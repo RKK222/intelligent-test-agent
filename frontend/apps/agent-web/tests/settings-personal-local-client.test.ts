@@ -130,7 +130,7 @@ describe("SettingsPersonalPanel local-client version state", () => {
     const view = renderPanel(client, true);
 
     expect(await view.findByText("旧版客户端", { selector: ".ta-item-title" })).toBeTruthy();
-    expect(view.getByText("不支持自更新，请安装新版 DEB")).toBeTruthy();
+    expect(view.getByText("不支持自更新，请重新下载用户包")).toBeTruthy();
     expect(view.queryByText("用户更新")).toBeNull();
     await waitFor(() => expect(client.listMyLocalClientInstances).toHaveBeenCalledTimes(1));
     await fireEvent.click(view.getByRole("button", { name: "刷新" }));

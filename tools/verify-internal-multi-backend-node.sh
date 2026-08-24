@@ -119,8 +119,8 @@ tar -C "${EMPTY_ROOT}" -czf "${RELEASE_ROOT}/dist/test-agent-frontend-dist.tar.g
 mkdir -p "${RELEASE_ROOT}/dist/local-opencode-client/stable"
 printf '#!/usr/bin/env bash\nexit 0\n' \
   >"${RELEASE_ROOT}/dist/local-opencode-client/install.sh"
-printf 'fixture deb\n' \
-  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+printf 'fixture user package\n' \
+  >"${RELEASE_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 printf '{\n  "version": "fixture-local-client"\n}\n' \
   >"${RELEASE_ROOT}/dist/local-opencode-client/stable/manifest.json"
 printf 'fixture signature\n' \

@@ -25,7 +25,7 @@
 - 用户凭据在 release 目录外，配置目录必须为 `0700`、凭据文件必须为 `0600`。普通重启、更新、回退和自动回切
   复用相同凭据和 `clientInstanceId`，不再次提示输入。
 - HTTP 仅是制品传输层：客户端下载后必须先验签 manifest，再校验可信 Host/受限相对路径、大小及 SHA-256。私钥
-  仅保留在外网 Mac 构建环境；DEB、客户端和平台只携带同一信任公钥。release 目录不可原地覆盖，catalog 必须最后
+  仅保留在外网 Mac 构建环境；用户包内安装脚本、客户端和平台只携带同一信任公钥。release 目录不可原地覆盖，catalog 必须最后
   发布，避免客户端发现未完整或未签名的 release。
 
 认证方式（按优先级）：
@@ -199,13 +199,12 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 后台默认只允许直接 HTTPS/WSS URI，或信任代理源 IP 清单内的连接携带 `X-Forwarded-Proto: https|wss`；禁止
   无条件信任客户端可伪造的 forwarded header。企业部署必须显式维护 Nginx 源 IP；当前固定 HTTP 现场允许在
   两台 Java 显式设置 `TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true`，入口升级 TLS 后必须恢复 `false`。
-- 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化制品以及 macOS PKG/麒麟 DEB 的 SHA-256
-  必须进入签名清单；打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。生产 macOS PKG 还必须使用
-  Developer ID Installer 签名并按网络条件完成 notarization。麒麟 DEB 既要经过平台受控发布链路和签名清单
-  校验，也必须在发布前由企业麒麟软件管理平台或 UKey 纳入终端信任链，并在真实终端以
-  `kylinsigntool -v <package.deb>` 验签成功；平台运行时 RSA 签名不能替代麒麟系统包签名。DEB 仍可能经明文 HTTP
-  取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
-  必须依赖网络 ACL、可信 HTTPS 或带外固定校验。
+- 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化运行制品的 SHA-256 必须进入签名清单；打包私钥
+  不得进入仓库、企业 ZIP、Nginx 目录或客户端。麒麟只交付普通用户级 `tar.gz`：包内静态 ARM64 启动器会校验随包
+  安装脚本和图标摘要，安装脚本再验证 JAR、JDK、OpenCode 和公共能力制品的平台 RSA 签名；包不写 `/usr` 或
+  `/var/lib/dpkg`，不得调用 sudo/dpkg，也不生成 DEB。用户包自身不具备麒麟系统包签名身份，经明文 HTTP 获取时，
+  主动中间人仍可能整体替换启动器和资源，因此必须依赖网络 ACL、可信 HTTPS 或带外固定 SHA-256；包内摘要不能被
+  表述为操作系统代码签名。
 - 本地客户端相关功能默认隐藏，只允许 `SUPER_ADMIN` 通过受认证管理 API 按已存在且可登录的 userId 加入
   灰度名单。普通用户通过兼容路径 `download-access/me` 仅接收 `allowed` 布尔值；缺字段、请求失败、存储
   异常和值为 false 均隐藏下载、实例状态、本地工作区和个人客户端设置。实例 capability 仅作向后兼容，

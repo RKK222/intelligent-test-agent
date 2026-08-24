@@ -2949,8 +2949,8 @@ function submitJoinApp() {
             >
               <Download class="figma-user-menu-icon" />
               <span class="figma-local-client-download-text">
-                <strong>下载本地客户端安装包</strong>
-                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；下载后双击 DEB 安装包并按提示完成安装</small>
+                <strong>下载本地客户端用户包</strong>
+                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；解压后双击 TestAgent-Local-Client，无需 sudo</small>
               </span>
             </a>
             <button

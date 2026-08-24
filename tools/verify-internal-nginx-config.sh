@@ -87,7 +87,7 @@ grep -Fq 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF
 grep -A1 -F 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}" | grep -Fq 'return 404;'
 grep -Fq 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}"
 grep -Fq 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}"
-grep -Fq 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${CONF_PATH}"
+grep -Fq 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz {' "${CONF_PATH}"
 grep -Fq 'location = /downloads/local-opencode-client/stable/manifest.json {' "${CONF_PATH}"
 grep -Fq 'location ^~ /downloads/local-opencode-client/releases/ {' "${CONF_PATH}"
 grep -Fq 'listen 8081;' "${CONF_PATH}"
@@ -95,7 +95,7 @@ test "$(grep -Fc 'listen 8081;' "${CONF_PATH}")" = 1
 test "$(grep -Fc 'absolute_redirect off;' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}")" = 2
 test "$(grep -Fc 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}")" = 2
-test "$(grep -Fc 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${CONF_PATH}")" = 2
+test "$(grep -Fc 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz {' "${CONF_PATH}")" = 2
 awk '/listen 8081;/,/^}/' "${CONF_PATH}" | grep -A1 -F 'location / {' | grep -Fq 'return 404;'
 grep -A8 -F 'location ^~ /downloads/local-opencode-client/releases/ {' "${CONF_PATH}" \
   | grep -Fq 'Cache-Control "public, max-age=31536000, immutable"'

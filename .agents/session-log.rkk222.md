@@ -13919,3 +13919,27 @@
 
 - 顶部点击“新增版本”后，遮罩覆盖完整视口且弹窗正常居中显示，不再被 34px 顶部上下文舱裁切；左下角入口行为保持不变。
 - 本次仅修复前端挂载层级，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署、性能模型、安全协议或兼容性契约。
+
+## 2026-08-24 - 改为麒麟普通用户双击客户端包
+
+### Why
+
+- 企业麒麟普通用户没有 sudo，标准 DEB 必须写 `/usr` 和 `/var/lib/dpkg`，即使补签名也无法由无管理员权限账号自行安装；现场已验证 `dpkg -i` 会被权限门禁拒绝。
+- 网页下载需要提供真正可双击启动的用户包，而不是再次下载 shell 或要求用户绕过系统包管理。
+
+### What
+
+- 删除本地客户端 DEB 构建与发布入口，新增静态 Linux ARM64 Go 启动器和 `tar.gz` 用户包；用户完整解压后双击 `TestAgent-Local-Client`，启动器校验随包安装脚本与图标摘要，并在麒麟 UKUI 或常见 Linux 桌面终端中复用现有 `setup`。
+- 现有安装脚本继续负责运行时签名校验、Client Key 接入、`~/.local` / `~/.config` 安装和 user systemd 常驻；桌面入口补齐小兔子图标，不写系统目录、不调用 sudo/dpkg。
+- 网页、Vite、Nginx、企业发布 ZIP、增量指纹、部署校验和用户文档统一改为 `TestAgent-Local-Client-Kylin-arm64.tar.gz`，发布门禁固定六个归档条目并拒绝符号链接、越界或安装脚本不一致；旧 DEB 不再进入新分发目录。
+
+### How
+
+- Go 启动器单元测试和 `go vet` 通过；本地客户端正式打包测试通过，覆盖 ARM64 ELF、归档执行权限、用户级安装、签名运行时、桌面入口和无 DEB 残留。
+- 企业增量组件、双后台节点和真实 Nginx 容器配置三组校验通过；前端定向 Vitest 74/74、VitePress + agent-web TypeScript/production build 通过，仅保留既有大 chunk 提示。
+- 版本 `20260824185203` 用户包在 ARM64 Debian 容器实际执行 `--self-check` 成功；本地 `http://127.0.0.1:3000/downloads/local-opencode-client/installer` 下载文件与 `~/Desktop/mimoagent/0709/TestAgent-Local-Client-Kylin-arm64.tar.gz` SHA-256 均为 `a451debfe405cb0cf969ae5986d817682403764ccf9371d07f3ebaaffc336f81`。
+
+### Result
+
+- 新用户不再接触 DEB：下载、完整解压、双击原生启动器即可在当前账号下安装并接入；命令行兜底仅为解压目录中的 `./TestAgent-Local-Client`，同样不需要 sudo。
+- 本次不新增 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点或强制环境变量，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。真实麒麟文件管理器双击、首次 Client Key 输入和 user systemd 在线状态仍需在企业桌面完成最终人工验收。

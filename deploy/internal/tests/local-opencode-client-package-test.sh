@@ -183,33 +183,40 @@ NGINX_TEMPLATE="${ROOT_DIR}/deploy/internal/nginx/gateway.conf.template"
 test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json.sig {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/installer {' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -c 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -c 'return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -c 'filename="TestAgent-Local-Client-Kylin-arm64.deb"' "${NGINX_TEMPLATE}")" -eq 2
-test "$(grep -F -c 'test-agent-local-client_[0-9]{14}_arm64\.deb' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz {' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz;' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'filename="TestAgent-Local-Client-Kylin-arm64.tar.gz"' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -F -c 'test-agent-local-client_[0-9]{14}_arm64\.tar\.gz' "${NGINX_TEMPLATE}")" -eq 2
 grep -q 'Cache-Control "public, max-age=31536000, immutable"' "${NGINX_TEMPLATE}"
 
-DEB_FILE="${TEST_ROOT}/dist/local-opencode-client/test-agent-local-client_${VERSION}_arm64.deb"
-DEB_DOWNLOAD_ALIAS="${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
-test -f "${DEB_FILE}"
-cmp "${DEB_FILE}" "${DEB_DOWNLOAD_ALIAS}"
-ar -p "${DEB_FILE}" data.tar.gz >"${TEST_ROOT}/data.tar.gz"
-if gzip -dc "${TEST_ROOT}/data.tar.gz" | grep -aEq 'LIBARCHIVE\.xattr|SCHILY\.xattr'; then
-  echo "DEB data payload unexpectedly contains extended-attribute PAX headers" >&2
+USER_PACKAGE="${TEST_ROOT}/dist/local-opencode-client/test-agent-local-client_${VERSION}_arm64.tar.gz"
+USER_PACKAGE_DOWNLOAD_ALIAS="${TEST_ROOT}/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
+test -f "${USER_PACKAGE}"
+cmp "${USER_PACKAGE}" "${USER_PACKAGE_DOWNLOAD_ALIAS}"
+if gzip -dc "${USER_PACKAGE}" | grep -aEq 'LIBARCHIVE\.xattr|SCHILY\.xattr'; then
+  echo "User package unexpectedly contains extended-attribute PAX headers" >&2
   exit 1
 fi
-tar -tzf "${TEST_ROOT}/data.tar.gz" >"${TEST_ROOT}/deb-data.list"
-grep -q '^\./usr/bin/test-agent-local-client$' "${TEST_ROOT}/deb-data.list"
-grep -q '^\./usr/share/applications/test-agent-local-client.desktop$' "${TEST_ROOT}/deb-data.list"
-grep -q '^\./usr/share/icons/hicolor/512x512/apps/test-agent-local-client.png$' "${TEST_ROOT}/deb-data.list"
-if grep -Eq '\.(jar|tar\.gz)$' "${TEST_ROOT}/deb-data.list"; then
-  echo "DEB data payload unexpectedly contains a runtime artifact" >&2
-  exit 1
-fi
-tar -xOzf "${TEST_ROOT}/data.tar.gz" \
-  ./usr/share/applications/test-agent-local-client.desktop >"${TEST_ROOT}/test-agent-local-client.desktop"
-grep -q '^Exec=/usr/bin/test-agent-local-client setup$' "${TEST_ROOT}/test-agent-local-client.desktop"
-grep -q '^Icon=test-agent-local-client$' "${TEST_ROOT}/test-agent-local-client.desktop"
+mkdir -p "${TEST_ROOT}/user-package"
+tar -xzf "${USER_PACKAGE}" -C "${TEST_ROOT}/user-package"
+USER_PACKAGE_ROOT="${TEST_ROOT}/user-package/TestAgent-Local-Client"
+test -x "${USER_PACKAGE_ROOT}/TestAgent-Local-Client"
+test -x "${USER_PACKAGE_ROOT}/resources/test-agent-local-client"
+test -f "${USER_PACKAGE_ROOT}/resources/radar-bunny.png"
+test -f "${USER_PACKAGE_ROOT}/README.txt"
+cmp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
+  "${USER_PACKAGE_ROOT}/resources/test-agent-local-client"
+file "${USER_PACKAGE_ROOT}/TestAgent-Local-Client" | grep -Eq 'ELF 64-bit.*ARM aarch64'
+grep -q '不需要 sudo' "${USER_PACKAGE_ROOT}/README.txt"
+test -z "$(find "${TEST_ROOT}/dist/local-opencode-client" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+
+"${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
+  --root "${TEST_ROOT}/dist/local-opencode-client" \
+  --expected-version "${VERSION}" \
+  --expected-manifest-sha256 "$(sha256_file "${RELEASE_DIR}/manifest.json")" \
+  --expected-signature-sha256 "$(sha256_file "${RELEASE_DIR}/manifest.json.sig")" \
+  --expected-install-sha256 "$(sha256_file "${TEST_ROOT}/dist/local-opencode-client/install.sh")" \
+  --expected-user-package-sha256 "$(sha256_file "${USER_PACKAGE}")"
 
 if package_release >/dev/null 2>&1; then
   echo "Duplicate immutable client version was unexpectedly overwritten" >&2
@@ -348,6 +355,8 @@ cmp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
 grep -Fxq "ExecStart=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client run" \
   "${TEST_ROOT}/user-home/.config/systemd/user/test-agent-local-opencode-client.service"
 grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client enroll" \
+  "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
+grep -Fxq "Icon=test-agent-local-client" \
   "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
 
 for scenario in no-java java-only java17 java21-javac17 split-path-java-javac absolute-escaped-javac; do
@@ -510,4 +519,4 @@ CREDENTIALS
   test ! -L "${TEST_ROOT}/install-${failure_case}/runtime/current"
 done
 
-echo "Kylin ARM64 installer DEB, immutable signed release, catalog and bootstrap verified"
+echo "Kylin ARM64 user package, immutable signed release, catalog and bootstrap verified"

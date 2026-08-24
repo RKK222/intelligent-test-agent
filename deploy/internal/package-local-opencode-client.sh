@@ -30,7 +30,7 @@ usage() {
 Usage: deploy/internal/package-local-opencode-client.sh [options]
 
 Build one immutable Kylin ARM64/glibc local-client release, its signed catalog,
-and a DEB containing the stable launcher plus desktop-menu integration.
+and a user-level package that ordinary users can extract and double-click.
 
 Options:
   --output-dir <path>        Distribution root ending in local-opencode-client.
@@ -178,7 +178,6 @@ require_command openssl
 require_command curl
 require_command tar
 require_command find
-require_command ar
 [[ -n "${SIGNING_KEY}" && -f "${SIGNING_KEY}" ]] || {
   echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY or --signing-key is required" >&2
   exit 1
@@ -324,19 +323,24 @@ openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${TEMP_DIR}/catalog.json.sig" 
 mv "${TEMP_DIR}/catalog.json.sig" "${OUTPUT_DIR}/catalog.json.sig"
 mv "${CATALOG_TEMP}" "${OUTPUT_DIR}/catalog.json"
 
-DEB_PATH="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-local-client_${VERSION}_arm64.deb"
-DEB_DOWNLOAD_ALIAS="${OUTPUT_DIR}/TestAgent-Local-Client-Kylin-arm64.deb"
-"${SCRIPT_DIR}/build-local-opencode-client-deb.sh" \
+USER_PACKAGE_PATH="$(cd "${OUTPUT_DIR}" && pwd)/test-agent-local-client_${VERSION}_arm64.tar.gz"
+USER_PACKAGE_DOWNLOAD_ALIAS="${OUTPUT_DIR}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
+"${SCRIPT_DIR}/build-local-opencode-client-user-package.sh" \
   --launcher "${OUTPUT_DIR}/install.sh" \
   --version "${VERSION}" \
-  --output "${DEB_PATH}"
-cp "${DEB_PATH}" "${DEB_DOWNLOAD_ALIAS}"
+  --output "${USER_PACKAGE_PATH}"
+cp "${USER_PACKAGE_PATH}" "${USER_PACKAGE_DOWNLOAD_ALIAS}"
+
+# 新版分发只保留普通用户可用的归档，避免旧 DEB 别名继续被网页或现场人员误用。
+while IFS= read -r legacy_deb; do
+  rm -f "${legacy_deb}"
+done < <(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name '*.deb' -print)
 archive_strip_file_metadata "${OUTPUT_DIR}/install.sh" "${OUTPUT_DIR}/catalog.json" \
   "${OUTPUT_DIR}/catalog.json.sig" "${OUTPUT_DIR}/stable/manifest.json" \
-  "${OUTPUT_DIR}/stable/manifest.json.sig" "${RELEASE_DIR}"/* "${DEB_PATH}" \
-  "${DEB_DOWNLOAD_ALIAS}"
+  "${OUTPUT_DIR}/stable/manifest.json.sig" "${RELEASE_DIR}"/* "${USER_PACKAGE_PATH}" \
+  "${USER_PACKAGE_DOWNLOAD_ALIAS}"
 
 printf 'Local client HTTP distribution: %s\n' "${OUTPUT_DIR}"
 printf 'Release version: %s\n' "${VERSION}"
-printf 'Kylin ARM64 DEB: %s\n' "${DEB_PATH}"
-printf 'Kylin ARM64 download alias: %s\n' "${DEB_DOWNLOAD_ALIAS}"
+printf 'Kylin ARM64 user package: %s\n' "${USER_PACKAGE_PATH}"
+printf 'Kylin ARM64 user-package alias: %s\n' "${USER_PACKAGE_DOWNLOAD_ALIAS}"

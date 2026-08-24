@@ -6,6 +6,7 @@ EXPECTED_VERSION=""
 EXPECTED_MANIFEST_SHA256=""
 EXPECTED_SIGNATURE_SHA256=""
 EXPECTED_INSTALL_SHA256=""
+EXPECTED_USER_PACKAGE_SHA256=""
 
 usage() {
   cat <<'USAGE'
@@ -20,6 +21,8 @@ Options:
   --expected-manifest-sha256 <sha>    Expected stable/manifest.json SHA-256.
   --expected-signature-sha256 <sha>   Expected stable/manifest.json.sig SHA-256.
   --expected-install-sha256 <sha>     Expected install.sh SHA-256.
+  --expected-user-package-sha256 <sha>
+                                      Expected user-level package SHA-256.
   -h, --help                          Show this help.
 USAGE
 }
@@ -31,6 +34,7 @@ while [[ $# -gt 0 ]]; do
     --expected-manifest-sha256) EXPECTED_MANIFEST_SHA256="$2"; shift 2 ;;
     --expected-signature-sha256) EXPECTED_SIGNATURE_SHA256="$2"; shift 2 ;;
     --expected-install-sha256) EXPECTED_INSTALL_SHA256="$2"; shift 2 ;;
+    --expected-user-package-sha256) EXPECTED_USER_PACKAGE_SHA256="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -143,6 +147,9 @@ verify_artifact() {
 require_sha256 "${EXPECTED_MANIFEST_SHA256}" manifest
 require_sha256 "${EXPECTED_SIGNATURE_SHA256}" signature
 require_sha256 "${EXPECTED_INSTALL_SHA256}" install.sh
+if [[ -n "${EXPECTED_USER_PACKAGE_SHA256}" ]]; then
+  require_sha256 "${EXPECTED_USER_PACKAGE_SHA256}" user-package
+fi
 
 MANIFEST="${ROOT}/stable/manifest.json"
 SIGNATURE="${ROOT}/stable/manifest.json.sig"
@@ -151,11 +158,11 @@ CATALOG="${ROOT}/catalog.json"
 CATALOG_SIGNATURE="${ROOT}/catalog.json.sig"
 RELEASE_MANIFEST="${ROOT}/releases/${EXPECTED_VERSION}/manifest.json"
 RELEASE_SIGNATURE="${ROOT}/releases/${EXPECTED_VERSION}/manifest.json.sig"
-VERSIONED_DEB="${ROOT}/test-agent-local-client_${EXPECTED_VERSION}_arm64.deb"
-DOWNLOAD_ALIAS="${ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
+VERSIONED_USER_PACKAGE="${ROOT}/test-agent-local-client_${EXPECTED_VERSION}_arm64.tar.gz"
+DOWNLOAD_ALIAS="${ROOT}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 for required in "${MANIFEST}" "${SIGNATURE}" "${INSTALL_SCRIPT}" "${CATALOG}" \
   "${CATALOG_SIGNATURE}" "${RELEASE_MANIFEST}" "${RELEASE_SIGNATURE}" \
-  "${VERSIONED_DEB}" "${DOWNLOAD_ALIAS}"; do
+  "${VERSIONED_USER_PACKAGE}" "${DOWNLOAD_ALIAS}"; do
   require_file "${required}"
 done
 
@@ -179,8 +186,63 @@ cmp "${SIGNATURE}" "${RELEASE_SIGNATURE}" >/dev/null || {
   echo "Stable and versioned local client manifest signatures differ" >&2
   exit 1
 }
-cmp "${VERSIONED_DEB}" "${DOWNLOAD_ALIAS}" >/dev/null || {
-  echo "Local client download alias does not match the active versioned DEB" >&2
+if [[ -n "${EXPECTED_USER_PACKAGE_SHA256}" ]]; then
+  [[ "$(sha256_file "${VERSIONED_USER_PACKAGE}")" == "${EXPECTED_USER_PACKAGE_SHA256}" ]] || {
+    echo "Local client user package SHA-256 mismatch" >&2
+    exit 1
+  }
+fi
+cmp "${VERSIONED_USER_PACKAGE}" "${DOWNLOAD_ALIAS}" >/dev/null || {
+  echo "Local client download alias does not match the active versioned user package" >&2
+  exit 1
+}
+
+# 用户包会在普通账号目录直接解压执行，发布门禁固定其最小文件集并拒绝符号链接或越界条目。
+entry_count=0
+while IFS= read -r entry; do
+  entry_count=$((entry_count + 1))
+  case "${entry}" in
+    TestAgent-Local-Client/|TestAgent-Local-Client/TestAgent-Local-Client|\
+    TestAgent-Local-Client/README.txt|TestAgent-Local-Client/resources/|\
+    TestAgent-Local-Client/resources/test-agent-local-client|\
+    TestAgent-Local-Client/resources/radar-bunny.png) ;;
+    *)
+      echo "Unexpected or unsafe local client user-package entry: ${entry}" >&2
+      exit 1
+      ;;
+  esac
+done < <(tar -tzf "${VERSIONED_USER_PACKAGE}")
+[[ "${entry_count}" -eq 6 ]] || {
+  echo "Local client user package must contain exactly six entries" >&2
+  exit 1
+}
+while IFS= read -r listing; do
+  mode="${listing%% *}"
+  [[ "${mode}" != l* ]] || {
+    echo "Local client user package must not contain symbolic links" >&2
+    exit 1
+  }
+done < <(tar -tvzf "${VERSIONED_USER_PACKAGE}")
+
+PACKAGE_VERIFY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-local-client-user-verify.XXXXXX")"
+cleanup_package_verify() {
+  case "${PACKAGE_VERIFY_DIR}" in
+    */test-agent-local-client-user-verify.*) rm -rf "${PACKAGE_VERIFY_DIR}" ;;
+    *) echo "Refusing unsafe user-package verification cleanup: ${PACKAGE_VERIFY_DIR}" >&2 ;;
+  esac
+}
+trap cleanup_package_verify EXIT
+tar -xzf "${VERSIONED_USER_PACKAGE}" -C "${PACKAGE_VERIFY_DIR}"
+PACKAGE_ROOT="${PACKAGE_VERIFY_DIR}/TestAgent-Local-Client"
+[[ -x "${PACKAGE_ROOT}/TestAgent-Local-Client" \
+  && -x "${PACKAGE_ROOT}/resources/test-agent-local-client" \
+  && -f "${PACKAGE_ROOT}/resources/radar-bunny.png" \
+  && -f "${PACKAGE_ROOT}/README.txt" ]] || {
+  echo "Local client user package permissions or files are invalid" >&2
+  exit 1
+}
+cmp "${INSTALL_SCRIPT}" "${PACKAGE_ROOT}/resources/test-agent-local-client" >/dev/null || {
+  echo "Local client user package does not embed the active install.sh" >&2
   exit 1
 }
 

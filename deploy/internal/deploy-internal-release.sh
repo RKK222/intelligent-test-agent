@@ -861,7 +861,8 @@ verify_local_client_distribution_root() {
     --expected-version "${LOCAL_CLIENT_VERSION}" \
     --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
     --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
-    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    --expected-user-package-sha256 "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
 }
 
 find_first_tar() {
@@ -911,6 +912,7 @@ run_frontend_update() {
   local local_client_manifest_sha256="$8"
   local local_client_signature_sha256="$9"
   local local_client_install_sha256="${10}"
+  local local_client_user_package_sha256="${11}"
   local remote_deploy_tmp="${FRONTEND_ROOT}/deploy/internal.new"
 
   # 前端服务器只接收静态包和 deploy/internal 模板；不把后端 jar 或 worker 镜像传过去。
@@ -947,7 +949,7 @@ EOF
 
   log "Update frontend files and reload nginx on ${frontend_target}"
   # 远程更新先备份旧目录，再解压新静态资源；nginx 校验失败会阻断 reload。
-  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' NGINX_ENV='${NGINX_ENV}' LOCAL_CLIENT_COMPONENT_MODE='${local_client_mode}' LOCAL_CLIENT_FINGERPRINT='${local_client_fingerprint}' LOCAL_CLIENT_VERSION='${local_client_version}' LOCAL_CLIENT_MANIFEST_SHA256='${local_client_manifest_sha256}' LOCAL_CLIENT_SIGNATURE_SHA256='${local_client_signature_sha256}' LOCAL_CLIENT_INSTALL_SHA256='${local_client_install_sha256}' bash -s" <<'REMOTE_FRONTEND'
+  ssh "${frontend_target}" "FRONTEND_ROOT='${FRONTEND_ROOT}' FRONTEND_HEALTH_URL='${FRONTEND_HEALTH_URL}' FRONTEND_URL='${FRONTEND_URL}' NGINX_ENV='${NGINX_ENV}' LOCAL_CLIENT_COMPONENT_MODE='${local_client_mode}' LOCAL_CLIENT_FINGERPRINT='${local_client_fingerprint}' LOCAL_CLIENT_VERSION='${local_client_version}' LOCAL_CLIENT_MANIFEST_SHA256='${local_client_manifest_sha256}' LOCAL_CLIENT_SIGNATURE_SHA256='${local_client_signature_sha256}' LOCAL_CLIENT_INSTALL_SHA256='${local_client_install_sha256}' LOCAL_CLIENT_USER_PACKAGE_SHA256='${local_client_user_package_sha256}' bash -s" <<'REMOTE_FRONTEND'
 set -euo pipefail
 timestamp="$(date +%Y%m%d%H%M%S)"
 mkdir -p "${FRONTEND_ROOT}/frontend" "${FRONTEND_ROOT}/dist" "${FRONTEND_ROOT}/deploy"
@@ -958,7 +960,8 @@ verify_local_client() {
     --expected-version "${LOCAL_CLIENT_VERSION}" \
     --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
     --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
-    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    --expected-user-package-sha256 "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
 }
 
 # 先用本批次临时脚本验证客户端，再切换 deploy/internal、静态前端或 Nginx。
@@ -1070,6 +1073,8 @@ LOCAL_CLIENT_SIGNATURE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
   TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
 LOCAL_CLIENT_INSTALL_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
   TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
+LOCAL_CLIENT_USER_PACKAGE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256)"
 WORKER_COMPONENT_MODE="${WORKER_COMPONENT_MODE:-included}"
 LOCAL_CLIENT_COMPONENT_MODE="${LOCAL_CLIENT_COMPONENT_MODE:-included}"
 [[ "${WORKER_COMPONENT_MODE}" == included || "${WORKER_COMPONENT_MODE}" == reuse ]] || {
@@ -1128,11 +1133,11 @@ require_file "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.s
 }
 if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
   require_file "${LOCAL_CLIENT_DIST}/install.sh"
-  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
   # 保持旧全量包兼容；新包带组件哈希时执行逐文件一致性校验。
-  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}" ]]; then
+  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}${LOCAL_CLIENT_USER_PACKAGE_SHA256}" ]]; then
     [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || {
       echo "Invalid local client component fingerprint" >&2
       exit 1
@@ -1148,7 +1153,8 @@ else
     && -n "${LOCAL_CLIENT_VERSION}" \
     && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
     && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
-    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_USER_PACKAGE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
     echo "Local client reuse metadata is missing or invalid" >&2
     exit 1
   }
@@ -1197,7 +1203,8 @@ if [[ "${SKIP_FRONTEND}" -eq 0 ]]; then
   run_frontend_update "$(ssh_target)" "${FRONTEND_ARCHIVE}" "${DEPLOY_INTERNAL_SRC}" \
     "${LOCAL_CLIENT_DIST}" "${LOCAL_CLIENT_COMPONENT_MODE}" "${LOCAL_CLIENT_FINGERPRINT}" \
     "${LOCAL_CLIENT_VERSION}" "${LOCAL_CLIENT_MANIFEST_SHA256}" \
-    "${LOCAL_CLIENT_SIGNATURE_SHA256}" "${LOCAL_CLIENT_INSTALL_SHA256}"
+    "${LOCAL_CLIENT_SIGNATURE_SHA256}" "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
 fi
 
 log "Install backend artifacts under ${INSTALL_ROOT}"

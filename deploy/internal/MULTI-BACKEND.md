@@ -118,7 +118,7 @@ deploy/internal/package-release.sh --python-libs-only \
 
 - `worker runtime` 把 OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 视为一个不可拆分单元；其中任一项变化就全部重建并进入 ZIP。
 - `toolbox` 把 IT-Tools、OmniTools、完整修改源码和目录文件视为一个单元；其中任一项变化就全部重建并进入 ZIP。
-- `local OpenCode client` 把客户端 JAR、PKG、DEB、JRE、OpenCode 归档、安装脚本和签名清单视为一个单元；客户端输入未变化时不再进入 ZIP。
+- `local OpenCode client` 把客户端 JAR、麒麟 ARM64 用户包、JRE、OpenCode 归档、安装脚本和签名清单视为一个单元；客户端输入未变化时不再进入 ZIP。
 
 Python 的 pandas、Excel、Word 和 JSON 第三方库是第三个、完全独立的交付单元，不进入内层 ZIP，也不改变 worker 指纹。库升级只重新生成 `test-agent-python-libs-py313-linux-amd64.tar.gz` 及校验文件，然后分别部署到两台后台。该归档由 worker 内的 Linux GNU tar 生成并以相同实现复核，禁止使用会写入并隐藏 `._*` AppleDouble/PAX 成员的 Mac 归档结果；目标机出现 `Unsafe or unexpected archive entry` 时停止部署并更换原始归档，不得忽略成员或重新计算 SHA。
 
@@ -719,7 +719,7 @@ bash deploy-frontend-node.sh
 容器未运行或 Nginx 仍使用旧配置，脚本就会失败并指出具体 upstream，不再等到浏览器点击后才暴露 502。
 
 客户端清单为 `reuse` 时，`.2` 不接收 `dist/local-opencode-client/`，而是在任何前端目录切换和 Nginx
-reload 前校验现有 `/data/testagent/dist/local-opencode-client/`。版本、清单、签名、安装脚本、PKG、DEB、
+reload 前校验现有 `/data/testagent/dist/local-opencode-client/`。版本、清单、签名、安装脚本、用户包、
 JRE 或 OpenCode 归档任一 SHA-256 不一致都会停止部署；该校验只使用 `bash`、`awk` 和 `sha256sum`。
 
 正式部署必须由 `root` 执行。平台外层包内已有完整平台发布 ZIP，三台应用服务器不再另外复制内层 ZIP

@@ -517,7 +517,7 @@ install_user_service() {
     printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Test Agent 本地客户端接入' \
       'Comment=输入统一认证号和 Client key 重新接入'
     printf 'Exec=%s enroll\n' "${service_launcher}"
-    printf '%s\n' 'Terminal=true' \
+    printf '%s\n' 'Icon=test-agent-local-client' 'Terminal=true' \
       'Categories=Development;Utility;'
   } >"${desktop_dir}/test-agent-local-client.desktop"
   chmod 0600 "${desktop_dir}/test-agent-local-client.desktop"

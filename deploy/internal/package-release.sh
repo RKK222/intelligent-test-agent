@@ -884,6 +884,8 @@ write_component_fingerprints() {
       "${LOCAL_CLIENT_SIGNATURE_SHA256}"
     printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=%s\n' \
       "${LOCAL_CLIENT_INSTALL_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=%s\n' \
+      "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
   } >"${tmp}"
   chmod 0600 "${tmp}"
   mv -f "${tmp}" "${target}"
@@ -900,10 +902,13 @@ load_local_client_artifact_metadata() {
   LOCAL_CLIENT_MANIFEST_SHA256="$(sha256_file "${manifest}")"
   LOCAL_CLIENT_SIGNATURE_SHA256="$(sha256_file "${root}/stable/manifest.json.sig")"
   LOCAL_CLIENT_INSTALL_SHA256="$(sha256_file "${root}/install.sh")"
+  LOCAL_CLIENT_USER_PACKAGE_SHA256="$(sha256_file \
+    "${root}/TestAgent-Local-Client-Kylin-arm64.tar.gz")"
   [[ -n "${LOCAL_CLIENT_VERSION}" \
     && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
     && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
-    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_USER_PACKAGE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
     echo "Invalid local client artifact metadata" >&2
     exit 1
   }
@@ -912,7 +917,8 @@ load_local_client_artifact_metadata() {
     --expected-version "${LOCAL_CLIENT_VERSION}" \
     --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
     --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
-    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    --expected-user-package-sha256 "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
 }
 
 write_worker_artifact_state() {
@@ -956,7 +962,7 @@ plan_release_components() {
     && -f "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}" ]]; then
     public_capability_bundle_sha="$(sha256_file "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}")"
   fi
-  local_client_config="schema=5|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
+  local_client_config="schema=6|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \
@@ -986,7 +992,8 @@ plan_release_components() {
     backend/test-agent-local-client/src/main \
     backend/test-agent-local-client-protocol/pom.xml \
     backend/test-agent-local-client-protocol/src/main \
-    deploy/internal/build-local-opencode-client-deb.sh \
+    deploy/internal/build-local-opencode-client-user-package.sh \
+    deploy/internal/local-opencode-client/bootstrap \
     deploy/internal/package-local-opencode-client.sh \
     deploy/internal/opencode-observability-plugin.mjs \
     deploy/internal/local-opencode-client/install.sh.template \
@@ -1006,6 +1013,8 @@ plan_release_components() {
     TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
   LOCAL_CLIENT_INSTALL_SHA256="$(state_value "${COMPONENT_STATE_FILE}" \
     TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
+  LOCAL_CLIENT_USER_PACKAGE_SHA256="$(state_value "${COMPONENT_STATE_FILE}" \
+    TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256)"
   WORKER_COMPONENT_MODE=reuse
   TOOLBOX_COMPONENT_MODE=reuse
   LOCAL_CLIENT_COMPONENT_MODE=reuse
@@ -1050,6 +1059,7 @@ plan_release_components() {
       LOCAL_CLIENT_MANIFEST_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
       LOCAL_CLIENT_SIGNATURE_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
       LOCAL_CLIENT_INSTALL_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
+      LOCAL_CLIENT_USER_PACKAGE_SHA256="$(awk -F= '$1 == "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256" { print substr($0, index($0, "=") + 1) }' <<<"${current_manifest}")"
     fi
   fi
   [[ "${PACKAGE_MODE}" != opencode-only ]] || WORKER_COMPONENT_MODE=included
@@ -1117,6 +1127,8 @@ plan_release_components() {
       TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
     LOCAL_CLIENT_INSTALL_SHA256="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
       TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
+    LOCAL_CLIENT_USER_PACKAGE_SHA256="$(state_value "${LOCAL_CLIENT_BASELINE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256)"
     [[ "${client_baseline_version}" == 1 ]] || {
       echo "Unsupported local client baseline version: ${client_baseline_version:-<empty>}" >&2
       exit 1
@@ -1141,7 +1153,8 @@ plan_release_components() {
     [[ -n "${LOCAL_CLIENT_VERSION}" \
       && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
       && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
-      && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+      && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ \
+      && "${LOCAL_CLIENT_USER_PACKAGE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
       echo "Local client reuse metadata is missing or invalid; use an approved baseline or include the component" >&2
       exit 1
     }
@@ -1579,7 +1592,7 @@ package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
   local worker_tar it_tools_tar omni_tools_tar required_artifact persistence_jar xxl_job_integration_jar
-  local local_client_catalog local_client_version local_client_deb local_client_release_dir
+  local local_client_catalog local_client_version local_client_user_package local_client_release_dir
 
   require_command zip
   require_command rsync
@@ -1610,7 +1623,7 @@ package_release_zip() {
       echo "Local client catalog does not contain a valid release version" >&2
       exit 1
     }
-    local_client_deb="${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${local_client_version}_arm64.deb"
+    local_client_user_package="${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${local_client_version}_arm64.tar.gz"
     local_client_release_dir="${OUTPUT_DIR}/local-opencode-client/releases/${local_client_version}"
     for required_artifact in \
       "${OUTPUT_DIR}/local-opencode-client/install.sh" \
@@ -1618,8 +1631,8 @@ package_release_zip() {
       "${OUTPUT_DIR}/local-opencode-client/catalog.json.sig" \
       "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json" \
       "${OUTPUT_DIR}/local-opencode-client/stable/manifest.json.sig" \
-      "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
-      "${local_client_deb}" \
+      "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz" \
+      "${local_client_user_package}" \
       "${local_client_release_dir}/manifest.json" \
       "${local_client_release_dir}/manifest.json.sig" \
       "${local_client_release_dir}/test-agent-local-client.jar" \
@@ -1758,6 +1771,8 @@ package_release_zip() {
       "${LOCAL_CLIENT_SIGNATURE_SHA256}"
     printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=%s\n' \
       "${LOCAL_CLIENT_INSTALL_SHA256}"
+    printf 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=%s\n' \
+      "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
   } >"${staging_dir}/deploy/internal/release-components.env"
   chmod 0644 "${staging_dir}/deploy/internal/release-components.env"
   # 升级脚本和官方启动器共用这份忽略清单；任一文件漏包都会让存量节点或新增节点重新出现 Git 脏状态。
@@ -1932,6 +1947,7 @@ LOCAL_CLIENT_VERSION=""
 LOCAL_CLIENT_MANIFEST_SHA256=""
 LOCAL_CLIENT_SIGNATURE_SHA256=""
 LOCAL_CLIENT_INSTALL_SHA256=""
+LOCAL_CLIENT_USER_PACKAGE_SHA256=""
 if [[ "${PACKAGE_MODE}" == full || "${PACKAGE_MODE}" == zip-only \
   || "${PACKAGE_MODE}" == opencode-only || "${PACKAGE_MODE}" == toolbox-only \
   || "${COMPONENT_PLAN_ONLY}" -eq 1 ]]; then

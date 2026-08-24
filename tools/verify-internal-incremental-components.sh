@@ -40,9 +40,20 @@ LOCAL_CLIENT_VERSION="20260820153045"
 LOCAL_CLIENT_RELEASE="${LOCAL_CLIENT_ROOT}/releases/${LOCAL_CLIENT_VERSION}"
 mkdir -p "${LOCAL_CLIENT_ROOT}/stable" "${LOCAL_CLIENT_RELEASE}"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
-printf 'fixture deb\n' >"${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
-cp "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" \
-  "${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.deb"
+USER_PACKAGE_STAGE="${TMP_ROOT}/local-client-user-package"
+mkdir -p "${USER_PACKAGE_STAGE}/TestAgent-Local-Client/resources"
+printf '#!/usr/bin/env sh\nexit 0\n' >"${USER_PACKAGE_STAGE}/TestAgent-Local-Client/TestAgent-Local-Client"
+printf 'fixture readme\n' >"${USER_PACKAGE_STAGE}/TestAgent-Local-Client/README.txt"
+cp "${OUTPUT_DIR}/local-opencode-client/install.sh" \
+  "${USER_PACKAGE_STAGE}/TestAgent-Local-Client/resources/test-agent-local-client"
+printf 'fixture icon\n' >"${USER_PACKAGE_STAGE}/TestAgent-Local-Client/resources/radar-bunny.png"
+chmod 0755 "${USER_PACKAGE_STAGE}/TestAgent-Local-Client/TestAgent-Local-Client" \
+  "${USER_PACKAGE_STAGE}/TestAgent-Local-Client/resources/test-agent-local-client"
+tar -C "${USER_PACKAGE_STAGE}" -czf \
+  "${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.tar.gz" \
+  TestAgent-Local-Client
+cp "${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.tar.gz" \
+  "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 printf 'fixture client jar\n' >"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar"
 printf 'fixture Linux JDK\n' >"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz"
 printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz"
@@ -123,7 +134,7 @@ grep -Fxq 'deploy/internal/deploy-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
-grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb' <<<"${full_listing}"
+grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz' <<<"${full_listing}"
 if grep -Eq '^dist/lobehub/' <<<"${full_listing}"; then
   echo 'Default release unexpectedly contains LobeHub artifacts' >&2
   exit 1
@@ -140,6 +151,7 @@ local_client_version="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERS
 local_client_manifest_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=//p' "${STATE_FILE}")"
 local_client_signature_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=//p' "${STATE_FILE}")"
 local_client_install_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=//p' "${STATE_FILE}")"
+local_client_user_package_sha="$(sed -n 's/^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=//p' "${STATE_FILE}")"
 bash "${ROOT_DIR}/deploy/internal/deploy-internal-frontend.sh" \
   --archive "${OUTPUT_DIR}/test-agent-internal-release.zip" --validate-only >/dev/null
 bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
@@ -162,7 +174,7 @@ if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.s
 fi
 cp "${TMP_ROOT}/public-capabilities.tar.gz.original" \
   "${LOCAL_CLIENT_RELEASE}/public-capabilities.tar.gz"
-printf 'tampered deb alias\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
+printf 'tampered user-package alias\n' >"${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
   --root "${LOCAL_CLIENT_ROOT}" \
   --expected-version "${local_client_version}" \
@@ -172,8 +184,8 @@ if bash "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.s
   echo 'Tampered local client distribution unexpectedly passed verification' >&2
   exit 1
 fi
-cp "${LOCAL_CLIENT_ROOT}/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.deb" \
-  "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.deb"
+cp "${LOCAL_CLIENT_ROOT}/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.tar.gz" \
+  "${LOCAL_CLIENT_ROOT}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 
 # 同一批次只补日志的 zip-only 必须保留当前全量选择，不能把尚未部署的组件误删掉。
 bash "${PACKAGE_SCRIPT}" --zip-only --output-dir "${OUTPUT_DIR}" \
@@ -238,6 +250,7 @@ printf '%s\n' \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=${local_client_signature_sha}" \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=${local_client_install_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=${local_client_user_package_sha}" \
   >"${LOCAL_CLIENT_BASELINE_FILE}"
 printf '%s\n' \
   'TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1' \
@@ -259,6 +272,8 @@ client_baseline_manifest="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.
 grep -Fxq 'TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse' <<<"${client_baseline_manifest}"
 grep -Fxq "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
   <<<"${client_baseline_manifest}"
+grep -Fxq "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=${local_client_user_package_sha}" \
+  <<<"${client_baseline_manifest}"
 
 # 只有 worker runtime 基线变化时，只重新携带 Manager/Codex/programs 与 worker 镜像。
 printf '%s\n' \
@@ -270,6 +285,7 @@ printf '%s\n' \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_MANIFEST_SHA256=${local_client_manifest_sha}" \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256=${local_client_signature_sha}" \
   "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256=${local_client_install_sha}" \
+  "TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256=${local_client_user_package_sha}" \
   >"${STATE_FILE}"
 rm -f "${OUTPUT_DIR}/test-agent-internal-release.zip" \
   "${OUTPUT_DIR}/test-agent-internal-release.zip.sha256"

@@ -57,12 +57,12 @@ cd /Users/huang/workspace/intelligent-test-agent-gitee
 deploy/internal/package-release.sh --local-client-only --no-zip --output-dir /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>
 test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/catalog.json
 test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/catalog.json.sig
-test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
-test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz
+test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz
 test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json
 ~~~
 
-成功条件：脚本退出 0，五个文件均存在，且不带版本号的麒麟 ARM64 下载别名与本次版本化 DEB 逐字节相同。脚本会对输入 JDK/OpenCode 摘要、release 签名及 catalog 发布顺序失败关闭。
+成功条件：脚本退出 0，五个文件均存在，且不带版本号的麒麟 ARM64 下载别名与本次版本化用户包逐字节相同。脚本会对输入 JDK/OpenCode 摘要、release 签名及 catalog 发布顺序失败关闭。
 
 **机器：外网 Mac（同一终端）**。把生成目录封装为 U 盘只转运的一个压缩包和一个摘要文件；包内顶层必须是 local-opencode-client/。
 
@@ -140,7 +140,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 sudoedit /data/testagent/config/backend.env
 ~~~
 
-在该文件中确认或加入以下精确键；公钥值必须与 .4 和 DEB 内置的信任公钥配对：
+在该文件中确认或加入以下精确键；公钥值必须与 .4 和用户包内安装脚本固化的信任公钥配对：
 
 ~~~dotenv
 TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_DOWNLOAD_BASE_URL=http://122.233.30.2/downloads/local-opencode-client/
@@ -178,14 +178,14 @@ sudo tar -xzf /data/0709/test-agent-local-opencode-client_<RELEASE_VERSION>_arm6
 test -f "$local_client_stage_dir/local-opencode-client/catalog.json"
 test -f "$local_client_stage_dir/local-opencode-client/catalog.json.sig"
 test -f "$local_client_stage_dir/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json"
-test -f "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb"
-test -f "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
-cmp -s "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb" "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+test -f "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz"
+test -f "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
+cmp -s "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz" "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
 ~~~
 
-成功条件：摘要输出 OK，五个文件均存在且两个 DEB 逐字节相同。失败即停止并保留现有 /data/testagent/dist/local-opencode-client/ 不变。
+成功条件：摘要输出 OK，五个文件均存在且两个用户包逐字节相同。失败即停止并保留现有 /data/testagent/dist/local-opencode-client/ 不变。
 
-**机器：122.233.30.2 前端（同一终端）**。先放置 versioned release，若同版本已经存在则必须逐字节相同；然后才替换 catalog、stable manifest、启动器和 DEB。下面的 mv 仅移动由上一条 mktemp 创建的精确 staging 路径。
+**机器：122.233.30.2 前端（同一终端）**。先放置 versioned release，若同版本已经存在则必须逐字节相同；然后才替换 catalog、stable manifest、启动器和用户包。下面的 mv 仅移动由上一条 mktemp 创建的精确 staging 路径。
 
 ~~~bash
 sudo install -d -m 0755 /data/testagent/dist/local-opencode-client/releases
@@ -194,8 +194,8 @@ sudo install -d -m 0755 /data/testagent/dist/local-opencode-client/stable
 sudo install -m 0755 "$local_client_stage_dir/local-opencode-client/install.sh" /data/testagent/dist/local-opencode-client/install.sh
 sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/stable/manifest.json" /data/testagent/dist/local-opencode-client/stable/manifest.json
 sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/stable/manifest.json.sig" /data/testagent/dist/local-opencode-client/stable/manifest.json.sig
-sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb" /data/testagent/dist/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
-sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb" /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz" /data/testagent/dist/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz
+sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz" /data/testagent/dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz
 sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/catalog.json.sig" /data/testagent/dist/local-opencode-client/catalog.json.sig
 sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/catalog.json" /data/testagent/dist/local-opencode-client/catalog.json
 ~~~
@@ -208,12 +208,12 @@ sudo install -m 0644 "$local_client_stage_dir/local-opencode-client/catalog.json
 sudo /data/testagent/deploy/internal/configure-nginx.sh --env-file /data/testagent/config/nginx.env --template /data/testagent/deploy/internal/nginx/gateway.conf.template
 curl -fsSI http://127.0.0.1/downloads/local-opencode-client/catalog.json
 curl -fsSI http://127.0.0.1/downloads/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json
-curl -fsSI http://127.0.0.1/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.deb
+curl -fsSI http://127.0.0.1/downloads/local-opencode-client/test-agent-local-client_<RELEASE_VERSION>_arm64.tar.gz
 curl -fsSIL http://127.0.0.1/downloads/local-opencode-client/installer
 ~~~
 
 成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载为
-`TestAgent-Local-Client-Kylin-arm64.deb`。配置中 /downloads/local-opencode-client/ 必须映射到
+`TestAgent-Local-Client-Kylin-arm64.tar.gz`。配置中 /downloads/local-opencode-client/ 必须映射到
 /data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
 
 **机器：平台网页（超级管理员）**。在 Nginx 三个 URL 都返回 200 后，进入本地客户端版本管理页面，执行“同步 release/catalog”。成功条件：页面显示 <RELEASE_VERSION> 的已同步 release，且 platform=linux、architecture=arm64、签名校验成功。同步失败或版本不兼容时停止，不能创建 rollout。
@@ -229,29 +229,24 @@ esac
 
 成功条件：local_client_stage_dir 是本节 mktemp 生成的 /data/testagent/dist/.local-opencode-client-stage.* 目录。若变量为空、路径不匹配或不确定，停止并人工检查，不要扩大删除范围。
 
-## 7. 麒麟 ARM 用户节点：安装包安装与 enroll
+## 7. 麒麟 ARM 用户节点：普通用户安装与 enroll
 
-**机器：具备企业麒麟签名能力的发布环节**。`package-local-opencode-client.sh` 生成标准 ARM64 DEB，但平台 RSA
-清单签名只保护 TestAgent 下载的运行时，不能让麒麟安全中心信任安装包。对外发布前，必须使用企业麒麟软件管理
-平台或安全团队提供的 UKey 流程对最终 DEB 加签；签名后的字节必须作为 Nginx 下载别名实际发布。不同企业的
-UKey 与证书策略不同，仓库不保存也不模拟签名私钥。
-
-**机器：真实麒麟 ARM 用户节点**。先验证网页实际下载到的是 DEB，而不是 shell，再用系统工具验签：
+**机器：真实麒麟 ARM 用户节点，普通账号**。从网页下载并完整解压用户包，不运行 `dpkg`，也不需要 sudo：
 
 ~~~bash
-client_deb="$HOME/下载/TestAgent-Local-Client-Kylin-arm64.deb"
-file "$client_deb"
-dpkg-deb -f "$client_deb" Package Version Architecture
-kylinsigntool -v "$client_deb"
+client_package="$HOME/下载/TestAgent-Local-Client-Kylin-arm64.tar.gz"
+file "$client_package"
+tar -tzf "$client_package"
 ~~~
 
-成功条件：`file` 识别为 Debian binary package，包名为 `test-agent-local-client`、架构为 `arm64`，
-`kylinsigntool` 明确验签成功。若系统没有该命令，先由终端管理员按企业镜像规范安装 `kylinsigntool`；若验签失败，
-停止发布，不能通过脚本、解包复制或关闭来源检查向普通用户交付。
+成功条件：`file` 识别为 gzip compressed data，归档中只有 `TestAgent-Local-Client/` 下的原生启动器、README 和
+`resources/`。不要直接在压缩包预览窗口内运行；完整解压后双击 `TestAgent-Local-Client`。文件管理器若禁止双击
+可执行文件，可在解压目录打开终端执行 `./TestAgent-Local-Client`，该命令不需要 sudo。
 
-**机器：同一麒麟 ARM 用户节点**。双击 DEB（或由文件管理器选择麒麟安装器）完成安装，再从应用菜单启动
-“TestAgent 本地客户端”。安装包的应用入口会执行首次 `setup`，下载经过平台签名校验的运行时并弹出接入向导；
-只在本机输入统一认证号和 Client key，不要把 Key 放到命令、环境变量、URL、截图或日志中。
+原生启动器会校验包内安装脚本和图标摘要，在可见终端中执行首次 `setup`，随后把客户端、运行时、配置、桌面入口和
+user systemd 服务安装到当前账号的 `~/.local` / `~/.config`。运行时 JAR、JDK、OpenCode 和公共能力基线仍按平台 RSA
+签名清单逐项验证；只在本机输入统一认证号和 Client key，不要把 Key 放到命令、环境变量、URL、截图或日志中。
+用户包不会写 `/usr` 或 `/var/lib/dpkg`，因此不再生成或交付 DEB。
 
 **机器：同一普通用户的真实交互终端，仅用于验收状态**。应用菜单完成首次接入后执行：
 
@@ -276,7 +271,7 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 本手册的文件、Nginx、首次 enroll 和 WSS/实例检查不替代数据库准入。发布前仍必须按照 [database.md](database.md) 对每套已知真实 PostgreSQL 历史留存 flyway_schema_history 的 version/checksum/success，验证升级到当前 HEAD，并检查两条固定 migration 在源码、构建输出、发布 ZIP 和安装后 backend/lib/test-agent-persistence-*.jar 中的字节。未完成真实 PostgreSQL 升级或真实麒麟 ARM64 glibc 全链路测试时，它们必须继续标记为发布闸门，不能表述为已通过。
 
-Observability 现场验收还必须确认 DEB 的受控 release 包含共享插件，客户端注册 capability
+Observability 现场验收还必须确认用户包引用的受控 release 包含共享插件，客户端注册 capability
 `OPENCODE_OBSERVABILITY_V1`，对话期间 WSS 没有 Trace 上传，空闲 3 秒后才出现单在途分片。断网后 spool 保留，重连按
 服务器 watermark 续传；只有匹配 ACK 后文件才删除。空间不足时客户端必须继续对话并报告 degraded/incomplete。不得通过
 清理用户 spool、调高超过 1 MiB/s 的速率或降低 3 秒空闲门槛来使验收表面通过。

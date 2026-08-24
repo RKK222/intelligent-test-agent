@@ -523,7 +523,7 @@ function formatLocalClientTime(value?: string | null) {
                 </div>
               </div>
               <div v-else class="ta-client-update-state is-legacy">
-                <span class="ta-update-support">不支持自更新，请安装新版 DEB</span>
+                <span class="ta-update-support">不支持自更新，请重新下载用户包</span>
               </div>
               <div v-if="client.publicCapabilities" class="ta-client-update-state">
                 <div class="ta-client-update-heading">

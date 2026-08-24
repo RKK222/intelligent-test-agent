@@ -66,7 +66,6 @@ const localClientDistributionRoot = resolve(
 
 const localClientContentType = (filePath: string): string => {
   if (filePath.endsWith(".tar.gz")) return "application/gzip";
-  if (filePath.endsWith(".deb")) return "application/vnd.debian.binary-package";
   if (extname(filePath) === ".json") return "application/json; charset=utf-8";
   if (extname(filePath) === ".sh") return "text/x-shellscript; charset=utf-8";
   return "application/octet-stream";
@@ -105,7 +104,7 @@ const localClientDistributionRoute = (): Plugin => ({
         response.statusCode = 302;
         response.setHeader(
           "Location",
-          "/downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+          "/downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
         );
         response.setHeader("Cache-Control", "no-store");
         response.end();
@@ -137,7 +136,7 @@ const localClientDistributionRoute = (): Plugin => ({
             ? "public, max-age=31536000, immutable"
             : "no-store"
         );
-        if (relativePath === "TestAgent-Local-Client-Kylin-arm64.deb") {
+        if (relativePath === "TestAgent-Local-Client-Kylin-arm64.tar.gz") {
           response.setHeader("Content-Disposition", `attachment; filename="${relativePath}"`);
         }
         if (request.method === "HEAD") {

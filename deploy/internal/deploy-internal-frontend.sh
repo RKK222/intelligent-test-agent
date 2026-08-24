@@ -134,7 +134,8 @@ verify_local_client_root() {
     --expected-version "${LOCAL_CLIENT_VERSION}" \
     --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
     --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
-    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}"
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    --expected-user-package-sha256 "${LOCAL_CLIENT_USER_PACKAGE_SHA256}"
 }
 
 require_command unzip
@@ -173,6 +174,8 @@ LOCAL_CLIENT_SIGNATURE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
   TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_SIGNATURE_SHA256)"
 LOCAL_CLIENT_INSTALL_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
   TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_INSTALL_SHA256)"
+LOCAL_CLIENT_USER_PACKAGE_SHA256="$(manifest_value "${COMPONENT_MANIFEST}" \
+  TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_USER_PACKAGE_SHA256)"
 
 require_file "${FRONTEND_ARCHIVE}"
 require_file "${CONFIGURE_NGINX_SCRIPT}"
@@ -187,11 +190,11 @@ require_file "${DEPLOY_INTERNAL_SRC}/verify-local-opencode-client-distribution.s
 }
 if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
   require_file "${LOCAL_CLIENT_DIST}/install.sh"
-  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.deb"
+  require_file "${LOCAL_CLIENT_DIST}/TestAgent-Local-Client-Kylin-arm64.tar.gz"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json"
   require_file "${LOCAL_CLIENT_DIST}/stable/manifest.json.sig"
   # 旧全量包没有组件哈希字段时继续兼容；新包必须执行完整逐文件校验。
-  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}" ]]; then
+  if [[ -n "${LOCAL_CLIENT_FINGERPRINT}${LOCAL_CLIENT_MANIFEST_SHA256}${LOCAL_CLIENT_SIGNATURE_SHA256}${LOCAL_CLIENT_INSTALL_SHA256}${LOCAL_CLIENT_USER_PACKAGE_SHA256}" ]]; then
     [[ "${LOCAL_CLIENT_FINGERPRINT}" =~ ^[0-9a-f]{64}$ ]] || {
       echo "Invalid local client component fingerprint" >&2
       exit 1
@@ -207,7 +210,8 @@ else
     && -n "${LOCAL_CLIENT_VERSION}" \
     && "${LOCAL_CLIENT_MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ \
     && "${LOCAL_CLIENT_SIGNATURE_SHA256}" =~ ^[0-9a-f]{64}$ \
-    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
+    && "${LOCAL_CLIENT_INSTALL_SHA256}" =~ ^[0-9a-f]{64}$ \
+    && "${LOCAL_CLIENT_USER_PACKAGE_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
     echo "Local client reuse metadata is missing or invalid" >&2
     exit 1
   }

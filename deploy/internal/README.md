@@ -244,7 +244,7 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 
 - `worker runtime`：Python/通用脚本工具、OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
 - `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
-- `local OpenCode client`：客户端 JAR、PKG、DEB、JRE、OpenCode 归档、完整公共能力基线、安装脚本和签名清单是一个单元。麒麟 DEB 由 `build-local-opencode-client-deb.sh` 统一组装稳定启动器、应用菜单和图标；该步骤不持有企业 UKey，生产下载别名必须在企业麒麟签名环节完成加签并由真实终端 `kylinsigntool -v` 验证。
+- `local OpenCode client`：客户端 JAR、麒麟 ARM64 用户包、JRE、OpenCode 归档、完整公共能力基线、安装脚本和签名清单是一个单元。`build-local-opencode-client-user-package.sh` 生成包含静态 ARM64 启动器的 `tar.gz`；普通用户完整解压后可双击运行，安装只写入 `~/.local` / `~/.config`，不生成 DEB，也不调用 sudo/dpkg。
 
 Python 第三方库不进入上述 worker 指纹，也不烘焙进 worker 镜像。它使用独立命令、独立 tar 和独立校验文件，升级 pandas/Office/JSON 库时不需要重建或重新加载 worker 镜像：
 
