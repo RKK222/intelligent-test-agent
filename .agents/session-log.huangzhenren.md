@@ -2611,3 +2611,18 @@
 - Result:
   - 思维导图可以承载安全测试场景中的特殊字符，保存后仍为可重开的规范 Markdown；空节点和结构冲突继续失败关闭。
   - 本次仅调整前端文字校验，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、migration、依赖、部署、性能路径或后端安全边界；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。
+
+### 2026-08-24 - 将思维导图特殊字符优化选择性合入 release
+
+- Why:
+  - 用户明确要求把已在 `dev` 完成的思维导图特殊字符优化合入 `release`；`dev` 同时包含其它未批准功能，不能整体合并。
+- What:
+  - 在最新 `origin/release` 基线 `8b52329ac` 上确认思维导图基础提交已存在，只选择性 cherry-pick `69bad33b5`，生成 `release` 提交 `eddbec020`；未带入功能页 Tab、本地客户端等其它 `dev` 能力。
+  - 保留 `release` 后续提交和全部会话日志内容；目标代码、测试、前端总览、editor 包说明和内置用户手册按原提交语义合入。
+- How:
+  - 合入前全量 Vitest 150/150 文件通过，2211 passed / 1 skipped；合入后思维导图定向 Vitest 13/13 文件、121/121 通过，editor 与 agent-web 类型检查通过。
+  - Chromium 独立 `.mind` 用例首次冷启动因 Vite `504 Outdated Optimize Dep` 导致 `WorkbenchView.vue` 未加载，重试通过；读取 trace 确认失败发生在进入思维导图逻辑前，依赖优化稳定后关闭重试连续运行 3/3 通过。
+  - 合入后全量 Vitest 150/150 文件通过，2213 passed / 1 skipped；production build、`tools/verify-ai-docs.sh` 和 `git diff --check` 通过，构建产物继续包含独立的 `simple-mind-map` 懒加载 chunk。
+- Result:
+  - `release` 现已包含“允许非空单行节点使用 HTML、Markdown、SQL 等特殊字符，继续禁止空节点和保留注释”的优化；`<script>` 仅作为普通文字显示，不执行。
+  - 本次仅做前端既有功能的跨长期分支选择性同步，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、部署节点、依赖、性能路径、后端安全边界或兼容协议；未修改 `.env*`、generated SDK、OpenCode 只读源码，未新建分支或推送远端。
