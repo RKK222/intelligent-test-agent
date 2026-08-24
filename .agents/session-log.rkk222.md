@@ -13943,3 +13943,26 @@
 
 - 新用户不再接触 DEB：下载、完整解压、双击原生启动器即可在当前账号下安装并接入；命令行兜底仅为解压目录中的 `./TestAgent-Local-Client`，同样不需要 sudo。
 - 本次不新增 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点或强制环境变量，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。真实麒麟文件管理器双击、首次 Client Key 输入和 user systemd 在线状态仍需在企业桌面完成最终人工验收。
+
+## 2026-08-24 - 修复工作台首次进入白屏
+
+### Why
+
+- 重新部署后浏览器冷缓存进入 `/workbench` 时，Vue Router 会等待约 4.1 MB 的异步工作台脚本，根组件此前只渲染 `RouterView`，首导航完成前保持纯白。
+- 页面入口还同步引用 Google Fonts，企业网络首次请求可能阻塞字体获取并放大冷启动等待。
+
+### What
+
+- 根组件在 `router.isReady()` 前展示复用现有 Logo 的品牌加载态，首导航成功或失败后均退出兜底并交回正常路由；动效支持 `prefers-reduced-motion`。
+- 删除运行时 Google Fonts 和预连接，统一改用 macOS、Windows、中文系统字体与本机等宽字体栈；同步 frontend、agent-web、PACKAGE 和前端规范说明。
+- 新增 App 入口回归，覆盖首导航等待、成功切换以及失败时不永久停留加载态。
+
+### How
+
+- App 定向 Vitest 2/2、agent-web 类型检查、VitePress + agent-web production build 和 `git diff --check` 均通过。
+- 使用 production preview 与 Playwright 实测：人为延迟工作台脚本 1.5 秒时，品牌加载态约 97 ms 出现、工作台约 2.0 秒接管且兜底移除；无人工延迟的浏览器冷缓存约 290 ms 进入工作台，两次 Google Fonts 请求均为 0。
+
+### Result
+
+- 首次路由等待期间不再白屏，也不再依赖公共字体服务；工作台大包仍约 4.1 MB（gzip 约 1.28 MB），拆包属于后续性能批次，本次未扩大范围。
+- 本次不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、部署节点、安全协议或兼容性契约；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，未新建分支。

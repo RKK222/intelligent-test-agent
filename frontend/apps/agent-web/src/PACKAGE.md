@@ -10,7 +10,7 @@
 
 - `components/BatchTestCaseGenerationDialog.vue`、`components/ExecutionTimePicker.vue`、`components/useBatchTestCaseGeneration.ts` 与 `components/batch-test-case-generation.ts`：提供宽 70vw、高 90vh 的批量选择弹层、选择/会话创建进度两阶段门禁、单条/批量失败重试、单条/批量共用时间选择、最多四路局部上下文编排和纯容量分配；定时选择与立即执行互斥，只有时间和容量有效时才在主操作位展示定时执行，关闭定时选择会清空未提交时间。候选只消费输入 `#` 的既有聚合结果，重试复用原批次与已创建 Session，用户确认关闭后显式清理前端批次身份，执行过程不修改当前 Session、输入正文或附件。
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
-- `App.vue`：根组件，渲染 `<RouterView />`。
+- `App.vue`：根组件，在 `router.isReady()` 完成首次异步导航前渲染复用工作台 Logo 与 shell token 的品牌加载态，导航成功或失败后切换到 `<RouterView />`，避免冷缓存白屏。
 - `release-features.ts`：集中解析 LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 dev 默认关闭。
 - `router.ts`、`stores/memoryAccessStore.ts`、`session-share-route.ts`：SPA 客户端路由与用户级记忆灰度状态，`/985211` 登录页、`/workbench` 工作台、`/toolbox` 离线工具箱、受服务端白名单保护的 `/memories` 记忆中心、`/system` 超级管理员控制台、`/hub` 能力库、`/settings` 设置弹窗、受发布开关保护的 `/lobehub/launch`，并在 `/s/:id` 下按 `ses_`/`shr_` 前缀分别进入只读 transcript 或分享工作台；记忆路由在挂载前重新校验，未授权或异常时返回工作台，未知路径进入 404 页面，历史根路径 `/` 兼容跳转到 `/workbench`。
 - `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。

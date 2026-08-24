@@ -71,7 +71,7 @@
 
 ## 字体与字号
 
-前端全局排版必须使用统一字体族：英文使用 `Geist Sans`，中文使用 `Noto Sans SC`，代码与等宽内容使用 `Geist Mono`。新增或调整组件样式时，应优先复用全局 token 和 `ui-kit` 组件尺寸，避免在业务组件中散落不一致的字号和字重。
+企业入口不得在运行时依赖 Google Fonts 等公网字体服务。前端全局排版统一使用操作系统字体栈：正文优先 `-apple-system / BlinkMacSystemFont / Segoe UI / PingFang SC / Microsoft YaHei / Noto Sans CJK SC`，代码与等宽内容优先 `SFMono-Regular / Menlo / Monaco / Consolas / Liberation Mono`。新增或调整组件样式时，应优先复用全局 token 和 `ui-kit` 组件尺寸，避免在业务组件中散落不一致的字号和字重；如确需自定义字体，必须作为经过许可和体积评估的离线制品随前端发布，并使用 `font-display: swap`，不能增加运行时公网请求。
 
 文件浏览区例外：工作区文件树、搜索结果、变更列表和 Agent 配置树可使用 `--ta-tree-*` 局部 token 模拟 VS Code Workbench 信息密度，字体栈限定为系统 UI 字体，字号为 13px，行高为 22px。该例外只能用于文件浏览区，不得扩散到聊天正文、设置页、编辑器正文或普通表单。
 
