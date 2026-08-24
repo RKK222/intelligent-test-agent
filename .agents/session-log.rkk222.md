@@ -13728,3 +13728,27 @@
 
 - SkillHub 创建人现在按统一认证号动态解析为平台用户名，并保持缺失用户/旧数据的兼容展示。
 - 本次仅向现有资产响应增加可选字段并调整单次列表 SQL；不新增 HTTP 路径、RunEvent/SSE、数据库结构、migration、部署节点或强制配置，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-24 - 客户端统一使用离线现代桌面主题
+
+### Why
+
+- 企业部署的 `20260824155652` 已解决旧 Metal 观感，但底层仍按平台选择 macOS Aqua 或 JDK Nimbus；用户明确要求客户端不要再使用 Java/系统原生主题。
+- 企业现网 `20260824155652` 相对上一版 `20260824124347` 的范围容易与之后生成但未部署的本机 release 混淆，需要固定真实企业版本差异和下一版客户端边界。
+
+### What
+
+- 复用既有 `LocalClientDesktopTheme` 统一入口，删除 Aqua/Nimbus/Metal 选择逻辑；macOS 与麒麟/Linux 统一使用 shaded JAR 内置的 FlatLaf 3.7.2，并增加白色卡片、轻边框、12px 圆角、紧凑滚动条和 TestAgent 红色默认操作按钮 token。
+- FlatLaf 是纯 Java、Apache-2.0 依赖，由外网 Maven 构建后进入 fat JAR；企业目标机不联网安装 UI 包。同步客户端模块 README 和本地客户端部署验收说明。
+- 生成独立签名客户端 release `20260824180254`，继续使用企业公共 Git `81605f245d1512e1ab0dd73812391f6da7d008b5` 的既有完整能力包，不改变 8 Agent / 16 Skill / 8 Tool。
+
+### How
+
+- JDK 25 按 Java 21 release 运行 `mvn -pl test-agent-local-client -am test`：客户端 96 项通过、1 项按桌面条件跳过，上游 common/protocol 共 121 项通过；`mvn ... -DskipTests package` 成功。
+- 实际 shaded JAR 包含 `LocalClientDesktopTheme.class` 与 `com/formdev/flatlaf/FlatLightLaf.class`，`java -jar ... --version` 输出 `20260824180254`；manifest、客户端 JAR和公共能力包三项签名均通过稳定公钥验证。
+- U 盘转运包为 `~/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260824180254_arm64.tar.gz`，SHA-256 为 `53cf358538920b7f971cd802f82f7448d840142435b2ef3383aae34452720f77`；JAR 为 `30f2c627218aa5138ef66f9e2afa85016c88015c502362e6cdefbb4ce5494f82`，DEB 为 `2f03d1be04818381ca491cd8555e5a5dbd4ab8b33230dc1e57d17ad41564f8cf`。
+
+### Result
+
+- 新客户端正常路径不再依赖操作系统或 JDK 原生 LookAndFeel，且新增依赖已完整离线打入签名 release；真实麒麟桌面视觉仍需发布该独立客户端包后人工复验。
+- 本次不变更 HTTP API、RunEvent/SSE、数据库、Flyway、后端/worker、OpenCode 只读源码、generated SDK 或 `.env*`。构建期间并行 SkillHub 改动已由其所有者提交，本次提交只纳入主题、依赖、测试、文档与本条会话记录。

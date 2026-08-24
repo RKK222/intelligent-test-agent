@@ -55,6 +55,7 @@
         <mybatis-spring-boot.version>4.0.1</mybatis-spring-boot.version>
         <pty4j.version>0.13.12</pty4j.version>
         <jna.version>5.14.0</jna.version>
+        <flatlaf.version>3.7.2</flatlaf.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <xxl-job.version>3.4.2</xxl-job.version>
         <xxl-sso.version>2.4.0</xxl-sso.version>
@@ -298,6 +299,11 @@
                 <groupId>net.java.dev.jna</groupId>
                 <artifactId>jna</artifactId>
                 <version>${jna.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.formdev</groupId>
+                <artifactId>flatlaf</artifactId>
+                <version>${flatlaf.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.xuxueli</groupId>

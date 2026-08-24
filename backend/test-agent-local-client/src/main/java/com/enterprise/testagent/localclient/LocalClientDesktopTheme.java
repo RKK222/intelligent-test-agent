@@ -1,5 +1,6 @@
 package com.enterprise.testagent.localclient;
 
+import com.formdev.flatlaf.FlatLightLaf;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Insets;
@@ -15,7 +16,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 客户端桌面窗口的统一视觉入口。
- * macOS 继续使用原生 Aqua；Linux 使用 JDK 自带 Nimbus，避免回退到老旧 Metal 风格。
+ * 所有桌面平台统一使用随客户端打包的 FlatLaf，不依赖 JDK 或操作系统原生主题。
  */
 final class LocalClientDesktopTheme {
 
@@ -25,57 +26,35 @@ final class LocalClientDesktopTheme {
     private static final ColorUIResource TEXT = new ColorUIResource(31, 41, 55);
     private static final ColorUIResource MUTED = new ColorUIResource(107, 114, 128);
     private static final ColorUIResource ACCENT = new ColorUIResource(190, 30, 45);
+    private static final ColorUIResource ACCENT_HOVER = new ColorUIResource(168, 24, 39);
+    private static final ColorUIResource ACCENT_PRESSED = new ColorUIResource(143, 20, 34);
+    private static final ColorUIResource BORDER = new ColorUIResource(218, 222, 229);
+    private static final ColorUIResource DISABLED_BORDER = new ColorUIResource(232, 234, 239);
     private static final FontUIResource DEFAULT_FONT = new FontUIResource(Font.DIALOG, Font.PLAIN, 14);
 
     private LocalClientDesktopTheme() {
     }
 
-    static void install() {
-        try {
-            String lookAndFeel = preferredLookAndFeelClassName(
-                    LocalClientPaths.isMac(),
-                    UIManager.getInstalledLookAndFeels(),
-                    UIManager.getSystemLookAndFeelClassName());
-            UIManager.setLookAndFeel(lookAndFeel);
-            applyDefaults(UIManager.getDefaults());
-            LOGGER.info("local_client_desktop_theme_installed lookAndFeel={}", lookAndFeel);
-        } catch (Exception exception) {
-            // 主题失败不能阻断客户端连接；继续使用当前 LookAndFeel，并尽量应用字体和间距。
-            applyDefaults(UIManager.getDefaults());
-            LOGGER.warn("local_client_desktop_theme_fallback reason={}",
-                    exception.getClass().getSimpleName());
+    static boolean install() {
+        if (!FlatLightLaf.setup()) {
+            // 外观失败不能阻断反向连接；记录固定原因，不回退选择另一套平台原生主题。
+            LOGGER.warn("local_client_desktop_theme_unavailable lookAndFeel={}",
+                    FlatLightLaf.class.getName());
+            return false;
         }
+        applyDefaults(UIManager.getDefaults());
+        LOGGER.info("local_client_desktop_theme_installed lookAndFeel={}",
+                FlatLightLaf.class.getName());
+        return true;
     }
 
-    static String preferredLookAndFeelClassName(
-            boolean mac,
-            UIManager.LookAndFeelInfo[] installed,
-            String systemLookAndFeel) {
-        if (mac) {
-            return systemLookAndFeel;
-        }
-        for (UIManager.LookAndFeelInfo candidate : installed) {
-            if ("Nimbus".equals(candidate.getName())) {
-                return candidate.getClassName();
-            }
-        }
-        return systemLookAndFeel;
-    }
-
-    /** 统一字体、表面层级、主色和触控间距，保证高分屏下仍然清晰紧凑。 */
+    /** 统一字体、圆角、表面层级和主操作色，保证高分屏下仍然清晰紧凑。 */
     static void applyDefaults(UIDefaults defaults) {
         defaults.keySet().stream()
                 .filter(key -> key instanceof String value && value.endsWith(".font"))
                 .toList()
                 .forEach(key -> defaults.put(key, DEFAULT_FONT));
 
-        defaults.put("control", SURFACE);
-        defaults.put("info", FIELD);
-        defaults.put("text", TEXT);
-        defaults.put("nimbusBase", ACCENT);
-        defaults.put("nimbusFocus", ACCENT);
-        defaults.put("nimbusSelectionBackground", ACCENT);
-        defaults.put("nimbusLightBackground", FIELD);
         defaults.put("OptionPane.background", SURFACE);
         defaults.put("Panel.background", SURFACE);
         defaults.put("Label.foreground", TEXT);
@@ -85,6 +64,27 @@ final class LocalClientDesktopTheme {
         defaults.put("PasswordField.foreground", TEXT);
         defaults.put("TextField.inactiveForeground", MUTED);
         defaults.put("PasswordField.inactiveForeground", MUTED);
+
+        // FlatLaf 客户端级 token：白色卡片、轻边框、12px 圆角，仅默认操作按钮使用品牌红。
+        defaults.put("Component.arc", 12);
+        defaults.put("Component.focusWidth", 1);
+        defaults.put("Component.innerFocusWidth", 0);
+        defaults.put("Component.focusColor", ACCENT);
+        defaults.put("Component.borderColor", BORDER);
+        defaults.put("Component.focusedBorderColor", ACCENT);
+        defaults.put("Component.disabledBorderColor", DISABLED_BORDER);
+        defaults.put("Button.arc", 12);
+        defaults.put("Button.background", FIELD);
+        defaults.put("Button.foreground", TEXT);
+        defaults.put("Button.default.background", ACCENT);
+        defaults.put("Button.default.foreground", new ColorUIResource(Color.WHITE));
+        defaults.put("Button.default.hoverBackground", ACCENT_HOVER);
+        defaults.put("Button.default.pressedBackground", ACCENT_PRESSED);
+        defaults.put("Button.default.focusColor", ACCENT);
+        defaults.put("TextComponent.arc", 12);
+        defaults.put("ScrollBar.width", 10);
+        defaults.put("ScrollBar.thumbArc", 999);
+        defaults.put("ProgressBar.arc", 999);
 
         defaults.put("Button.margin", new InsetsUIResource(8, 18, 8, 18));
         defaults.put("TextField.margin", new InsetsUIResource(8, 10, 8, 10));

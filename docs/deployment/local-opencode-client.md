@@ -289,6 +289,10 @@ Observability 现场验收还必须确认 DEB 的受控 release 包含共享插�
 发布完整 release，存量实例必须由平台生成“公共能力有更新”并由用户在托盘或网页确认。禁止直接覆盖不可变 release 中
 的 JAR 或能力包，否则 manifest 摘要和签名会失效。
 
+客户端 Swing 窗口统一使用 shaded JAR 内置的 FlatLaf 3.7.2，不再读取 macOS Aqua、JDK Nimbus/Metal 或麒麟桌面主题；
+目标机不需要也禁止现场下载 UI 依赖。发布验收除签名与版本外，还应确认 JAR 包含
+`com/formdev/flatlaf/FlatLightLaf.class`，并在真实麒麟桌面检查首次配置、目录选择、会话进度和公共能力确认窗口。
+
 能力包 manifest 的 `contentDigest` 只表示文件内容，安装版本的 `bundleDigest` 固定按
 `sha256(sourceCommit + "\n" + contentDigest)` 计算。同一内容的新公共提交仍必须生成独立完整包并显示该提交哈希；
 首版客户端已经安装的文件摘要型 `bundleDigest` 继续兼容读取，但新发布包不得再使用旧算法。

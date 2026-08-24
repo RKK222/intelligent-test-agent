@@ -6,9 +6,9 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 ## 桌面界面
 
-- `LocalClientDesktopTheme` 是首次配置、目录选择、会话进度和公共能力确认窗口的统一主题入口。macOS 保持系统 Aqua，
-  麒麟/Linux 优先使用 JDK 自带 Nimbus，并统一 14px 对话字体、TestAgent 红色主色、输入框和按钮留白；Nimbus 不可用时
-  才回退系统 LookAndFeel。主题初始化失败只降级界面，不能阻断 WSS 连接。
+- `LocalClientDesktopTheme` 是首次配置、目录选择、会话进度和公共能力确认窗口的统一主题入口。macOS 与麒麟/Linux
+  统一使用随 shaded JAR 离线交付的 FlatLaf 3.7.2，不再选择系统 Aqua、JDK Nimbus 或 Metal；界面使用 14px 对话字体、
+  白色卡片、轻边框、圆角控件和 TestAgent 红色主操作。主题初始化失败只降级界面，不能阻断 WSS 连接。
 - 会话进度与能力确认使用无遗留 Java 吉祥物图标的纯内容对话框；系统托盘菜单仍由操作系统原生渲染。
 
 ## Git 权限巡检
