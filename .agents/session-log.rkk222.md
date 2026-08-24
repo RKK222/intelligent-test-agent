@@ -13678,3 +13678,5 @@
 
 - 正常 Trace 的首屏耗时不再与全部流式事件和归档正文大小线性绑定，事件 Payload/Result 仍按类型显示且正文继续只存在服务器归档。
 - 当前仓库 `.env.test` 实际指向本机 `127.0.0.1:15432/test_agent`，本次按用户要求使用该文件完成真实启动但未修改它；这不等同于仓库清单要求的 `.100/testagent_dev` 企业验收，后者仍需环境所有者恢复规定配置后单独执行。
+- 以已提交的 release `a3db388e0` 重建企业增量包：内层 `test-agent-internal-release.zip` SHA-256 为 `933e936e2188ec4eac405fd03fcdd21808aa8a6dce1ff8300c64e2415153a9de`，固定名双后台外层包为 `c3b43b79d17f3f98a47d367465da138bb45583ab0ac06c3cada9298d0bdbea4e`；外层内嵌内层逐字节一致，两层 ZIP CRC、受保护 PostgreSQL/ClickHouse/XXL migration、客户端签名分发和三节点配置门禁均通过。
+- 发布产物中的 `test-agent-api` JAR 已用 `javap` 确认包含 `/spans`、`/records/{eventId}` 与 `globalSequence`，前端 production JS 同时包含对应请求；外层包及 checksum 已复制到 `~/Desktop/mimoagent/0709/` 并复验一致。本条是制品生成后的追溯记录，不再据此递归重封 ZIP。
