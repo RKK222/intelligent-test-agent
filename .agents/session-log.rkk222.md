@@ -13609,3 +13609,24 @@
 
 - 远端基础中间件和 Mem0/BGE 已启动并稳定运行；本次未启动 backend、frontend 或 opencode-manager，因为用户范围是中间件。
 - 远端 runtime 生成文件和容器状态已落地，但未产生本地源码改动、API/事件/数据库结构变更或企业部署包变更。
+
+## 2026-08-24 - 明确客户端与长期记忆的账号灰度边界
+
+### Why
+
+- 用户手册虽然分别提到客户端和记忆的开放条件，但功能总览、周更和常见问题没有统一说明两项能力均为按账号灰度，容易把客户端开放误解为同时开通记忆，或误解关闭客户端灰度会停止本地运行。
+
+### What
+
+- 更新每周新功能、功能总览、设置、长期记忆和常见问题：超级管理员在“系统管理 → 用户管理”分别控制“客户端灰度”和“记忆灰度”；记忆还依赖平台全局记忆配置可用。
+- 补全本地客户端从个人设置创建 Client Key、头像下载、托盘注册目录到顶部选择本地工作区的操作步骤和入口截图；注明灰度只控制网页入口与投影，不自动安装或启动，关闭后也不会停止客户端、重启本地 OpenCode 或撤销 Key。
+- 新增帮助中心回归断言，锁定两项开关独立、记忆全局前置条件、客户端关闭边界、周更灰度文案和无游戏内容/章节截图约束。
+
+### How
+
+- 复用现有的 `settings-personal.png` 脱敏操作截图和帮助中心文档扫描机制，没有新增界面、API 或配置。
+- `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts`（16 passed）、`corepack pnpm --filter @test-agent/user-manual build`、`corepack pnpm --filter @test-agent/agent-web typecheck` 全部通过；VitePress 实际页面复核了设置章节的 Markdown 层级。
+
+### Result
+
+- 客户端与长期记忆的可见性、配置入口和关闭后的影响已按当前实现同步到用户手册；不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、部署、性能、安全策略、环境配置、generated SDK 或 OpenCode 源码。

@@ -103,6 +103,10 @@ describe("help center", () => {
     const prompt = buildManualQuestionPrompt("memory", "为什么没有显示参考了几条记忆？");
 
     expect(prompt).toContain("【当前章节】长期记忆");
+    expect(prompt).toContain("按账号灰度开放");
+    expect(prompt).toContain("平台全局记忆配置可用");
+    expect(prompt).toContain("记忆灰度");
+    expect(prompt).toContain("客户端灰度是另一项独立开关");
     expect(prompt).toContain("参考了 N 条记忆");
     expect(prompt).toContain("团队记忆");
     expect(prompt).toContain("Skill 提案");
@@ -123,7 +127,25 @@ describe("help center", () => {
     expect(prompt).toContain("VITE_CACHE_DATA_URL");
     expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);
     expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
+    expect(prompt).toContain("本地 OpenCode 客户端（按账号灰度开放）");
+    expect(prompt).toContain("客户端灰度");
     expect(prompt.length).toBeLessThan(8_100);
+  });
+
+  it("documents client and memory rollout as separate user-level switches", () => {
+    const settings = helpTopicById("settings").content;
+    const overview = helpTopicById("feature-overview").content;
+    const faq = helpTopicById("faq").content;
+
+    expect(settings).toContain("系统管理 → 用户管理");
+    expect(settings).toContain("客户端灰度");
+    expect(settings).toContain("记忆灰度");
+    expect(settings).toContain("不会互相开启");
+    expect(settings).toContain("不停止客户端、不重启本地 OpenCode，也不撤销 client key");
+    expect(overview).toContain("平台全局记忆配置可用");
+    expect(overview).toContain("本地 OpenCode 客户端");
+    expect(faq).toContain("为什么看不到“下载本地客户端”");
+    expect(faq).toContain("客户端灰度与记忆灰度相互独立");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
