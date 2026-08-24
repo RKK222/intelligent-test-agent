@@ -342,6 +342,7 @@ public final class AgentSkillHubModels {
             Revision publishedRevision,
             String sourceAppName,
             String sourceWorkspaceName,
+            String externalContributorName,
             boolean updateAvailable,
             String referenceStatus,
             long referenceCount) {

@@ -497,7 +497,8 @@ class AgentSkillHubApplicationServiceTest {
         when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
                 nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of(new AssetSummary(
-                        asset, revision, revision, "来源应用", "来源工作空间", false, "PENDING_PUSH", 0)));
+                        asset, revision, revision, "来源应用", "来源工作空间", null,
+                        false, "PENDING_PUSH", 0)));
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
                 repository,
                 mock(ConfigurationManagementRepository.class),
@@ -524,7 +525,8 @@ class AgentSkillHubApplicationServiceTest {
         when(repository.listAssets(any(), nullable(SkillCategory.class), nullable(SkillSubcategory.class),
                 nullable(String.class), anyString(), nullable(String.class), anyBoolean(), anyInt(), anyInt()))
                 .thenReturn(List.of(new AssetSummary(
-                        asset, revision, revision, "来源应用", "来源工作空间", false, "PENDING_REMOVE", 0)));
+                        asset, revision, revision, "来源应用", "来源工作空间", null,
+                        false, "PENDING_REMOVE", 0)));
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
                 repository,
                 mock(ConfigurationManagementRepository.class),

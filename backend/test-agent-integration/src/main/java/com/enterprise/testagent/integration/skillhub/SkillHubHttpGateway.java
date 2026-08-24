@@ -89,11 +89,12 @@ final class SkillHubHttpGateway implements SkillHubGateway {
             if (id <= 0 || blank(name) || blank(version)) {
                 throw unavailable("SkillHub 目录存在缺少 ID、name 或 version 的条目");
             }
+            String contributor = firstText(value, "contributor", "creator", "createdBy");
             result.add(new ExternalSkill(
                     id, name.trim(), version.trim(), firstText(value, "displayName", "title", "name"),
                     text(value, "description"), text(value, "source"), text(value, "tag"),
                     firstText(value, "phase", "phaseCode"), text(value, "phaseName"),
-                    firstText(value, "contributor", "creator", "createdBy"),
+                    blank(contributor) ? null : contributor.trim(),
                     instant(value, "createdAt", "createTime"),
                     Math.max(0, longValue(value, "downloadNum", longValue(value, "downloadCount", 0)))));
         }

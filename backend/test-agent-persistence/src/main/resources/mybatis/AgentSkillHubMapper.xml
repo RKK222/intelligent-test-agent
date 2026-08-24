@@ -342,6 +342,7 @@
           a.external_source as externalSource, a.external_tag as externalTag,
           a.external_phase as externalPhase, a.external_phase_name as externalPhaseName,
           a.external_contributor as externalContributor,
+          contributor.username as externalContributorName,
           a.external_download_count as externalDownloadCount,
           a.catalog_display_name as catalogDisplayName, a.catalog_description as catalogDescription,
           a.forked_from_asset_id as forkedFromAssetId, a.forked_from_revision_id as forkedFromRevisionId,
@@ -380,6 +381,7 @@
         left join agent_skill_hub_revisions pub on pub.revision_id = a.latest_published_revision_id
         left join applications app on app.app_id = a.source_app_id
         left join application_workspaces aw on aw.workspace_id = a.source_application_workspace_id
+        left join users contributor on contributor.unified_auth_id = trim(a.external_contributor)
         <include refid="BrowseWhere"/>
         order by coalesce(pub.published_at, pr.pushed_at) desc, a.asset_id
         limit #{limit} offset #{offset}

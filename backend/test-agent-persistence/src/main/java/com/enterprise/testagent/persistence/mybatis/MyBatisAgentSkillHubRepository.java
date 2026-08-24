@@ -459,7 +459,7 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                 row.publishedPushedAt(), row.publishedAt(), row.publishedByUserId(),
                 row.externalSkillId(), row.externalVersion());
         return new AssetSummary(asset, pushed, published, row.sourceAppName(), row.sourceWorkspaceName(),
-                row.updateAvailable(), row.referenceStatus(), row.referenceCount());
+                row.externalContributorName(), row.updateAvailable(), row.referenceStatus(), row.referenceCount());
     }
 
     private ReferenceUpdate toDomain(ReferenceUpdateRow row) {

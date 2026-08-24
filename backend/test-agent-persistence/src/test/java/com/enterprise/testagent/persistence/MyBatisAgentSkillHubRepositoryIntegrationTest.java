@@ -280,6 +280,7 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 AssetType.SKILL, null, null, SourceKind.SKILLHUB,
                 null, "usr_hub", null, false, 0, 10).getFirst();
         assertThat(summary.asset().sourceKind()).isEqualTo(SourceKind.SKILLHUB);
+        assertThat(summary.externalContributorName()).isEqualTo("Skill 创建人");
         assertThat(summary.pushedRevision()).isNull();
         assertThat(summary.asset().sourceAvailable()).isTrue();
         assertThat(repository.countAssets(
@@ -440,6 +441,10 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
         jdbc.sql("""
                 insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
                 values('usr_hub', 'hub-user', 'hub-user', 'hash', 'ACTIVE', :now, :now)
+                """).param("now", NOW).update();
+        jdbc.sql("""
+                insert into users(user_id, unified_auth_id, username, password_hash, status, created_at, updated_at)
+                values('usr_skill_creator', 'team', 'Skill 创建人', 'hash', 'ACTIVE', :now, :now)
                 """).param("now", NOW).update();
         jdbc.sql("""
                 insert into applications(app_id, app_name, enabled, created_at, updated_at)

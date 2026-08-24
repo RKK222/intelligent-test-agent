@@ -39,7 +39,7 @@ class SkillHubHttpGatewayTest {
                     {"code":0,"msg":"ok","result":[{"id":42,"name":"SLB_ENV_DEEPCHECK","version":"0",
                     "description":"检查测试环境的 SLB 集群 IP","url":"/skill/SLB_ENV_DEEPCHECK.zip",
                     "source":"杭州产品部","tag":null,"sortOrder":null,"status":1,"phase":"04",
-                    "phaseName":"测试","contributor":"000831611","createTime":"2026-07-31T02:13:20.000+00:00",
+                    "phaseName":"测试","contributor":"000831611\\r\\n","createTime":"2026-07-31T02:13:20.000+00:00",
                     "updateTime":"2026-08-11T06:00:21.000+00:00","downloadNum":23,
                     "safetyReportPic":"/skill/temp/pic/report.png","approvalRecord":"[]"}]}
                     """.getBytes(StandardCharsets.UTF_8));
@@ -101,6 +101,7 @@ class SkillHubHttpGatewayTest {
             assertThat(skill.version()).isEqualTo("0");
             assertThat(skill.source()).isEqualTo("杭州产品部");
             assertThat(skill.phase()).isEqualTo("04");
+            assertThat(skill.contributor()).isEqualTo("000831611");
             assertThat(skill.createdAt()).isEqualTo(java.time.Instant.parse("2026-07-31T02:13:20Z"));
             assertThat(skill.downloadCount()).isEqualTo(23);
         });

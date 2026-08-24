@@ -628,9 +628,14 @@ function message(cause: unknown) {
   return cause instanceof Error ? cause.message : "Hub 操作失败";
 }
 
-/** SkillHub 文档 contributor 是创建人用户 ID，清理现场数据中可能携带的换行。 */
+/** 优先展示平台用户姓名；用户尚未同步到 users 时回退 SkillHub contributor ID。 */
 function skillCreator(asset: AgentSkillHubAsset) {
-  return asset.externalContributor?.trim() || "未提供";
+  return asset.externalContributorName?.trim() || asset.externalContributor?.trim() || "未提供";
+}
+
+function skillCreatorTitle(asset: AgentSkillHubAsset) {
+  const contributorId = asset.externalContributor?.trim();
+  return asset.externalContributorName?.trim() && contributorId ? `统一认证号：${contributorId}` : undefined;
 }
 
 /** 列表状态必须同时给出文本与图标，不能只依赖颜色表达。 */
@@ -930,7 +935,11 @@ onUnmounted(() => {
             <span v-if="asset.type === 'SKILL'" class="hub-card-taxonomy">
               {{ skillCategoryLabel(asset) }}<template v-if="skillSubcategoryLabel(asset)"> · {{ skillSubcategoryLabel(asset) }}</template>
             </span>
-            <span v-if="asset.type === 'SKILL' && asset.sourceKind === 'SKILLHUB'" class="hub-card-contributor">
+            <span
+              v-if="asset.type === 'SKILL' && asset.sourceKind === 'SKILLHUB'"
+              class="hub-card-contributor"
+              :title="skillCreatorTitle(asset)"
+            >
               <UserRound :size="11" />创建人：{{ skillCreator(asset) }}
             </span>
             <p>{{ asset.description || '该能力暂未提供说明。' }}</p>
@@ -1034,7 +1043,7 @@ onUnmounted(() => {
               <section v-if="selectedAsset.sourceKind === 'SKILLHUB'" class="hub-classification">
                 <div>
                   <strong>SkillHub 目录元数据</strong>
-                  <span>版本 {{ selectedAsset.externalVersion || '-' }} · {{ selectedAsset.externalPhaseName || selectedAsset.externalPhase || '未标注阶段' }} · 创建人：{{ skillCreator(selectedAsset) }}</span>
+                  <span :title="skillCreatorTitle(selectedAsset)">版本 {{ selectedAsset.externalVersion || '-' }} · {{ selectedAsset.externalPhaseName || selectedAsset.externalPhase || '未标注阶段' }} · 创建人：{{ skillCreator(selectedAsset) }}</span>
                 </div>
                 <b class="hub-classification-value">{{ selectedAsset.externalTag || selectedAsset.externalSource || '外部能力' }}</b>
               </section>

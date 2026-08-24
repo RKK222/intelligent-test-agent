@@ -728,6 +728,7 @@ export type AgentSkillHubAsset = {
   externalPhase?: string | null;
   externalPhaseName?: string | null;
   externalContributor?: string | null;
+  externalContributorName?: string | null;
   externalDownloadCount?: number | null;
   forkedFromAssetId?: string | null;
   forkedFromRevisionId?: string | null;

@@ -1604,7 +1604,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 "platform", "平台内置", "public", "公共配置", snapshot.revisionId(), snapshot.revisionId(),
                 true, true, false, false, false, null, 0, snapshot.pushedAt(), snapshot.pushedAt(),
                 SourceKind.PLATFORM.name(), true, true, null, null, null, null, null, null, null,
-                null, null, null);
+                null, null, null, null);
     }
 
     private AgentSkillHubResponses.AssetResponse response(AssetSummary summary) {
@@ -1631,6 +1631,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 summary.asset().externalSkillId(), summary.asset().externalVersion(),
                 summary.asset().externalSource(), summary.asset().externalTag(), summary.asset().externalPhase(),
                 summary.asset().externalPhaseName(), summary.asset().externalContributor(),
+                summary.externalContributorName(),
                 summary.asset().externalDownloadCount(), summary.asset().forkedFromAssetId(),
                 summary.asset().forkedFromRevisionId());
     }

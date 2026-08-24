@@ -22,7 +22,7 @@ public final class AgentSkillHubResponses {
             Instant pushedAt, Instant publishedAt,
             String sourceKind, boolean sourceAvailable, boolean contentAvailable,
             Long externalSkillId, String externalVersion, String externalSource, String externalTag,
-            String externalPhase, String externalPhaseName, String externalContributor,
+            String externalPhase, String externalPhaseName, String externalContributor, String externalContributorName,
             Long externalDownloadCount, String forkedFromAssetId, String forkedFromRevisionId) {
     }
 

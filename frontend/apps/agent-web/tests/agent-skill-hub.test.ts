@@ -280,7 +280,7 @@ describe("AgentSkillHub", () => {
       pushedRevisionId: null, publishedRevisionId: null, published: false,
       sourceKind: "SKILLHUB", sourceAvailable: true, contentAvailable: false,
       externalSkillId: 42, externalVersion: "1.2.0", externalPhaseName: "稳定",
-      externalContributor: "000831611\r\n"
+      externalContributor: "000831611\r\n", externalContributorName: "徐丽娜"
     } as const;
     const materialized = {
       ...external, pushedRevisionId: "hub_rev_external", publishedRevisionId: "hub_rev_external",
@@ -303,9 +303,9 @@ describe("AgentSkillHub", () => {
     await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
       type: "SKILL", source: "SKILLHUB"
     })));
-    expect(await view.findByText("创建人：000831611")).toBeTruthy();
+    expect(await view.findByText("创建人：徐丽娜")).toBeTruthy();
     await fireEvent.click(view.getByText("外部测试设计"));
-    expect(await view.findByText(/版本 1\.2\.0 .* 创建人：000831611/)).toBeTruthy();
+    expect(await view.findByText(/版本 1\.2\.0 .* 创建人：徐丽娜/)).toBeTruthy();
     expect(api.materializeAgentSkillHubAsset).not.toHaveBeenCalled();
     await fireEvent.click(await view.findByText("预览内容"));
     await waitFor(() => expect(api.materializeAgentSkillHubAsset).toHaveBeenCalledWith(

@@ -170,7 +170,7 @@
 
 ### Agent & Skill Hub
 
-- `MyBatisAgentSkillHubRepository` / `AgentSkillHubMapper.xml` 保存内容寻址 GZIP 制品、每个远端 commit 的不可变修订、发布依赖、应用级引用和更新操作。
+- `MyBatisAgentSkillHubRepository` / `AgentSkillHubMapper.xml` 保存内容寻址 GZIP 制品、每个远端 commit 的不可变修订、发布依赖、应用级引用和更新操作；外部 SkillHub 列表按清理后的 `external_contributor = users.unified_auth_id` 左连接当前平台用户名，查询投影只补充展示姓名，不复制用户姓名到 Hub 资产表。
 - `V20260725143000__create_agent_skill_hub.sql` 创建六张 Hub 表；`V20260725230000__support_hub_reference_removal.sql` 增加 `PENDING_REMOVE` 并允许引用解除时级联清理临时更新操作。相同 canonical 内容按 SHA-256 去重，逻辑修订仍按 `(asset_id, source_commit_hash)` 保留每次 push 身份。
 - `V20260806143000__classify_skill_hub_assets.sql` 为资产增加 Skill 一级/二级事项分类及最近分类操作者、时间；历史与新资产默认 `OTHER`，数据库约束只允许 `TEST` 的四类测试事项和 `CODE/WHITE_BOX_ANALYSIS` 组合，`WORKER/OTHER` 当前不带二级事项。分类更新 SQL 继续位于 `AgentSkillHubMapper.xml`，不会被后续 push 覆盖。
 - `V20260820153926__agent_skill_hub_assets_add_skillhub_source.sql` 增加 `PLATFORM/SKILLHUB` 来源、来源可用性、外部目录元数据、外部精确版本和平台派生链路。目录下架不删历史引用；push 快照和引用保持外部身份/转平台派生由同一 MyBatis 事务完成。

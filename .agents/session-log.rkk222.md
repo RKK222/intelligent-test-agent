@@ -13705,3 +13705,26 @@
 - 代码侧已消除因企业代理下载传输元数据差异导致的 503，并让真实上游非 200 在下一次现场复验时可直接区分；创建人可在外部 Skill 卡片和详情看到。
 - 企业真实 `materialize` 尚需重打包并在 `.4/.114` 两个 Java 节点部署后复验；若仍失败，应按响应 `upstreamStatus` 和两节点 `backend.env`/日志判断凭据、DNS或上游状态。
 - 本次是向后兼容的错误详情增强和前端展示，不新增 HTTP 路径、RunEvent/SSE、数据库、SQL、Flyway、部署节点或强制配置；未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-24 - SkillHub 创建人联合平台用户姓名
+
+### Why
+
+- SkillHub `/list` 的 `contributor` 是统一认证号，能力库直接展示该 ID 不便于识别创建人；用户要求联合平台用户表显示姓名。
+
+### What
+
+- Hub 列表 MyBatis 查询按清理后的 `external_contributor = users.unified_auth_id` 左连接 `users.username`，API 新增可空字段 `externalContributorName`；不把易变姓名复制到 Hub 资产表，也不新增 SQL 或 Flyway migration。
+- 前端卡片和详情优先显示平台用户名，悬停展示原统一认证号；关联不到用户时回退 contributor ID，两者都没有时显示“未提供”。同步共享类型、HTTP API、persistence 与 agent-web README。
+- SkillHub 同步入口统一清理 contributor 首尾空白，兼容现场 ID 带换行的数据。
+
+### How
+
+- JDK 25 下 `SkillHubHttpGatewayTest` 6 项、`AgentSkillHubApplicationServiceTest` 20 项、`MyBatisAgentSkillHubRepositoryIntegrationTest` 8 项全部通过；集成测试覆盖统一认证号关联用户名。
+- 前端全量 Vitest 150 个文件通过，2213 passed / 1 skipped；`agent-web` 类型检查和 production build 通过。JDK 25 后端 26 模块 `-DskipTests package` 成功；`git diff --check` 通过，提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+- 未重启现有本地服务以避免打断并行使用；只读检查确认 backend health/readiness 为 UP，frontend 3000 返回 200。新改动由自动化测试和类型检查验证，运行中的旧进程尚未加载本提交。
+
+### Result
+
+- SkillHub 创建人现在按统一认证号动态解析为平台用户名，并保持缺失用户/旧数据的兼容展示。
+- 本次仅向现有资产响应增加可选字段并调整单次列表 SQL；不新增 HTTP 路径、RunEvent/SSE、数据库结构、migration、部署节点或强制配置，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。
