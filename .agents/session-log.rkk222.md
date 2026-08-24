@@ -13827,3 +13827,25 @@
 
 - 内层 `test-agent-internal-release.zip` SHA-256 为 `8ffdc3d5ebfc951d7d40d54fa711ee73c8aede41f239c8b0feb79a210bb877b1`；固定外层 `test-agent-two-backend-complete.zip` SHA-256 为 `e438921189deff29e5ed136dff418827f1a4b9482392453f5d28cac9f4bcecaa`，已复制到 `~/Desktop/mimoagent/0709` 并复验。
 - 企业 `.4/.114/.2` 尚未执行实际部署，客户端真实麒麟桌面、企业域名下载、首次输入 Client Key、在线状态及本地工作区会话仍需现场验收；工作区并行出现的配置管理和前端设置未提交改动没有进入本包，也未被本次提交暂存。
+
+## 2026-08-24 - 修复应用版本目录刷新与工作空间别名重置
+
+### Why
+
+- 应用版本关联的目录树复用了最长一小时的 Git 浅缓存，远端分支已经更新时仍可能只显示旧目录；保存应用版本工作空间后，前端还会把用户填写的别名强制重置为 `ai-test`。
+
+### What
+
+- 配置管理为设置页目录树增加显式远端刷新入口：每次查询都在原有受控临时 Git 仓库内重新浅拉取所选分支并读取最新树；其它只读调用继续复用原有缓存策略。
+- 应用版本工作空间保存成功后保留当前输入的自定义别名，不再写回默认值；补充后端真实本地 Git 回归和前端组件回归，并同步配置管理、agent-web、backend-api 与 HTTP API 文档。
+
+### How
+
+- JDK 21 定向后端 34 项通过，配置管理模块及依赖全量 323 项通过；前端设置组件 20 项通过，agent-web 类型检查通过。
+- 按 `.env.test` / `test` profile 使用 JDK 25 完成 26 模块后端和前端生产构建并重启标准服务；backend health/readiness 为 `UP`、frontend 3000 返回 200、登录 CORS 正常，manager 最终恢复 `HEALTHY`。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离工作区中的版本弹窗、页脚和生成声明等并行改动。
+
+### Result
+
+- 设置页再次加载目录树时会读取远端所选分支的最新提交，无需等待一小时或手工删除缓存；保存后工作空间名称保持用户填写值。
+- HTTP 路径和响应结构不变，不涉及 RunEvent/SSE、数据库、SQL、Flyway、部署节点、强制配置、generated SDK、OpenCode 只读源码或 `.env*`。

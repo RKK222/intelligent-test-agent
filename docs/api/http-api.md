@@ -647,7 +647,7 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 
 ## 应用配置管理 API
 
-Base URL：`/api/internal/platform/configuration-management`。除设置页保存应用工作空间时会委托 workspace-management 创建初始版本工作区并执行 Git clone/checkout 外，本能力只产生和维护配置数据；版本库分支、目录和远端树加载均使用远端只读 Git 命令，不 clone、不落本地磁盘、不启动 Session/Run、不产生 RunEvent。
+Base URL：`/api/internal/platform/configuration-management`。除设置页保存应用工作空间时会委托 workspace-management 创建初始版本工作区并执行 Git clone/checkout 外，本能力只产生和维护配置数据；版本库分支使用远端只读查询，目录和远端树通过服务端临时浅层 fetch 加 `ls-tree` 读取，不创建业务文件 checkout、不启动 Session/Run，也不产生 RunEvent。
 
 鉴权：
 
@@ -692,8 +692,8 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 | `POST` | `/repositories/{repoId}/applications` | 指定代码库关联应用。 |
 | `DELETE` | `/repositories/{repoId}/applications/{appId}` | 删除代码库与应用关联。 |
 | `GET` | `/repositories/{repoId}/branches` | 使用 Git 远端命令列分支。 |
-| `GET` | `/repositories/{repoId}/directories?branch=main` | 使用 `git archive --remote` 解析指定分支目录。 |
-| `GET` | `/applications/{appId}/repositories/{repoId}/tree?branch=main` | 使用 `git archive --remote` 解析指定分支目录/文件树；测试工作库只返回当前应用同名根目录及其子树。 |
+| `GET` | `/repositories/{repoId}/directories?branch=main` | 使用服务端浅层 fetch 缓存和 `git ls-tree` 解析指定分支目录。 |
+| `GET` | `/applications/{appId}/repositories/{repoId}/tree?branch=main` | 每次请求重新浅层 fetch 指定远程分支，再用 `git ls-tree` 返回最新目录/文件树；标准测试工作库只返回目录节点。 |
 
 `POST /repositories` 请求体：
 
@@ -774,7 +774,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 版本库已被 `application_workspaces` 引用时，切换类型返回 `409 CONFLICT`；这是因为现有工作空间的分支、目录和版本规则已按原类型生成，仅更改配置会造成数据身份不一致。
 - 应用资产库首次初始化引用副本后，`englishName` 作为各服务器磁盘目录名冻结，且类型必须保持 `APPLICATION_ASSET_REPOSITORY`；应用代码库存在任意 app-source slot/snapshot/operation/cleanup 历史后，`englishName` 和 `APPLICATION_CODE_REPOSITORY` 类型同样冻结。试图改变这些磁盘身份均返回 `409 CONFLICT`。
 - HTTPS URL 不支持内嵌账号或 token；本期不做连通性校验。
-- Git 目录和远端树读取不直接写业务配置、不 clone 到本地磁盘；外部 SSH URL 和内部版本库会立即使用当前登录用户保存的唯一 SSH key。当前用户未配置 key 或远端不支持 `git archive --remote` 时返回统一 Git 错误。统一认证号不按敏感信息脱敏，SSH 私钥、token、Cookie、Authorization 仍不得出现在错误详情中。
+- Git 目录和远端树读取不直接写业务配置、不创建业务工作区或 checkout；后端只在临时缓存根目录保存按有效 URL 与分支隔离的 `.git` 元数据。外部 SSH URL 和内部版本库会立即使用当前登录用户保存的唯一 SSH key，设置页树接口不复用旧 `FETCH_HEAD`，因此远端提交或 SCM 权限变化会在下一次请求体现。当前用户未配置 key 或远端 fetch 失败时返回统一 Git 错误。统一认证号不按敏感信息脱敏，SSH 私钥、token、Cookie、Authorization 仍不得出现在错误详情中。
 
 `GET /applications/{appId}/repositories/{repoId}/tree?branch=feature_testagent_20260707` 响应：
 
@@ -805,7 +805,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 }
 ```
 
-树节点 `type` 仅为 `directory` 或 `file`，文件节点 `children` 为空列表。后端会校验应用存在、代码库已关联到该应用、当前用户有可用 SSH key；测试工作库按 `applications.app_name` 过滤，只返回与当前应用同名的根目录及其全部子目录/文件。旧 `GET /repositories/{repoId}/directories?branch=` 保留兼容，只返回目录路径列表。
+树节点 `type` 仅为 `directory` 或 `file`，文件节点 `children` 为空列表。后端会校验应用存在、代码库已关联到该应用、当前用户有可用 SSH key；标准测试工作库仅返回目录节点，前端按 `applications.app_name` 将当前应用同名根目录的一级子目录设为可选，其他节点仅供浏览。旧 `GET /repositories/{repoId}/directories?branch=` 保留兼容，只返回目录路径列表并允许命中限时缓存。
 
 ### 应用工作空间
 
@@ -839,7 +839,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 - 测试工作库必须选择形如 `feature_testagent_yyyyMMdd` 的分支，后端从分支名提取版本号。
 - 测试工作库的 `directoryPath` 必须是当前应用同名根目录的一级子目录，例如 `F-COSS/W1` 可选，`F-COSS/W1/F1` 只能浏览不能作为工作空间。
 - 该接口只接受测试工作库；自动化代码库、应用代码库和应用资产库均不是工作空间候选。历史自动化模板、版本和 worktree 仅保留审计，旧入口统一拒绝。
-- 只有保存接口会触发 Git clone/fetch、分支 checkout 和本地目录准备；页面上的分支、远端树和新增目录操作均不落磁盘。
+- 保存接口会触发业务工作区的 Git clone/fetch、分支 checkout 和目录准备；页面加载远端树时只刷新服务端临时 `.git` 元数据，不创建业务文件 checkout，前端新增目录仍只保存在页面内存中直至保存。
 - `directoryNew=true` 只表示前端在远端树内存中新增了测试工作库应用根目录下的一级子目录。后端在 clone/checkout 后如果目标目录不存在，则在保存阶段创建 `.gitkeep`，以当前用户身份提交并 push 当前 feature 分支；push 未确认时创建失败，避免只在单台服务器留下 Git 无法复制的空目录。旧客户端不传该字段时行为不变。
 - 后端会先保存或复用 `应用 + 代码库 + 分支 + 目录路径` 对应的工作空间模板，再创建同版本的应用版本工作区并完成 Git clone/fetch、分支 checkout 和运行态 `Workspace` 创建。命中已有位置时返回原 `workspaceId`，按本次请求更新别名；若原模板已停用则同时重新启用，避免异步操作显示成功但模板仍不可见。别名仍需满足同应用唯一约束。
 - 本次请求新插入模板后，如果初始版本创建失败且数据库复核该模板仍没有任何版本，后端会补偿删除该新模板并保留 `workspace_create_operations` 失败审计；命中既有模板或版本已经持久化时不删除，避免失败请求误删历史配置或并发成功结果。补偿失败只记录日志并附加到原异常，不覆盖原始错误码和错误说明。

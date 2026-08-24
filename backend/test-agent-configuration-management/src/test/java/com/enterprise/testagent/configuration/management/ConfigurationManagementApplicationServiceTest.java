@@ -896,7 +896,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(repository.findRepository(codeRepository.repositoryId())).thenReturn(Optional.of(codeRepository));
         when(repository.findRepositoriesByApplication(app.appId())).thenReturn(List.of(codeRepository));
         when(repository.findSshKeys(userId)).thenReturn(List.of(storedKey));
-        when(gitCloneCacheService.listTree(codeRepository.gitUrl(), "feature_testagent_20260707", PRIVATE_KEY)).thenReturn(remoteTree);
+        when(gitCloneCacheService.refreshTree(codeRepository.gitUrl(), "feature_testagent_20260707", PRIVATE_KEY)).thenReturn(remoteTree);
 
         ConfigurationManagementApplicationService service =
                 new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());
@@ -933,7 +933,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(repository.findApplication(app.appId())).thenReturn(Optional.of(app));
         when(repository.findRepository(codeRepository.repositoryId())).thenReturn(Optional.of(codeRepository));
         when(repository.findRepositoriesByApplication(app.appId())).thenReturn(List.of(codeRepository));
-        when(gitCloneCacheService.listTree(codeRepository.gitUrl(), "main", null)).thenReturn(remoteTree);
+        when(gitCloneCacheService.refreshTree(codeRepository.gitUrl(), "main", null)).thenReturn(remoteTree);
 
         ConfigurationManagementApplicationService service =
                 new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, sshKeyFixtures.encryptionService(), org.mockito.Mockito.mock(ManagedWorkspaceRepository.class), noReferenceRepositoryState());

@@ -490,7 +490,8 @@ public class ConfigurationManagementApplicationService implements RepositoryRemo
         ensureRepositoryLinked(application.appId(), repository.repositoryId());
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String privateKey = privateKeyFor(repository, currentUserId);
-        List<RemoteTreeNode> nodes = gitCloneCacheService.listTree(
+        // 设置页目录选择必须看到远程分支最新内容，避免有效期内的旧 FETCH_HEAD 隐藏新目录或权限变化。
+        List<RemoteTreeNode> nodes = gitCloneCacheService.refreshTree(
                 effectiveGitUrl(repository, currentUserId),
                 normalizedBranch,
                 privateKey);

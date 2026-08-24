@@ -21,14 +21,13 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Git 远程目录查询服务。
- * 使用 git fetch + ls-tree 查询远程仓库的目录结构，只下载 tree 对象，不下载文件内容。
+ * 使用浅层 git fetch + ls-tree 查询远程仓库的目录结构，不创建工作区 checkout。
  *
  * <p>性能优势：</p>
  * <ul>
- *   <li>只下载 commit 和 tree 对象，数据传输量极小（KB级）</li>
- *   <li>查询速度快，通常在秒级完成</li>
+ *   <li>只获取目标分支最新提交的浅层对象，传输规模由远端 Git 能力和该提交内容决定</li>
  *   <li>支持缓存机制，避免重复查询</li>
- *   <li>零工作目录占用，只保留 .git 元数据</li>
+ *   <li>不检出业务文件，只保留用于 ls-tree 的 .git 元数据</li>
  * </ul>
  *
  * <p>要求：Git 1.7.8+ 版本</p>
@@ -152,6 +151,29 @@ public class GitCloneCacheService {
     }
 
     /**
+     * 重新获取指定远程分支并返回最新目录/文件树。
+     * 设置页创建工作空间时必须实时反映刚推送的目录和刚生效的 SCM 权限，不能复用一小时内的旧 FETCH_HEAD。
+     *
+     * @param gitUrl     Git 仓库 URL
+     * @param branch     分支名称
+     * @param privateKey SSH 私钥（可选）
+     * @return 远程分支最新目录/文件树节点列表（已排序）
+     */
+    public List<RemoteTreeNode> refreshTree(String gitUrl, String branch, String privateKey) {
+        String cacheKey = buildCacheKey(gitUrl, branch);
+        Path cacheDir = cacheRoot.resolve(cacheKey);
+        Object lock = queryLocks.computeIfAbsent(cacheKey, key -> new Object());
+        synchronized (lock) {
+            try {
+                fetchAndListDirectories(gitUrl, branch, cacheDir, privateKey);
+                return listCachedTree(cacheDir);
+            } finally {
+                queryLocks.remove(cacheKey, lock);
+            }
+        }
+    }
+
+    /**
      * 清理过期缓存。
      */
     public void cleanExpiredCache() {
@@ -271,7 +293,7 @@ public class GitCloneCacheService {
      * 步骤：
      * 1. 创建临时 Git 仓库
      * 2. 添加远程引用
-     * 3. fetch 远程分支（只获取 tree，不获取 blob）
+     * 3. 浅层 fetch 远程分支
      * 4. 使用 ls-tree 列出目录
      */
     private void fetchAndListDirectories(String gitUrl, String branch, Path cacheDir, String privateKey) {
@@ -286,7 +308,7 @@ public class GitCloneCacheService {
             executeCommand(List.of("git", "-C", cacheDir.toString(), "remote", "add", "origin", gitUrl),
                     privateKey, "添加远程引用失败");
 
-            // 3. fetch 远程分支（--depth=1 只获取最新提交，不下载 blob）
+            // 3. fetch 远程分支（--depth=1 只保留最新提交历史，不创建业务文件 checkout）
             executeCommand(List.of("git", "-C", cacheDir.toString(), "fetch", "origin", branch, "--depth=1"),
                     privateKey, "获取远程分支失败");
 

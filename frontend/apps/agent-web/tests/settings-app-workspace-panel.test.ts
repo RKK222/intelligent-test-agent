@@ -626,6 +626,26 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     })));
   });
 
+  it("keeps the custom workspace alias after saving", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("52345678-1234-1234-1234-123456789abc");
+    const { container, findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    await findByText("F-COSS/W1");
+    await fireEvent.click(getTreePathButton(container, "F-COSS/W1"));
+    const workspaceAliasInput = getByPlaceholderText("ai-test") as HTMLInputElement;
+    await fireEvent.update(workspaceAliasInput, "接口自动化");
+    await fireEvent.click(getByText("保存"));
+
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
+      workspaceName: "接口自动化"
+    })));
+    await waitFor(() => expect(workspaceAliasInput.value).toBe("接口自动化"));
+  });
+
   it("defaults workspace alias to ai-test and disables saving duplicate aliases", async () => {
     const api = createApi();
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);

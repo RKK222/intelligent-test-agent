@@ -1,237 +1,71 @@
-# 无blob克隆优化说明
+# Git 远端目录树查询说明
 
-## 问题背景
+## 目标
 
-**原始问题：** 应用与工作空间管理->加载目录超时
+配置管理需要在不创建业务工作区的前提下读取远程分支目录。实现必须同时满足：
 
-**问题URL：** `http://127.0.0.1:8080/api/internal/platform/configuration-management/repositories/repo_ac77047d918c4129911aa4b22513029f/directories?branch=main`
+- 使用当前登录用户的 Git 身份和 SSH key，让 SCM 权限变更立即参与鉴权；
+- 设置页创建工作空间时看到远程分支最新提交，不能继续展示一小时内的旧目录；
+- 其它只读引用场景允许复用临时 Git 元数据，避免无意义的重复传输；
+- 不 checkout 业务文件，不写应用工作空间配置，不启动 Session 或 Run。
 
-**原因分析：**
-1. 原实现使用 `git clone --depth=1 --single-branch` 进行浅克隆
-2. 虽然只克隆最新一次提交，但仍会下载该提交的所有文件内容（blob对象）
-3. 对于大型仓库（大量文件或大文件），即使只克隆一次提交，下载所有文件内容仍然会很慢
-4. 默认超时时间是5分钟，对于大型仓库可能不够
+## 当前实现
 
-## 解决方案
-
-### 优化方法：使用 `--filter=blob:none` 无blob克隆
-
-**核心原理：**
-- Git 2.22+ 版本支持 `--filter` 参数
-- `--filter=blob:none` 只下载 commit 和 tree 对象，**不下载文件内容（blob对象）**
-- 结合 `--sparse` 稀疏检出，只检出目录结构
-
-**性能优势：**
-1. **数据传输量大幅减少**：从GB级降至KB级
-2. **加载速度显著提升**：对于大仓库，速度提升可达10-100倍
-3. **磁盘占用减少**：只存储目录结构，不存储文件内容
-
-### 修改内容
-
-**文件：** `backend/test-agent-configuration-management/src/main/java/com/enterprise/testagent/configuration/management/GitCloneCacheService.java`
-
-**修改前：**
-```bash
-git clone --depth=1 --single-branch --branch=<branch> <url> <dir>
-```
-
-**修改后：**
-```bash
-git clone --depth=1 --single-branch --branch=<branch> --filter=blob:none --sparse <url> <dir>
-git -C <dir> sparse-checkout set /
-```
-
-## 技术细节
-
-### Git命令详解
+`GitCloneCacheService` 使用以下命令读取目录树：
 
 ```bash
-git clone \
-  --depth=1 \                    # 浅克隆，只克隆最新一次提交
-  --single-branch \              # 只克隆指定分支
-  --branch=<branch> \            # 指定分支名称
-  --filter=blob:none \           # 关键：不下载blob对象（文件内容）
-  --sparse \                     # 启用稀疏检出模式
-  <url> <dir>
+git init <cache-dir>
+git -C <cache-dir> remote add origin <git-url>
+git -C <cache-dir> fetch origin <branch> --depth=1
+git -C <cache-dir> ls-tree -r -t FETCH_HEAD
 ```
 
-### 工作原理
+`--depth=1` 只保留目标分支最新提交历史，`ls-tree` 直接读取 Git 对象，不创建工作目录 checkout。实际对象传输量由远端 Git 能力和目标提交内容决定，不能把浅层 fetch 描述为必然“不下载 blob”。
 
-1. **克隆阶段**：
-   - 下载 commit 对象（提交信息）
-   - 下载 tree 对象（目录结构）
-   - **不下载 blob 对象（文件内容）**
+临时目录默认位于：
 
-2. **稀疏检出阶段**：
-   - 配置稀疏检出规则：检出所有目录
-   - Git 在检出时会跳过不存在的blob对象
-   - 只创建目录结构，文件内容为占位符
-
-3. **目录遍历阶段**：
-   - 使用 `Files.walk()` 遍历本地目录
-   - 只需要目录路径，不需要文件内容
-   - 速度极快
-
-## 兼容性要求
-
-**Git版本要求：** Git 2.22+ （2019年6月发布）
-
-**验证Git版本：**
-```bash
-git --version
-# 输出示例：git version 2.39.2
+```text
+/tmp/git-clone-cache/{effectiveGitUrlSha256前16位}_{branch}
 ```
 
-**主流操作系统支持：**
-- Ubuntu 20.04+：Git 2.25+
-- CentOS 8+：Git 2.27+
-- macOS（Homebrew）：Git 2.42+
-- Windows Git for Windows 2.22+
+内部版本库的有效 URL 包含当前用户统一认证号，因此不同内部 SCM 用户不会共用同一个缓存键。缓存中额外记录完整有效 URL，用于防止摘要碰撞误读其它仓库。
 
-## 性能对比
+## 新鲜度规则
 
-### 测试场景：大型仓库目录列表查询
+| 调用场景 | 方法 | 规则 |
+|---|---|---|
+| 设置页“工作空间管理”目录树 | `refreshTree()` | 每次请求都重新 fetch 所选远程分支，再读取新的 `FETCH_HEAD`。 |
+| 自动化引用等普通只读树查询 | `listTree()` | 缓存未过期且 URL 一致时读取现有 `FETCH_HEAD`，否则重新 fetch。 |
+| 兼容目录列表 | `listDirectories()` | 与普通缓存查询一致。 |
 
-**仓库规模示例：**
-- 文件数量：10,000+
-- 仓库大小：5GB+
-- 分支：main
+默认缓存有效期由 `TEST_AGENT_GIT_CACHE_EXPIRY` 控制，当前默认 `1h`；该有效期不再影响设置页工作空间目录树的新鲜度。SCM 权限变化不会主动删除磁盘缓存，但设置页下一次请求会以当前用户 SSH key 重新 fetch，因此无需等待缓存过期或手工清理目录。
 
-**性能对比：**
+同一有效 URL 和分支的 fetch 使用进程内锁串行化，避免同一 Java 进程并发重建相同缓存目录。多 Java 节点各自维护临时缓存，设置页请求无论落到哪台节点都会重新 fetch。
 
-| 方案 | 下载内容 | 数据传输量 | 耗时 | 磁盘占用 |
-|------|----------|------------|------|----------|
-| 原方案（浅克隆） | 所有文件内容 | 5GB+ | 5-10分钟 | 5GB+ |
-| **新方案（无blob克隆）** | **仅目录结构** | **< 1MB** | **< 30秒** | **< 10MB** |
+## 错误与安全边界
 
-**提升效果：**
-- 数据传输量减少：**> 99%**
-- 加载速度提升：**10-100倍**
-- 磁盘占用减少：**> 99%**
+- Git 命令关闭交互式凭据提示，并受 `command-timeout` 限制。
+- SSH 私钥只写入短生命周期、仅 owner 可读写的临时文件，命令结束后删除。
+- fetch 失败时删除本次不完整缓存并返回统一 Git 错误，不回退旧目录掩盖权限或远端异常。
+- 日志和错误不得输出 SSH 私钥、token、Cookie 或 Authorization。
+- 不要通过重启服务或手工删除 `/tmp/git-clone-cache` 解决设置页旧目录；设置页查询本身应完成最新分支刷新。
 
-## 验证方法
+## 验证
 
-### 1. 手动测试
+后端回归测试会先建立一个本地 Git 仓库并生成有效缓存，再提交新目录：普通 `listTree()` 仍返回缓存内容，`refreshTree()` 必须返回新提交目录。
 
 ```bash
-# 创建测试目录
-mkdir -p /tmp/git-test
-cd /tmp/git-test
-
-# 测试无blob克隆
-git clone --depth=1 --single-branch --filter=blob:none --sparse \
-  https://gitee.com/your-org/your-repo.git test-repo
-
-# 进入仓库
-cd test-repo
-
-# 配置稀疏检出
-git sparse-checkout set /
-
-# 查看目录结构（应该很快）
-find . -type d | head -20
-
-# 查看文件内容（会提示缺失blob）
-cat README.md  # 提示：fatal: unable to read blob object
+cd backend
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+export PATH="$JAVA_HOME/bin:$PATH"
+mvn -pl test-agent-configuration-management -am \
+  -Dtest=GitCloneCacheServiceTest,ConfigurationManagementApplicationServiceTest \
+  -Dsurefire.failIfNoSpecifiedTests=false test
 ```
 
-### 2. API测试
-
-**请求：**
-```bash
-curl -X GET "http://127.0.0.1:8080/api/internal/platform/configuration-management/repositories/{repoId}/directories?branch=main" \
-  -H "Authorization: Bearer {token}"
-```
-
-**预期结果：**
-1. 首次请求：30秒内返回目录列表（取决于网络和仓库大小）
-2. 后续请求（缓存命中）：< 1秒返回
-3. 响应包含完整的目录路径列表
-
-### 3. 日志验证
-
-**查看日志：**
-```bash
-# 应用日志中应该看到：
-# 无blob浅克隆完成: <url> 分支 <branch> 到 <cache-dir>
-# 稀疏检出配置完成: <cache-dir>
-```
-
-## 注意事项
-
-### 1. Git版本兼容性
-
-如果系统Git版本低于2.22，需要升级Git：
-
-**Ubuntu/Debian：**
-```bash
-sudo add-apt-repository ppa:git-core/ppa
-sudo apt-get update
-sudo apt-get install git
-```
-
-**CentOS/RHEL：**
-```bash
-sudo yum install https://packages.endpointdev.com/rhel/7/os/x86_64/endpoint-repo.x86_64.rpm
-sudo yum install git
-```
-
-**macOS：**
-```bash
-brew install git
-```
-
-### 2. 缓存清理
-
-无blob克隆后，缓存目录大小显著减小，但仍建议定期清理过期缓存：
+前端回归测试验证设置页保存自定义工作空间别名后，输入框不会重新变为 `ai-test`：
 
 ```bash
-# 清理Git克隆缓存
-rm -rf /tmp/git-clone-cache/*
+cd frontend
+corepack pnpm vitest run apps/agent-web/tests/settings-app-workspace-panel.test.ts
 ```
-
-### 3. 错误处理
-
-如果无blob克隆失败，会抛出 `PlatformException`：
-- 错误码：`GIT_UNAVAILABLE` 或 `GIT_TIMEOUT`
-- 错误信息：包含详细的错误原因和命令信息
-
-### 4. 超时配置
-
-默认克隆超时时间为5分钟，可以通过配置调整：
-
-**配置文件：** `application.yml`
-```yaml
-test-agent:
-  git-clone-cache:
-    clone-timeout: 10m  # 调整为10分钟
-```
-
-## 后续优化建议
-
-### 短期优化（已实施）
-- ✅ 使用 `--filter=blob:none` 无blob克隆
-- ✅ 结合稀疏检出只检出目录结构
-
-### 中期优化（可选）
-- [ ] 添加Git版本检测，低版本降级到原方案
-- [ ] 实现远程查询优先策略（`git ls-tree`）
-- [ ] 添加克隆进度通知
-
-### 长期优化（可选）
-- [ ] 实现增量缓存更新（仅更新变更部分）
-- [ ] 支持多个缓存层级（内存缓存 + 磁盘缓存）
-- [ ] 实现智能预加载（预测用户可能访问的仓库）
-
-## 相关文档
-
-- **模块文档：** `backend/test-agent-configuration-management/README.md`
-- **API文档：** `docs/api/http-api.md`
-- **架构文档：** `docs/architecture/module-map.md`
-
-## 更新记录
-
-**2026-06-29：**
-- 实施无blob克隆优化
-- 更新 GitCloneCacheService 实现
-- 创建优化说明文档

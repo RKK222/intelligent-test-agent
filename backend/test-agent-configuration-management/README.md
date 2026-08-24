@@ -4,35 +4,22 @@
 
 应用配置管理业务模块，承载应用定义查询与超级管理员新建、应用成员、应用与代码库关联、应用工作空间模板及启用状态、个人 SSH key，以及内部模型供应商和可复用 Token 定义管理。
 
-## 性能优化
-
-### 目录加载优化（2026-06-29）
-
-**问题：** 大型仓库加载目录列表超时
-
-**解决方案：** 使用无blob克隆技术，只下载目录结构不下载文件内容
-
-**技术细节：**
-- 使用 `git clone --filter=blob:none` 参数，只下载 commit 和 tree 对象
-- 结合 `--sparse` 稀疏检出，只检出目录结构
-- 性能提升：数据传输量减少 > 99%，加载速度提升 10-100 倍
-- 要求：Git 2.22+ 版本
-
-**详细文档：** 见 `OPTIMIZATION.md`
-
-### 远端目录树加载（2026-07-07）
+## 远端目录树加载
 
 设置页创建应用工作空间使用应用维度远端树接口读取目录和文件结构：
 
-- `ConfigurationManagementApplicationService.listRepositoryTree(appId, repositoryId, branch, currentUserId)` 校验应用启用、代码库已关联到应用和当前用户 SSH key 后，调用 `GitRemoteService.listTree()`。
-- 树接口通过 `git archive --remote` 解析 tar header 生成 `directory/file` 树，不使用 `GitCloneCacheService`，不会 clone/fetch 到本地磁盘。
-- 测试工作库按 `ApplicationDefinition.appName` 过滤，只返回与当前应用同名的根目录及其子树；非测试工作库返回远端全量树。
+- `ConfigurationManagementApplicationService.listRepositoryTree(appId, repositoryId, branch, currentUserId)` 校验应用启用、代码库已关联到应用和当前用户 SSH key 后，调用 `GitCloneCacheService.refreshTree()`。
+- 每次设置页目录树请求都会以当前用户身份重新执行目标分支的浅层 `git fetch`，随后用 `git ls-tree` 读取最新 `FETCH_HEAD`；不复用一小时内的旧树，刚推送的目录和刚生效的 SCM 权限会在下一次请求中体现。
+- 查询只在服务端临时目录保存 `.git` 元数据，不创建业务文件 checkout；其它复用 `GitCloneCacheService.listTree()` 的只读引用场景仍可使用按 URL 与分支隔离的限时缓存。
+- 标准测试工作库只返回目录节点供前端选择；前端再按当前应用名称和一级子目录规则控制可选项。
 - 旧 `listRepositoryDirectories()` 目录列表接口保留兼容。
+
+具体命令、缓存边界和验证方式见 `OPTIMIZATION.md`。
 
 ## 边界
 
 - 不接入运行态 Workspace / Session / Run。
-- 不执行 clone、fetch 或启动会话；Git 目录和树读取只使用远端只读命令。
+- Git 目录和树读取只执行只读远端查询或服务端临时浅层 fetch，不创建业务工作区、不 push，也不启动会话。
 - 不创建应用版本工作区或个人 worktree；这些运行编排属于 `test-agent-workspace-management`。
 - 版本库英文名称由本模块在新增/编辑时校验并统一小写保存；版本库类型读取通用字典 `REPOSITORY_TYPE`，新增和编辑都以四态 `repositoryType` 为准，再派生旧 `standard` 兼容字段；版本库部署模式按每个代码库保存，内部模式只入库 `host[:port]/path`，分支/目录读取时用当前用户统一认证号动态拼接 `ssh://{unifiedAuthId}@`。无类型专属历史时四种版本库类型可互相修改；已创建应用工作空间时禁止改类型，应用资产库已初始化引用副本或应用代码库存在 app-source slot/snapshot/operation/cleanup 历史时，其 `englishName` 和类型也按磁盘身份冻结。设置页创建工作空间时的初始版本工作区 clone/checkout 由 `test-agent-api` 委托 `test-agent-workspace-management` 执行。
 - 不定义 HTTP Controller，API 入口放在 `test-agent-api`。

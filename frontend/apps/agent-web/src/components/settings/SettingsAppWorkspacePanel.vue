@@ -651,7 +651,7 @@ async function createWorkspace() {
       throw error;
     }
     await refreshWorkspaceCreateOperation(operationId);
-    workspaceName.value = DEFAULT_WORKSPACE_ALIAS;
+    // 保存后保留用户刚填写的别名，避免成功刷新列表时输入框又跳回默认 ai-test。
     await loadWorkspaces();
   });
 }
