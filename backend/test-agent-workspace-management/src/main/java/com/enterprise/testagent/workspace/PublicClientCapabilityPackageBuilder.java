@@ -483,6 +483,7 @@ final class PublicClientCapabilityPackageBuilder {
         String lower = name.toLowerCase(Locale.ROOT);
         return lower.endsWith(".md") || lower.endsWith(".json") || lower.endsWith(".jsonc")
                 || lower.endsWith(".ts") || lower.endsWith(".js") || lower.endsWith(".mjs")
+                || lower.endsWith(".py")
                 || lower.endsWith(".txt") || lower.endsWith(".yaml") || lower.endsWith(".yml")
                 || lower.endsWith(".html") || lower.endsWith(".css") || lower.endsWith(".sh");
     }

@@ -28,6 +28,8 @@ public final class LocalClientMain {
         if (!LocalClientFirstRunSetup.requiresFirstRunSetup()) {
             System.setProperty("apple.awt.UIElement", "true");
         }
+        // 必须在 apple.awt.UIElement 决策之后初始化 Swing，避免 macOS 首次配置窗口被一并隐藏。
+        LocalClientDesktopTheme.install();
         Files.createDirectories(LocalClientPaths.logsDirectory());
         System.setProperty("testagent.localclient.logDir", LocalClientPaths.logsDirectory().toString());
         if (!LocalClientFirstRunSetup.ensureConfigured()) {

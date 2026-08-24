@@ -284,6 +284,11 @@ Observability 现场验收还必须确认 DEB 的受控 release 包含共享插�
 候选包经安全解压、文件/内容摘要、目录接口和 OpenCode 健康校验后才原子切换，失败回到上一不可变版本。公共版本
 `SERVER_ONLY` 时不下发，客户端继续使用上一 `AVAILABLE` 版本。
 
+`public-capabilities.tar.gz` 是 release 内与 JAR 并列、分别签名的 sidecar 制品，不打进 JAR classpath。现场只覆盖
+`test-agent-local-client.jar` 不会清空或替换 `state/public-capabilities` 的当前版本，也不能用于验证公共配置更新；新装必须
+发布完整 release，存量实例必须由平台生成“公共能力有更新”并由用户在托盘或网页确认。禁止直接覆盖不可变 release 中
+的 JAR 或能力包，否则 manifest 摘要和签名会失效。
+
 能力包 manifest 的 `contentDigest` 只表示文件内容，安装版本的 `bundleDigest` 固定按
 `sha256(sourceCommit + "\n" + contentDigest)` 计算。同一内容的新公共提交仍必须生成独立完整包并显示该提交哈希；
 首版客户端已经安装的文件摘要型 `bundleDigest` 继续兼容读取，但新发布包不得再使用旧算法。

@@ -78,6 +78,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - Skill 目录由两类来源组成：应用成功 push 形成的 `PLATFORM` 资产，以及外部 `/list` 只同步元数据的 `SKILLHUB` 资产；公共配置 Git 只继续提供内置 Agent，不再展示公共 Git Skill。外部目录由 Redis 分布式锁保护的定时任务完整对账，下架只隐藏发现入口并保留当前应用已有引用。
 - 外部 ZIP 仅在预览、引用或更新时按需下载，应用服务复用既有内容寻址制品编码，并校验 20 MiB/256 文件、路径、重复项、根 `SKILL.md`、UTF-8 和稳定 `name`。外部 `name` 按 SkillHub 原值保存并作为技术 ID，只允许大小写字母、数字、点、下划线和短横线，首字符必须是字母或数字；不再额外限制为小写短横线格式。相同外部 ID+版本不同摘要拒绝覆盖。
 - 外部 Skill 写入管理员个人 worktree 后，push 摘要未变则仍是外部引用并排除重复平台卡片；发生编辑则同一事务自动转为记录 `forkedFrom*` 的平台派生资产，初始为已推送未发布，仍需管理员显式发布。
+- 超级管理员可通过平台 HTTP 入口显式调用 SkillHub `/upload`，必须同时提供 ZIP 和安全审查报告、目录结构、运行效果三张图片；应用服务校验阶段枚举、20 MiB ZIP、三个 5 MiB 图片、ZIP 安全路径及根 `SKILL.md`。上传返回上游 `result` taskId，进度查询返回上游 `result.progress/message`；完成后由下一轮目录对账或手工 `/external/sync` 纳入能力库。应用 Git push 不自动上传 SkillHub，因为该流程没有三张必填图片。
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，按同一物理仓库组逐工作空间目录生成不可变压缩快照；平台外部 push 由具备该应用刷新权限的管理员通过应用 Git 刷新发现，远端提交同步完成后立即执行同一组索引。Hub 不依赖用户个人 worktree 拉取，定时对账本机 READY 副本仅用于补偿漏记。
 - push 与 publish 分离：全员可浏览 pushed 快照，显式发布固定当前修订和精确依赖；公共配置仓库只以平台内置只读资产展示。`reconcilePublicBuiltinSnapshots()` 默认启动 2 秒后、此后每 10 分钟用共享仓库现有 Git 身份 fetch 当前分支、读取 `origin/{branch}` 的精确提交并把元数据和内容寻址制品写入数据库，因此用户从其它本地 clone 直接 push 后无需打开 Hub 即可入库；任务只刷新远端引用，不 checkout/reset 运行工作树，认证暂不可用时回退已由公共 rollout 同步的本地 HEAD。Hub 列表、详情和正文查询不再读取 Git。
 - Skill 目录持久化受控事项分类：一级固定为 `WORKER/TEST/CODE/OTHER`，二级固定为测试设计、测试数据构造、测试执行、测试分析和白盒分析。历史、新 push 与公共 Git Skill 默认 `OTHER`；应用 Skill 分类保存在资产表，公共 Skill 分类保存在独立逻辑资产表，后续 push/commit 都不覆盖超级管理员已经设置的分类。列表分类筛选同时覆盖两类内容。
@@ -138,7 +139,8 @@ Skill 修订。公共内置 Agent 没有发布依赖表，因此只从同一公�
 能力包。`PublicClientCapabilityPackageBuilder` 只导出 `opencode/agents|skills|tools` 白名单，排除 AGENTS.md、
 `opencode.jsonc`、密钥、地址、Git、缓存和原始 `node_modules`；Tool 静态 import 必须能在平台锁文件及离线
 node_modules 中递归解析为纯 JS/WASM。构建不运行 npm。兼容失败持久化 `SERVER_ONLY` 并允许服务器 rollout 继续，
-持久化异常只记录安全日志，不能把服务器发布伪报失败。
+持久化异常只记录安全日志，不能把服务器发布伪报失败。Tool 的 Python companion 文件虽然不计入 OpenCode Tool 数量，
+仍作为文本执行同一密钥和固定地址检查，不能借非 JS/TS 后缀绕过能力包敏感内容门禁。
 
 manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`；后者按
 `sha256(sourceCommit + "\n" + contentDigest)` 计算。即使两个公共 commit 的 Agent/Skill/Tool 文件完全一致，也会
@@ -149,6 +151,6 @@ manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`
 当前已检出的共享副本，不 fetch、不提交、不推送，在 Redis 全局锁内为该 commit 补建首个完整包。后续扫描命中
 同一 commit 时幂等跳过，因此客户端安装基线和平台“当前公共版本”不会停留在空值。
 
-`PublicClientCapabilityPackageBuilderTest` 覆盖确定性完整包、提交绑定版本身份、白名单/敏感文件排除、未声明依赖和原生扩展拒绝；
+`PublicClientCapabilityPackageBuilderTest` 覆盖确定性完整包、提交绑定版本身份、白名单/JS/TS/Python 敏感文件排除、未声明依赖和原生扩展拒绝；
 `PublicClientCapabilityBootstrapReconcilerTest` 覆盖历史 HEAD 首次补建与未配置跳过；发布测试还必须验证首次版本、
 无变化版本、Agent/Skill 热加载摘要与 Tool/依赖重启摘要。

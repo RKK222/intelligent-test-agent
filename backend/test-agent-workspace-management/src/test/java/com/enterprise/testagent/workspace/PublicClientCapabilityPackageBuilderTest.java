@@ -114,6 +114,21 @@ class PublicClientCapabilityPackageBuilderTest {
                         error -> assertThat(error.errorCode()).isEqualTo("SENSITIVE_CONTENT"));
     }
 
+    @Test
+    void scansPythonCompanionFilesForSecretsBeforePackaging() throws Exception {
+        Fixture fixture = fixture();
+        Files.writeString(
+                fixture.config().resolve("tools/helper.py"),
+                "client_secret = 'enterprise-secret-value'\n");
+        var builder = new PublicClientCapabilityPackageBuilder(objectMapper);
+
+        assertThatThrownBy(() -> builder.build(
+                fixture.config(), fixture.lock(), fixture.nodeModules(), COMMIT, null, Instant.now()))
+                .isInstanceOfSatisfying(
+                        PublicClientCapabilityPackageBuilder.CompatibilityException.class,
+                        error -> assertThat(error.errorCode()).isEqualTo("SENSITIVE_CONTENT"));
+    }
+
     private Fixture fixture() throws Exception {
         Path config = temporary.resolve("config");
         Files.createDirectories(config.resolve("agents"));

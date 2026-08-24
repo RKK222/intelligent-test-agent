@@ -13537,3 +13537,28 @@
 
 - 功能页隐藏或拓扑容器零尺寸时不再调用 ECharts view 坐标系布局，恢复后仍显示最新拓扑；不改变拓扑交互、overview 数据或缩放能力。
 - 本次不涉及 HTTP API、RunEvent、WebSocket、数据库、Flyway、部署节点、性能模型、安全、环境配置、generated SDK 或 OpenCode 只读源码；工作区并行存在的本地客户端改动未纳入本次提交。
+
+## 2026-08-24 - 同步企业公共配置并重打麒麟客户端
+
+### Why
+
+- 企业麒麟客户端仍使用带 Codex 联调项的旧公共能力基线，用户提供 `testagent.7z` 作为企业 Agent/Skill/Tool 权威内容，并要求同步 Gitee `master` 后重新打包。
+- 客户端 Swing 对话框仍使用默认 Metal 风格和 Java 信息图标，在麒麟桌面呈现明显的老旧系统观感。
+
+### What
+
+- 客户端增加统一桌面主题：macOS 使用系统 Aqua，麒麟/Linux 优先使用 JDK 自带 Nimbus，并统一字体、TestAgent 红色主色和控件间距；会话进度与能力确认移除遗留信息/警告图标。
+- 公共能力构建器把 `.py` companion 纳入敏感文本扫描并补充回归测试。按用户明确要求，企业归档的 `tcds-enter-case-query.ts` 保持原字节，包括 `/usr/local/bin/python3` 依赖，不做行为改写。
+- 企业归档同步到 Gitee `master` 最终提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`；删除旧 Codex/个人联调 Agent/Skill/Tool，保留 8 Agent、16 Skill、8 Tool，并补平台离线构建必需的 `tools/package.json` 锁定声明。
+- 生成签名客户端 release `20260824155652`，公共能力摘要为 `a1aa92a93883cb99589bb8a9d0d53a0c0e057bb69d65598e11ac74f9e8a1cf71`；JAR、能力包和 DEB 的版本化副本放入 `~/Desktop/mimoagent/0709`。文档明确能力包是与 JAR 并列签名的 sidecar，存量实例只替换 JAR 不会改变已激活公共版本。
+
+### How
+
+- JDK 25 按 Java 21 release 运行客户端 reactor：本地客户端 96 项通过、1 项跳过；能力构建器 6 项通过。`local-opencode-client-package-test.sh` 与 `local-opencode-client-update-test.sh` 均通过，覆盖不可变签名 release、DEB、能力 sidecar 下载、升级/降级和自动回滚。
+- 实际构建能力包并检查 manifest、路径与原生文件：8/16/8，3735 个归档条目，无 Codex、`opencode.jsonc`、AGENTS.md 或原生扩展；包内 TCDS 文件与上传归档逐字节一致。
+- 新 release 的 manifest 及四个 artifact 签名全部通过稳定公钥验证；JAR 实际执行输出版本 `20260824155652` 并包含 `LocalClientDesktopTheme.class`。已回顾全部 session log 近期条目，并隔离工作区同时出现的 SkillHub 未提交改动。
+
+### Result
+
+- Gitee `master`、本机公共运行 clone 和新客户端首次安装基线均指向企业配置 `81605f245d...`，旧 Codex 联调项不再进入新能力包；新装使用完整 release 初始化，存量客户端仍按产品约束由用户确认公共能力更新。
+- 不新增部署节点，不变更 HTTP API、RunEvent、数据库、Flyway、OpenCode 源码、generated SDK 或 `.env*`。样式自动化测试和 Mac Aqua 路径已通过，真实麒麟 Nimbus 视觉仍需企业桌面人工复验；TCDS Tool 继续要求目标机存在 `/usr/local/bin/python3`。

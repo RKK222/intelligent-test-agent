@@ -300,7 +300,7 @@ final class LocalClientTray implements AutoCloseable {
                     .append(" · ").append(seconds).append(" 秒");
         }
         JOptionPane.showMessageDialog(
-                null, message.toString(), "TestAgent 会话进度", JOptionPane.INFORMATION_MESSAGE);
+                null, message.toString(), "TestAgent 会话进度", JOptionPane.PLAIN_MESSAGE);
     }
 
     private void confirmPublicCapabilityUpdate() {
@@ -320,7 +320,7 @@ final class LocalClientTray implements AutoCloseable {
                 message,
                 "更新本地公共能力",
                 JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE);
+                JOptionPane.PLAIN_MESSAGE);
         if (result == JOptionPane.OK_OPTION) {
             connection.requestPublicCapabilityUpdate(available.bundleDigest());
             displayMessage("公共能力更新", "已确认，正在下载完整能力包", TrayIcon.MessageType.INFO);

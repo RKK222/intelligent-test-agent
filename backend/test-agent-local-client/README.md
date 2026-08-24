@@ -4,6 +4,13 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 整客户端自更新和公共 Agent/Skill/Tool 完整能力包激活。客户端不直接访问平台数据库，也不把本地 OpenCode 请求
 回退到服务器运行时。
 
+## 桌面界面
+
+- `LocalClientDesktopTheme` 是首次配置、目录选择、会话进度和公共能力确认窗口的统一主题入口。macOS 保持系统 Aqua，
+  麒麟/Linux 优先使用 JDK 自带 Nimbus，并统一 14px 对话字体、TestAgent 红色主色、输入框和按钮留白；Nimbus 不可用时
+  才回退系统 LookAndFeel。主题初始化失败只降级界面，不能阻断 WSS 连接。
+- 会话进度与能力确认使用无遗留 Java 吉祥物图标的纯内容对话框；系统托盘菜单仍由操作系统原生渲染。
+
 ## Git 权限巡检
 
 - 新客户端声明 `WORKSPACE_GIT_ACCESS_V1`，通过既有受认证文件 RPC 接收 `workspace.git-access.check`；工作区 ID 与根摘要仍由注册表校验，服务端不能传入任意本地路径。
@@ -16,6 +23,8 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
   manifest、路径、符号链接、文件类型、文件数/大小和逐文件/内容摘要，再通过 `current` 软链接原子切换
   `OPENCODE_CONFIG_DIR`。首次安装从当前 release 的 `public-capabilities.tar.gz` 初始化；macOS 开发 App 通过
   `-Dtestagent.localclient.packagedPublicCapabilityBundle=<绝对路径>` 指向同一完整包，不能用空版本启动验收。
+  能力包是与 JAR 同一 release 的独立签名制品，不是 JAR classpath 资源；只替换 JAR 不会覆盖已激活版本。已有客户端
+  必须收到平台通知并由用户确认更新，新安装则由完整 release 的 sidecar 能力包初始化。
   新包以 `contentDigest` 标识文件内容，以 `sha256(sourceCommit + "\n" + contentDigest)` 作为版本身份；客户端仍
   接受上线前已经安装、缺少 `contentDigest` 且以文件摘要作为 `bundleDigest` 的首版基线，避免升级后丢失当前版本。
 - `LocalClientPublicCapabilityUpdater` 只在用户已确认、服务器发出绑定当前 generation 的命令后，逐个请求
