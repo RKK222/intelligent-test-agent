@@ -73,6 +73,7 @@ create_backend_node() {
     'TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-must-not-print' \
     'TEST_AGENT_INTERNAL_PROXY_API_KEY=proxy-must-not-print' \
     'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-must-not-print' \
+    'TEST_AGENT_SKILLHUB_ACCESS_KEY=skillhub-must-not-print-123456' \
     'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-key-must-not-print-123456' \
     'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-must-not-print-123456789' \
     >"${root}/${node}/config/backend.env"
@@ -174,7 +175,7 @@ test -s "${TMP_ROOT}/deploy-122.233.30.2.log"
 
 init_output="$(cd "${BUNDLE}" && PATH="${FAKE_BIN}:${PATH}" TEST_AGENT_FIXTURE_IP=122.233.30.115 \
   bash init-backend-node-config.sh 2>&1)"
-if grep -Eq 'secret-must-not-print|manager-must-not-print|proxy-must-not-print' <<<"${init_output}"; then
+if grep -Eq 'secret-must-not-print|manager-must-not-print|proxy-must-not-print|skillhub-must-not-print' <<<"${init_output}"; then
   echo "New-node initializer leaked a secret" >&2
   exit 1
 fi

@@ -113,7 +113,7 @@ unzip -t test-agent-internal-release.zip
 
 ## 3. 配置后台
 
-在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；只需要替换 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码和 XXL access token 这 5 个 `REPLACE_...` 值。本次现场纳管密码已更新到交付包内 `.114` 敏感节点配置，不在本文或 Git 模板中明文记录。密码包含 `=`、`@`、`*` 等特殊字符，必须按 dotenv 原值写入，不能 `source` 文件或通过命令行传递。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
+在 `.114` 创建 `/data/testagent/config/backend.env`。下面是可整文件替换的完整生产配置；需要替换 PostgreSQL 密码、manager token、内部代理 key、XXL MySQL 密码、XXL access token 和 SkillHub Access Key 这 6 个 `REPLACE_...` 值。本次现场纳管密码已更新到交付包内 `.114` 敏感节点配置，不在本文或 Git 模板中明文记录。密码包含 `=`、`@`、`*` 等特殊字符，必须按 dotenv 原值写入，不能 `source` 文件或通过命令行传递。模板按 Redis 无密码、平台 API token 为空填写；如果现网这两项非空，必须保留现网值。替换前先备份：
 
 ```bash
 install -d -m 0755 /data/testagent/config
@@ -152,6 +152,14 @@ TEST_AGENT_REDIS_HOST=122.233.30.20
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=
 TEST_AGENT_REDIS_TIMEOUT=1s
+
+TEST_AGENT_SKILLHUB_ENABLED=true
+TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill
+TEST_AGENT_SKILLHUB_ACCESS_KEY=REPLACE_SKILLHUB_ACCESS_KEY
+TEST_AGENT_SKILLHUB_CONNECT_TIMEOUT=10s
+TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT=30s
+TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY=10s
+TEST_AGENT_SKILLHUB_SYNC_DELAY=10m
 
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 TEST_AGENT_API_TOKEN=
@@ -201,6 +209,7 @@ TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true
 - XXL executor 固定使用 `.114:9999` 可达地址，注册不携带 Linux 亲和；夜间扫描后由业务层读取任务固化的目标服务器并调用对应 Java。
 - 当前 HTTP 现场必须同时保留空的 `TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL` 和显式的 `TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true`；缺一项都会按安全默认拒绝不安全终端。签票后浏览器直连 `ws://122.233.30.114:8080`，不是经 `mimo.sdc.cs.icbc:9996` 转发。
 - 企业模型供应商地址和上游 token 在“内部模型供应商”页面维护，不写入 `backend.env` 或 `docker.env`。
+- SkillHub 只在企业 `backend.env` 中启用；本地研发配置不设置这些变量时保持默认关闭，不影响 Java 启动。企业地址暂时不可达时，Java 仍可启动，首次同步记录脱敏告警并在下个周期重试。
 
 保存后先确认没有遗留占位符：
 

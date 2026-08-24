@@ -18,11 +18,13 @@ printf '%s\n' \
   "TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=${marker}" \
   "TEST_AGENT_MEMORY_SERVICE_API_KEY=${marker}" \
   "TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=${marker}" \
+  "TEST_AGENT_SKILLHUB_ACCESS_KEY=${marker}" \
   >"${prepared}"
 printf '%s\n' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-secret-123' \
   'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-key-123456789012345' \
   'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-secret-123456789012345' \
+  'TEST_AGENT_SKILLHUB_ACCESS_KEY=skillhub-secret-123456789012345' \
   >"${installed}"
 chmod 0600 "${prepared}" "${installed}"
 
@@ -32,6 +34,8 @@ hydrate_preserved_env_value "${prepared}" "${installed}" \
   TEST_AGENT_MEMORY_SERVICE_API_KEY "${marker}" 32
 hydrate_preserved_env_value "${prepared}" "${installed}" \
   TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET "${marker}" 32
+hydrate_preserved_env_value "${prepared}" "${installed}" \
+  TEST_AGENT_SKILLHUB_ACCESS_KEY "${marker}" 16
 
 ! grep -qF "${marker}" "${prepared}"
 [[ "$(dotenv_value "${prepared}" TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD)" == \
@@ -40,6 +44,8 @@ hydrate_preserved_env_value "${prepared}" "${installed}" \
   'memory-service-key-123456789012345' ]]
 [[ "$(dotenv_value "${prepared}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET)" == \
   'memory-hmac-secret-123456789012345' ]]
+[[ "$(dotenv_value "${prepared}" TEST_AGENT_SKILLHUB_ACCESS_KEY)" == \
+  'skillhub-secret-123456789012345' ]]
 
 printf 'TEST_AGENT_MEMORY_SERVICE_API_KEY=short\n' >"${installed}"
 replace_env_value "${prepared}" TEST_AGENT_MEMORY_SERVICE_API_KEY "${marker}"

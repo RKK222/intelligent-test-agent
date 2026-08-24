@@ -155,9 +155,9 @@ cp .env.local.example .env.local
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
 | `TEST_AGENT_TCDS_BASE_URL` | TCDS HTTP/HTTPS 基础地址；默认使用现场确认的企业局域网入口 `http://tcds-prod.sdc.icbc:9080`，其它环境可显式覆盖。 |
-| `TEST_AGENT_SKILLHUB_ENABLED` | 是否启用 SkillHub 外部 Skill 目录和定时对账；默认 `false`，启用后必须同时配置基础地址和访问密钥。 |
+| `TEST_AGENT_SKILLHUB_ENABLED` | 是否启用 SkillHub 外部 Skill 目录和定时对账；应用默认 `false`，本地研发保持关闭，企业 `backend.env` 显式启用后必须同时配置基础地址和访问密钥。 |
 | `TEST_AGENT_SKILLHUB_BASE_URL` | SkillHub HTTP/HTTPS 基础地址；只作为部署期外部端点注入。 |
-| `TEST_AGENT_SKILLHUB_ACCESS_KEY` | SkillHub 访问密钥；敏感值，仅从部署环境注入，禁止写入配置文件和日志。 |
+| `TEST_AGENT_SKILLHUB_ACCESS_KEY` | SkillHub 访问密钥；敏感值，仅从部署环境注入，禁止写入 Git/YAML 默认值、普通发布包和日志；企业目标机只保存在 `0600` 的敏感 `backend.env`。 |
 | `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java、XXL executor 和用户 opencode server 对其它节点可访问的主机地址；缺失时统一复用现有内网 IPv4 探测。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 历史兼容项。前端对话框模型/供应商目录已统一走 opencode 原生 `/api/model`、`/api/provider`，不再从数据库模型目录读取。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |

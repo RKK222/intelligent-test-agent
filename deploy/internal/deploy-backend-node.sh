@@ -28,18 +28,20 @@ BACKEND_ENV_SOURCE="${SCRIPT_DIR}/${NODE_NAME}/config/backend.env"
 INSTALLED_BACKEND_ENV="${INSTALL_ROOT}/config/backend.env"
 PRESERVE_INSTALLED_MARKER="__PRESERVE_FROM_INSTALLED_BACKEND_ENV__"
 
-# ClickHouse/Mem0 已独立部署，增量平台包只携带地址和开关；密钥必须继承目标机现有配置。
+# ClickHouse/Mem0/SkillHub 的敏感值不进入增量平台包；部署时从目标机现有配置继承。
 hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
   TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD "${PRESERVE_INSTALLED_MARKER}" 8
 hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
   TEST_AGENT_MEMORY_SERVICE_API_KEY "${PRESERVE_INSTALLED_MARKER}" 32
 hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
   TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET "${PRESERVE_INSTALLED_MARKER}" 32
+hydrate_preserved_env_value "${BACKEND_ENV_SOURCE}" "${INSTALLED_BACKEND_ENV}" \
+  TEST_AGENT_SKILLHUB_ACCESS_KEY "${PRESERVE_INSTALLED_MARKER}" 16
 if grep -qF "${PRESERVE_INSTALLED_MARKER}" "${BACKEND_ENV_SOURCE}"; then
   echo "Prepared backend configuration still contains an unresolved installed-secret marker" >&2
   exit 1
 fi
-printf 'Existing ClickHouse and memory runtime secrets carried forward without printing values\n'
+printf 'Existing ClickHouse, memory and SkillHub runtime secrets carried forward without printing values\n'
 
 manifest_value() {
   local content="$1" key="$2"

@@ -923,6 +923,8 @@ ENTERPRISE_UCID=<current-user-unified-auth-id>
 | `MODELSTUDIO_API_KEY` | 空 | `TEST_AGENT_MODEL_CATALOG_SOURCE=bailian` 时使用的 Model Studio API Key；该模式使用代码内置的 `modelstudio` provider、`https://coding.dashscope.aliyuncs.com/v1` base URL 和 `qwen3.5-plus` 默认模型。 |
 | `TEST_AGENT_INTERNAL_PROXY_API_KEY` | 空；`local` 启动期随机值 | 内部模型代理鉴权 apikey，Java 校验 opencode 子进程请求并注入用户 opencode server 环境；敏感，不得写入日志或 startCommand 明文。生产必须显式配置，随机兜底仅对 `local` profile 生效。 |
 
+应用级默认始终是关闭：本地 `.env.test/.env.local` 不配置上述变量时，研发启动不访问 SkillHub。企业离线模板单独设置 `TEST_AGENT_SKILLHUB_ENABLED=true` 和接口文档测试环境 `http://ai-code.sdc.icbc/icbc/skill`；Access Key 只从目标机敏感 `/data/testagent/config/backend.env` 或敏感节点包继承。网关构造期不访问远端，企业地址暂时不可达不会阻止 Java readiness；启动约 10 秒后的目录同步会记录脱敏 `skillhub_catalog_sync_failed` 告警，并在固定周期继续重试。
+
 ## 独立 UI 测试平台配置
 
 UI 测试执行采用 `OpenCode ui_test_execute Tool → 独立 UI 平台`，Java 只提供地址查询、不代理 UI

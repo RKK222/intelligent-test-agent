@@ -279,6 +279,10 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   require_exact_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     http://tcds-prod.sdc.icbc:9080
+  require_exact_value "${backend_env}" TEST_AGENT_SKILLHUB_ENABLED true
+  require_exact_value "${backend_env}" TEST_AGENT_SKILLHUB_BASE_URL \
+    http://ai-code.sdc.icbc/icbc/skill
+  require_minimum_length_value "${backend_env}" TEST_AGENT_SKILLHUB_ACCESS_KEY 16
   require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED true
   require_exact_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_URL \
     jdbc:clickhouse://122.233.30.147:8123/testagent_analytics

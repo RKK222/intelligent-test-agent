@@ -199,6 +199,7 @@ render_backend_template() {
   local memory_service_api_key="${13}"
   local memory_model_gateway_hmac_secret="${14}"
   local local_client_signing_public_key_base64="${15}"
+  local skillhub_access_key="${16}"
   local line key value
 
   : >"${output}"
@@ -222,6 +223,7 @@ render_backend_template() {
       TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD) value="${analytics_clickhouse_password}" ;;
       TEST_AGENT_MEMORY_SERVICE_API_KEY) value="${memory_service_api_key}" ;;
       TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET) value="${memory_model_gateway_hmac_secret}" ;;
+      TEST_AGENT_SKILLHUB_ACCESS_KEY) value="${skillhub_access_key}" ;;
       # 当前现场同时支持域名和 IP 的 9996 入口，前端使用同源 API。
       TEST_AGENT_CORS_ALLOWED_ORIGINS) value="http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996" ;;
       TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL) value="" ;;
@@ -271,7 +273,7 @@ configure_backend() {
   local xxl_mysql_password xxl_access_token lobehub_hmac_secret
   local analytics_clickhouse_url analytics_clickhouse_username analytics_clickhouse_password
   local memory_service_api_key memory_model_gateway_hmac_secret
-  local local_client_signing_public_key_base64
+  local local_client_signing_public_key_base64 skillhub_access_key
 
   require_file "${BACKEND_TEMPLATE}"
   require_file "${DOCKER_TEMPLATE}"
@@ -294,6 +296,7 @@ configure_backend() {
   memory_service_api_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_SERVICE_API_KEY)"
   memory_model_gateway_hmac_secret="$(env_value "${BACKEND_ENV}" TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET)"
   local_client_signing_public_key_base64="$(env_value "${BACKEND_ENV}" TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64)"
+  skillhub_access_key="$(env_value "${BACKEND_ENV}" TEST_AGENT_SKILLHUB_ACCESS_KEY)"
   analytics_clickhouse_username="${analytics_clickhouse_username:-testagent_analytics}"
 
   [[ -n "${db_password}" ]] || {
@@ -315,6 +318,10 @@ configure_backend() {
   }
   [[ -n "${local_client_signing_public_key_base64}" ]] || {
     echo "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64 is missing from ${BACKEND_ENV}" >&2
+    exit 1
+  }
+  [[ ${#skillhub_access_key} -ge 16 ]] || {
+    echo "TEST_AGENT_SKILLHUB_ACCESS_KEY is missing or shorter than 16 characters in ${BACKEND_ENV}" >&2
     exit 1
   }
   [[ -n "${xxl_mysql_password}" ]] || {
@@ -349,7 +356,7 @@ configure_backend() {
     "${proxy_key}" "${xxl_mysql_password}" "${xxl_access_token}" "${lobehub_hmac_secret}" \
     "${analytics_clickhouse_url}" "${analytics_clickhouse_username}" "${analytics_clickhouse_password}" \
     "${memory_service_api_key}" "${memory_model_gateway_hmac_secret}" \
-    "${local_client_signing_public_key_base64}"
+    "${local_client_signing_public_key_base64}" "${skillhub_access_key}"
   render_docker_template "${docker_tmp}" "${manager_token}"
 
   if grep -q 'REPLACE_' "${backend_tmp}" "${docker_tmp}"; then
@@ -368,6 +375,9 @@ configure_backend() {
   grep -Fxq 'TEST_AGENT_CORS_ALLOWED_ORIGINS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_PUBLIC_WEBSOCKET_BASE_URL=' "${backend_tmp}"
   grep -Fxq 'TEST_AGENT_SERVER_TERMINAL_ALLOW_INSECURE_WEBSOCKET=true' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' "${backend_tmp}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' "${backend_tmp}"
+  [[ "$(grep -c '^TEST_AGENT_SKILLHUB_ACCESS_KEY=' "${backend_tmp}")" -eq 1 ]]
   grep -Fxq 'TEST_AGENT_DATA_ROOT=/data/testagent/data' "${docker_tmp}"
   grep -Fxq 'VITE_TEST_AGENT_API_BASE_URL=' "${docker_tmp}"
   grep -Fxq 'OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996' "${docker_tmp}"

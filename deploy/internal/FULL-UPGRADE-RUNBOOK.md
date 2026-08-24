@@ -429,6 +429,26 @@ Docker。`opencode-worker-docker.sh` 会在删除现有 worker 容器前拒绝�
 `pg_isready` 和 `5432` 恢复后才能启动 worker。不删除 `postgres` 容器、volume、
 `/data/testagent/data` 或 manager state。
 
+### 12.1 SkillHub 企业配置预检
+
+企业 SkillHub 使用接口文档测试环境 `http://ai-code.sdc.icbc/icbc/skill`。首次启用前，分别在 `.4`、`.114` 使用受控编辑器核对开关、地址，并把已经提供的 Access Key 写入本机 `/data/testagent/config/backend.env`；不得把值放进命令参数、聊天、普通发布 ZIP 或运维日志。两台机器执行以下脱敏检查，预期前三条各输出 `1`，最后一条输出 `SET`：
+
+```bash
+# 122.233.30.4
+grep -c '^TEST_AGENT_SKILLHUB_ENABLED=true$' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill$' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_SKILLHUB_ACCESS_KEY=' /data/testagent/config/backend.env
+awk -F= '$1=="TEST_AGENT_SKILLHUB_ACCESS_KEY" {print length(substr($0,index($0,"=")+1))>=16 ? "SET" : "INVALID"}' /data/testagent/config/backend.env
+
+# 122.233.30.114
+grep -c '^TEST_AGENT_SKILLHUB_ENABLED=true$' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill$' /data/testagent/config/backend.env
+grep -c '^TEST_AGENT_SKILLHUB_ACCESS_KEY=' /data/testagent/config/backend.env
+awk -F= '$1=="TEST_AGENT_SKILLHUB_ACCESS_KEY" {print length(substr($0,index($0,"=")+1))>=16 ? "SET" : "INVALID"}' /data/testagent/config/backend.env
+```
+
+任一结果不符时停止，不执行后台 A 部署。外层完整包会给旧敏感节点包补齐 SkillHub 地址和开关；Access Key 仍只从目标机已安装配置继承。SkillHub 地址不可达不阻断 Java 启动和 readiness，但首次目录同步会记录 `event=skillhub_catalog_sync_failed`，恢复网络后由 10 分钟周期自动补偿，也可由超级管理员手工触发。
+
 ## 13. 部署后台 A `.4`
 
 当前机器：`122.233.30.4`。

@@ -33,6 +33,7 @@ printf '%s\n' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_USERNAME=ck' \
   'TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD=clickhouse-secret-must-not-print' \
+  'TEST_AGENT_SKILLHUB_ACCESS_KEY=skillhub-secret-must-not-print' \
   'TEST_AGENT_MEMORY_ENABLED=true' \
   'TEST_AGENT_MEMORY_SERVICE_API_KEY=memory-service-secret-must-not-print' \
   'TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET=memory-hmac-secret-must-not-print' \
@@ -51,6 +52,11 @@ bash "${CONFIGURE_SCRIPT}" backend \
   --docker-template "${ROOT_DIR}/deploy/internal/env.example" \
   >/dev/null
 grep -Fxq 'TEST_AGENT_LOBEHUB_HMAC_SECRET=lobehub-secret-must-not-print' \
+  "${CONFIG_114}/backend.env"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' "${CONFIG_114}/backend.env"
+grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' \
+  "${CONFIG_114}/backend.env"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ACCESS_KEY=skillhub-secret-must-not-print' \
   "${CONFIG_114}/backend.env"
 # 当前双后台企业拓扑的数据面已验收，节点部署门禁要求平台侧显式启用记忆。
 sed -i.bak \

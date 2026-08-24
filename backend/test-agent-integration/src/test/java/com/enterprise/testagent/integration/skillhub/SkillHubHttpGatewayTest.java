@@ -66,6 +66,29 @@ class SkillHubHttpGatewayTest {
         assertThat(downloadQuery).hasValue("channel=" + SkillHubDownloadChannel.PLATFORM.code());
     }
 
+    @Test
+    void doesNotContactRemoteEndpointDuringConstruction() {
+        SkillHubProperties properties = new SkillHubProperties();
+        properties.setEnabled(true);
+        properties.setBaseUrl("http://127.0.0.1:1/skillhub");
+        properties.setAccessKey("test-only-access-key");
+
+        SkillHubHttpGateway gateway = new SkillHubHttpGateway(
+                properties, HttpClient.newHttpClient(), new ObjectMapper());
+
+        assertThat(gateway.enabled()).isTrue();
+    }
+
+    @Test
+    void disabledIntegrationDoesNotRequireEnterpriseConfiguration() {
+        SkillHubProperties properties = new SkillHubProperties();
+
+        SkillHubHttpGateway gateway = new SkillHubHttpGateway(
+                properties, HttpClient.newHttpClient(), new ObjectMapper());
+
+        assertThat(gateway.enabled()).isFalse();
+    }
+
     private void respond(HttpExchange exchange, String contentType, byte[] body) throws java.io.IOException {
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.sendResponseHeaders(200, body.length);

@@ -228,6 +228,10 @@ node_guide="$(tar -xOzf "${BACKEND_NODE_ARCHIVE}" \
 grep -Fxq 'TEST_AGENT_XXL_JOB_COOKIE_SECURE=false' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_MAX_PREVIEW_BYTES=5242880' <<<"${backend_env}"
 grep -Fxq 'TEST_AGENT_UPLOAD_CHUNK_BYTES=262144' <<<"${backend_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' <<<"${backend_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' <<<"${backend_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ACCESS_KEY=__PRESERVE_FROM_INSTALLED_BACKEND_ENV__' \
+  <<<"${backend_env}"
 grep -Fxq \
   "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=${SIGNING_PUBLIC_KEY_BASE64}" \
   <<<"${backend_env}"
@@ -239,6 +243,10 @@ backend_114_env="$(tar -xOzf "${BACKEND_114_NODE_ARCHIVE}" \
   'test-agent-two-backend-122.233.30.114/config/backend.env')"
 grep -Fxq \
   "TEST_AGENT_LOCAL_CLIENT_VERSION_MANAGEMENT_SIGNING_PUBLIC_KEY_BASE64=${SIGNING_PUBLIC_KEY_BASE64}" \
+  <<<"${backend_114_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' <<<"${backend_114_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' <<<"${backend_114_env}"
+grep -Fxq 'TEST_AGENT_SKILLHUB_ACCESS_KEY=__PRESERVE_FROM_INSTALLED_BACKEND_ENV__' \
   <<<"${backend_114_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_START=14096' <<<"${docker_env}"
 grep -Fxq 'OPENCODE_WORKER_PORT_END=15095' <<<"${docker_env}"

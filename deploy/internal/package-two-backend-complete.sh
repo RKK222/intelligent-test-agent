@@ -611,6 +611,7 @@ replace_or_append_env_value() {
 }
 
 # 敏感值已存在时保持原值；旧节点包没有该键时写入目标机继承标记，不生成或伪造密钥。
+# SkillHub Access Key 与 ClickHouse/Mem0 密钥共用这条安全继承路径。
 preserve_or_append_env_value() {
   local file="$1"
   local key="$2"
@@ -645,6 +646,15 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     'http://tcds-prod.sdc.icbc:9080'
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_ENABLED true
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_BASE_URL \
+    'http://ai-code.sdc.icbc/icbc/skill'
+  preserve_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_ACCESS_KEY \
+    "${PRESERVE_INSTALLED_MARKER}"
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_CONNECT_TIMEOUT 10s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_REQUEST_TIMEOUT 30s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_SYNC_INITIAL_DELAY 10s
+  replace_or_append_env_value "${backend_env}" TEST_AGENT_SKILLHUB_SYNC_DELAY 10m
   replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED true
   replace_or_append_env_value "${backend_env}" TEST_AGENT_ANALYTICS_CLICKHOUSE_URL \
     'jdbc:clickhouse://122.233.30.147:8123/testagent_analytics'
@@ -749,6 +759,10 @@ validate_mysql_cluster_config() {
   }
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_4}"
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_ENABLED=true' "${backend_114}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' "${backend_4}"
+  grep -Fxq 'TEST_AGENT_SKILLHUB_BASE_URL=http://ai-code.sdc.icbc/icbc/skill' "${backend_114}"
   for expected in \
     'TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=true' \
     'TEST_AGENT_ANALYTICS_CLICKHOUSE_URL=jdbc:clickhouse://122.233.30.147:8123/testagent_analytics' \
@@ -763,6 +777,7 @@ validate_mysql_cluster_config() {
   done
   for secret_spec in \
     TEST_AGENT_ANALYTICS_CLICKHOUSE_PASSWORD:8 \
+    TEST_AGENT_SKILLHUB_ACCESS_KEY:16 \
     TEST_AGENT_MEMORY_SERVICE_API_KEY:32 \
     TEST_AGENT_MEMORY_MODEL_GATEWAY_HMAC_SECRET:32; do
     key="${secret_spec%%:*}"
