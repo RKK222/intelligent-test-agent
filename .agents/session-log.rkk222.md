@@ -13562,3 +13562,27 @@
 
 - Gitee `master`、本机公共运行 clone 和新客户端首次安装基线均指向企业配置 `81605f245d...`，旧 Codex 联调项不再进入新能力包；新装使用完整 release 初始化，存量客户端仍按产品约束由用户确认公共能力更新。
 - 不新增部署节点，不变更 HTTP API、RunEvent、数据库、Flyway、OpenCode 源码、generated SDK 或 `.env*`。样式自动化测试和 Mac Aqua 路径已通过，真实麒麟 Nimbus 视觉仍需企业桌面人工复验；TCDS Tool 继续要求目标机存在 `/usr/local/bin/python3`。
+
+## 2026-08-24 - 补齐 SkillHub 上传和进度查询接口
+
+### Why
+
+- 企业 SkillHub 接口文档除 `/list`、`/download/{id}` 外还明确提供 `/upload` 和 `/upload/progress`；平台此前未实现这两条链路，用户要求严格按文档补齐请求字段和 response。
+
+### What
+
+- 扩展 `SkillHubGateway` 领域端口和 HTTP 适配器：所有请求继续携带环境注入的 `X-Skill-Access-Key`；上传固定发送 `source/phase/file/safetyReportPic/directoryStructurePic/runningEffectPic` 六个 multipart 字段，响应读取文档 `result` taskId，进度读取 `result.progress/message`。
+- 新增 `SUPER_ADMIN` 平台入口 `POST /agent-skill-hub/external/upload` 和 `GET /agent-skill-hub/external/upload/progress`；平台统一 `ApiResponse.data` 分别直接承载 taskId 字符串和 `progress/message`，不添加接口文档外业务字段。
+- 上传在 API 与业务层限制 ZIP 20 MiB、三张图片各 5 MiB，校验 `phase=00..06`、文件名、ZIP 路径/数量/重复项/根 `SKILL.md`/UTF-8/技术 ID；Git push 不隐式上传，进度 100 后由手工 `/external/sync` 或下一轮目录对账纳入能力库。
+- 下载适配器同步按文档校验 `application/octet-stream`、附件文件名和 `Content-Length`，继续固定补充渠道枚举 `PLATFORM(3)`。同步 integration/workspace/backend README、HTTP API、事件、后端、安全和部署文档。
+
+### How
+
+- JDK 25 定向运行 `SkillHubHttpGatewayTest`、`AgentSkillHubApplicationServiceTest`、`AgentSkillHubControllerTest`，最终 28 项通过、0 失败、0 错误；覆盖六字段 multipart、认证头、文档 response、`taskId` 查询、权限和 ZIP 校验。
+- 相关 Reactor 全量执行 432 个测试类、2818 项，Surefire 报告为 0 失败、0 错误；`git diff --check` 通过，并已回顾全部 `.agents/session-log*.md` 近期条目，未覆盖并行客户端交付成果。
+- 未用当前 `.env.test` 重启：其验收数据库仍为 `127.0.0.1:15432/test_agent`，不符合仓库强制的 `192.168.8.100:15432/testagent_dev`，且直接 source 在第 38 行遇到未转义 `&`；未修改环境文件，也未停止或替换已有本地服务。
+
+### Result
+
+- SkillHub 文档提供的四类能力现均有后端适配；超级管理员可以显式上传、按文档轮询到 100/-1，再同步目录查看新能力。
+- 本次新增 HTTP API 并收紧外部下载响应校验，未新增 RunEvent/SSE/WebSocket 类型、数据库、SQL、Flyway、部署节点或强制配置；未修改 `.env*`、generated SDK、OpenCode 只读源码，也未把访问密钥写入源码或日志。企业真实 SkillHub 上传仍需部署后用内网文件联调。

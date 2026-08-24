@@ -26,6 +26,9 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.ReferenceUpdate;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadFile;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadProgress;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadRequest;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
@@ -92,6 +95,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     private static final String ENCODING = "GZIP_JSON_V1";
     private static final int MAX_FILES = 256;
     private static final long MAX_UNCOMPRESSED_BYTES = 20L * 1024L * 1024L;
+    private static final int MAX_SKILLHUB_PICTURE_BYTES = 5 * 1024 * 1024;
     private static final int MAX_CANONICAL_BYTES = 32 * 1024 * 1024;
     private static final int MAX_PAGE_SIZE = 100;
     private static final String AGENT_FILE = "AGENT.md";
@@ -169,14 +173,26 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     public AgentSkillHubResponses.ExternalSyncResponse syncExternalSkillHubCatalog() {
-        if (skillHubGateway == null || !skillHubGateway.enabled()) {
-            throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 集成未启用");
-        }
+        ensureSkillHubEnabled();
         List<ExternalSkill> skills = skillHubGateway.listSkills();
         validateExternalCatalog(skills);
         Instant synchronizedAt = Instant.now();
         repository.replaceExternalCatalog(skills, synchronizedAt);
         return new AgentSkillHubResponses.ExternalSyncResponse(skills.size(), synchronizedAt);
+    }
+
+    /** 按企业接口文档显式提交六个 multipart 字段；返回值直接对应上游 result taskId。 */
+    public String uploadExternalSkillHub(SkillHubUploadRequest request) {
+        ensureSkillHubEnabled();
+        SkillHubUploadRequest validated = validateExternalUpload(request);
+        return skillHubGateway.upload(validated).taskId();
+    }
+
+    /** 返回结构直接对应上游 result 中的 progress 和 message。 */
+    public SkillHubUploadProgress externalSkillHubUploadProgress(String taskId) {
+        ensureSkillHubEnabled();
+        validateTaskId(taskId);
+        return skillHubGateway.uploadProgress(taskId.trim());
     }
 
     @Override
@@ -927,6 +943,72 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
+    private void ensureSkillHubEnabled() {
+        if (skillHubGateway == null || !skillHubGateway.enabled()) {
+            throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 集成未启用");
+        }
+    }
+
+    private SkillHubUploadRequest validateExternalUpload(SkillHubUploadRequest request) {
+        if (request == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 上传请求不能为空");
+        }
+        String source = requireUploadText(request.source(), "source");
+        String phase = request.phase() == null ? "" : request.phase().trim();
+        if (!Set.of("00", "01", "02", "03", "04", "05", "06").contains(phase)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "phase 必须是 00 至 06 的阶段编码");
+        }
+        SkillHubUploadFile skillPackage = requireUploadFile(request.skillPackage(), "file", MAX_UNCOMPRESSED_BYTES);
+        if (!skillPackage.filename().toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "file 必须是 ZIP 文件");
+        }
+        Map<String, byte[]> files = unzipExternalSkill(skillPackage.content());
+        normalizeTechnicalId(externalSkillManifestName(files.get("SKILL.md")));
+        requireUploadFile(request.safetyReportPicture(), "safetyReportPic", MAX_SKILLHUB_PICTURE_BYTES);
+        requireUploadFile(request.directoryStructurePicture(), "directoryStructurePic", MAX_SKILLHUB_PICTURE_BYTES);
+        requireUploadFile(request.runningEffectPicture(), "runningEffectPic", MAX_SKILLHUB_PICTURE_BYTES);
+        return new SkillHubUploadRequest(
+                source,
+                phase,
+                request.skillPackage(),
+                request.safetyReportPicture(),
+                request.directoryStructurePicture(),
+                request.runningEffectPicture());
+    }
+
+    private String requireUploadText(String value, String field) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty() || normalized.length() > 256 || normalized.indexOf('\0') >= 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 无效");
+        }
+        return normalized;
+    }
+
+    private SkillHubUploadFile requireUploadFile(SkillHubUploadFile file, String field, long maxBytes) {
+        if (file == null || file.size() == 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 不能为空");
+        }
+        if (file.size() > maxBytes) {
+            throw new PlatformException(ErrorCode.PAYLOAD_TOO_LARGE, field + " 超过接口文档建议上限");
+        }
+        String filename = file.filename() == null ? "" : file.filename().trim();
+        if (filename.isEmpty() || filename.length() > 255 || filename.indexOf('\r') >= 0
+                || filename.indexOf('\n') >= 0 || filename.indexOf('/') >= 0 || filename.indexOf('\\') >= 0) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 文件名无效");
+        }
+        return file;
+    }
+
+    private void validateTaskId(String taskId) {
+        String normalized = requireUploadText(taskId, "taskId");
+        int separator = normalized.lastIndexOf('_');
+        String timestamp = separator < 0 ? "" : normalized.substring(separator + 1);
+        if (separator <= 0 || timestamp.length() < 10 || timestamp.length() > 17
+                || !timestamp.chars().allMatch(Character::isDigit)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "taskId 格式无效");
+        }
+    }
+
     private Asset ensureExternalMaterialized(Asset asset) {
         if (asset.sourceKind() != SourceKind.SKILLHUB) return asset;
         if (!asset.sourceAvailable()) return asset;
@@ -1017,6 +1099,13 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
     }
 
     private void validateExternalSkillManifest(String expectedName, byte[] skillMarkdown) {
+        String declared = externalSkillManifestName(skillMarkdown);
+        if (!expectedName.equals(declared)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub SKILL.md name 与目录稳定 ID 不一致");
+        }
+    }
+
+    private String externalSkillManifestName(byte[] skillMarkdown) {
         String content = utf8(skillMarkdown, "SKILL.md");
         var matcher = java.util.regex.Pattern.compile("(?m)^name\\s*:\\s*(.+?)\\s*$").matcher(content);
         if (!matcher.find()) {
@@ -1027,9 +1116,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 || (declared.startsWith("'") && declared.endsWith("'"))) {
             declared = declared.substring(1, declared.length() - 1);
         }
-        if (!expectedName.equals(declared)) {
-            throw new PlatformException(ErrorCode.CONFLICT, "SkillHub SKILL.md name 与目录稳定 ID 不一致");
-        }
+        return declared;
     }
 
     private PushedAsset pushedAsset(AssetType type, String technicalId, Map<String, byte[]> files) {

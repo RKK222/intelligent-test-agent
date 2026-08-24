@@ -784,7 +784,7 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 
 服务端必须按 ticket 绑定的 workspace、服务器和模式校验请求：workspace 操作的 `workspaceId` 必须等于 ticket 绑定值，并在路由、ticket 签发和每条 workspace RPC 时重新校验托管工作区的当前用户仍是应用成员；非托管 Workspace 文件访问默认拒绝，仅 ticket 记录为 `SUPER_ADMIN` 的服务器工作空间兼容入口可放行。应用版本副本对普通成员的 write/rename/delete/mkdir 返回只读错误，个人 worktree 普通文件允许 owner 写入；完整 `.opencode/**` 命名空间只允许 APP_ADMIN，不能通过 command/plugin/tool、旧 mode 别名或辅助源码目录绕过。Agent 配置操作的 `scope/workspaceId/worktreeId` 必须等于 ticket 绑定值，公共直接目录模式还必须受 ticket 绑定的 `linuxServerId` 约束；`directory.list` 仅 `directory-picker` ticket 可用；`workspace.create` 必须由 `SUPER_ADMIN` 创建，并且工作空间服务器与当前用户 opencode 进程服务器一致。客户端必须按 `id` 匹配响应，允许未知字段，收到错误 envelope 后按统一错误码处理。
 
-Agent & Skill Hub 不新增 RunEvent/SSE 类型。更新角标由 HTTP 查询，制品读取和引用变更复用上述平台文件 WebSocket；应用 feature push 成功后的快照索引及引用状态提升属于服务端持久化流程，不通过 RunEvent 广播。外部 SkillHub 引用在 push 对账事务中按提交摘要原样提升，内容未变时保持外部身份，内容变化时切换到记录来源链路的平台派生资产，也不新增事件类型。
+Agent & Skill Hub 不新增 RunEvent/SSE 类型。更新角标由 HTTP 查询，SkillHub 异步上传按接口文档通过 HTTP `/external/upload/progress` 每秒轮询，制品读取和引用变更复用上述平台文件 WebSocket；应用 feature push 成功后的快照索引及引用状态提升属于服务端持久化流程，不通过 RunEvent 广播。外部 SkillHub 引用在 push 对账事务中按提交摘要原样提升，内容未变时保持外部身份，内容变化时切换到记录来源链路的平台派生资产，也不新增事件类型。
 
 示例：
 

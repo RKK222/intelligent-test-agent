@@ -37,6 +37,10 @@ import com.enterprise.testagent.domain.hub.AgentSkillHubModels.PushReferenceDeci
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Reference;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Revision;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillCategory;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadFile;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadProgress;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadRequest;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadSubmission;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillSubcategory;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SourceKind;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.UpdateOperation;
@@ -106,6 +110,43 @@ class AgentSkillHubApplicationServiceTest {
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
                 .hasMessageContaining("条目标识无效");
         verify(repository, never()).replaceExternalCatalog(any(), any());
+    }
+
+    @Test
+    void externalUploadValidatesPackageAndReturnsDocumentedResult() throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.upload(any())).thenReturn(new SkillHubUploadSubmission("user001_1723526400000"));
+        when(gateway.uploadProgress("user001_1723526400000"))
+                .thenReturn(new SkillHubUploadProgress(100, "完成"));
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+        SkillHubUploadRequest request = uploadRequest(" 研发团队 ", "04", zip("SKILL.md", "name: api-check"));
+
+        assertThat(service.uploadExternalSkillHub(request)).isEqualTo("user001_1723526400000");
+        assertThat(service.externalSkillHubUploadProgress("user001_1723526400000"))
+                .isEqualTo(new SkillHubUploadProgress(100, "完成"));
+
+        ArgumentCaptor<SkillHubUploadRequest> uploaded = ArgumentCaptor.forClass(SkillHubUploadRequest.class);
+        verify(gateway).upload(uploaded.capture());
+        assertThat(uploaded.getValue().source()).isEqualTo("研发团队");
+        assertThat(uploaded.getValue().phase()).isEqualTo("04");
+        verify(gateway).uploadProgress("user001_1723526400000");
+    }
+
+    @Test
+    void externalUploadRejectsUndocumentedPhaseBeforeCallingRemote() throws Exception {
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        when(gateway.enabled()).thenReturn(true);
+        AgentSkillHubApplicationService service = service(mock(AgentSkillHubRepository.class));
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.uploadExternalSkillHub(
+                uploadRequest("研发团队", "07", zip("SKILL.md", "name: api-check"))))
+                .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
+                .hasMessageContaining("00 至 06");
+        verify(gateway, never()).upload(any());
     }
 
     @Test
@@ -190,6 +231,16 @@ class AgentSkillHubApplicationServiceTest {
             zip.closeEntry();
         }
         return output.toByteArray();
+    }
+
+    private SkillHubUploadRequest uploadRequest(String source, String phase, byte[] packageBytes) {
+        return new SkillHubUploadRequest(
+                source,
+                phase,
+                new SkillHubUploadFile("api-check.zip", "application/zip", packageBytes),
+                new SkillHubUploadFile("safety.png", "image/png", new byte[]{1}),
+                new SkillHubUploadFile("directory.png", "image/png", new byte[]{2}),
+                new SkillHubUploadFile("running.png", "image/png", new byte[]{3}));
     }
 
     private ExternalSkill externalSkill(long id, String name, String version, Instant createdAt) {

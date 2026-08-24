@@ -2,6 +2,8 @@ package com.enterprise.testagent.integration.skillhub;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadFile;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.SkillHubUploadRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -19,6 +21,10 @@ class SkillHubHttpGatewayTest {
     private String baseUrl;
     private final AtomicReference<String> accessKey = new AtomicReference<>();
     private final AtomicReference<String> downloadQuery = new AtomicReference<>();
+    private final AtomicReference<String> uploadMethod = new AtomicReference<>();
+    private final AtomicReference<String> uploadContentType = new AtomicReference<>();
+    private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
+    private final AtomicReference<String> progressQuery = new AtomicReference<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -38,7 +44,24 @@ class SkillHubHttpGatewayTest {
         server.createContext("/download/42", exchange -> {
             accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
             downloadQuery.set(exchange.getRequestURI().getQuery());
-            respond(exchange, "application/zip", new byte[]{1, 2, 3});
+            exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=skill.zip");
+            respond(exchange, "application/octet-stream", new byte[]{1, 2, 3});
+        });
+        server.createContext("/upload/progress", exchange -> {
+            accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
+            progressQuery.set(exchange.getRequestURI().getQuery());
+            respond(exchange, "application/json", """
+                    {"code":0,"msg":"ok","result":{"progress":50,"message":"数据保存 - 开始"}}
+                    """.getBytes(StandardCharsets.UTF_8));
+        });
+        server.createContext("/upload", exchange -> {
+            accessKey.set(exchange.getRequestHeaders().getFirst(SkillHubHttpGateway.ACCESS_KEY_HEADER));
+            uploadMethod.set(exchange.getRequestMethod());
+            uploadContentType.set(exchange.getRequestHeaders().getFirst("Content-Type"));
+            uploadBody.set(exchange.getRequestBody().readAllBytes());
+            respond(exchange, "application/json", """
+                    {"code":0,"msg":"ok","result":"user_001_1723526400000"}
+                    """.getBytes(StandardCharsets.UTF_8));
         });
         server.start();
     }
@@ -72,6 +95,42 @@ class SkillHubHttpGatewayTest {
     }
 
     @Test
+    void uploadsAllDocumentedPartsAndReadsDocumentedProgressResponse() {
+        SkillHubHttpGateway gateway = enabledGateway();
+        SkillHubUploadFile zip = file("skill.zip", "application/zip", "zip-content");
+        SkillHubUploadRequest request = new SkillHubUploadRequest(
+                "测试团队",
+                "04",
+                zip,
+                file("safety.png", "image/png", "safety-content"),
+                file("directory.png", "image/png", "directory-content"),
+                file("running.png", "image/png", "running-content"));
+
+        assertThat(gateway.upload(request).taskId()).isEqualTo("user_001_1723526400000");
+        assertThat(gateway.uploadProgress("user_001_1723526400000"))
+                .satisfies(progress -> {
+                    assertThat(progress.progress()).isEqualTo(50);
+                    assertThat(progress.message()).isEqualTo("数据保存 - 开始");
+                });
+
+        assertThat(uploadMethod).hasValue("POST");
+        assertThat(uploadContentType.get()).startsWith("multipart/form-data; boundary=testagent-skillhub-");
+        String body = new String(uploadBody.get(), StandardCharsets.UTF_8);
+        assertThat(body)
+                .contains("name=\"source\"")
+                .contains("测试团队")
+                .contains("name=\"phase\"")
+                .contains("\r\n04\r\n")
+                .contains("name=\"file\"; filename=\"skill.zip\"")
+                .contains("name=\"safetyReportPic\"; filename=\"safety.png\"")
+                .contains("name=\"directoryStructurePic\"; filename=\"directory.png\"")
+                .contains("name=\"runningEffectPic\"; filename=\"running.png\"")
+                .contains("zip-content", "safety-content", "directory-content", "running-content");
+        assertThat(progressQuery).hasValue("taskId=user_001_1723526400000");
+        assertThat(accessKey).hasValue("test-only-access-key");
+    }
+
+    @Test
     void doesNotContactRemoteEndpointDuringConstruction() {
         SkillHubProperties properties = new SkillHubProperties();
         properties.setEnabled(true);
@@ -92,6 +151,18 @@ class SkillHubHttpGatewayTest {
                 properties, HttpClient.newHttpClient(), new ObjectMapper());
 
         assertThat(gateway.enabled()).isFalse();
+    }
+
+    private SkillHubHttpGateway enabledGateway() {
+        SkillHubProperties properties = new SkillHubProperties();
+        properties.setEnabled(true);
+        properties.setBaseUrl(baseUrl);
+        properties.setAccessKey("test-only-access-key");
+        return new SkillHubHttpGateway(properties, HttpClient.newHttpClient(), new ObjectMapper());
+    }
+
+    private SkillHubUploadFile file(String filename, String contentType, String content) {
+        return new SkillHubUploadFile(filename, contentType, content.getBytes(StandardCharsets.UTF_8));
     }
 
     private void respond(HttpExchange exchange, String contentType, byte[] body) throws java.io.IOException {

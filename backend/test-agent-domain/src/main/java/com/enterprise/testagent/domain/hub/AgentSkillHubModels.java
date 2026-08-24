@@ -69,6 +69,7 @@ public final class AgentSkillHubModels {
         public byte[] content() {
             return content.clone();
         }
+
     }
 
     public record Asset(
@@ -204,6 +205,40 @@ public final class AgentSkillHubModels {
         public byte[] content() {
             return content.clone();
         }
+    }
+
+    /** SkillHub 上传接口的单个文件部分；协议字段名由 integration 适配器固定。 */
+    public record SkillHubUploadFile(String filename, String contentType, byte[] content) {
+        public SkillHubUploadFile {
+            content = content == null ? new byte[0] : content.clone();
+        }
+
+        @Override
+        public byte[] content() {
+            return content.clone();
+        }
+
+        public int size() {
+            return content.length;
+        }
+    }
+
+    /** SkillHub /upload 的完整业务输入，四个文件均由调用方显式提供。 */
+    public record SkillHubUploadRequest(
+            String source,
+            String phase,
+            SkillHubUploadFile skillPackage,
+            SkillHubUploadFile safetyReportPicture,
+            SkillHubUploadFile directoryStructurePicture,
+            SkillHubUploadFile runningEffectPicture) {
+    }
+
+    /** 异步上传提交成功后由 SkillHub 返回的任务标识。 */
+    public record SkillHubUploadSubmission(String taskId) {
+    }
+
+    /** SkillHub /upload/progress 返回的当前处理状态。 */
+    public record SkillHubUploadProgress(int progress, String message) {
     }
 
     /** push 快照和引用身份切换必须在同一个数据库事务中完成。 */

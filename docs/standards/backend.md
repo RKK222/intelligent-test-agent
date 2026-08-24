@@ -114,9 +114,10 @@
 
 ### SkillHub 调用
 
-1. SkillHub 目录同步和下载只能通过 `SkillHubGateway` 领域端口及 integration 适配器完成；访问密钥只从部署环境注入，所有请求固定使用 `X-Skill-Access-Key`，日志和错误响应不得记录该请求头或第三方正文。
-2. `/download/{id}` 的渠道固定由 `SkillHubDownloadChannel.PLATFORM(3)` 生成，业务层和前端不得传入任意整数；目录同步只保存元数据，ZIP 只允许在显式预览、引用或更新时按需下载。
-3. 外部 ZIP 必须限制响应体、文件数量、路径、重复项、根 `SKILL.md`、UTF-8 和稳定名称；相同外部 ID+版本出现不同内容摘要时失败关闭，不得覆盖已保存修订。
+1. SkillHub `/list`、`/upload`、`/upload/progress` 和 `/download/{id}` 只能通过 `SkillHubGateway` 领域端口及 integration 适配器完成；访问密钥只从部署环境注入，所有请求固定使用 `X-Skill-Access-Key`，日志和错误响应不得记录该请求头或第三方正文。
+2. 上传必须按文档固定六个 multipart 字段，响应只读取文档 `result` taskId 或 `result.progress/message`；平台入口只允许 `SUPER_ADMIN` 显式触发，不得由应用 Git push 隐式上传。`progress=100` 后由目录对账发现新条目。
+3. `/download/{id}` 的渠道固定由 `SkillHubDownloadChannel.PLATFORM(3)` 生成，业务层和前端不得传入任意整数；目录同步只保存元数据，ZIP 只允许在显式预览、引用或更新时按需下载。
+4. 上传和下载的外部 ZIP 必须限制压缩体、文件数量、路径、重复项、根 `SKILL.md`、UTF-8 和稳定名称；三张上传图片分别限制 5 MiB。相同外部 ID+版本出现不同内容摘要时失败关闭，不得覆盖已保存修订。
 
 ### SSE 与事件
 
