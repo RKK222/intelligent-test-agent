@@ -13434,7 +13434,7 @@
 
 - `local-opencode-client-package-test.sh` 覆盖 HTTP 未显式批准时拒绝、域名 HTTP 配置、DEB 无扩展属性、用户级 systemd/桌面入口；`local-opencode-client-update-test.sh` 覆盖稳定启动器更新/回退/自动回切。
 - 单后台配置、双后台完整包结构、归档卫生门禁全部通过；变更脚本语法、`git diff --check` 和冲突标记检查通过。
-- 首轮构建复核发现容量预警 PostgreSQL migration 与清理描述 XXL migration 虽已进入 JAR，但旧封包清单未锁定；已在内包构建、双后台外包和目标机安装三层补齐文件名及固定 SHA-256 门禁。
+- 首轮构建复核发现容量预警 PostgreSQL migration 与清理描述 XXL migration 虽已进入 JAR，但旧封包清单未锁定；继续审计还发现上一轮已部署的应用自动化、本地客户端公共能力、工作空间 Git 巡检等 8 条 PostgreSQL migration 与 XXL V14 未纳入三层清单。现已在内包构建、双后台外包和目标机安装三层全部补齐文件名及固定 SHA-256 门禁，并把部署手册基线更新为上一轮 `f5c88d8ca` / `a13f0cc8...`。
 - 增量组件计划确认 backend、frontend、worker runtime 与 local client 需要重建，toolbox 指纹未变并复用；独立 ClickHouse、Mem0、BGE、pgvector、LobeHub 制品不随本轮前后台包重复携带。
 
 ### Result

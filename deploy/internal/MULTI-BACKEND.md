@@ -599,10 +599,9 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
 企业现网上一轮已经部署完成的平台包业务源码提交为
-`57e211de48a5507fb8d1689e1c8f86fd96563032`，内层 ZIP SHA-256 为
-`7af9c20e57a809258b0acd4672189b5ca875dde3f1a7208f770414a57d234b53`。正常 PostgreSQL 企业主链最高版本为
-`20260812204207`；这只能作为已知基线，不能代替本轮部署前的完整 history。XXL MySQL 的准入预期为 V1-V11
-全部成功。部署前必须分别由数据库管理员导出
+`f5c88d8cad2054a3ea7272d4e6ef348801347c0c`，内层 ZIP SHA-256 为
+`a13f0cc83850d5a1eb6eecfb37caa378e3d8cf67ebe277371b1e66390ef62397`。该值只标识上一轮已部署制品，
+不能代替本轮部署前的完整 history。部署前必须分别由数据库管理员导出
 平台 PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
 ```sql
@@ -611,19 +610,14 @@ from flyway_schema_history
 order by installed_rank;
 ```
 
-PostgreSQL 正常现网路径必须满足：所有记录 `success=true`，且自动化代码库版本 `20260812204207` 与已部署
-SCM 版本 `20260813190929` 成功、checksum 不变。若现场仍低于该版本，必须先逐条核对完整历史与已登记兼容路径，不能
-直接套用本节的增量结论。第一台 `.4` 新 Java 从该现场 history 首次成功升级时，只允许按兼容装配新增：
-
-- `V20260814165300__analytics_event_outbox_create_pipeline_after_release.sql`；
-- `V20260814165301__analytics_event_outbox_install_triggers_after_release.sql`；
-- `V20260817193414__local_client_rollout_users_create.sql`；
-- `V20260818094330__local_client_credentials_create_runtime_after_enterprise_release.sql`，源码 SHA-256
-  `6d390354ddb9794c1f3730f09f1dd806ea74628f20fa6ea2857c1dee6774d25c`。
-
-其中 `20260818094330` 是高于现场 `20260812204207`/`20260813190929` 的本地客户端企业前向版本；不得继续
-向该 history 装配较低的 `20260812202425`。如果本包已经在首台成功启动后只是故障重部署，上述版本必须成功且
-checksum 不变，本次不得新增 history。出现失败记录、未知更高版本或未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
+上一轮已成功部署时，PostgreSQL 正常现网路径必须满足所有记录 `success=true`，且至少已成功执行并保持 checksum 的
+主链版本包括 `20260818094330`、`20260819125704`、`20260820153926`、`20260820182024`、
+`20260820202529`、`20260821113000`、`20260822075000`、`20260822103625`、`20260822201811`、
+`20260823104611`、`20260823123757`、`20260823191023`。第一台 `.4` 新 Java 从这套已部署 history 启动时，
+本轮 PostgreSQL 只允许新增 `V20260824100444__user_notifications_add_opencode_capacity_warning.sql`，源码 SHA-256
+固定为 `c53ce7ecdd506219337b5f3af5251dbfebbb38486c3fb311d688a28febafaf4a`；故障重部署时连这一条也不得重复新增。
+若现场缺少上述上一轮版本，必须先逐条核对真实部署记录，不能直接套用本节增量结论。出现失败记录、未知更高版本或
+未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
 开发历史的 `20260809120000`、`20260809210000`、`20260809230000`、`20260810090000`、
 `20260810110000` 至 `20260810110002`、`20260810173117` 或 `20260812202425`；其中 `20260809210000`
 仅用于已执行旧体验候选的个人库，`20260812202425` 仅用于已经由 dev 执行本地客户端迁移的共享开发库。
@@ -632,24 +626,29 @@ checksum 不变，本次不得新增 history。出现失败记录、未知更高
 虽然 LobeHub 服务和页面入口继续关闭，既有兼容 migration 创建的平台模型目录/聚合表和四个默认禁用参数仍必须
 保留，这是数据库兼容要求，不代表启用服务。
 
-XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为 V1-V11 全部成功且
-checksum 不变。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
+XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的准入历史应为已登记的 V12 分支以及 V13、V14
+全部成功且 checksum 不变。V10 的 Flyway checksum 为 `1539433813`、文件 SHA-256 为
 `665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47`，V11 的 Flyway checksum 为
 `-1863356225`、文件 SHA-256 为 `03e7054a56daac14bd1cb62fd2302c7752c5d93ba88f255ad8d10f7320736236`；
 并行历史中存在两条已执行过且字节不可改写的 V12：ClickHouse 运营入库的 SHA-256 为
 `70878c4544d5d8c030b1edf59406a320ceec68f86bd763d366a80d5d4ed005f0`，SCM Git 姓名补偿的 SHA-256 为
 `2ef19bbbffb56131981f4f99f7d58d5b1d9f25715b0e76dc0cfd44b80b196739`。打包必须同时锁定两份历史资源，运行时按数据库已执行
 V12 选择兼容 location 并由更高版本前向 migration 补齐另一任务。失败记录、未知 checksum、未知更高版本或未登记的 V12
-分叉都必须停止发布。
+分叉都必须停止发布。V13 文件 SHA-256 为
+`d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a`，V14 文件 SHA-256 为
+`551d90547b21440b614a40502c852b303b22a41d93ab4060acc962b7ae411718`。本轮只允许新增
+`V20260824100401__xxl_job_info_update_inactive_cleanup_description.sql`，源码 SHA-256 固定为
+`4eda1bf4168f097f83357d097714cc66d83156f7a2e88d3dd60adc56c218be3a`；它只把平台初始化的闲置清理任务说明从十五天改为十天。
 
 `V20260728160800__create_toolbox_click_tracking.sql` 的现网 checksum 仍必须为 `-1966404877`；只有已登记的
 早期测试/过渡历史才允许旧 `V20260727203500` 或 `-74327385` 幂等变体；现网历史中的
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增
-`20260813190929` 及发布清单登记的 dev 前向 migration，XXL MySQL 只新增兼容装配允许的更高版本（故障重部署时两边都不新增）；
+`20260824100444`、XXL MySQL 只新增 `20260824100401`、ClickHouse `analytics_schema_history` 只新增
+`20260824110209`（故障重部署时三边都不新增）；
 随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、
-ClickHouse 入库为每分钟且 SCM Git 姓名补偿为每日 04:10，再部署 `.114`。共享数据库上 `.114` 启动只允许
+ClickHouse 入库为每分钟、SCM Git 姓名补偿为每日 04:10、工作空间 Git 权限巡检为每两小时，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
 `FlywayValidateException`、`ClassNotFoundException: org.postgresql.Driver` 或 `Application run failed` 时不得继续滚动。
 
