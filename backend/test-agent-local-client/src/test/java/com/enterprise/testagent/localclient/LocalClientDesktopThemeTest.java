@@ -29,8 +29,8 @@ class LocalClientDesktopThemeTest {
 
         assertThat((Font) defaults.get("Label.font")).extracting(Font::getSize).isEqualTo(14);
         assertThat((Font) defaults.get("Button.font")).extracting(Font::getSize).isEqualTo(14);
-        assertThat((Color) defaults.get("Component.focusColor")).isEqualTo(new Color(190, 30, 45));
-        assertThat((Color) defaults.get("Button.default.background")).isEqualTo(new Color(190, 30, 45));
+        assertThat((Color) defaults.get("Component.focusColor")).isEqualTo(new Color(49, 91, 125));
+        assertThat((Color) defaults.get("Button.default.background")).isEqualTo(new Color(49, 91, 125));
         assertThat(defaults.getInt("Component.arc")).isEqualTo(12);
         assertThat(defaults.getInt("TextComponent.arc")).isEqualTo(12);
         assertThat(defaults.getInsets("Button.margin")).isEqualTo(new java.awt.Insets(8, 18, 8, 18));

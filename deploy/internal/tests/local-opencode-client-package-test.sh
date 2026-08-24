@@ -184,6 +184,8 @@ test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json {' "${
 test "$(grep -c 'location = /downloads/local-opencode-client/catalog.json.sig {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/installer {' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -c 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'return 302 /downloads/local-opencode-client/install.sh;' "${NGINX_TEMPLATE}")" -eq 2
+test "$(grep -c 'filename="test-agent-local-client-install.sh"' "${NGINX_TEMPLATE}")" -eq 2
 test "$(grep -F -c 'test-agent-local-client_[0-9]{14}_arm64\.deb' "${NGINX_TEMPLATE}")" -eq 2
 grep -q 'Cache-Control "public, max-age=31536000, immutable"' "${NGINX_TEMPLATE}"
 
@@ -318,21 +320,25 @@ grep -q '^signingPublicKeyBase64=' "${TEST_ROOT}/install/config/client.propertie
 test "$(stat -f '%Lp' "${TEST_ROOT}/install/config/credentials.properties" 2>/dev/null \
   || stat -c '%a' "${TEST_ROOT}/install/config/credentials.properties")" = 600
 
-# 无管理员权限安装时，user systemd 和桌面入口必须使用用户级启动器，不能回退到不存在的 /usr/bin。
-mkdir -p "${TEST_ROOT}/user-home/.local/bin" "${TEST_ROOT}/fake-systemctl"
-cp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
-  "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
-chmod 0755 "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
+# 无管理员权限安装时，下载脚本必须先自安装为用户级启动器，再创建 user systemd 和桌面入口。
+mkdir -p "${TEST_ROOT}/user-home" "${TEST_ROOT}/fake-systemctl"
 printf '#!/usr/bin/env sh\nexit 0\n' >"${TEST_ROOT}/fake-systemctl/systemctl"
 chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
-HOME="${TEST_ROOT}/user-home" \
-PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
-TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
-TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
-TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install/runtime" \
-TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install/config" \
-TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
-  "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client" setup
+(
+  cd "${TEST_ROOT}/dist/local-opencode-client"
+  HOME="${TEST_ROOT}/user-home" \
+  PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
+  TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+  TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+  TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install/runtime" \
+  TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install/config" \
+  TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
+    sh install.sh setup
+)
+test -x "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
+test ! -L "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
+cmp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
+  "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
 grep -Fxq "ExecStart=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client run" \
   "${TEST_ROOT}/user-home/.config/systemd/user/test-agent-local-opencode-client.service"
 grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client enroll" \

@@ -105,7 +105,7 @@ const localClientDistributionRoute = (): Plugin => ({
         response.statusCode = 302;
         response.setHeader(
           "Location",
-          "/downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb"
+          "/downloads/local-opencode-client/install.sh"
         );
         response.setHeader("Cache-Control", "no-store");
         response.end();

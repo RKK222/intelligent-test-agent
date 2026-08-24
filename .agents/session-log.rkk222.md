@@ -13752,3 +13752,29 @@
 
 - 新客户端正常路径不再依赖操作系统或 JDK 原生 LookAndFeel，且新增依赖已完整离线打入签名 release；真实麒麟桌面视觉仍需发布该独立客户端包后人工复验。
 - 本次不变更 HTTP API、RunEvent/SSE、数据库、Flyway、后端/worker、OpenCode 只读源码、generated SDK 或 `.env*`。构建期间并行 SkillHub 改动已由其所有者提交，本次提交只纳入主题、依赖、测试、文档与本条会话记录。
+
+## 2026-08-24 - 客户端取消红色主色并改用用户级安装脚本
+
+### Why
+
+- 用户明确不希望新 FlatLaf 客户端继续使用红色主操作；企业新用户从网页下载 DEB 后，麒麟图形软件安装器因没有匹配的企业系统包信任链而拒绝安装，但手工提取启动器可正常运行。
+- 现有发布已经提供会校验签名清单和制品的 `install.sh`，不应继续要求普通用户通过系统软件安装器安装只有稳定启动器的 DEB。
+
+### What
+
+- 客户端焦点、默认按钮及交互态由红色改为深蓝灰；继续复用随 shaded JAR 离线交付的 FlatLaf 3.7.2，不恢复 Java 或系统原生外观。
+- 网页直接下载 `install.sh` 并固定文件名为 `test-agent-local-client-install.sh`；Nginx 与 Vite 的兼容 `/installer` 入口也改为重定向脚本。版本化 DEB 继续保留为受控离线提取载体，不再表述为可由未配置信任策略的图形软件安装器直接安装。
+- 安装脚本在成功初始化/接入后原子自安装到 `~/.local/bin/test-agent-local-client`，user systemd 和桌面入口只引用该用户级启动器，不需要 `/usr/bin` 或 sudo。同步客户端、前端、部署、安全和用户手册说明。
+- 生成新的不可变签名客户端 release `20260824183732`，继续使用企业公共 Git `81605f245d1512e1ab0dd73812391f6da7d008b5` 的 8 Agent / 16 Skill / 8 Tool 完整能力包。
+
+### How
+
+- `local-opencode-client-package-test.sh` 通过，覆盖下载脚本直接自安装、非符号链接用户启动器、systemd/桌面入口、Nginx 双入口重定向和 DEB 离线载体；`FigmaShell.test.ts` 定向测试和 agent-web production build 通过。
+- Maven 首次被默认 Java 17 与已有 Java 21 class 拦截；固定本机 JDK 25 后按 Java 21 release 重跑，common 110、protocol 11、client 96 项通过，client 1 项按桌面条件跳过。
+- 本机独立 Vite `http://127.0.0.1:3101` 实测 `install.sh` 返回 200、下载文件名正确，兼容 `/installer` 返回 302 并指向脚本；生成分发通过离线 verifier，manifest、客户端 JAR和公共能力包签名均验证成功。
+- U 盘转运包为 `~/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260824183732_arm64.tar.gz`，SHA-256 为 `dfbe70371dcf2c752db93be9dd49e3605384540aed7cfe6c65fcc847ebc44b37`；JAR 为 `ccdb0de50ab6568adfa671b4beabdc37eb2c88068b4f6e9e8d4cb8658511b26b`，DEB 为 `a34f75ecf487a9f3c6aee0eced33824ac67f7630c41f2ca6a253bc62afee77d0`，安装脚本为 `6fa0edfa20d408e906fb853ff49d7f3610fd65515962b1bc172eb8ed85c4deeb`。
+
+### Result
+
+- 普通用户下载后执行 `sh ~/下载/test-agent-local-client-install.sh` 即可完成用户级初始化、接入和常驻服务安装，不再触发麒麟软件中心的未签名 DEB 拒绝；这不是伪造或绕过系统签名，若未来必须由图形软件安装器安装，仍需企业提供并预置信任的 APT/debsig 密钥与策略。
+- 本次不新增 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点或强制环境变量，不修改 `.env*`、generated SDK 或 OpenCode 只读源码。真实麒麟桌面视觉与新用户首次输入 Client key 仍需在发布该客户端和前端/Nginx入口后人工复验。

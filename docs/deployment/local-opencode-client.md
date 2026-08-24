@@ -212,7 +212,7 @@ curl -fsSI http://127.0.0.1/downloads/local-opencode-client/test-agent-local-cli
 curl -fsSIL http://127.0.0.1/downloads/local-opencode-client/installer
 ~~~
 
-成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载 `TestAgent-Local-Client-Kylin-arm64.deb`。配置中 /downloads/local-opencode-client/ 必须映射到 /data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
+成功条件：配置脚本打印已安装的 gateway，前三个 curl 返回 200，`/installer` 只重定向并最终下载为 `test-agent-local-client-install.sh`；版本化 DEB 继续返回 200，但只作为受控离线载体，不交给未配置企业包信任链的图形安装器。配置中 /downloads/local-opencode-client/ 必须映射到 /data/testagent/dist/local-opencode-client/；下载服务只暴露制品，不暴露 API 或目录索引。失败即停止，脚本会恢复旧 Nginx 配置。
 
 **机器：平台网页（超级管理员）**。在 Nginx 三个 URL 都返回 200 后，进入本地客户端版本管理页面，执行“同步 release/catalog”。成功条件：页面显示 <RELEASE_VERSION> 的已同步 release，且 platform=linux、architecture=arm64、签名校验成功。同步失败或版本不兼容时停止，不能创建 rollout。
 
@@ -229,7 +229,21 @@ esac
 
 ## 7. 麒麟 ARM 用户节点：普通用户级安装与 enroll
 
-**机器：麒麟 ARM 用户节点，同一普通登录用户，不使用 sudo**。下载本次精确版本的 DEB，校验元数据后只提取其中的稳定启动器到用户目录；不要双击系统安装器，也不要把 Client key 放到命令、环境变量或安装日志中。
+**机器：麒麟 ARM 用户节点，同一普通登录用户，不使用 sudo**。网页普通用户入口下载 `test-agent-local-client-install.sh`，脚本会把自身安装为 `~/.local/bin/test-agent-local-client` 并下载签名运行时；不要双击或调用系统软件安装器，也不要把 Client key 放到命令、环境变量或安装日志中。下面的版本化 DEB 提取方式只作为运维离线兜底：
+
+~~~bash
+client_installer="$HOME/Downloads/test-agent-local-client-install.sh"
+curl -fS --proto '=http' http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/install.sh -o "$client_installer"
+chmod 0700 "$client_installer"
+sh "$client_installer"
+~~~
+
+成功条件：脚本提示输入统一认证号和隐藏 Client key，随后输出“麒麟 ARM64 本地客户端已安装并接入”；
+`~/.local/bin/test-agent-local-client`、user systemd unit 和桌面入口均由脚本自动创建。网页下载得到同名脚本后，
+也只需在终端执行 `sh ~/下载/test-agent-local-client-install.sh`，不要双击软件安装器。
+
+**机器：同一麒麟 ARM 用户节点，仅在网页安装脚本无法转运时使用**。版本化 DEB 只用于提取启动器，不调用
+图形软件安装器：
 
 ~~~bash
 client_deb="$HOME/Downloads/test-agent-local-client_<RELEASE_VERSION>_arm64.deb"

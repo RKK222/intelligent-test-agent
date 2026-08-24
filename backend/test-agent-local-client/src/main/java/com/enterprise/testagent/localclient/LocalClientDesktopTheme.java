@@ -25,9 +25,9 @@ final class LocalClientDesktopTheme {
     private static final ColorUIResource FIELD = new ColorUIResource(255, 255, 255);
     private static final ColorUIResource TEXT = new ColorUIResource(31, 41, 55);
     private static final ColorUIResource MUTED = new ColorUIResource(107, 114, 128);
-    private static final ColorUIResource ACCENT = new ColorUIResource(190, 30, 45);
-    private static final ColorUIResource ACCENT_HOVER = new ColorUIResource(168, 24, 39);
-    private static final ColorUIResource ACCENT_PRESSED = new ColorUIResource(143, 20, 34);
+    private static final ColorUIResource ACCENT = new ColorUIResource(49, 91, 125);
+    private static final ColorUIResource ACCENT_HOVER = new ColorUIResource(39, 76, 105);
+    private static final ColorUIResource ACCENT_PRESSED = new ColorUIResource(31, 62, 86);
     private static final ColorUIResource BORDER = new ColorUIResource(218, 222, 229);
     private static final ColorUIResource DISABLED_BORDER = new ColorUIResource(232, 234, 239);
     private static final FontUIResource DEFAULT_FONT = new FontUIResource(Font.DIALOG, Font.PLAIN, 14);
@@ -65,7 +65,7 @@ final class LocalClientDesktopTheme {
         defaults.put("TextField.inactiveForeground", MUTED);
         defaults.put("PasswordField.inactiveForeground", MUTED);
 
-        // FlatLaf 客户端级 token：白色卡片、轻边框、12px 圆角，仅默认操作按钮使用品牌红。
+        // FlatLaf 客户端级 token：白色卡片、轻边框、12px 圆角，默认操作使用克制的深蓝灰。
         defaults.put("Component.arc", 12);
         defaults.put("Component.focusWidth", 1);
         defaults.put("Component.innerFocusWidth", 0);

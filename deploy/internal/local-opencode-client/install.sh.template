@@ -478,12 +478,31 @@ install_user_service() {
   [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ] || return 0
   unit_dir="${HOME}/.config/systemd/user"
   desktop_dir="${HOME}/.local/share/applications"
-  if [ -x "${HOME}/.local/bin/test-agent-local-client" ]; then
-    service_launcher="${HOME}/.local/bin/test-agent-local-client"
-  else
-    service_launcher="/usr/bin/test-agent-local-client"
+  launcher_dir="${HOME}/.local/bin"
+  service_launcher="${launcher_dir}/test-agent-local-client"
+  launcher_source="$0"
+  case "${launcher_source}" in
+    */*) ;;
+    *)
+      if [ -f "${launcher_source}" ]; then
+        launcher_source="./${launcher_source}"
+      else
+        launcher_source="$(command -v "${launcher_source}" 2>/dev/null || true)"
+      fi
+      ;;
+  esac
+  launcher_source="$(resolve_real_path "${launcher_source}")" \
+    || fail "无法定位当前客户端安装脚本"
+  mkdir -p "${launcher_dir}"
+  if [ ! -f "${service_launcher}" ] || [ -L "${service_launcher}" ] \
+    || ! cmp -s "${launcher_source}" "${service_launcher}"; then
+    launcher_temp="${launcher_dir}/.test-agent-local-client.$$"
+    cp "${launcher_source}" "${launcher_temp}"
+    chmod 0755 "${launcher_temp}"
+    mv -f "${launcher_temp}" "${service_launcher}"
   fi
-  [ -x "${service_launcher}" ] || fail "未找到可执行的用户级客户端启动器"
+  [ -x "${service_launcher}" ] && [ ! -L "${service_launcher}" ] \
+    || fail "用户级客户端启动器安装失败"
   mkdir -p "${unit_dir}" "${desktop_dir}"
   {
     printf '%s\n' '[Unit]' 'Description=Test Agent Local OpenCode Client' \

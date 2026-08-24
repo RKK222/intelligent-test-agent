@@ -289,7 +289,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 个人设置页提供 client key 创建/复制/轮换/撤销、实例状态与生命周期控制、本地只读目录选择和 Workspace
 注册。明文 key 只在 API 方法局部变量中直接写剪贴板，不渲染、不进入 TanStack Query cache 或浏览器
 存储。头像菜单合并服务端和本地 OpenCode 实例，显示平台、上报/观察地址、端口、版本、状态和最后心跳。
-实例列表下方的“下载本地客户端”经 `/downloads/local-opencode-client/installer` 下载麒麟 Linux ARM64 DEB；任一
+实例列表下方的“下载本地客户端安装脚本”直接下载 `/downloads/local-opencode-client/install.sh`；兼容入口 `/installer` 也重定向到同一麒麟 Linux ARM64 普通用户安装脚本。用户在终端以 `sh` 执行，脚本会把稳定启动器安装到 `~/.local/bin`，不经过系统软件安装器；DEB 仅作为管理员受控离线载体保留。任一
 本地客户端在线时隐藏该入口，全部离线且仍有下载灰度权限时恢复显示。工作区默认从客户端托盘直接选择并注册，
 网页个人设置只保留目录浏览和手工注册兜底。客户端注册成功会打开只携带逻辑 Workspace ID 的工作台深链；页面
 校验当前用户归属后切换到 `LOCAL_CLIENT` 工作区，通过既有文件 WebSocket 加载目录，不把本机绝对路径写入 URL。
@@ -300,7 +300,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 目录继续经文件 WebSocket 后台加载；其服务器模板查询保留最近应用上下文，禁用查询不再误显示永久加载。每次成功切换都会写入服务端全局最近工作区偏好，刷新、重新登录或由客户端再次打开
 网页时自动恢复最后一次本地/服务器选择。切换只传递逻辑 Workspace ID，不在浏览器另存本机路径。LOCAL_CLIENT 仍使用独立
 选择语义，不触发默认应用补选，并隐藏 Git、应用版本和物理路径复制入口。
-管理员安装后，普通用户在终端执行 `test-agent-local-client enroll` 完成接入。macOS、Windows 与非 glibc
+普通用户执行下载脚本后直接完成首次初始化与接入。macOS、Windows 与非 glibc
 系统不在本地客户端支持范围；客户端向平台注册后，该位置改为显示本地 OpenCode
 健康、异常或离线状态。生产由 Nginx 同源下载路由提供，dev server 只读暴露
 `deploy/internal/dist/local-opencode-client/`，也可用

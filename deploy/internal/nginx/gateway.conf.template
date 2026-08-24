@@ -58,11 +58,12 @@ server {
         default_type text/x-shellscript;
         add_header Cache-Control "no-store" always;
         add_header X-Content-Type-Options nosniff always;
+        add_header Content-Disposition 'attachment; filename="test-agent-local-client-install.sh"' always;
     }
 
-    # 网页统一入口只提供 dev 客户端核心支持的麒麟 ARM64 安装包。
+    # 网页统一入口下载普通用户安装脚本，避免未纳入企业包信任链的 DEB 被图形安装器拒绝。
     location = /downloads/local-opencode-client/installer {
-        return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+        return 302 /downloads/local-opencode-client/install.sh;
     }
 
     location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {
@@ -245,11 +246,12 @@ server {
         default_type text/x-shellscript;
         add_header Cache-Control "no-store" always;
         add_header X-Content-Type-Options nosniff always;
+        add_header Content-Disposition 'attachment; filename="test-agent-local-client-install.sh"' always;
     }
 
-    # 独立下载端口与同源入口保持相同的麒麟 ARM64 下载行为。
+    # 独立下载端口与同源入口保持相同的普通用户安装行为。
     location = /downloads/local-opencode-client/installer {
-        return 302 /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb;
+        return 302 /downloads/local-opencode-client/install.sh;
     }
 
     location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {

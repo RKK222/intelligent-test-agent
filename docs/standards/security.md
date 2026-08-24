@@ -202,7 +202,8 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 内网 HTTP 下载不使用 client key。stable 清单必须签名，版本化制品以及 macOS PKG/麒麟 DEB 的 SHA-256
   必须进入签名清单；打包私钥不得进入仓库、企业 ZIP、Nginx 目录或客户端。生产 macOS PKG 还必须使用
   Developer ID Installer 签名并按网络条件完成 notarization；DEB 由受控发布链路和签名清单校验。由于
-  install.sh 和原生安装包仍可能经明文 HTTP 取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
+  网页安装入口只下载会自安装到 `~/.local/bin` 的普通用户 `install.sh`，不把未进入企业系统包信任链的 DEB
+  交给图形软件安装器；DEB 仅保留为受控离线载体。`install.sh` 和 DEB 仍可能经明文 HTTP 取得，主动中间人替换下载内容的风险不能只靠同源清单消除，
   必须依赖网络 ACL、可信 HTTPS 或带外固定校验。
 - 本地客户端相关功能默认隐藏，只允许 `SUPER_ADMIN` 通过受认证管理 API 按已存在且可登录的 userId 加入
   灰度名单。普通用户通过兼容路径 `download-access/me` 仅接收 `allowed` 布尔值；缺字段、请求失败、存储
