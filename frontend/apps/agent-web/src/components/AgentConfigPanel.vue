@@ -33,6 +33,7 @@ import { formatAgentConfigError } from "./agentConfigErrors";
 import {
   agentFileInfo,
   isAgentFilePath,
+  type AgentQuickCommitRequest,
   type AgentFileLoadRequest,
   type PublicWorktreeMountRequest
 } from "./agentFileLoad";
@@ -83,6 +84,7 @@ const emit = defineEmits<{
     workspaceId?: string;
   }];
   "files-mutated": [payload: AgentConfigMutation];
+  "request-git-commit": [payload: AgentQuickCommitRequest];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -436,6 +438,29 @@ function visibleEntries(scope: Scope, path: string) {
 
 function canWriteScope(scope: Scope) {
   return scope === "PUBLIC" ? props.canWrite : workspaceCanWrite.value;
+}
+
+/** 文件逐个提交；Skill 以 skills 下的一级包目录作为一个完整 Git 提交单元。 */
+function quickCommitKind(entry: FileTreeEntry): AgentQuickCommitRequest["kind"] | null {
+  const path = entry.path.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
+  if (entry.type === "directory" && /^skills\/[^/]+$/i.test(path)) return "SKILL";
+  if (entry.type === "file" && !/^skills\//i.test(path)) return "FILE";
+  return null;
+}
+
+function canQuickCommitEntry(entry: FileTreeEntry): boolean {
+  return quickCommitKind(entry) !== null;
+}
+
+function requestQuickGitCommit(scope: Scope, entry: FileTreeEntry) {
+  const kind = quickCommitKind(entry);
+  if (!kind || !canWriteScope(scope) || busy.value) return;
+  emit("request-git-commit", {
+    scope,
+    path: entry.path,
+    kind,
+    displayName: entry.displayName?.trim() || entry.name
+  });
 }
 
 /** Agent 配置树复用工作空间的新建面板，作用域只负责补齐文件路由上下文。 */
@@ -2122,6 +2147,7 @@ defineExpose({
           :selected-entries="selectedEntriesByScope.PUBLIC"
           :drag-source-paths="dragSourcePathsByScope.PUBLIC"
           :clipboard-available="agentClipboard?.scope === 'PUBLIC'"
+          :can-git-commit-entry="canQuickCommitEntry"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
           @create-entry="(path) => openCreateEntryDialog('PUBLIC', path)"
@@ -2133,6 +2159,7 @@ defineExpose({
           @paste-entries="(targetDirectory) => pasteAgentEntries('PUBLIC', targetDirectory)"
           @move-entries="(sourcePaths, targetDirectory) => moveAgentEntries('PUBLIC', sourcePaths, targetDirectory)"
           @drag-source-change="(paths) => setAgentDragSources('PUBLIC', paths)"
+          @git-commit="(entry) => requestQuickGitCommit('PUBLIC', entry)"
         />
       </div>
 
@@ -2197,6 +2224,7 @@ defineExpose({
           :selected-entries="selectedEntriesByScope.WORKSPACE"
           :drag-source-paths="dragSourcePathsByScope.WORKSPACE"
           :clipboard-available="agentClipboard?.scope === 'WORKSPACE'"
+          :can-git-commit-entry="canQuickCommitEntry"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
           @create-entry="(path) => openCreateEntryDialog('WORKSPACE', path)"
@@ -2208,6 +2236,7 @@ defineExpose({
           @paste-entries="(targetDirectory) => pasteAgentEntries('WORKSPACE', targetDirectory)"
           @move-entries="(sourcePaths, targetDirectory) => moveAgentEntries('WORKSPACE', sourcePaths, targetDirectory)"
           @drag-source-change="(paths) => setAgentDragSources('WORKSPACE', paths)"
+          @git-commit="(entry) => requestQuickGitCommit('WORKSPACE', entry)"
         />
       </div>
     </div>

@@ -465,6 +465,38 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.emitted("agent-config-mutated")).toEqual([[mutation]]);
   });
 
+  it("routes an Agent tree quick commit through the existing Git changes owner", async () => {
+    const openQuickAgentCommit = vi.fn().mockResolvedValue(undefined);
+    const GitChangesPanelStub = defineComponent({
+      name: "GitChangesPanel",
+      setup(_, { expose }) {
+        expose({ refreshChanges: vi.fn(), openQuickAgentCommit });
+        return () => h("div");
+      }
+    });
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      },
+      global: { stubs: { GitChangesPanel: GitChangesPanelStub } }
+    });
+    const request = {
+      scope: "WORKSPACE" as const,
+      path: "skills/payment-test",
+      kind: "SKILL" as const,
+      displayName: "payment-test"
+    };
+
+    wrapper.findComponent(AgentConfigPanel).vm.$emit("request-git-commit", request);
+    await wrapper.vm.$nextTick();
+
+    expect(openQuickAgentCommit).toHaveBeenCalledWith(request);
+    expect(wrapper.get('button[aria-label="变更"]').classes()).toContain("is-active");
+  });
+
   it("forwards the initialized public worktree remount request to the Agent config panel", () => {
     const request = {
       revision: 3,

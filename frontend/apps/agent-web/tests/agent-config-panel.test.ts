@@ -946,6 +946,45 @@ describe("AgentConfigPanel", () => {
     ]]));
   });
 
+  it("offers quick Git submission for public and application files and treats a Skill as one folder", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => {
+      if (path === "") return [
+        { path: "opencode.jsonc", name: "opencode.jsonc", type: "file" },
+        { path: "agents", name: "agents", type: "directory" },
+        { path: "skills", name: "skills", type: "directory" }
+      ];
+      if (path === "agents") return [{ path: "agents/review.md", name: "review.md", type: "file" }];
+      if (path === "skills") return [{ path: "skills/payment-test", name: "payment-test", type: "directory" }];
+      if (path === "skills/payment-test") {
+        return [{ path: "skills/payment-test/SKILL.md", name: "SKILL.md", type: "file" }];
+      }
+      return [];
+    });
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => {
+      if (path === "") return [{ path: "agents/app-review.md", name: "app-review.md", type: "file" }];
+      return [];
+    });
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByRole("button", { name: "agents" }));
+    await fireEvent.click(await view.findByRole("button", { name: "skills" }));
+    await fireEvent.click(await view.findByRole("button", { name: "payment-test" }));
+
+    expect(view.getByRole("button", { name: "提交并推送 opencode.jsonc" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "提交并推送 review.md" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "提交并推送 payment-test" })).toBeTruthy();
+    expect(view.queryByRole("button", { name: "提交并推送 SKILL.md" })).toBeNull();
+
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送 payment-test" }));
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    await fireEvent.click(await view.findByRole("button", { name: "提交并推送 app-review.md" }));
+
+    expect(view.emitted("request-git-commit")).toEqual([
+      [{ scope: "PUBLIC", path: "skills/payment-test", kind: "SKILL", displayName: "payment-test" }],
+      [{ scope: "WORKSPACE", path: "agents/app-review.md", kind: "FILE", displayName: "app-review.md" }]
+    ]);
+  });
+
   it("creates a tracked application Agent folder with gitkeep and reports the Git mutation", async () => {
     apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
       ? [{ path: "skills", name: "skills", type: "directory" }]

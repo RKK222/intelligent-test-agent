@@ -14481,3 +14481,26 @@
 
 - 手册已同步当前 release 的 SkillMarket 上传能力；仍需管理员补拍“能力库 → Skill → 上传 Skill”弹窗的已脱敏真实截图后补入对应章节。
 - 本次只修改手册与帮助中心测试，不涉及 API、事件、数据库、性能、安全实现、兼容性、环境配置、OpenCode 源码或部署节点。
+
+## 2026-08-25 - Agent 配置树增加单文档快捷提交发布
+
+### Why
+
+- 公共级和应用级 Agent 配置原先只能切到 Git Changes 后手工寻找、暂存、填写说明并发布，单文档修改路径较长；Skill 还需要按整个目录作为同一提交单元。
+
+### What
+
+- 公共/应用 Agent 树为普通文件增加行内 Git 按钮，Skill 只在 `skills/{skillName}` 一级目录显示一次；点击后切换到既有变更面板，按真实 Diff 自动暂存精确文件或 Skill 目录内全部变更，再弹出提交信息框。
+- 快捷入口复用既有公共个人 worktree 发布、应用个人 worktree 提交及 feature 投影发布程序；冲突、待重新推送状态或同作用域无关 staged 文件会阻断操作，取消弹框不擅自撤销已完成的暂存。
+- 补充配置树事件、变更面板路径映射与组件回归测试，并同步 agent-web README/PACKAGE。
+
+### How
+
+- 前端全量 Vitest 152 个文件通过，2226 passed / 1 skipped；agent-web typecheck 和 production build 通过，`git diff --check` 通过。
+- `restart-dev-services.sh --profile test --env-file .env.test` 完成后端 26 模块与前端构建，但再次卡在 Docker Desktop 的 ClickHouse `docker run`；在脚本停止旧服务前中止卡住进程，随后仅重启本次变更的前端，`127.0.0.1:3000` 可访问，未变更的后端 health 为 `UP`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目；不纳入 `.reasonix/`、Vite cache 和根 `node_modules/` 等既有未跟踪内容。
+
+### Result
+
+- 可从公共或应用 Agent 配置树直接完成目标文档/Skill 的 stage、提交和远端推送，同时避免把此前暂存的无关文件带入提交。
+- 本次仅修改前端交互和稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、性能模型、安全协议、环境配置、generated SDK 或只读 OpenCode 源码；整栈自动重启仍受本机 Docker ClickHouse 创建卡死影响。

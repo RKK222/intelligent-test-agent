@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/vue";
+import { mount } from "@vue/test-utils";
 import { createPinia } from "pinia";
 import { BackendApiError } from "@test-agent/backend-api";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
@@ -236,6 +237,154 @@ describe("GitChangesPanel", () => {
 
     expect(await view.findByText("public-review.md", { exact: false })).toBeTruthy();
     expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalledTimes(2);
+  });
+
+  it("quick-stages an application Skill folder and reuses personal-worktree commit and publish", async () => {
+    let staged = false;
+    apiClientMock.getWorkspaceAgentDiff.mockImplementation(async () => ({
+      files: [
+        { path: "skills/payment-test/SKILL.md", status: "M", staged, patch: "" },
+        { path: "skills/payment-test/rules/review.md", status: "M", staged, patch: "" },
+        { path: "agents/unrelated.md", status: "M", staged: false, patch: "" }
+      ]
+    }));
+    apiClientMock.stageWorkspaceAgentFiles.mockImplementation(async () => {
+      staged = true;
+    });
+    const wrapper = mount(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_runtime",
+        agentConfigWorkspaceId: "wrk_runtime",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    try {
+      await waitFor(() => expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalled());
+      await (wrapper.vm as unknown as {
+        openQuickAgentCommit: (request: {
+          scope: "WORKSPACE";
+          path: string;
+          kind: "SKILL";
+          displayName: string;
+        }) => Promise<void>;
+      }).openQuickAgentCommit({
+        scope: "WORKSPACE",
+        path: "skills/payment-test",
+        kind: "SKILL",
+        displayName: "payment-test"
+      });
+      await wrapper.vm.$nextTick();
+
+      expect(apiClientMock.stageWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_runtime", [
+        "skills/payment-test/SKILL.md",
+        "skills/payment-test/rules/review.md"
+      ]);
+      const dialog = wrapper.get('[role="dialog"][aria-label="提交并推送 Agent 文档"]');
+      expect(dialog.text()).toContain("已自动暂存 2 个目标文件");
+      await dialog.get('textarea[aria-label="快捷提交信息"]').setValue("agent: 更新支付测试 Skill");
+      await dialog.get("button.quick-agent-commit-submit").trigger("click");
+
+      await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
+        "psw_default",
+        expect.objectContaining({
+          commitMessage: "agent: 更新支付测试 Skill",
+          files: [
+            ".opencode/skills/payment-test/SKILL.md",
+            ".opencode/skills/payment-test/rules/review.md"
+          ]
+        })
+      ));
+      await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith(
+        "psw_default",
+        expect.objectContaining({
+          files: [
+            ".opencode/skills/payment-test/SKILL.md",
+            ".opencode/skills/payment-test/rules/review.md"
+          ]
+        })
+      ));
+      expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
+      expect(apiClientMock.publishWorkspaceAgentConfig).not.toHaveBeenCalled();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("maps a public tree file to the public Git path before quick commit and publish", async () => {
+    let staged = false;
+    apiClientMock.getPublicAgentDiff.mockImplementation(async () => ({
+      files: [{ path: "opencode/agents/review.md", status: "M", staged, patch: "" }]
+    }));
+    apiClientMock.stagePublicAgentFiles.mockImplementation(async () => {
+      staged = true;
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-08-25T00:00:00Z",
+      updatedAt: "2026-08-25T00:00:00Z"
+    };
+    const wrapper = mount(GitChangesPanel, {
+      props: {
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: false,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    try {
+      await waitFor(() => expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalled());
+      await (wrapper.vm as unknown as {
+        openQuickAgentCommit: (request: {
+          scope: "PUBLIC";
+          path: string;
+          kind: "FILE";
+          displayName: string;
+        }) => Promise<void>;
+      }).openQuickAgentCommit({
+        scope: "PUBLIC",
+        path: "agents/review.md",
+        kind: "FILE",
+        displayName: "review.md"
+      });
+      await wrapper.vm.$nextTick();
+
+      expect(apiClientMock.stagePublicAgentFiles).toHaveBeenCalledWith(
+        ["opencode/agents/review.md"],
+        "agw_public"
+      );
+      const dialog = wrapper.get('[role="dialog"][aria-label="提交并推送 Agent 文档"]');
+      await dialog.get('textarea[aria-label="快捷提交信息"]').setValue("agent: 更新公共审查 Agent");
+      await dialog.get("button.quick-agent-commit-submit").trigger("click");
+
+      await waitFor(() => expect(apiClientMock.commitPublicAgentConfig).toHaveBeenCalledWith(expect.objectContaining({
+        message: "agent: 更新公共审查 Agent",
+        worktreeId: "agw_public"
+      })));
+      await waitFor(() => expect(apiClientMock.publishPublicAgentConfig).toHaveBeenCalledWith(
+        "agw_public",
+        expect.stringMatching(/^aco_/)
+      ));
+    } finally {
+      wrapper.unmount();
+    }
   });
 
   it("does not expose mock data button and loads workspace plus application agent changes", async () => {

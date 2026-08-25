@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type {
   AppSourceRepositorySummary,
@@ -12,7 +12,12 @@ import type {
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
-import type { AgentConfigMutation, AgentFileLoadRequest, PublicWorktreeMountRequest } from "./agentFileLoad";
+import type {
+  AgentConfigMutation,
+  AgentFileLoadRequest,
+  AgentQuickCommitRequest,
+  PublicWorktreeMountRequest
+} from "./agentFileLoad";
 import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, CloudDownload, FolderTree, GitBranch, Globe, MoreHorizontal, Plane, Plus, RefreshCw, Search } from "lucide-vue-next";
 import type { AppSourceWorkspaceContext, SelectedWorkspaceKind } from "./app-source-workspace";
@@ -332,6 +337,13 @@ function refreshAgents() {
 function refreshChanges() {
   if (props.workspaceKind === "APP_SOURCE" || props.workspaceKind === "LOCAL_CLIENT") return;
   gitChangesPanelRef.value?.refreshChanges();
+}
+
+/** 行内入口切到统一变更面板后再打开弹框，确保后续发布进度同样可见。 */
+async function openAgentQuickCommit(request: AgentQuickCommitRequest) {
+  tab.value = "changes";
+  await nextTick();
+  await gitChangesPanelRef.value?.openQuickAgentCommit(request);
 }
 
 const DIFF_AUTO_REFRESH_INTERVAL_MS = 5000;
@@ -680,6 +692,7 @@ defineExpose({
               @open-file="emit('openAgentFile', $event)"
               @files-mutated="emit('agent-config-mutated', $event)"
               @personal-runtime-reload="emit('personal-runtime-reload', $event)"
+              @request-git-commit="openAgentQuickCommit"
             />
           </div>
         </div>

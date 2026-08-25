@@ -2,7 +2,7 @@
 import { computed, nextTick, ref } from "vue";
 import { cn } from "@test-agent/ui-kit";
 import { FileEntryContextMenu, FileIcon } from "@test-agent/file-explorer";
-import { Plus, Trash2 } from "lucide-vue-next";
+import { GitCommitHorizontal, Plus, Trash2 } from "lucide-vue-next";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
 /**
@@ -48,6 +48,8 @@ const props = defineProps<{
   dragSourcePaths?: string[];
   /** 当前作用域是否已有可粘贴的文件剪贴板。 */
   clipboardAvailable?: boolean;
+  /** 普通文件与一级 Skill 目录才显示行内提交入口，范围规则由父组件统一判断。 */
+  canGitCommitEntry?: (entry: FileTreeEntry) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -67,6 +69,8 @@ const emit = defineEmits<{
   pasteEntries: [targetDirectory: string];
   moveEntries: [sourcePaths: string[], targetDirectory: string];
   dragSourceChange: [paths: string[] | undefined];
+  /** 请求父层复用 Git Changes 的暂存、提交和推送编排。 */
+  gitCommit: [entry: FileTreeEntry];
 }>();
 
 const renameInput = ref<HTMLInputElement | null>(null);
@@ -319,6 +323,16 @@ function submitRename() {
     </button>
     <div v-if="canWrite" class="agent-tree-actions">
       <button
+        v-if="canGitCommitEntry?.(entry)"
+        type="button"
+        class="agent-tree-action-btn is-commit"
+        :aria-label="`提交并推送 ${entry.name}`"
+        title="暂存后提交并推送"
+        @click.stop="emit('gitCommit', entry)"
+      >
+        <GitCommitHorizontal class="h-3.5 w-3.5" :stroke-width="1.5" />
+      </button>
+      <button
         v-if="isDirectory && (canCreateInDirectory?.(entry.path) ?? true)"
         type="button"
         class="agent-tree-action-btn is-add"
@@ -357,6 +371,7 @@ function submitRename() {
         :selected-entries="selectedEntries"
         :drag-source-paths="dragSourcePaths"
         :clipboard-available="clipboardAvailable"
+        :can-git-commit-entry="canGitCommitEntry"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
         @create-entry="(path: string) => emit('createEntry', path)"
@@ -368,6 +383,7 @@ function submitRename() {
         @paste-entries="(targetDirectory: string) => emit('pasteEntries', targetDirectory)"
         @move-entries="(sourcePaths: string[], targetDirectory: string) => emit('moveEntries', sourcePaths, targetDirectory)"
         @drag-source-change="(paths: string[] | undefined) => emit('dragSourceChange', paths)"
+        @git-commit="(child: FileTreeEntry) => emit('gitCommit', child)"
       />
     </div>
     <FileEntryContextMenu
@@ -421,7 +437,7 @@ function submitRename() {
 }
 
 .agent-config-tree-node > .ta-file-tree-row {
-  padding-right: 48px;
+  padding-right: 68px;
 }
 
 .ta-file-tree-row.is-dragging {
@@ -469,6 +485,11 @@ function submitRename() {
 .agent-tree-action-btn.is-add:hover {
   background: var(--ta-hover, #f1f5f9);
   color: var(--ta-tree-text, #3b3b3b);
+}
+
+.agent-tree-action-btn.is-commit:hover {
+  background: rgb(37 99 235 / 10%);
+  color: var(--ta-accent, #2563eb);
 }
 
 .agent-tree-action-btn.is-delete:hover {

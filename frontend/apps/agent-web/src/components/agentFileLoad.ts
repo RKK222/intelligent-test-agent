@@ -33,6 +33,14 @@ export type AgentConfigMutation = {
   renamed?: { path: string; nextPath: string; type: "file" };
 };
 
+/** Agent 配置树行内 Git 入口只描述目标；暂存、提交和发布仍由统一变更面板编排。 */
+export type AgentQuickCommitRequest = {
+  scope: "PUBLIC" | "WORKSPACE";
+  path: string;
+  kind: "FILE" | "SKILL";
+  displayName: string;
+};
+
 /** 初始化进程成功后，把后端已经准备好的公共个人 worktree 精确交给配置树重新挂载。 */
 export type PublicWorktreeMountRequest = {
   revision: number;
