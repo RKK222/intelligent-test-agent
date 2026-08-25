@@ -23,6 +23,7 @@ sha256_file() {
 }
 
 VERSION=20260820153045
+RELATIVE_OUTPUT_VERSION=20260820153046
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
@@ -160,7 +161,31 @@ package_release() {
       --skip-build
 }
 
+package_relative_output_release() {
+  (
+    cd "${TEST_ROOT}"
+    TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jdk-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+      "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+        --output-dir relative-dist/local-opencode-client \
+        --version "${RELATIVE_OUTPUT_VERSION}" \
+        --download-base-url "${DOWNLOAD_ROOT}" \
+        --server-url "${SERVER_ROOT}" \
+        --allow-insecure-control true \
+        --signing-key "${TEST_ROOT}/signing-private.pem" \
+        --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+        --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+        --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
+        --skip-build >/dev/null
+  )
+}
+
 package_release
+package_relative_output_release
+test -f "${TEST_ROOT}/relative-dist/local-opencode-client/releases/${RELATIVE_OUTPUT_VERSION}/jdk.tar.gz"
+test -f "${TEST_ROOT}/relative-dist/local-opencode-client/releases/${RELATIVE_OUTPUT_VERSION}/opencode.tar.gz"
 RELEASE_DIR="${TEST_ROOT}/dist/local-opencode-client/releases/${VERSION}"
 PUBLIC_KEY="${TEST_ROOT}/signing-public.pem"
 openssl pkey -in "${TEST_ROOT}/signing-private.pem" -pubout -out "${PUBLIC_KEY}" >/dev/null

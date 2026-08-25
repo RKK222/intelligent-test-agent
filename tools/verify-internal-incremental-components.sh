@@ -37,8 +37,11 @@ printf 'frontend\n' >"${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
 # zip-only 测试复用已生成制品，显式补齐可逐文件验真的客户端目录，避免把构建阶段误当作封装阶段。
 LOCAL_CLIENT_ROOT="${OUTPUT_DIR}/local-opencode-client"
 LOCAL_CLIENT_VERSION="20260820153045"
+LOCAL_CLIENT_HISTORY_VERSION="20260819153045"
 LOCAL_CLIENT_RELEASE="${LOCAL_CLIENT_ROOT}/releases/${LOCAL_CLIENT_VERSION}"
-mkdir -p "${LOCAL_CLIENT_ROOT}/stable" "${LOCAL_CLIENT_RELEASE}"
+LOCAL_CLIENT_HISTORY_RELEASE="${LOCAL_CLIENT_ROOT}/releases/${LOCAL_CLIENT_HISTORY_VERSION}"
+mkdir -p "${LOCAL_CLIENT_ROOT}/stable" "${LOCAL_CLIENT_RELEASE}" \
+  "${LOCAL_CLIENT_HISTORY_RELEASE}"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${OUTPUT_DIR}/local-opencode-client/install.sh"
 USER_PACKAGE_STAGE="${TMP_ROOT}/local-client-user-package"
 mkdir -p "${USER_PACKAGE_STAGE}/TestAgent-Local-Client/resources"
@@ -54,6 +57,11 @@ tar -C "${USER_PACKAGE_STAGE}" -czf \
   TestAgent-Local-Client
 cp "${OUTPUT_DIR}/local-opencode-client/test-agent-local-client_${LOCAL_CLIENT_VERSION}_arm64.tar.gz" \
   "${OUTPUT_DIR}/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz"
+# 构建目录允许保留历史版本；平台 ZIP 必须裁剪为当前版本，避免未变化的运行时重复交付。
+printf 'historical user package\n' \
+  >"${LOCAL_CLIENT_ROOT}/test-agent-local-client_${LOCAL_CLIENT_HISTORY_VERSION}_arm64.tar.gz"
+printf 'historical manifest\n' >"${LOCAL_CLIENT_HISTORY_RELEASE}/manifest.json"
+printf 'historical signature\n' >"${LOCAL_CLIENT_HISTORY_RELEASE}/manifest.json.sig"
 printf 'fixture client jar\n' >"${LOCAL_CLIENT_RELEASE}/test-agent-local-client.jar"
 printf 'fixture Linux JDK\n' >"${LOCAL_CLIENT_RELEASE}/jdk.tar.gz"
 printf 'fixture Linux OpenCode\n' >"${LOCAL_CLIENT_RELEASE}/opencode.tar.gz"
@@ -95,10 +103,18 @@ printf '%s\n' \
   '{' \
   '  "schemaVersion": 1,' \
   '  "releases": [' \
+  "    {\"version\": \"${LOCAL_CLIENT_HISTORY_VERSION}\", \"manifestPath\": \"releases/${LOCAL_CLIENT_HISTORY_VERSION}/manifest.json\", \"manifestSha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"manifestSignaturePath\": \"releases/${LOCAL_CLIENT_HISTORY_VERSION}/manifest.json.sig\"}," \
   "    {\"version\": \"${LOCAL_CLIENT_VERSION}\", \"manifestPath\": \"releases/${LOCAL_CLIENT_VERSION}/manifest.json\", \"manifestSha256\": \"${manifest_sha}\", \"manifestSignaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/manifest.json.sig\"}" \
   '  ]' \
   '}' >"${LOCAL_CLIENT_ROOT}/catalog.json"
 printf 'fixture catalog signature\n' >"${LOCAL_CLIENT_ROOT}/catalog.json.sig"
+TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY="${TMP_ROOT}/local-client-signing-private.pem"
+TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY="${TMP_ROOT}/local-client-signing-public.pem"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+  -out "${TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY}" >/dev/null 2>&1
+openssl pkey -in "${TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY}" -pubout \
+  -out "${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY}" >/dev/null
+export TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY
 printf 'programs\n' >"${OUTPUT_DIR}/test-agent-programs.tar.gz"
 printf 'worker\n' >"${OUTPUT_DIR}/test-agent-opencode-worker_internal-linux-amd64.tar"
 printf 'it-tools\n' >"${OUTPUT_DIR}/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar"
@@ -135,6 +151,25 @@ grep -Fxq 'deploy/internal/verify-python-libs.sh' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_it-tools_2024.10.22-7ca5933-platform.2-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/test-agent_omni-tools_0.6.0-platform.1-linux-amd64.tar' <<<"${full_listing}"
 grep -Fxq 'dist/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.tar.gz' <<<"${full_listing}"
+grep -Fxq "dist/local-opencode-client/releases/${LOCAL_CLIENT_VERSION}/manifest.json" \
+  <<<"${full_listing}"
+if grep -Fq "${LOCAL_CLIENT_HISTORY_VERSION}" <<<"${full_listing}"; then
+  echo 'Historical local client artifacts leaked into the active enterprise ZIP' >&2
+  exit 1
+fi
+full_client_catalog="$(unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  dist/local-opencode-client/catalog.json)"
+[[ "$(grep -c '"version":' <<<"${full_client_catalog}")" -eq 1 ]]
+grep -Fq "\"version\": \"${LOCAL_CLIENT_VERSION}\"" <<<"${full_client_catalog}"
+CLIENT_CATALOG_VERIFY_DIR="${TMP_ROOT}/client-catalog-verify"
+mkdir -p "${CLIENT_CATALOG_VERIFY_DIR}"
+unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  dist/local-opencode-client/catalog.json >"${CLIENT_CATALOG_VERIFY_DIR}/catalog.json"
+unzip -p "${OUTPUT_DIR}/test-agent-internal-release.zip" \
+  dist/local-opencode-client/catalog.json.sig >"${CLIENT_CATALOG_VERIFY_DIR}/catalog.json.sig"
+openssl dgst -sha256 -verify "${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY}" \
+  -signature "${CLIENT_CATALOG_VERIFY_DIR}/catalog.json.sig" \
+  "${CLIENT_CATALOG_VERIFY_DIR}/catalog.json" >/dev/null
 if grep -Eq '^dist/lobehub/' <<<"${full_listing}"; then
   echo 'Default release unexpectedly contains LobeHub artifacts' >&2
   exit 1

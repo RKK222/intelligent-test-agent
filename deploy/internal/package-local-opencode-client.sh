@@ -151,7 +151,10 @@ archive_create_runtime_tar_gz() {
   local output="$1" base_dir="$2"
   shift 2
   local -a metadata_flags=() owner_flags=() exclude_flags=()
-  local value
+  local value output_parent
+  # 归档时会切换到 base_dir；先把输出规范成绝对路径，避免相对 output 被错误解析到临时 staging 目录下。
+  output_parent="$(cd "$(dirname "${output}")" && pwd -P)"
+  output="${output_parent}/$(basename "${output}")"
   while IFS= read -r value; do
     [[ -z "${value}" ]] || metadata_flags+=("${value}")
   done < <(archive_tar_metadata_flags)

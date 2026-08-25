@@ -1592,6 +1592,69 @@ package_lobehub_zip() {
   ls -lh "${zip_path}" "${zip_path}.sha256"
 }
 
+stage_active_local_client_distribution() {
+  local source_root="$1" target_root="$2" version="$3"
+  local source_catalog="${source_root}/catalog.json"
+  local release_count manifest_sha signing_key verify_key derived_public_key=""
+
+  mkdir -p "${target_root}/stable" "${target_root}/releases/${version}"
+  cp -a \
+    "${source_root}/install.sh" \
+    "${source_root}/TestAgent-Local-Client-Kylin-arm64.tar.gz" \
+    "${source_root}/test-agent-local-client_${version}_arm64.tar.gz" \
+    "${target_root}/"
+  cp -a "${source_root}/stable/manifest.json" \
+    "${source_root}/stable/manifest.json.sig" "${target_root}/stable/"
+  cp -a "${source_root}/releases/${version}/." \
+    "${target_root}/releases/${version}/"
+
+  release_count="$(grep -E -c '^[[:space:]]*\{"version": "[0-9]{14}"' \
+    "${source_catalog}" || true)"
+  if [[ "${release_count}" -eq 1 ]] \
+    && grep -Fq "\"version\": \"${version}\"" "${source_catalog}"; then
+    cp -a "${source_catalog}" "${source_root}/catalog.json.sig" "${target_root}/"
+  else
+    # 构建输出可以保留历史版本用于本机追溯；企业增量包只发布当前版本，catalog 也必须同步裁剪并重新签名。
+    signing_key="${TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY:-}"
+    [[ -n "${signing_key}" && -f "${signing_key}" ]] || {
+      echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY is required to stage an active-only client catalog" >&2
+      exit 1
+    }
+    require_command openssl
+    manifest_sha="$(sha256_file "${source_root}/releases/${version}/manifest.json")"
+    {
+      printf '{\n  "schemaVersion": 1,\n  "releases": [\n'
+      printf '    {"version": "%s", "manifestPath": "releases/%s/manifest.json", "manifestSha256": "%s", "manifestSignaturePath": "releases/%s/manifest.json.sig"}\n' \
+        "${version}" "${version}" "${manifest_sha}" "${version}"
+      printf '  ]\n}\n'
+    } >"${target_root}/catalog.json"
+    openssl dgst -sha256 -sign "${signing_key}" \
+      -out "${target_root}/catalog.json.sig" "${target_root}/catalog.json"
+
+    verify_key="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
+    if [[ -z "${verify_key}" ]]; then
+      derived_public_key="${target_root}/.catalog-signing-public.pem"
+      openssl pkey -in "${signing_key}" -pubout -out "${derived_public_key}" >/dev/null
+      verify_key="${derived_public_key}"
+    fi
+    openssl dgst -sha256 -verify "${verify_key}" \
+      -signature "${target_root}/catalog.json.sig" \
+      "${target_root}/catalog.json" >/dev/null || {
+      echo "Active-only local client catalog signature verification failed" >&2
+      exit 1
+    }
+    [[ -z "${derived_public_key}" ]] || rm -f "${derived_public_key}"
+  fi
+
+  bash "${SCRIPT_DIR}/verify-local-opencode-client-distribution.sh" \
+    --root "${target_root}" \
+    --expected-version "${version}" \
+    --expected-manifest-sha256 "${LOCAL_CLIENT_MANIFEST_SHA256}" \
+    --expected-signature-sha256 "${LOCAL_CLIENT_SIGNATURE_SHA256}" \
+    --expected-install-sha256 "${LOCAL_CLIENT_INSTALL_SHA256}" \
+    --expected-user-package-sha256 "${LOCAL_CLIENT_USER_PACKAGE_SHA256}" >/dev/null
+}
+
 package_release_zip() {
   local staging_dir="${OUTPUT_DIR}/.release-zip"
   local zip_path session_log session_log_count=0
@@ -1694,8 +1757,10 @@ package_release_zip() {
   cp -a "${OUTPUT_DIR}/backend/." "${staging_dir}/dist/backend/"
   cp -a "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" "${staging_dir}/dist/"
   if [[ "${LOCAL_CLIENT_COMPONENT_MODE}" == included ]]; then
-    mkdir -p "${staging_dir}/dist/local-opencode-client"
-    cp -a "${OUTPUT_DIR}/local-opencode-client/." "${staging_dir}/dist/local-opencode-client/"
+    stage_active_local_client_distribution \
+      "${OUTPUT_DIR}/local-opencode-client" \
+      "${staging_dir}/dist/local-opencode-client" \
+      "${local_client_version}"
   fi
   if [[ "${WORKER_COMPONENT_MODE}" == included ]]; then
     cp -a "${OUTPUT_DIR}/test-agent-programs.tar.gz" "${worker_tar}" "${staging_dir}/dist/"

@@ -246,6 +246,7 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 - `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
 - `local OpenCode client`：客户端 JAR、麒麟 ARM64 用户包、JRE、OpenCode 归档、完整公共能力基线、安装脚本和签名清单是一个单元。`build-local-opencode-client-user-package.sh` 生成包含静态 ARM64 启动器的 `tar.gz`；普通用户完整解压后可双击运行，安装只写入 `~/.local` / `~/.config`，不生成 DEB，也不调用 sudo/dpkg。
   JDK/OpenCode 的规范化归档固定条目顺序、属主、时间与 gzip header；同一输入跨客户端版本保持相同摘要，用户端升级只在新签名 manifest 完全匹配时复用上一 release 归档，实际变化或验签失败仍重新下载。
+  本机构建输出可保留历史 release 供追溯，但平台 ZIP 只携带当前 release、当前用户包和重新签名的单版本 catalog，不会重复交付未变化的历史客户端运行时。
 
 Python 第三方库不进入上述 worker 指纹，也不烘焙进 worker 镜像。它使用独立命令、独立 tar 和独立校验文件，升级 pandas/Office/JSON 库时不需要重建或重新加载 worker 镜像：
 

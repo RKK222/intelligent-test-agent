@@ -5,6 +5,30 @@
 
 ## Entries
 
+### 2026-08-25 - 修复企业客户端归档并重建当前 release 增量包
+
+### Why
+
+- 用户要求基于当前 `release` 重新打企业增量包，且未变化内容不能重复携带；本机客户端构建目录同时保留上一版和当前版 release，原平台 ZIP 会把整个目录复制进去，导致历史 JDK/OpenCode 和用户包重复交付。
+- 正式构建还暴露出相对 `--output-dir` 下运行时归档路径会在切换 staging 目录后解析错误，客户端构建直接找不到目标 `jdk.tar.gz`。
+
+### What
+
+- 客户端运行时归档先将输出文件规范为绝对路径，再进入 JDK/OpenCode staging 目录执行确定性打包。
+- 企业内层 ZIP 只暂存当前客户端 release、当前用户包、stable 清单和安装器；若本机构建 catalog 含历史版本，则使用固定组织私钥生成并签署只含当前版本的 catalog，再用对应公钥验签，私钥不进入制品。
+- 增加相对输出路径回归、历史客户端 release 泄漏回归和裁剪后 catalog 签名回归；部署 README 明确本机构建历史与企业交付快照的边界。
+
+### How
+
+- `bash -n` 覆盖两个打包脚本和两个回归脚本，`git diff --check` 通过。
+- `tools/verify-internal-incremental-components.sh` 通过，确认历史版本不进入 ZIP、单版本 catalog 内容正确且签名可由组织公钥验证。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖相对输出、离线安装、签名发布、普通用户包与 bootstrap。
+
+### Result
+
+- 归档和增量选择缺陷已由自动化回归验证；当前客户端版本、最终内外包 SHA-256、Flyway/JAR 字节和外层节点包仍需在提交后正式重新封装并记录。
+- 本次不新增部署节点，不修改业务 HTTP API、RunEvent/SSE、数据库结构、Flyway SQL、generated SDK、OpenCode 源码或 `.env*`；只收紧企业发布归档完整性与增量边界。
+
 ### 2026-08-25 - 稳定客户端下载入口并复用已验签依赖缓存
 
 ### Why
