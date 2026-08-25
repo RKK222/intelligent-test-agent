@@ -33,6 +33,17 @@
         "提供时间窗日志采证方法",
         "要求脱敏 token、Cookie、prompt 和私钥"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "我在开发者 Mac 本机执行 restart-dev-services.sh 后，后端端口没有起来，使用的是根目录 .env.test。帮我排查一下。",
+      "expected_output": "明确说明这不是企业部署后现场问题，不进入 DBeaver、用户 binding、企业服务器归属或现场日志流程；改用 intelligent-test-agent-local-startup，本地通用重启场景可使用 restart-services。",
+      "files": [],
+      "expectations": [
+        "识别为开发者本机启动问题并停止使用 enterprise-troubleshooting",
+        "转交 intelligent-test-agent-local-startup 或 restart-services",
+        "不要求执行企业数据库和服务器取证流程"
+      ]
     }
   ]
 }

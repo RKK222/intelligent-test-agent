@@ -1,14 +1,23 @@
 ---
 name: enterprise-troubleshooting
-description: 企业内排查 TestAgent 用户登录、工作区打不开、Agent/Run/用户进程不可用、跨服务器路由、Java/worker 节点异常或数据库状态不一致时使用。无论用户是否明确提到“服务器归属”或“数据库排查”，只要需要定位某个用户或请求落在哪台服务器，都必须先用 DBeaver 连接项目数据库执行只读 SQL，拿到用户身份、当前 binding、用户 opencode 进程、工作区和 Java 节点证据；现场命令禁止使用 rg、jq、qgsql 以及任何命令行数据库客户端，日志与文本排查改用 grep、sed、find、journalctl、docker logs 等可用工具。
-compatibility: 需要企业内 PostgreSQL 的 DBeaver 只读连接；终端仅使用系统已有的基础文本、日志和 HTTP 工具，不依赖 rg、jq、qgsql 或数据库 CLI。
+description: 仅用于 TestAgent 已部署到企业内部环境后产生的现场运行问题，例如企业用户登录、工作区打不开、Agent/Run/用户进程不可用、跨服务器路由、Java/worker 节点异常或数据库状态不一致。开发者本机的启动、重启、端口、依赖、`.env.test` 或 `restart-dev-services.sh` 问题不使用本技能，应改用本地启动排查技能。企业现场需要定位某个用户或请求落在哪台服务器时，先用 DBeaver 连接项目数据库执行只读 SQL，拿到用户身份、当前 binding、用户 opencode 进程、工作区和 Java 节点证据；现场命令禁止使用 rg、jq、qgsql 以及任何命令行数据库客户端。
 ---
 
-# 企业内问题排查
+# 企业部署后问题排查
 
 ## 目标和边界
 
-把“用户在哪台服务器”作为企业内问题排查的第一事实，而不是先猜 IP、重启服务或清理数据。排查结果必须区分以下几类位置：
+本技能只处理**已经部署到企业内部环境后**，在企业服务器或企业用户实际使用阶段出现的问题。开始排查前先判断运行目标：
+
+- 目标是企业内已部署环境，问题发生在部署完成后的运行或使用阶段：继续使用本技能。
+- 目标是开发者本机，或问题涉及本机启动/重启、`restart-dev-services.sh`、`.env.test`、`localhost`、本机端口、本地前后端/manager 进程或本地依赖：立即停止使用本技能，改用 `intelligent-test-agent-local-startup`；仅需通用本地服务重启时使用 `restart-services`。
+- 目标环境不明确：先确认故障发生在开发者本机还是企业已部署服务器；在确认是企业部署后问题前，不执行本技能的 DBeaver 查询和现场日志流程。
+
+本地启动问题即使表现为登录失败、工作区打不开、Agent 不可用或数据库连接失败，也不属于本技能。企业部署、升级或重启完成后在企业环境暴露出的运行故障仍属于本技能；尚未部署的打包、制品传输和安装实施问题不属于本技能。
+
+使用本技能需要企业内 PostgreSQL 的 DBeaver 只读连接；终端仅使用系统已有的基础文本、日志和 HTTP 工具，不依赖 `rg`、`jq`、`qgsql` 或数据库 CLI。
+
+进入企业部署后排查后，把“用户在哪台服务器”作为第一事实，而不是先猜 IP、重启服务或清理数据。排查结果必须区分以下几类位置：
 
 1. **用户 Agent 进程服务器**：以 `user_opencode_process_bindings` 的当前绑定和 `opencode_server_processes` 的进程记录为主证据。
 2. **用户工作区服务器**：以 `workspaces.linux_server_id` 为主证据；个人工作区通过 `personal_workspaces.runtime_workspace_id` 关联到工作区。

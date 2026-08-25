@@ -13992,3 +13992,25 @@
 - 最终外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`，SHA-256 为 `f7f12fcb0a2898db02096590d36429c35302d5e5f1c012cd6c978b498d8b7bc8`；配套 `.sha256` 已覆盖并自校验为 OK。内层包为 `deploy/internal/dist/test-agent-internal-release.zip`，SHA-256 为 `236f80b9920e622f48b9c9187cb6c8406ab689b391fac3da5f5a4f9a5cd41403`。
 - 后端 JAR SHA-256 为 `60470d47e3f8aea2feaf68830831ce3bfb98aac7d3e03bf1147f046093b05f87`，persistence JAR 为 `5dc089057c28a600ee01a2e065a3853653feb8519e21052650848867bc599d5d`，前端 tar 为 `b1221d4936b2bf149fc983be15f75d97a7f948dfc8b3b5b0aa2964133af98704`。
 - 固定组织私钥/公钥和公共能力基线只保存在 Git 忽略的 `.secure/`，未进入 Git 或发布 ZIP；构建产物同样未提交。真实企业 `.4 → .114 → .2` 部署和麒麟文件管理器双击验收仍需现场执行，本轮未推送远程。
+
+## 2026-08-25 - 收紧企业部署后排查技能边界
+
+### Why
+
+- `enterprise-troubleshooting` 原触发描述覆盖所有登录、工作区、Agent 和数据库问题，容易把开发者本机启动失败误导到企业数据库与服务器归属取证流程。
+
+### What
+
+- 将技能明确限定为 TestAgent 已部署到企业内部环境后的现场运行故障；开发者本机启动、重启、端口、依赖、`.env.test` 和 `restart-dev-services.sh` 问题改由 `intelligent-test-agent-local-startup` 或通用 `restart-services` 处理。
+- 在正文增加运行目标入口判断，明确环境不清时先确认本机或企业服务器，本地问题不执行 DBeaver、binding 或企业现场日志流程；补充一个本地启动负向 eval。
+- 将不受当前 Codex 技能 schema 支持的 `compatibility` 顶层字段移入正文，保留企业现场工具约束并使技能通过标准校验。
+
+### How
+
+- 使用 Skill Creator 的 `quick_validate.py` 验证技能结构，通过 `python3 -m json.tool` 验证 eval JSON，并执行 `git diff --check`。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，未发现与本次两个技能文件冲突的未完成事项；工作区既有未跟踪目录不纳入提交。
+
+### Result
+
+- 企业部署后故障继续使用原有 DBeaver 只读 SQL 和现场日志证据链；开发者本机启动问题不再触发该技能。
+- 本次仅修改技能说明、eval 和本机会话记录，不涉及业务代码、API、事件、数据库、Flyway、性能、安全契约、部署拓扑、环境配置、generated SDK 或 OpenCode 源码；无需启动项目服务。
