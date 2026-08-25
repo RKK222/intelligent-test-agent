@@ -88,6 +88,7 @@
 - 有管理权限的用户可以把本应用最新推送的能力发布到 Hub，也可以把别处已经发布的能力引用到当前个人 worktree。引用、取消引用和更新之后，都要回到 Git Changes 检查并 push；否则只改了本地。
 - “待更新”会把来源的新版本合入当前个人 worktree；存在文本或二进制冲突时，先在 Hub 的冲突界面选择处理方式，再完成 Git 提交和推送。
 - 来自 SkillHub 的 Skill 卡片和详情会显示“创建人”。优先显示平台用户名；若悬停提示中还有统一认证号，它只用于确认来源，不是可编辑字段。
+- 只有超级管理员可在 Hub 的“Skill”页签点击“上传 Skill”，一次提交根目录含 `SKILL.md` 的 ZIP、安全审查报告、目录结构和运行效果三张图片。平台自动显示处理进度，成功后同步并刷新 SkillMarket 目录；这不会写入当前个人 worktree，也不替代应用内 Git 发布。完整材料、脱敏和超时处理见[Agent 与 Skill 配置](./agent-config.md#向-skillmarket-上传-skill)。
 
 配置文件操作见[Agent 与 Skill 配置](./agent-config.md)。
 

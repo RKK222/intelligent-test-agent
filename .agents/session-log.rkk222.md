@@ -14460,3 +14460,24 @@
 
 - 公共 config 仓库 `master` 已提交 `9d0abe0`（`新增存量案例推荐子智能体`），未推送远端；远程额外顶层文件未清理、未继承到本次改动。
 - 主项目不新增部署节点，不修改 API、RunEvent/SSE、数据库、Flyway、性能、安全协议、环境文件、generated SDK 或只读 OpenCode 源码；真实企业资产服务仍需在配置发布后做一次端到端推荐验收。
+
+## 2026-08-25 - 同步 SkillMarket 上传用户手册
+
+### Why
+
+- release 已交付超级管理员一次上传 Skill ZIP 与三张审查图片、自动查询进度并刷新 SkillMarket 目录；内置手册尚未说明该入口、权限、材料和超时处理。
+
+### What
+
+- 在 Agent 与 Skill 配置、功能总览、每周新功能和常见问题补充 SkillMarket 上传流程、四项必需材料、超级管理员边界、外部材料脱敏要求、100 秒后继续查询及目录同步失败后的处理。
+- 帮助中心回归测试覆盖新增专题、周报和 FAQ；周报保留本周摘要，并把完整步骤置于历史内容之后，以维持既有宠物问答上下文截断边界。
+
+### How
+
+- 依据 `AgentSkillHub.vue` 的真实按钮、阶段、文件类型、进度和同步状态，以及 `agent-skill-hub.test.ts` 的回归契约编写；未生成或伪造截图。
+- `corepack pnpm vitest run apps/agent-web/tests/help-center.test.ts`（17 passed）、`corepack pnpm --filter @test-agent/user-manual build`、`corepack pnpm --filter @test-agent/agent-web typecheck`、操作截图引用检查和 `git diff --check` 均通过。
+
+### Result
+
+- 手册已同步当前 release 的 SkillMarket 上传能力；仍需管理员补拍“能力库 → Skill → 上传 Skill”弹窗的已脱敏真实截图后补入对应章节。
+- 本次只修改手册与帮助中心测试，不涉及 API、事件、数据库、性能、安全实现、兼容性、环境配置、OpenCode 源码或部署节点。

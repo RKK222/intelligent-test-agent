@@ -138,6 +138,18 @@ describe("help center", () => {
     expect(prompt.length).toBeLessThan(8_100);
   });
 
+  it("keeps the SkillMarket upload workflow and its external-material boundary in Help", () => {
+    const weekly = helpTopicById("weekly-updates").content;
+    const agentConfig = helpTopicById("agent-config").content;
+
+    expect(weekly).toContain("一次提交 SkillMarket 材料并自动刷新目录");
+    expect(weekly).toContain("Skill ZIP");
+    expect(weekly).toContain("继续查询");
+    expect(agentConfig).toContain("向 SkillMarket 上传 Skill");
+    expect(agentConfig).toContain("只有超级管理员");
+    expect(agentConfig).toContain("不会写入当前应用或个人 worktree");
+  });
+
   it("documents client and memory rollout as separate user-level switches", () => {
     const settings = helpTopicById("settings").content;
     const overview = helpTopicById("feature-overview").content;
@@ -156,6 +168,7 @@ describe("help center", () => {
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
     expect(faq).toContain("客户端注册了本地目录后，怎样在工作台打开？");
     expect(faq).toContain("为什么“新增版本”不可用或创建失败？");
+    expect(faq).toContain("为什么看不到“上传 Skill”，或上传后目录还没有出现？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
