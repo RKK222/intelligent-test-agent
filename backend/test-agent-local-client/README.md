@@ -16,7 +16,9 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 - `LocalClientDesktopTheme` 是首次配置、目录选择、会话进度和公共能力确认窗口的统一主题入口。macOS 与麒麟/Linux
   统一使用随 shaded JAR 离线交付的 FlatLaf 3.7.2，不再选择系统 Aqua、JDK Nimbus 或 Metal；界面使用 14px 对话字体、
   白色卡片、轻边框、圆角控件和深蓝灰主操作，不使用红色作为客户端主色。主题初始化失败只降级界面，不能阻断 WSS 连接。
-- 会话进度与能力确认使用无遗留 Java 吉祥物图标的纯内容对话框；系统托盘菜单仍由操作系统原生渲染。
+- 托盘点击弹层改由 `LocalClientTrayPopup` 使用同一 FlatLaf 主题渲染，顶部复用小兔子和实时连接状态，动作分组、圆角、
+  轻边框与工作区选择窗口保持一致；不再使用无法消费 Swing 主题的原生 AWT `PopupMenu`。会话进度与能力确认继续使用
+  无遗留 Java 吉祥物图标的纯内容对话框。
 
 ## Git 权限巡检
 

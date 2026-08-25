@@ -86,6 +86,12 @@ final class LocalClientDesktopTheme {
         defaults.put("ScrollBar.thumbArc", 999);
         defaults.put("ProgressBar.arc", 999);
 
+        // 托盘的独立 Swing 卡片与目录选择器共享同一套轻边框和克制的悬停反馈。
+        defaults.put("PopupMenu.borderColor", BORDER);
+        defaults.put("PopupMenu.background", FIELD);
+        defaults.put("Button.toolbar.hoverBackground", new ColorUIResource(239, 243, 247));
+        defaults.put("Button.toolbar.pressedBackground", new ColorUIResource(229, 236, 242));
+
         defaults.put("Button.margin", new InsetsUIResource(8, 18, 8, 18));
         defaults.put("TextField.margin", new InsetsUIResource(8, 10, 8, 10));
         defaults.put("PasswordField.margin", new InsetsUIResource(8, 10, 8, 10));

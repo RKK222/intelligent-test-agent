@@ -8,11 +8,14 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.Graphics2D;
-import java.awt.MenuItem;
-import java.awt.PopupMenu;
+import java.awt.MouseInfo;
+import java.awt.Point;
+import java.awt.PointerInfo;
 import java.awt.RenderingHints;
 import java.awt.SystemTray;
 import java.awt.TrayIcon;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,6 +32,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 import javax.swing.JOptionPane;
@@ -50,14 +54,12 @@ final class LocalClientTray implements AutoCloseable {
     private final LocalClientConnection connection;
     private final SystemTray systemTray;
     private final TrayIcon trayIcon;
-    private final MenuItem statusItem;
-    private final MenuItem workspaceItem;
-    private final MenuItem progressItem;
-    private final MenuItem publicCapabilityItem;
+    private final LocalClientTrayPopup popup;
     private final BufferedImage petImage;
     private final ScheduledExecutorService updater;
     private final ExecutorService actions;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicLong lastPopupTriggerNanos = new AtomicLong();
     private final AtomicReference<String> lastUiKey = new AtomicReference<>();
     private final AtomicReference<String> lastPublicCapabilityStatus = new AtomicReference<>();
     private final AtomicReference<String> lastPublicCapabilityDigest = new AtomicReference<>();
@@ -68,10 +70,7 @@ final class LocalClientTray implements AutoCloseable {
             LocalClientConnection connection,
             SystemTray systemTray,
             TrayIcon trayIcon,
-            MenuItem statusItem,
-            MenuItem workspaceItem,
-            MenuItem progressItem,
-            MenuItem publicCapabilityItem,
+            LocalClientTrayPopup popup,
             BufferedImage petImage,
             ScheduledExecutorService updater,
             ExecutorService actions) {
@@ -79,10 +78,7 @@ final class LocalClientTray implements AutoCloseable {
         this.connection = connection;
         this.systemTray = systemTray;
         this.trayIcon = trayIcon;
-        this.statusItem = statusItem;
-        this.workspaceItem = workspaceItem;
-        this.progressItem = progressItem;
-        this.publicCapabilityItem = publicCapabilityItem;
+        this.popup = popup;
         this.petImage = petImage;
         this.updater = updater;
         this.actions = actions;
@@ -99,49 +95,23 @@ final class LocalClientTray implements AutoCloseable {
             BufferedImage pet = loadPetImage();
             SystemTray tray = SystemTray.getSystemTray();
             Dimension size = tray.getTrayIconSize();
-            MenuItem status = new MenuItem("正在连接");
-            status.setEnabled(false);
-            MenuItem openWeb = new MenuItem("打开网页");
-            MenuItem registerWorkspace = new MenuItem("选择并注册工作区…");
-            registerWorkspace.setEnabled(false);
-            MenuItem reconnect = new MenuItem("重连");
-            MenuItem publicCapabilities = new MenuItem("公共能力 · 暂无更新");
-            publicCapabilities.setEnabled(false);
-            MenuItem viewLogs = new MenuItem("查看日志");
-            MenuItem downloadLogs = new MenuItem("下载日志");
-            MenuItem progress = new MenuItem("会话进度 · 0 项进行中");
-            MenuItem exit = new MenuItem("退出客户端");
-            PopupMenu menu = new PopupMenu();
-            menu.add(status);
-            menu.addSeparator();
-            menu.add(openWeb);
-            menu.add(registerWorkspace);
-            menu.add(reconnect);
-            menu.addSeparator();
-            menu.add(publicCapabilities);
-            menu.add(viewLogs);
-            menu.add(downloadLogs);
-            menu.add(progress);
-            menu.addSeparator();
-            menu.add(exit);
+            LocalClientTrayPopup popup = new LocalClientTrayPopup(pet);
             TrayIcon icon = new TrayIcon(
                     renderIcon(
                             pet,
                             size.width,
                             size.height,
                             statusColor(LocalClientRuntimeSnapshot.ConnectionState.CONNECTING)),
-                    "TestAgent 客户端 · 正在连接",
-                    menu);
+                    "TestAgent 客户端 · 正在连接");
             icon.setImageAutoSize(true);
             ScheduledExecutorService updater = Executors.newSingleThreadScheduledExecutor(
                     Thread.ofPlatform().daemon().name("local-client-tray-status-", 0).factory());
             ExecutorService actions = Executors.newCachedThreadPool(
                     Thread.ofPlatform().daemon().name("local-client-tray-action-", 0).factory());
             LocalClientTray result = new LocalClientTray(
-                    configuration, connection, tray, icon, status, registerWorkspace, progress,
-                    publicCapabilities, pet, updater, actions);
-            result.bindActions(
-                    openWeb, registerWorkspace, reconnect, publicCapabilities, viewLogs, downloadLogs, progress, exit);
+                    configuration, connection, tray, icon, popup, pet, updater, actions);
+            result.bindActions();
+            result.bindTrayClick();
             tray.add(icon);
             updater.scheduleAtFixedRate(result::refreshSafely, 0, 2, TimeUnit.SECONDS);
             LOGGER.info("local_client_tray_started platform={} icon=radar-bunny", platformName());
@@ -156,45 +126,71 @@ final class LocalClientTray implements AutoCloseable {
             LocalClientConfiguration configuration,
             LocalClientConnection connection) {
         return new LocalClientTray(
-                configuration, connection, null, null, null, null, null, null, null, null, null);
+                configuration, connection, null, null, null, null, null, null);
     }
 
-    private void bindActions(
-            MenuItem openWeb,
-            MenuItem registerWorkspace,
-            MenuItem reconnect,
-            MenuItem publicCapabilities,
-            MenuItem viewLogs,
-            MenuItem downloadLogs,
-            MenuItem progress,
-            MenuItem exit) {
-        openWeb.addActionListener(event -> runAction("open_web", () -> {
+    private void bindActions() {
+        popup.bind(LocalClientTrayPopup.Action.OPEN_WEB, () -> runAction("open_web", () -> {
             LocalClientPayloads.WorkspaceRegistered workspace = latestWorkspace.get();
             LocalClientDesktopActions.openWeb(workspace == null
                     ? configuration.webBaseUri()
                     : LocalClientDesktopActions.workspaceWebUri(configuration.webBaseUri(), workspace.workspaceId()));
         }, null));
-        registerWorkspace.addActionListener(event -> runAction(
+        popup.bind(LocalClientTrayPopup.Action.REGISTER_WORKSPACE, () -> runAction(
                 "register_workspace", this::chooseAndRegisterWorkspace, null));
-        reconnect.addActionListener(event -> {
+        popup.bind(LocalClientTrayPopup.Action.RECONNECT, () -> {
             connection.reconnect();
             displayMessage("TestAgent 客户端", "正在重新连接", TrayIcon.MessageType.INFO);
         });
-        publicCapabilities.addActionListener(event -> runAction(
+        popup.bind(LocalClientTrayPopup.Action.UPDATE_PUBLIC_CAPABILITIES, () -> runAction(
                 "public_capability_update", this::confirmPublicCapabilityUpdate, null));
-        viewLogs.addActionListener(event -> runAction("view_logs", () ->
+        popup.bind(LocalClientTrayPopup.Action.VIEW_LOGS, () -> runAction("view_logs", () ->
                 LocalClientDesktopActions.openDirectory(LocalClientPaths.logsDirectory()), null));
-        downloadLogs.addActionListener(event -> runAction("download_logs", () -> {
+        popup.bind(LocalClientTrayPopup.Action.DOWNLOAD_LOGS, () -> runAction("download_logs", () -> {
             Path archive = LocalClientLogExporter.export(
                     LocalClientPaths.logsDirectory(), LocalClientPaths.downloadsDirectory());
             LocalClientDesktopActions.revealFile(archive);
             displayMessage("日志已下载", archive.getFileName().toString(), TrayIcon.MessageType.INFO);
         }, null));
-        progress.addActionListener(event -> showProgress());
-        exit.addActionListener(event -> actions.execute(() -> {
+        popup.bind(LocalClientTrayPopup.Action.SHOW_PROGRESS, this::showProgress);
+        popup.bind(LocalClientTrayPopup.Action.EXIT, () -> actions.execute(() -> {
             LOGGER.info("local_client_exit_requested source=tray");
             connection.close();
         }));
+    }
+
+    private void bindTrayClick() {
+        trayIcon.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                if (event.isPopupTrigger()) {
+                    togglePopupAt(new Point(event.getXOnScreen(), event.getYOnScreen()));
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent event) {
+                if (event.isPopupTrigger() || event.getButton() == MouseEvent.BUTTON1) {
+                    togglePopupAt(new Point(event.getXOnScreen(), event.getYOnScreen()));
+                }
+            }
+        });
+        // macOS 菜单栏和部分 Linux 桌面只派发 TrayIcon 的标准动作事件，不一定下发鼠标事件。
+        trayIcon.addActionListener(event -> {
+            PointerInfo pointerInfo = MouseInfo.getPointerInfo();
+            if (pointerInfo != null) {
+                togglePopupAt(pointerInfo.getLocation());
+            }
+        });
+    }
+
+    private void togglePopupAt(Point point) {
+        long now = System.nanoTime();
+        long previous = lastPopupTriggerNanos.getAndSet(now);
+        if (now - previous < TimeUnit.MILLISECONDS.toNanos(180)) {
+            return;
+        }
+        popup.toggleAt(point);
     }
 
     private void refreshSafely() {
@@ -228,14 +224,15 @@ final class LocalClientTray implements AutoCloseable {
             return;
         }
         String status = statusText(snapshot, snapshot.processStatus());
-        statusItem.setLabel(status);
-        workspaceItem.setEnabled(snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
+        popup.setStatus(status);
+        popup.setWorkspaceEnabled(snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE);
         int operationCount = snapshot.activeOperations().size();
-        progressItem.setLabel("会话进度 · " + operationCount + " 项进行中");
+        popup.setProgressLabel("会话进度 · " + operationCount + " 项进行中");
         LocalClientPublicCapabilityStore.State capability = connection.publicCapabilitySnapshot();
-        publicCapabilityItem.setLabel(publicCapabilityMenuLabel(capability));
-        publicCapabilityItem.setEnabled(publicCapabilityMenuEnabled(
-                capability, snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE));
+        popup.setPublicCapability(
+                publicCapabilityMenuLabel(capability),
+                publicCapabilityMenuEnabled(
+                        capability, snapshot.connectionState() == LocalClientRuntimeSnapshot.ConnectionState.ONLINE));
         Dimension size = systemTray.getTrayIconSize();
         trayIcon.setImage(renderIcon(
                 petImage, size.width, size.height, statusColor(snapshot.connectionState())));
@@ -518,6 +515,9 @@ final class LocalClientTray implements AutoCloseable {
         }
         if (actions != null) {
             actions.shutdownNow();
+        }
+        if (popup != null) {
+            popup.close();
         }
         if (systemTray != null && trayIcon != null) {
             systemTray.remove(trayIcon);

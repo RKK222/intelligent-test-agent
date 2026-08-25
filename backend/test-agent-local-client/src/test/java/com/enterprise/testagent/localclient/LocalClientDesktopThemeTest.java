@@ -33,6 +33,9 @@ class LocalClientDesktopThemeTest {
         assertThat((Color) defaults.get("Button.default.background")).isEqualTo(new Color(49, 91, 125));
         assertThat(defaults.getInt("Component.arc")).isEqualTo(12);
         assertThat(defaults.getInt("TextComponent.arc")).isEqualTo(12);
+        assertThat((Color) defaults.get("PopupMenu.borderColor")).isEqualTo(new Color(218, 222, 229));
+        assertThat((Color) defaults.get("Button.toolbar.hoverBackground"))
+                .isEqualTo(new Color(239, 243, 247));
         assertThat(defaults.getInsets("Button.margin")).isEqualTo(new java.awt.Insets(8, 18, 8, 18));
         Border border = defaults.getBorder("OptionPane.border");
         assertThat(border.getBorderInsets(null)).isEqualTo(new java.awt.Insets(18, 22, 14, 22));

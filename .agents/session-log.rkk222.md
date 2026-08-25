@@ -14081,3 +14081,27 @@
 ### Result
 
 - 用户可从正确的 Client Key 页面创建并安全保存密钥，再通过托盘或网页兜底注册本地目录，并在工作台重新打开；不涉及 API、事件、数据库、性能、安全契约、部署或环境配置，未加入游戏内容。
+
+## 2026-08-25 - 统一客户端托盘点击弹层主题
+
+### Why
+
+- 工作区选择、进度和确认窗口已经使用 FlatLaf，但托盘仍由平台原生 AWT `PopupMenu` 渲染，无法消费客户端主题，在 macOS 和麒麟桌面上会呈现老旧系统菜单样式。
+
+### What
+
+- 新增 `LocalClientTrayPopup`，复用现有桌面主题、小兔子资源、运行时快照和八项托盘动作，以白色圆角卡片、状态标题、轻边框、分组线和 toolbar hover 统一展示。
+- `SystemTray` 只保留图标和点击事件；鼠标事件与标准 `ActionEvent` 共享防抖，弹层按顶部/底部托盘及多屏可用区域定位，支持失焦和 Esc 收起。无透明窗口或窗口裁剪支持时仅降级为不透明或直角卡片，不影响托盘动作。
+- 保持打开网页、注册工作区、重连、公共能力更新、日志、进度和退出的既有业务处理不变，同步模块 README 和本地客户端架构文档。
+
+### How
+
+- 定向执行 `LocalClientTrayTest` 与 `LocalClientDesktopThemeTest`，8 项通过；执行本地客户端 Maven reactor 全量测试，219 项通过、1 项桌面条件跳过；跳过测试打包、`git diff --check` 和 shaded JAR 内容校验通过。
+- 使用最终 shaded JAR 和真实 `LocalClientTrayPopup` 做 JShell 图形预览，确认卡片、状态、分组、按钮 hover 与失焦收起；将同一 JAR 替换到本地运行目录后启动真实客户端，日志显示托盘成功创建，客户端连接代次稳定在 258，并保持到 8080 和 4106 的连接。
+- 本模块真正可执行的 shaded 产物是固定名 `target/test-agent-local-client.jar`；版本化的 `test-agent-local-client-0.1.0-SNAPSHOT.jar` 保留后端主类 manifest，不能用于启动客户端。最终运行 JAR 与 shaded 产物 SHA-256 均为 `077aa467e4d86e31d46d45151bc5f0f3e0d8a8417d313b5c88eb5614a217ab08`。
+- 重启验证时发现 `screen -X quit` 不一定终止既有 login/Java 叶子进程；按精确 PID 清理遗留实例后，仅保留一份最终客户端，避免重复注册干扰验证。
+
+### Result
+
+- 托盘点击不再使用类似旧系统的 AWT 原生菜单，已与工作区选择窗口统一为 FlatLaf 卡片风格；最终客户端正在 `test-agent-local-client-ui-82d123ac6` screen 会话中运行。
+- 本次不新增部署节点，不修改 HTTP API、RunEvent/SSE、文件 WebSocket、数据库、Flyway、性能或安全契约、环境配置、generated SDK 和 OpenCode 只读源码。受本机刘海区域遮挡影响，未取得状态栏图标直接点击截图；同一实际弹层组件的图形预览和最终客户端进程分别完成验证，麒麟真机视觉仍需现场复核。
