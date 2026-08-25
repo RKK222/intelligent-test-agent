@@ -14504,3 +14504,27 @@
 
 - 可从公共或应用 Agent 配置树直接完成目标文档/Skill 的 stage、提交和远端推送，同时避免把此前暂存的无关文件带入提交。
 - 本次仅修改前端交互和稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、性能模型、安全协议、环境配置、generated SDK 或只读 OpenCode 源码；整栈自动重启仍受本机 Docker ClickHouse 创建卡死影响。
+
+## 2026-08-25 - 快捷推送成功保留工作区并同步本地公共配置
+
+### Why
+
+- 用户要求先把当前本地公共 config 区收敛到远程一致，并调整行内快捷提交：推送成功后继续停留在工作区，只有失败才沿用原先切到 Diff 的排障行为。
+
+### What
+
+- 将受管公共个人 worktree `.testagent/agent-opencode/.configdev/public-usr_test_dev` 的未提交状态保存到 `stash@{0}`（`codex-sync-public-config-20260825`），再把分支精确重置到 `origin/master`；未触碰独立的 `temp/opencode-config` 及其未推送提交。
+- `GitChangesPanel` 继续常驻并复用既有暂存、提交和发布方法，但快捷提交框与后续进度框通过 Teleport 脱离隐藏的 Diff 根节点；成功不再切 Tab，暂存、提交或推送失败才向 `FigmaFileExplorer` 发事件并进入 Diff。
+- 更新成功/失败组件回归和 agent-web README/PACKAGE，明确新的 Tab 收敛行为。
+
+### How
+
+- 初次同步完成时，公共个人 worktree 本地 HEAD 与 `origin/master` 均校验为 `81605f245d1512e1ab0dd73812391f6da7d008b5`，工作树和 index 干净；旧本地提交仍可由 reflog 找回，36 个文件的原 staged 状态保存在 stash。
+- 定向 Vitest 2 个文件 76/76；前端全量 Vitest 152 个文件通过，2227 passed / 1 skipped；agent-web typecheck、用户手册及 agent-web production build、`git diff --check` 均通过。
+- 仅重启本次修改的真实前端 screen；`127.0.0.1:3000` 可访问，后端 health/readiness 为 `UP`，登录 CORS 预检 200。临时浏览器会话只能到登录页，未使用或传输账号凭据，因此未在真实登录态制造配置变更做推送验证。
+- 提交前复核发现用户随后在已有登录页面创建 `opencode/agents/wr.md` 并用提交信息 `ceshi` 实测快捷发布；后端完成本地提交，但远程 `master` 仍为 `81605f2`，个人 worktree 现为待重推提交 `e9d2366`、`publishPending=true`。该状态属于用户刚产生的失败恢复现场，未再次重置或覆盖。
+
+### Result
+
+- 受管公共 config 已按要求先与远程 `master` 完全一致；随后用户真实失败测试产生的新待重推提交被完整保留。快捷推送成功时底层保持工作区，失败时自动进入 Diff 并保留既有错误与恢复信息。
+- 本次不新增 API、事件协议、数据库、Flyway、部署节点、依赖、性能模型、安全边界、环境配置、generated SDK 或 OpenCode 源码；真实远程副作用由既有 Git 发布接口负责，回归使用 mock 覆盖成功/失败状态收敛。

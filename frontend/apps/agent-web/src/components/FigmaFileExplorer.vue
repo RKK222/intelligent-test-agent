@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type {
   AppSourceRepositorySummary,
@@ -339,11 +339,14 @@ function refreshChanges() {
   gitChangesPanelRef.value?.refreshChanges();
 }
 
-/** 行内入口切到统一变更面板后再打开弹框，确保后续发布进度同样可见。 */
+/** Git 面板常驻挂载，快捷弹框通过 Teleport 展示，成功时因此可以保留当前工作区。 */
 async function openAgentQuickCommit(request: AgentQuickCommitRequest) {
-  tab.value = "changes";
-  await nextTick();
   await gitChangesPanelRef.value?.openQuickAgentCommit(request);
+}
+
+/** 只有快捷暂存、提交或推送失败时才进入 Diff，保留原有排障入口。 */
+function handleAgentQuickCommitFailed() {
+  tab.value = "changes";
 }
 
 const DIFF_AUTO_REFRESH_INTERVAL_MS = 5000;
@@ -479,6 +482,7 @@ defineExpose({
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="handleChangesRefreshed"
         @agent-files-discarded="(payload) => emit('agent-files-discarded', payload)"
+        @quick-agent-commit-failed="handleAgentQuickCommitFailed"
       />
       <template v-if="tab !== 'changes'">
         <!-- Section 1: 应用工作空间 -->

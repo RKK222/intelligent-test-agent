@@ -285,10 +285,13 @@ describe("GitChangesPanel", () => {
         "skills/payment-test/SKILL.md",
         "skills/payment-test/rules/review.md"
       ]);
-      const dialog = wrapper.get('[role="dialog"][aria-label="提交并推送 Agent 文档"]');
-      expect(dialog.text()).toContain("已自动暂存 2 个目标文件");
-      await dialog.get('textarea[aria-label="快捷提交信息"]').setValue("agent: 更新支付测试 Skill");
-      await dialog.get("button.quick-agent-commit-submit").trigger("click");
+      const dialog = within(document.body).getByRole("dialog", { name: "提交并推送 Agent 文档" });
+      expect(dialog.textContent).toContain("已自动暂存 2 个目标文件");
+      await fireEvent.update(
+        within(dialog).getByRole("textbox", { name: "快捷提交信息" }),
+        "agent: 更新支付测试 Skill"
+      );
+      await fireEvent.click(within(dialog).getByRole("button", { name: "提交并推送" }));
 
       await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledWith(
         "psw_default",
@@ -311,6 +314,61 @@ describe("GitChangesPanel", () => {
       ));
       expect(apiClientMock.commitWorkspaceAgentConfig).not.toHaveBeenCalled();
       expect(apiClientMock.publishWorkspaceAgentConfig).not.toHaveBeenCalled();
+      expect(wrapper.emitted("quick-agent-commit-failed")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("reports a quick publish failure so the owner can switch to Diff", async () => {
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [{ path: "agents/app-review.md", status: "M", staged: true, patch: "" }]
+    });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValue(new BackendApiError(409, {
+      success: false,
+      code: "GIT_CONFLICT",
+      message: "远端分支存在冲突",
+      traceId: "trace_quick_publish_failed"
+    }));
+    const wrapper = mount(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_runtime",
+        agentConfigWorkspaceId: "wrk_runtime",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true,
+        canManagePublicConfig: false
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    try {
+      await waitFor(() => expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalled());
+      await (wrapper.vm as unknown as {
+        openQuickAgentCommit: (request: {
+          scope: "WORKSPACE";
+          path: string;
+          kind: "FILE";
+          displayName: string;
+        }) => Promise<void>;
+      }).openQuickAgentCommit({
+        scope: "WORKSPACE",
+        path: "agents/app-review.md",
+        kind: "FILE",
+        displayName: "app-review.md"
+      });
+
+      const dialog = within(document.body).getByRole("dialog", { name: "提交并推送 Agent 文档" });
+      await fireEvent.update(
+        within(dialog).getByRole("textbox", { name: "快捷提交信息" }),
+        "agent: 更新应用审查 Agent"
+      );
+      await fireEvent.click(within(dialog).getByRole("button", { name: "提交并推送" }));
+
+      await waitFor(() => expect(wrapper.emitted("quick-agent-commit-failed")).toHaveLength(1));
+      expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalled();
+      expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalled();
     } finally {
       wrapper.unmount();
     }
@@ -370,9 +428,12 @@ describe("GitChangesPanel", () => {
         ["opencode/agents/review.md"],
         "agw_public"
       );
-      const dialog = wrapper.get('[role="dialog"][aria-label="提交并推送 Agent 文档"]');
-      await dialog.get('textarea[aria-label="快捷提交信息"]').setValue("agent: 更新公共审查 Agent");
-      await dialog.get("button.quick-agent-commit-submit").trigger("click");
+      const dialog = within(document.body).getByRole("dialog", { name: "提交并推送 Agent 文档" });
+      await fireEvent.update(
+        within(dialog).getByRole("textbox", { name: "快捷提交信息" }),
+        "agent: 更新公共审查 Agent"
+      );
+      await fireEvent.click(within(dialog).getByRole("button", { name: "提交并推送" }));
 
       await waitFor(() => expect(apiClientMock.commitPublicAgentConfig).toHaveBeenCalledWith(expect.objectContaining({
         message: "agent: 更新公共审查 Agent",
@@ -382,6 +443,7 @@ describe("GitChangesPanel", () => {
         "agw_public",
         expect.stringMatching(/^aco_/)
       ));
+      expect(wrapper.emitted("quick-agent-commit-failed")).toBeUndefined();
     } finally {
       wrapper.unmount();
     }

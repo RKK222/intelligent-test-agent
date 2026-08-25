@@ -115,6 +115,8 @@ const emit = defineEmits<{
     scope: "PUBLIC" | "WORKSPACE";
     paths: string[];
   }];
+  /** 行内快捷暂存、提交或推送失败时，父层切到 Diff 供用户继续处理。 */
+  "quick-agent-commit-failed": [];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -585,6 +587,7 @@ const quickAgentCommitPreparing = ref(false);
 const quickAgentCommitTargetCount = ref(0);
 const quickAgentCommitMessageInput = ref<HTMLTextAreaElement | null>(null);
 let quickAgentCommitGeneration = 0;
+let quickAgentCommitFailureNotifiedGeneration = -1;
 const signOff = ref(false);
 const noVerify = ref(false);
 const amend = ref(false);
@@ -1606,6 +1609,13 @@ function closeQuickAgentCommit() {
   quickAgentCommitTargetCount.value = 0;
 }
 
+function failQuickAgentCommit(message: string) {
+  quickAgentCommitError.value = message;
+  if (quickAgentCommitFailureNotifiedGeneration === quickAgentCommitGeneration) return;
+  quickAgentCommitFailureNotifiedGeneration = quickAgentCommitGeneration;
+  emit("quick-agent-commit-failed");
+}
+
 /**
  * 树节点快捷入口先刷新真实 Diff，再仅暂存该文件或 Skill 目录；已有其它 staged 内容时拒绝继续，
  * 避免底层 Git commitStaged 把用户此前暂存的无关文档一起带入提交。
@@ -1622,51 +1632,51 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
 
   try {
     if (!canWriteAgentScope(request.scope)) {
-      quickAgentCommitError.value = `当前账号无权提交${quickAgentCommitScopeLabel(request)}配置。`;
+      failQuickAgentCommit(`当前账号无权提交${quickAgentCommitScopeLabel(request)}配置。`);
       return;
     }
     if (request.scope === "PUBLIC" && !workbench.publicWorktree?.worktreeId) {
-      quickAgentCommitError.value = "公共个人 worktree 尚未就绪，请刷新 Agent 区域后重试。";
+      failQuickAgentCommit("公共个人 worktree 尚未就绪，请刷新 Agent 区域后重试。");
       return;
     }
     if (request.scope === "WORKSPACE" && (!effectiveAgentConfigWorkspaceId.value || !props.personalWorkspaceId)) {
-      quickAgentCommitError.value = "当前应用个人 worktree 尚未就绪，不能提交并推送。";
+      failQuickAgentCommit("当前应用个人 worktree 尚未就绪，不能提交并推送。");
       return;
     }
 
     await refreshChanges();
     if (generation !== quickAgentCommitGeneration) return;
     if (activeAgentPublishPending.value) {
-      quickAgentCommitError.value = "当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。";
+      failQuickAgentCommit("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
       return;
     }
     if (activeAgentConflicts.value.length > 0) {
-      quickAgentCommitError.value = "当前作用域存在未解决的 Git 冲突，请先在变更面板处理。";
+      failQuickAgentCommit("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
       return;
     }
 
     const targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
     if (targetFiles.length === 0) {
-      quickAgentCommitError.value = request.kind === "SKILL"
+      failQuickAgentCommit(request.kind === "SKILL"
         ? "该 Skill 文件夹当前没有可提交的 Git 变更。"
-        : "该文件当前没有可提交的 Git 变更。";
+        : "该文件当前没有可提交的 Git 变更。");
       return;
     }
     const unrelatedStaged = activeAgentStaged.value.filter((file) => !isQuickAgentTarget(file, request));
     if (unrelatedStaged.length > 0) {
-      quickAgentCommitError.value = `当前作用域另有 ${unrelatedStaged.length} 个已暂存文件。为避免误提交，请先在变更面板提交或取消暂存。`;
+      failQuickAgentCommit(`当前作用域另有 ${unrelatedStaged.length} 个已暂存文件。为避免误提交，请先在变更面板提交或取消暂存。`);
       return;
     }
 
     const unstagedTargets = activeAgentUnstaged.value.filter((file) => isQuickAgentTarget(file, request));
     if (unstagedTargets.length > 0 && !await stageAgentFiles(unstagedTargets)) {
-      quickAgentCommitError.value = errorMessage.value || "自动暂存失败，请在变更面板重试。";
+      failQuickAgentCommit(errorMessage.value || "自动暂存失败，请在变更面板重试。");
       return;
     }
     if (generation !== quickAgentCommitGeneration) return;
     const stagedTargets = activeAgentStaged.value.filter((file) => isQuickAgentTarget(file, request));
     if (stagedTargets.length === 0) {
-      quickAgentCommitError.value = "目标变更未进入暂存区，请刷新后重试。";
+      failQuickAgentCommit("目标变更未进入暂存区，请刷新后重试。");
       return;
     }
     quickAgentCommitTargetCount.value = stagedTargets.length;
@@ -1692,11 +1702,11 @@ async function submitQuickAgentCommit() {
   const unrelatedStaged = activeAgentStaged.value.filter((file) => !isQuickAgentTarget(file, request));
   if (activeAgentConflicts.value.length > 0 || targetStaged.length === 0 || unrelatedStaged.length > 0) {
     quickAgentCommitPreparing.value = false;
-    quickAgentCommitError.value = activeAgentConflicts.value.length > 0
+    failQuickAgentCommit(activeAgentConflicts.value.length > 0
       ? "提交前检测到 Git 冲突，请先在变更面板处理。"
       : unrelatedStaged.length > 0
         ? `提交前检测到另外 ${unrelatedStaged.length} 个已暂存文件，请先处理后重试。`
-        : "目标变更已不在暂存区，请重新点击文档旁的提交按钮。";
+        : "目标变更已不在暂存区，请重新点击文档旁的提交按钮。");
     return;
   }
 
@@ -1704,6 +1714,9 @@ async function submitQuickAgentCommit() {
   quickAgentCommitRequest.value = null;
   quickAgentCommitPreparing.value = false;
   await handleCommit(true);
+  if (errorMessage.value) {
+    failQuickAgentCommit(errorMessage.value);
+  }
 }
 
 async function stageAgentFile(file: AgentPanelDiffFile) {
@@ -2983,7 +2996,8 @@ defineExpose({
       </div>
     </div>
 
-    <!-- Agent 树行内快捷提交：目标已自动暂存，提交与发布仍复用下方同一 handleCommit 流程。 -->
+    <!-- 快捷提交与后续进度必须脱离隐藏的 Diff 根节点，成功时底层继续停留在工作区。 -->
+    <Teleport to="body">
     <div v-if="quickAgentCommitRequest" class="ta-process-startup-backdrop" role="presentation">
       <section
         class="ta-process-startup-dialog quick-agent-commit-dialog"
@@ -3055,8 +3069,10 @@ defineExpose({
         </footer>
       </section>
     </div>
+    </Teleport>
 
     <!-- Git Commit & Push Progress Dialog Overlay -->
+    <Teleport to="body">
     <div v-if="showCommitProgressDialog" class="ta-process-startup-backdrop" role="presentation">
       <section class="ta-process-startup-dialog" role="dialog" aria-modal="true" :aria-label="commitRequestedPush ? '提交并推送' : '提交'">
         <header class="ta-process-startup-header">
@@ -3164,6 +3180,7 @@ defineExpose({
         </footer>
       </section>
     </div>
+    </Teleport>
   </div>
 </template>
 

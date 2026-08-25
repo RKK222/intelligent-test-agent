@@ -465,7 +465,7 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.emitted("agent-config-mutated")).toEqual([[mutation]]);
   });
 
-  it("routes an Agent tree quick commit through the existing Git changes owner", async () => {
+  it("keeps the workspace after opening an Agent quick commit and switches to Diff only on failure", async () => {
     const openQuickAgentCommit = vi.fn().mockResolvedValue(undefined);
     const GitChangesPanelStub = defineComponent({
       name: "GitChangesPanel",
@@ -494,6 +494,12 @@ describe("FigmaFileExplorer", () => {
     await wrapper.vm.$nextTick();
 
     expect(openQuickAgentCommit).toHaveBeenCalledWith(request);
+    expect(wrapper.get('button[aria-label="文件树"]').classes()).toContain("is-active");
+    expect(wrapper.get('button[aria-label="变更"]').classes()).not.toContain("is-active");
+
+    wrapper.findComponent(GitChangesPanel).vm.$emit("quick-agent-commit-failed");
+    await wrapper.vm.$nextTick();
+
     expect(wrapper.get('button[aria-label="变更"]').classes()).toContain("is-active");
   });
 
