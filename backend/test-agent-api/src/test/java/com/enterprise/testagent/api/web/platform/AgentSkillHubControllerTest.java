@@ -3,6 +3,7 @@ package com.enterprise.testagent.api.web.platform;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -25,6 +26,7 @@ import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.MultipartBodyBuilder;
 import org.springframework.web.reactive.function.BodyInserters;
@@ -139,8 +141,39 @@ class AgentSkillHubControllerTest {
         verify(service).uploadExternalSkillHub(request.capture());
         assertThat(request.getValue().source()).isEqualTo("研发团队");
         assertThat(request.getValue().phase()).isEqualTo("04");
+        assertThat(request.getValue().userId()).isEqualTo("AUTH_HUB");
         assertThat(request.getValue().skillPackage().filename()).isEqualTo("api-check.zip");
         verify(service).externalSkillHubUploadProgress("user001_1723526400000");
+    }
+
+    @Test
+    void materializeUsesAuthenticatedUnifiedAuthIdForSkillHubDownload() {
+        AgentSkillHubApplicationService service = mock(AgentSkillHubApplicationService.class);
+
+        client(service, List.of(Dictionary.ROLE_APP_ADMIN)).post()
+                .uri("/api/internal/platform/workspace-management/agent-skill-hub/assets/hub_external/materialize")
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).materializeExternalAsset(
+                "hub_external", null, new UserId("usr_admin"), "AUTH_HUB");
+    }
+
+    @Test
+    void uploadRejectsClientSuppliedUserId() throws Exception {
+        AgentSkillHubApplicationService service = mock(AgentSkillHubApplicationService.class);
+        var body = uploadBody();
+        body.add("userId", new HttpEntity<>("FORGED_AUTH_ID"));
+
+        client(service, List.of(Dictionary.ROLE_SUPER_ADMIN)).post()
+                .uri("/api/internal/platform/workspace-management/agent-skill-hub/external/upload")
+                .body(BodyInserters.fromMultipartData(body))
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
+
+        verify(service, never()).uploadExternalSkillHub(any());
     }
 
     private static org.springframework.util.MultiValueMap<String, org.springframework.http.HttpEntity<?>> uploadBody()

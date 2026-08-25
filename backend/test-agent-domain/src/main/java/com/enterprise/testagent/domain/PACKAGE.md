@@ -19,7 +19,7 @@
 - `session.Session`、`session.SessionId`、`session.SessionStatus`、`session.SessionRepository`：会话领域对象和值对象、持久化端口；Session 保存平台置顶状态和后端内部 opencode session/node 映射，软删除使用 `ARCHIVED` 状态。
 - `agent.AgentSessionBinding`、`agent.AgentSessionBindingRepository`：平台 session 到远端 agent session/node 的通用绑定模型和持久化端口。
 - `hub.ProtectedAgentSelection`、`hub.ProtectedAgentDefinitionResolver`：受保护 Agent 目录 opaque 选择句柄和不可变 Agent/Skill 修订解析端口；领域层只定义目录摘要、正文文件集合和冻结依赖结构，不感知 Hub 存储、MCP、WSS 或服务器执行实现。
-- `hub.AgentSkillHubModels`、`hub.AgentSkillHubRepository`、`hub.SkillHubGateway`：Hub 双来源资产、外部目录/下载、不可变修订、平台派生来源和 push 引用对账端口；不感知 HTTP 认证头、ZIP 或 MyBatis。
+- `hub.AgentSkillHubModels`、`hub.AgentSkillHubRepository`、`hub.SkillHubGateway`：Hub 双来源资产、携带当前操作人统一认证号的外部上传/下载、不可变修订、平台派生来源和 push 引用对账端口；不感知 HTTP 认证头、ZIP 或 MyBatis。
 - `session.SessionMessage`、`session.SessionMessageId`、`session.SessionMessageRole`、`session.SessionMessageRepository`：会话消息领域对象、角色和值对象、持久化端口；消息可携带 runId、远端 messageId、parts_json、token/cost 快照。
 - `supportaccess.*`：超级管理员短期只读排查授权、登录会话内令牌轮换、目标切换与逐次访问审计模型及持久化端口；领域对象只保存令牌摘要，不承载明文令牌。
 - `externalapi.*`：外部工具凭据聚合、稳定 ID、`USER_SSH_KEY_READ` scope、认证主体、Repository 端口与配置刷新事件；聚合只承载 RSA 密文、SHA-256 指纹和掩码提示。

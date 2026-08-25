@@ -6,7 +6,7 @@
 
 ## 当前能力
 
-- `SkillHubHttpGateway` 使用固定基础地址调用文档提供的 `/list`、`/upload`、`/upload/progress` 和 `/download/{id}`，全部请求携带只从环境注入的 `X-Skill-Access-Key`。上传严格使用 `source/phase/file/safetyReportPic/directoryStructurePic/runningEffectPic` 六个 multipart 字段，提交响应读取 `result` taskId，进度响应读取 `result.progress/message`；下载渠道由 `SkillHubDownloadChannel.PLATFORM(3)` 固定，调用方不能传任意 channel。下载标准响应按文档接受 `application/octet-stream`，并兼容企业代理常见的 `application/zip`、chunked 传输和附件元数据省略；正文仍限制 20 MiB，并由业务层继续完成 ZIP、根 `SKILL.md` 与稳定名称校验。目录和 JSON 响应限制 4 MiB，HTTP/业务错误统一收敛为 `SKILLHUB_UNAVAILABLE`，安全错误详情只允许包含上游 HTTP 状态，不记录密钥、URL 或正文。
+- `SkillHubHttpGateway` 使用固定基础地址调用文档提供的 `/list`、`/upload`、`/upload/progress` 和 `/download/{id}`，全部请求携带只从环境注入的 `X-Skill-Access-Key`。平台上传入口只接收 `source/phase/file/safetyReportPic/directoryStructurePic/runningEffectPic` 六个业务字段，适配器再按新版文档补入当前认证主体统一认证号 `userId`；提交响应读取 `result` taskId，进度响应读取 `result.progress/message`。下载渠道由 `SkillHubDownloadChannel.PLATFORM(3)` 固定，并把同一认证主体统一认证号作为必填 `userId` 查询参数，调用方不能传任意 channel 或自报身份。下载标准响应按文档接受 `application/octet-stream`，并兼容企业代理常见的 `application/zip`、chunked 传输和附件元数据省略；正文仍限制 20 MiB，并由业务层继续完成 ZIP、根 `SKILL.md` 与稳定名称校验。目录和 JSON 响应限制 4 MiB，HTTP/业务错误统一收敛为 `SKILLHUB_UNAVAILABLE`，安全错误详情只允许包含上游 HTTP 状态，不记录密钥、URL、统一认证号或正文。
 - `TcdsHttpGateway` 统一实现用户、TCDS 应用目录、需求子条目、文档元数据和受限下载；基础地址默认使用企业局域网 `http://tcds-prod.sdc.icbc:9080`，允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖，固定接口用 `URI.resolve` 构造。登录、用户、应用、子条目、文档元数据及 TCDS 同源文档请求统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；重定向到跨域对象存储后不透传该 header。文档 URL 只接受重新查询的 TCDS 响应，限定 HTTP/HTTPS、10 秒连接、30 秒请求、3 次重定向及调用方容量上限，日志不记录 token、签名 URL 或正文。
 - 从 `src/main/resources/toolbox/catalog-v1.json` 加载锁定 IT-Tools / OmniTools 的版本化离线目录，启动时校验 193 项的稳定 ID、深链接、双语字段、分类和顺序。
 - `ToolboxCatalogService` 通过显式生产构造器注入点击仓储，合并累计点击投影，并按累计数、最后计数时间和目录顺序计算正点击 Top 10。
@@ -49,7 +49,7 @@
 `RunnerPublicKeyEncryptionServiceTest` 覆盖超过RSA-OAEP明文上限的真实长度私钥可由版本化混合信封往返解密。
 `ExternalSshKeyEnvelopeServiceTest` 固化 TAEK1 测试向量并覆盖错误 Key/AAD/密文篡改；`ExternalUserSshKeyApplicationServiceTest` 覆盖 scope、用户状态、404 收敛、旧格式 409 和无明文响应。
 `TcdsCaseMaintenanceServiceTest` 锁定所有 profile 均使用任务类型无请求体 GET、统一部署地址、全部 TCDS 请求的固定 `toolId`、动态 `subItemTypes.name/value` 提取、重复或含分隔符名称拒绝，以及案例提交前按完整名称实时校验、服务端报文补齐、同案例多任务类型英文逗号连接、TCDS 业务异常收敛和请求/响应日志脱敏。
-`SkillHubHttpGatewayTest` 锁定认证头、现场 `/list` 字段形态、上传六字段及文档响应、进度查询、下载 `channel=3`、标准附件响应以及 ZIP MIME/chunked 企业代理兼容，并确认上游非 200 只返回脱敏状态分类。
+`SkillHubHttpGatewayTest` 锁定认证头、现场 `/list` 字段形态、上传六个业务字段加服务端 `userId` 及文档响应、进度查询、下载 `channel=3&userId=<统一认证号>`、标准附件响应以及 ZIP MIME/chunked 企业代理兼容，并确认上游非 200 只返回脱敏状态分类。
 `LobehubSsoApplicationServiceTest` 覆盖停用/空部门、票据时限、同名部门规范化、角色、grant 轮换与用户实时
 状态，以及启用但仍为占位配置时不持久化票据；`LobehubHmacAuthenticatorTest` 覆盖签名伪造、时钟边界与
 溢出、nonce 重放及原始 body 绑定；`LobehubDevelopmentOwnerResolverTest` 覆盖唯一自动候选、显式 owner 和

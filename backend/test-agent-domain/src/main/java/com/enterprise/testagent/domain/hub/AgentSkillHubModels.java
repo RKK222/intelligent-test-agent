@@ -223,10 +223,11 @@ public final class AgentSkillHubModels {
         }
     }
 
-    /** SkillHub /upload 的完整业务输入，四个文件均由调用方显式提供。 */
+    /** SkillHub /upload 的完整业务输入；userId 只能取当前认证主体的统一认证号。 */
     public record SkillHubUploadRequest(
             String source,
             String phase,
+            String userId,
             SkillHubUploadFile skillPackage,
             SkillHubUploadFile safetyReportPicture,
             SkillHubUploadFile directoryStructurePicture,

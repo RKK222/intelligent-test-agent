@@ -75,7 +75,8 @@ public class AgentSkillHubController {
             @RequestParam(required = false) String targetWorkspaceId,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.materializeExternalAsset(assetId, targetWorkspaceId, principal.userId()),
+        return ApiResponse.ok(service.materializeExternalAsset(
+                        assetId, targetWorkspaceId, principal.userId(), principal.unifiedAuthId()),
                 RuntimeApiSupport.traceId(exchange));
     }
 
@@ -86,13 +87,13 @@ public class AgentSkillHubController {
         return ApiResponse.ok(service.syncExternalSkillHubCatalog(), RuntimeApiSupport.traceId(exchange));
     }
 
-    /** 六个字段及返回结构均直接对齐企业 SkillHub /upload 文档。 */
+    /** 平台只接收六个业务字段；上游必填 userId 取当前认证主体统一认证号。 */
     @PostMapping(value = "/external/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public Mono<ApiResponse<String>> uploadExternalSkill(ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
         String traceId = RuntimeApiSupport.traceId(exchange);
         return exchange.getMultipartData()
-                .flatMap(parts -> uploadRequest(parts)
+                .flatMap(parts -> uploadRequest(parts, principal.unifiedAuthId())
                         .flatMap(request -> Mono.fromCallable(() -> service.uploadExternalSkillHub(request))
                                 .subscribeOn(Schedulers.boundedElastic())))
                 .map(taskId -> ApiResponse.ok(taskId, traceId));
@@ -173,7 +174,8 @@ public class AgentSkillHubController {
     record UpdateCountResponse(long count) {
     }
 
-    private Mono<SkillHubUploadRequest> uploadRequest(MultiValueMap<String, Part> parts) {
+    private Mono<SkillHubUploadRequest> uploadRequest(
+            MultiValueMap<String, Part> parts, String unifiedAuthId) {
         if (!parts.keySet().equals(EXTERNAL_UPLOAD_FIELDS)) {
             return Mono.error(new PlatformException(
                     ErrorCode.VALIDATION_ERROR, "SkillHub 上传必须且只能包含接口文档规定的六个字段"));
@@ -186,7 +188,8 @@ public class AgentSkillHubController {
                 readFile(filePart(parts, "directoryStructurePic"), "directoryStructurePic", MAX_PICTURE_BYTES),
                 readFile(filePart(parts, "runningEffectPic"), "runningEffectPic", MAX_PICTURE_BYTES))
                 .map(files -> new SkillHubUploadRequest(
-                        source, phase, files.getT1(), files.getT2(), files.getT3(), files.getT4()));
+                        source, phase, unifiedAuthId,
+                        files.getT1(), files.getT2(), files.getT3(), files.getT4()));
     }
 
     private FormFieldPart formField(MultiValueMap<String, Part> parts, String name) {

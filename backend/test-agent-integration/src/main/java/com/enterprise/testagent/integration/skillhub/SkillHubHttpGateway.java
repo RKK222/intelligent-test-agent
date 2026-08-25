@@ -113,6 +113,7 @@ final class SkillHubHttpGateway implements SkillHubGateway {
         addFile(body, boundary, "safetyReportPic", request.safetyReportPicture());
         addFile(body, boundary, "directoryStructurePic", request.directoryStructurePicture());
         addFile(body, boundary, "runningEffectPic", request.runningEffectPicture());
+        addFormField(body, boundary, "userId", requiredUnifiedAuthId(request.userId()));
         body.add(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
         HttpRequest httpRequest = requestBuilder(baseUri.resolve("upload"))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
@@ -154,10 +155,13 @@ final class SkillHubHttpGateway implements SkillHubGateway {
     }
 
     @Override
-    public ExternalSkillPackage download(long id, String version) {
+    public ExternalSkillPackage download(long id, String version, String unifiedAuthId) {
         ensureEnabled();
         if (id <= 0) throw new IllegalArgumentException("SkillHub id must be positive");
-        URI uri = baseUri.resolve("download/" + id + "?channel=" + SkillHubDownloadChannel.PLATFORM.code());
+        String userId = requiredUnifiedAuthId(unifiedAuthId);
+        URI uri = baseUri.resolve("download/" + id
+                + "?channel=" + SkillHubDownloadChannel.PLATFORM.code()
+                + "&userId=" + URLEncoder.encode(userId, StandardCharsets.UTF_8));
         HttpResponse<InputStream> response = send(get(uri));
         Long contentLength = validateDownloadHeaders(response);
         byte[] content = readLimited(response.body(), MAX_DOWNLOAD_BYTES, "SkillHub 下载包超过 20 MiB");
@@ -253,7 +257,7 @@ final class SkillHubHttpGateway implements SkillHubGateway {
     /** 上游正文可能包含内部信息，错误只保留安全状态分类和 HTTP 状态。 */
     private PlatformException unavailableForStatus(int statusCode) {
         String message = switch (statusCode) {
-            case 401 -> "SkillHub 访问凭据无效或无权限";
+            case 401 -> "SkillHub 认证信息无效或用户无权限";
             case 404 -> "SkillHub Skill 不存在或已下架";
             default -> statusCode >= 500 ? "SkillHub 服务异常" : "SkillHub 响应异常";
         };
@@ -296,6 +300,16 @@ final class SkillHubHttpGateway implements SkillHubGateway {
             throw new IllegalArgumentException("SkillHub upload " + field + " is invalid");
         }
         return value;
+    }
+
+    /** userId 是统一认证号；限制控制字符和数据库既有 255 字符边界，避免构造非法查询或表单。 */
+    private String requiredUnifiedAuthId(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty() || normalized.length() > 255
+                || normalized.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException("SkillHub userId is invalid");
+        }
+        return normalized;
     }
 
     /** 文档只规定 taskId 为 {userId}_{timestamp}；不额外限制企业 userId 字符集。 */

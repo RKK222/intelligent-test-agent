@@ -1316,7 +1316,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private Object hubReferenceCreate(WorkspaceFileSocketTicket ticket, JsonNode params) {
         requireHubReferenceWrite(ticket);
         return agentSkillHubService.createReference(
-                requiredText(params, "assetId"), ticket.workspaceId(), text(params, "aliasTechnicalId"), ticketUserId(ticket));
+                requiredText(params, "assetId"), ticket.workspaceId(), text(params, "aliasTechnicalId"),
+                ticketUserId(ticket), ticket.unifiedAuthId());
     }
 
     private Object hubReferenceRemove(WorkspaceFileSocketTicket ticket, JsonNode params) {
@@ -1328,7 +1329,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private Object hubReferenceUpdateStart(WorkspaceFileSocketTicket ticket, JsonNode params) {
         requireHubReferenceWrite(ticket);
         return agentSkillHubService.startUpdate(
-                requiredText(params, "referenceId"), ticket.workspaceId(), ticketUserId(ticket));
+                requiredText(params, "referenceId"), ticket.workspaceId(),
+                ticketUserId(ticket), ticket.unifiedAuthId());
     }
 
     private Object hubReferenceUpdateReadConflict(WorkspaceFileSocketTicket ticket, JsonNode params) {

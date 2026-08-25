@@ -181,7 +181,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return new AgentSkillHubResponses.ExternalSyncResponse(skills.size(), synchronizedAt);
     }
 
-    /** 按企业接口文档显式提交六个 multipart 字段；返回值直接对应上游 result taskId。 */
+    /** 平台接收六个业务字段，并补入当前认证主体统一认证号后调用上游 /upload。 */
     public String uploadExternalSkillHub(SkillHubUploadRequest request) {
         ensureSkillHubEnabled();
         SkillHubUploadRequest validated = validateExternalUpload(request);
@@ -607,9 +607,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     /** 显式预览才下载 ZIP；相同外部 ID+版本必须保持同一内容摘要。 */
     public AgentSkillHubResponses.AssetDetailResponse materializeExternalAsset(
-            String assetId, String targetRuntimeWorkspaceId, UserId userId) {
+            String assetId, String targetRuntimeWorkspaceId, UserId userId, String unifiedAuthId) {
         Asset asset = requireAsset(assetId);
-        materializeExternalRevision(asset);
+        materializeExternalRevision(asset, unifiedAuthId);
         return getAsset(assetId, null, targetRuntimeWorkspaceId, userId);
     }
 
@@ -712,9 +712,9 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     /** 在目标个人 worktree 引用已发布修订及其精确依赖，所有碰撞检查通过后才写盘。 */
     public AgentSkillHubResponses.ReferenceResponse createReference(
-            String assetId, String targetRuntimeWorkspaceId, String alias, UserId userId) {
+            String assetId, String targetRuntimeWorkspaceId, String alias, UserId userId, String unifiedAuthId) {
         PersonalWorkspace personal = requireOwnedPersonal(targetRuntimeWorkspaceId, userId);
-        Asset rootAsset = ensureExternalMaterialized(requireAsset(assetId));
+        Asset rootAsset = ensureExternalMaterialized(requireAsset(assetId), unifiedAuthId);
         if (!rootAsset.sourceAvailable()) {
             throw new PlatformException(ErrorCode.CONFLICT, "Agent/Skill 来源已不可用，不能新建引用");
         }
@@ -794,11 +794,11 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
 
     /** 启动三方更新；无冲突时原子写盘，有冲突时只保存操作，工作树保持不变。 */
     public AgentSkillHubResponses.UpdateOperationResponse startUpdate(
-            String referenceId, String targetRuntimeWorkspaceId, UserId userId) {
+            String referenceId, String targetRuntimeWorkspaceId, UserId userId, String unifiedAuthId) {
         PersonalWorkspace personal = requireOwnedPersonal(targetRuntimeWorkspaceId, userId);
         Reference reference = requireReference(referenceId);
         requireReferenceTarget(reference, personal);
-        Asset asset = ensureExternalMaterialized(requireAsset(reference.assetId()));
+        Asset asset = ensureExternalMaterialized(requireAsset(reference.assetId()), unifiedAuthId);
         if (!asset.sourceAvailable()) {
             throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 来源已不可用，不能更新引用");
         }
@@ -955,6 +955,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
         String source = requireUploadText(request.source(), "source");
         String phase = request.phase() == null ? "" : request.phase().trim();
+        String unifiedAuthId = requireUnifiedAuthId(request.userId());
         if (!Set.of("00", "01", "02", "03", "04", "05", "06").contains(phase)) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "phase 必须是 00 至 06 的阶段编码");
         }
@@ -970,6 +971,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         return new SkillHubUploadRequest(
                 source,
                 phase,
+                unifiedAuthId,
                 request.skillPackage(),
                 request.safetyReportPicture(),
                 request.directoryStructurePicture(),
@@ -980,6 +982,16 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         String normalized = value == null ? "" : value.trim();
         if (normalized.isEmpty() || normalized.length() > 256 || normalized.indexOf('\0') >= 0) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, field + " 无效");
+        }
+        return normalized;
+    }
+
+    /** SkillHub 的 userId 明确指统一认证号，禁止平台内部 userId、空值或控制字符进入上游。 */
+    private String requireUnifiedAuthId(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isEmpty() || normalized.length() > 255
+                || normalized.chars().anyMatch(Character::isISOControl)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前用户统一认证号无效");
         }
         return normalized;
     }
@@ -1009,20 +1021,20 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         }
     }
 
-    private Asset ensureExternalMaterialized(Asset asset) {
+    private Asset ensureExternalMaterialized(Asset asset, String unifiedAuthId) {
         if (asset.sourceKind() != SourceKind.SKILLHUB) return asset;
         if (!asset.sourceAvailable()) return asset;
         Revision current = asset.latestPublishedRevisionId() == null
                 ? null : requireRevision(asset.latestPublishedRevisionId());
         if (current == null || !Objects.equals(current.externalSkillId(), asset.externalSkillId())
                 || !Objects.equals(current.externalVersion(), asset.externalVersion())) {
-            materializeExternalRevision(asset);
+            materializeExternalRevision(asset, unifiedAuthId);
             return requireAsset(asset.assetId());
         }
         return asset;
     }
 
-    private Revision materializeExternalRevision(Asset asset) {
+    private Revision materializeExternalRevision(Asset asset, String unifiedAuthId) {
         if (asset.sourceKind() != SourceKind.SKILLHUB) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "只有 SkillHub 外部 Skill 支持按需下载");
         }
@@ -1033,7 +1045,8 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 || asset.externalSkillId() == null || asset.externalVersion() == null) {
             throw new PlatformException(ErrorCode.SKILLHUB_UNAVAILABLE, "SkillHub 集成未启用或目录元数据不完整");
         }
-        ExternalSkillPackage downloaded = skillHubGateway.download(asset.externalSkillId(), asset.externalVersion());
+        ExternalSkillPackage downloaded = skillHubGateway.download(
+                asset.externalSkillId(), asset.externalVersion(), requireUnifiedAuthId(unifiedAuthId));
         if (downloaded.id() != asset.externalSkillId()
                 || !Objects.equals(downloaded.version(), asset.externalVersion())) {
             throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 下载版本与当前目录不一致，请刷新后重试");

@@ -132,6 +132,7 @@ class AgentSkillHubApplicationServiceTest {
         verify(gateway).upload(uploaded.capture());
         assertThat(uploaded.getValue().source()).isEqualTo("研发团队");
         assertThat(uploaded.getValue().phase()).isEqualTo("04");
+        assertThat(uploaded.getValue().userId()).isEqualTo("AUTH_001");
         verify(gateway).uploadProgress("user001_1723526400000");
     }
 
@@ -207,7 +208,7 @@ class AgentSkillHubApplicationServiceTest {
                 "stable", "稳定", "team", 7L, "测试设计", "生成案例", null, null);
         when(repository.findAsset(external.assetId())).thenReturn(Optional.of(external));
         when(gateway.enabled()).thenReturn(true);
-        when(gateway.download(42, "1.2.0")).thenReturn(
+        when(gateway.download(42, "1.2.0", "AUTH_001")).thenReturn(
                 new ExternalSkillPackage(42, "1.2.0", zip("../SKILL.md", "name: case-design")));
         AgentSkillHubApplicationService service = new AgentSkillHubApplicationService(
                 repository, mock(ConfigurationManagementRepository.class),
@@ -216,9 +217,10 @@ class AgentSkillHubApplicationServiceTest {
         service.setSkillHubGateway(gateway);
 
         assertThatThrownBy(() -> service.materializeExternalAsset(
-                external.assetId(), null, new UserId("usr_1")))
+                external.assetId(), null, new UserId("usr_1"), "AUTH_001"))
                 .isInstanceOf(com.enterprise.testagent.common.error.PlatformException.class)
                 .hasMessageContaining("路径无效");
+        verify(gateway).download(42, "1.2.0", "AUTH_001");
         verify(repository, never()).saveExternalRevision(
                 anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any());
     }
@@ -237,6 +239,7 @@ class AgentSkillHubApplicationServiceTest {
         return new SkillHubUploadRequest(
                 source,
                 phase,
+                "AUTH_001",
                 new SkillHubUploadFile("api-check.zip", "application/zip", packageBytes),
                 new SkillHubUploadFile("safety.png", "image/png", new byte[]{1}),
                 new SkillHubUploadFile("directory.png", "image/png", new byte[]{2}),
@@ -675,7 +678,7 @@ class AgentSkillHubApplicationServiceTest {
         when(repository.saveReferenceAndUpdateOperation(any(Reference.class), any(UpdateOperation.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        var result = service.startUpdate("hub_ref_1", "wrk_target", new UserId("usr_1"));
+        var result = service.startUpdate("hub_ref_1", "wrk_target", new UserId("usr_1"), "AUTH_001");
 
         assertThat(result.status()).isEqualTo("COMPLETED");
         assertThat(result.worktreeChanged()).isTrue();
@@ -764,7 +767,8 @@ class AgentSkillHubApplicationServiceTest {
         when(repository.findReferencesByTargetAsset("awp_target", asset.assetId())).thenReturn(List.of(removing));
         when(repository.saveReferences(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        var result = service.createReference(asset.assetId(), "wrk_target", null, new UserId("usr_1"));
+        var result = service.createReference(
+                asset.assetId(), "wrk_target", null, new UserId("usr_1"), "AUTH_001");
 
         assertThat(result.referenceId()).isEqualTo(removing.referenceId());
         assertThat(result.status()).isEqualTo("PENDING_PUSH");
@@ -819,7 +823,8 @@ class AgentSkillHubApplicationServiceTest {
         Files.createDirectories(customFile.getParent());
         Files.writeString(customFile, "keep me");
 
-        assertThatThrownBy(() -> service.createReference(asset.assetId(), "wrk_target", null, new UserId("usr_1")))
+        assertThatThrownBy(() -> service.createReference(
+                asset.assetId(), "wrk_target", null, new UserId("usr_1"), "AUTH_001"))
                 .hasMessageContaining("目标 Agent/Skill 已存在");
         assertThat(customFile).exists();
         assertThat(Files.readString(customFile)).isEqualTo("keep me");

@@ -14105,3 +14105,27 @@
 
 - 托盘点击不再使用类似旧系统的 AWT 原生菜单，已与工作区选择窗口统一为 FlatLaf 卡片风格；最终客户端正在 `test-agent-local-client-ui-82d123ac6` screen 会话中运行。
 - 本次不新增部署节点，不修改 HTTP API、RunEvent/SSE、文件 WebSocket、数据库、Flyway、性能或安全契约、环境配置、generated SDK 和 OpenCode 只读源码。受本机刘海区域遮挡影响，未取得状态栏图标直接点击截图；同一实际弹层组件的图形预览和最终客户端进程分别完成验证，麒麟真机视觉仍需现场复核。
+
+## 2026-08-25 - 按新版 SkillHub 文档补齐统一认证号
+
+### Why
+
+- 新版 SkillHub 文档明确 `/upload` 和 `/download/{id}` 都必填 `userId`，语义为用户统一认证号；此前下载只带固定 `channel=3`，现场因此出现 `/list` 成功而下载返回 401。
+
+### What
+
+- SkillHub 上传在既有六个业务字段之外，由后端补入当前登录主体的统一认证号；平台 multipart 继续拒绝浏览器提交或覆盖 `userId`。
+- 外部 Skill 预览、引用和更新触发下载时，统一调用 `/download/{id}?channel=3&userId=<统一认证号>`；HTTP 入口使用 `AuthPrincipal.unifiedAuthId`，文件 WebSocket 入口使用 ticket 已冻结的同一字段。
+- 对统一认证号增加非空、长度和控制字符校验，并保持 URL、统一认证号、访问密钥和上游正文不进入日志或错误响应；同步 API、领域、工作区、integration 与安全规范文档。
+
+### How
+
+- 定向执行 `SkillHubHttpGatewayTest`、`AgentSkillHubApplicationServiceTest`、`AgentSkillHubControllerTest`，共 32 项全部通过，覆盖上传第七字段、下载 URL 编码、固定 `channel=3`、当前认证主体透传和客户端身份伪造拒绝。
+- 执行 `mvn -pl test-agent-app -am -DskipTests package`，24 模块应用打包成功；`git diff --check` 通过。
+- 尝试运行 `mvn -pl test-agent-api -am test`；SkillHub 所在及其前置业务模块均通过，但套件在既有 XXL-Job Testcontainers 的 Docker/Ryuk 启动检查中阻塞，线程栈确认停在 Docker HTTP 容器启动，人工中止后 API 模块未进入该轮全量执行，API 已由上述定向测试覆盖。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次 SkillHub 文件冲突的并行成果；保留并排除工作区既有 `.reasonix/`、Vite cache 和 `node_modules/`。
+
+### Result
+
+- 代码和文档已对齐新版 `userId` 契约，同时保留接口提供方此前明确的企业平台渠道 `channel=3`；需将新应用包部署到企业测试环境后再做真实 SkillHub 下载验证。
+- 本次不新增部署节点，不修改浏览器 HTTP 路径/请求字段、RunEvent/SSE、数据库、SQL、Flyway、性能模型、环境配置、generated SDK 或 OpenCode 只读源码；安全边界收紧为服务端可信身份派生。

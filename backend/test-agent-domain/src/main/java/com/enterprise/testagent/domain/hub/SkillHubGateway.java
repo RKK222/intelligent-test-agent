@@ -20,5 +20,6 @@ public interface SkillHubGateway {
 
     SkillHubUploadProgress uploadProgress(String taskId);
 
-    ExternalSkillPackage download(long id, String version);
+    /** 下载必须携带当前操作人的统一认证号，调用方不得使用平台内部 userId 或客户端自报身份。 */
+    ExternalSkillPackage download(long id, String version, String unifiedAuthId);
 }
