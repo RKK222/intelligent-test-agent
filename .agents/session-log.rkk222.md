@@ -23,10 +23,13 @@
 - `bash -n` 覆盖两个打包脚本和两个回归脚本，`git diff --check` 通过。
 - `tools/verify-internal-incremental-components.sh` 通过，确认历史版本不进入 ZIP、单版本 catalog 内容正确且签名可由组织公钥验证。
 - `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖相对输出、离线安装、签名发布、普通用户包与 bootstrap。
+- `local-opencode-client-update-test.sh` 通过；SkillHub 后端 24/24、前端 89/89 通过；正式双后台包的 ZIP CRC、内嵌内层 SHA、Flyway persistence/XXL JAR、三份节点包、RSA、公钥、配置脱敏和 manager 日志兼容门禁全部通过。
 
 ### Result
 
-- 归档和增量选择缺陷已由自动化回归验证；当前客户端版本、最终内外包 SHA-256、Flyway/JAR 字节和外层节点包仍需在提交后正式重新封装并记录。
+- 正式包基于源码提交 `c73b3ddfb9827141e1b53cd72bb6d19efcc8b61f`：客户端版本 `20260825135217`；内层 ZIP SHA-256 `5975ed638831a96826017689aade5e64ff9337bb84bd9ac4b4dc970862e5aaff`；外层固定名包 SHA-256 `2b96ba79c9212201af90a1c1f9c8872871350abd2bef1c84dd141f092f6048f9`。
+- 后端 JAR、前端 tar、麒麟用户包分别为 `4ad56a5862659ea1fb2a335a5678cee93b0de67d477ba74a76e62ace126c0886`、`f26ba562072feec1f36123ee9b6ca69d1942eb1449b791d0947e2d9fdea145a5`、`365a0f17ecd9afb27d83c096ebd4e86c40e7e576d461d71487697218093ba6b2`；三份节点包 `.2/.4/.114` 分别为 `b1ba62b4fecd605a81ad6e0bd7dd6ba0409e755b155907b1318710afb3bf4b5a`、`37c317140daedb9c0f73b4d5ce2f66069030496d912b04cb0cf1f181724dd3cd`、`8279272e5a6786e126a830ccd744143752f475d6053ed93d155a7a84e648bf4b`。
+- 组件清单为 worker runtime `reuse`、toolbox `reuse`、客户端 `included`、LobeHub/memory runtime `disabled`；平台 ZIP 从约 697 MiB 降回约 423 MiB，只含当前客户端 release。Flyway 当前待企业库执行的前向迁移仍为 `V20260825091459__local_client_instance_replacements_create.sql`，SHA-256 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。
 - 本次不新增部署节点，不修改业务 HTTP API、RunEvent/SSE、数据库结构、Flyway SQL、generated SDK、OpenCode 源码或 `.env*`；只收紧企业发布归档完整性与增量边界。
 
 ### 2026-08-25 - 稳定客户端下载入口并复用已验签依赖缓存
