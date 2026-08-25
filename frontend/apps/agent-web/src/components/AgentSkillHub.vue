@@ -71,6 +71,8 @@ type HubTab = "DISCOVER" | "AGENT" | "SKILL" | "MCP" | "TOOL" | "REFERENCED" | "
 type SkillCategoryFilter = AgentSkillHubSkillCategory | "ALL";
 type SkillSubcategoryFilter = AgentSkillHubSkillSubcategory | "ALL";
 type SkillSourceFilter = AgentSkillHubSourceKind | "ALL";
+type SkillHubUploadState = "IDLE" | "SUBMITTING" | "POLLING" | "SYNCING" | "SUCCEEDED" | "FAILED" | "TIMED_OUT";
+type SkillHubUploadFileKind = "skillPackage" | "safetyReportPicture" | "directoryStructurePicture" | "runningEffectPicture";
 
 const SKILL_CATEGORIES: Array<{ value: SkillCategoryFilter; label: string; hint: string }> = [
   { value: "ALL", label: "全部", hint: "全部 Skill" },
@@ -88,6 +90,17 @@ const TEST_SUBCATEGORIES: Array<{ value: AgentSkillHubSkillSubcategory; label: s
 const CODE_SUBCATEGORIES: Array<{ value: AgentSkillHubSkillSubcategory; label: string }> = [
   { value: "WHITE_BOX_ANALYSIS", label: "白盒分析" }
 ];
+const SKILL_HUB_UPLOAD_PHASES = [
+  { value: "00", label: "通用" },
+  { value: "01", label: "需求分析" },
+  { value: "02", label: "设计" },
+  { value: "03", label: "开发" },
+  { value: "04", label: "测试" },
+  { value: "05", label: "交付" },
+  { value: "06", label: "运维" }
+] as const;
+const SKILL_HUB_UPLOAD_POLL_INTERVAL_MS = 1_000;
+const SKILL_HUB_UPLOAD_POLL_TIMEOUT_MS = 100_000;
 
 const tab = ref<HubTab>("DISCOVER");
 const skillCategory = ref<SkillCategoryFilter>("ALL");
@@ -122,6 +135,23 @@ const detailFullscreen = ref(false);
 const detailResizing = ref(false);
 const classificationCategory = ref<AgentSkillHubSkillCategory>("OTHER");
 const classificationSubcategory = ref<AgentSkillHubSkillSubcategory | null>(null);
+const uploadDialog = ref(false);
+const uploadSource = ref("");
+const uploadPhase = ref("");
+const uploadFiles = ref<Record<SkillHubUploadFileKind, File | null>>({
+  skillPackage: null,
+  safetyReportPicture: null,
+  directoryStructurePicture: null,
+  runningEffectPicture: null
+});
+const uploadState = ref<SkillHubUploadState>("IDLE");
+const uploadProgress = ref<number | null>(null);
+const uploadMessage = ref("");
+const uploadTaskId = ref<string | null>(null);
+const uploadInputVersion = ref(0);
+let uploadPollTimer: ReturnType<typeof setTimeout> | null = null;
+let uploadPollVersion = 0;
+let uploadPollDeadline = 0;
 
 const visibleSkillSubcategories = computed(() => {
   if (skillCategory.value === "TEST") return TEST_SUBCATEGORIES;
@@ -142,6 +172,13 @@ const runtimeItems = computed(() => {
     .some((value) => value?.toLowerCase().includes(normalizedKeyword)));
 });
 const isRuntimeTab = computed(() => tab.value === "MCP" || tab.value === "TOOL");
+const uploadBusy = computed(() => ["SUBMITTING", "POLLING", "SYNCING"].includes(uploadState.value));
+const canSubmitUpload = computed(() =>
+  !uploadBusy.value
+  && Boolean(uploadSource.value.trim())
+  && SKILL_HUB_UPLOAD_PHASES.some((item) => item.value === uploadPhase.value)
+  && Object.values(uploadFiles.value).every(Boolean)
+);
 const detailPanelStyle = computed<CSSProperties>(() => detailFullscreen.value
   ? { width: "100vw", height: "100vh" }
   : { width: `${detailPanelWidth.value}px` });
@@ -381,6 +418,8 @@ function selectSkillSubcategory(subcategory: SkillSubcategoryFilter) {
 }
 
 function selectSkillSource(source: SkillSourceFilter) {
+  // 已选中的来源再次点击不会改变查询条件，无需重复请求目录。
+  if (skillSource.value === source) return;
   skillSource.value = source;
   void loadAssets();
 }
@@ -628,6 +667,157 @@ function message(cause: unknown) {
   return cause instanceof Error ? cause.message : "Hub 操作失败";
 }
 
+function clearUploadPollTimer() {
+  if (!uploadPollTimer) return;
+  clearTimeout(uploadPollTimer);
+  uploadPollTimer = null;
+}
+
+function resetUploadForm() {
+  uploadPollVersion++;
+  clearUploadPollTimer();
+  uploadSource.value = "";
+  uploadPhase.value = "";
+  uploadFiles.value = {
+    skillPackage: null,
+    safetyReportPicture: null,
+    directoryStructurePicture: null,
+    runningEffectPicture: null
+  };
+  uploadState.value = "IDLE";
+  uploadProgress.value = null;
+  uploadMessage.value = "";
+  uploadTaskId.value = null;
+  uploadInputVersion.value++;
+}
+
+function openUploadDialog() {
+  if (!props.canClassifySkills) return;
+  uploadDialog.value = true;
+}
+
+function selectUploadFile(kind: SkillHubUploadFileKind, event: Event) {
+  const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+  uploadFiles.value = { ...uploadFiles.value, [kind]: file };
+}
+
+function markUploadTimedOut(version: number) {
+  if (version !== uploadPollVersion) return;
+  uploadState.value = "TIMED_OUT";
+  uploadMessage.value = "100 秒内未查询到最终结果，任务仍可能在 SkillHub 处理中，可继续查询。";
+}
+
+function scheduleUploadPoll(version: number) {
+  if (version !== uploadPollVersion) return;
+  if (Date.now() >= uploadPollDeadline) {
+    markUploadTimedOut(version);
+    return;
+  }
+  clearUploadPollTimer();
+  uploadPollTimer = setTimeout(() => {
+    uploadPollTimer = null;
+    void pollUploadProgress(version);
+  }, SKILL_HUB_UPLOAD_POLL_INTERVAL_MS);
+}
+
+/** 上传完成后立即对账外部目录；对账失败不把已成功的上游上传误报为失败。 */
+async function synchronizeUploadedSkill(version: number) {
+  if (version !== uploadPollVersion) return;
+  uploadState.value = "SYNCING";
+  uploadProgress.value = 100;
+  uploadMessage.value = "SkillHub 上传完成，正在同步能力库目录...";
+  try {
+    const result = await api.syncExternalSkillHubCatalog();
+    if (version !== uploadPollVersion) return;
+    uploadState.value = "SUCCEEDED";
+    uploadMessage.value = `上传成功，能力库已同步 ${result.assetCount} 个 Skill。`;
+    skillSource.value = "SKILLHUB";
+    skillCategory.value = "ALL";
+    skillSubcategory.value = "ALL";
+    if (tab.value === "SKILL") await loadAssets();
+    else tab.value = "SKILL";
+    await refreshOverview();
+    ElMessage.success("Skill 上传成功，能力库目录已刷新");
+  } catch (cause) {
+    if (version !== uploadPollVersion) return;
+    uploadState.value = "SUCCEEDED";
+    uploadMessage.value = `SkillHub 上传已完成，但能力库目录同步失败：${message(cause)}。后台定时对账后会自动出现。`;
+    ElMessage.warning("Skill 已上传，能力库目录暂未同步");
+  }
+}
+
+/** 使用响应结束后再计时的短轮询，避免慢请求与下一次查询重叠。 */
+async function pollUploadProgress(version: number) {
+  if (version !== uploadPollVersion || !uploadTaskId.value) return;
+  if (Date.now() >= uploadPollDeadline) {
+    markUploadTimedOut(version);
+    return;
+  }
+  try {
+    const result = await api.getExternalSkillHubUploadProgress(uploadTaskId.value);
+    if (version !== uploadPollVersion) return;
+    uploadProgress.value = result.progress < 0 ? null : Math.min(100, Math.max(0, result.progress));
+    uploadMessage.value = result.message || `SkillHub 正在处理：${result.progress}%`;
+    if (result.progress === 100) {
+      await synchronizeUploadedSkill(version);
+      return;
+    }
+    if (result.progress === -1) {
+      uploadState.value = "FAILED";
+      uploadMessage.value = result.message || "SkillHub 上传失败";
+      return;
+    }
+    scheduleUploadPoll(version);
+  } catch (cause) {
+    if (version !== uploadPollVersion) return;
+    uploadMessage.value = `进度查询暂时失败，正在重试：${message(cause)}`;
+    scheduleUploadPoll(version);
+  }
+}
+
+async function submitSkillHubUpload() {
+  if (!props.canClassifySkills || !canSubmitUpload.value) return;
+  const files = uploadFiles.value;
+  if (!files.skillPackage || !files.safetyReportPicture || !files.directoryStructurePicture || !files.runningEffectPicture) return;
+  uploadPollVersion++;
+  const version = uploadPollVersion;
+  clearUploadPollTimer();
+  uploadState.value = "SUBMITTING";
+  uploadProgress.value = null;
+  uploadMessage.value = "正在向 SkillHub 提交上传任务...";
+  uploadTaskId.value = null;
+  try {
+    const taskId = (await api.uploadExternalSkillHub({
+      source: uploadSource.value.trim(),
+      phase: uploadPhase.value,
+      skillPackage: files.skillPackage,
+      safetyReportPicture: files.safetyReportPicture,
+      directoryStructurePicture: files.directoryStructurePicture,
+      runningEffectPicture: files.runningEffectPicture
+    })).trim();
+    if (version !== uploadPollVersion) return;
+    if (!taskId) throw new Error("SkillHub 未返回上传任务 ID");
+    uploadTaskId.value = taskId;
+    uploadState.value = "POLLING";
+    uploadMessage.value = "任务已提交，正在查询处理进度...";
+    uploadPollDeadline = Date.now() + SKILL_HUB_UPLOAD_POLL_TIMEOUT_MS;
+    await pollUploadProgress(version);
+  } catch (cause) {
+    if (version !== uploadPollVersion) return;
+    uploadState.value = "FAILED";
+    uploadMessage.value = message(cause);
+    ElMessage.error(`Skill 上传失败：${message(cause)}`);
+  }
+}
+
+function continueUploadProgress() {
+  if (!uploadTaskId.value || uploadState.value !== "TIMED_OUT") return;
+  uploadState.value = "POLLING";
+  uploadMessage.value = "继续查询 SkillHub 处理进度...";
+  uploadPollDeadline = Date.now() + SKILL_HUB_UPLOAD_POLL_TIMEOUT_MS;
+  void pollUploadProgress(uploadPollVersion);
+}
+
 /** 优先展示平台用户姓名；用户尚未同步到 users 时回退 SkillHub contributor ID。 */
 function skillCreator(asset: AgentSkillHubAsset) {
   return asset.externalContributorName?.trim() || asset.externalContributor?.trim() || "未提供";
@@ -715,6 +905,10 @@ watch(() => props.canManage, (canManage) => {
   activeConflictPath.value = null;
 });
 
+watch(() => props.canClassifySkills, (canUpload) => {
+  if (!canUpload) uploadDialog.value = false;
+});
+
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let searchRefreshPending = false;
 watch(keyword, () => {
@@ -751,6 +945,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer);
+  uploadPollVersion++;
+  clearUploadPollTimer();
   stopDetailResize();
 });
 </script>
@@ -799,6 +995,10 @@ onUnmounted(() => {
             <div class="hub-overview-item"><PlugZap :size="13" /><span><b>{{ runtimeMcp?.length ?? 0 }}</b> MCP</span></div>
             <div class="hub-overview-item"><Wrench :size="13" /><span><b>{{ runtimeTools?.length ?? 0 }}</b> Tool</span></div>
           </div>
+          <button v-if="canClassifySkills" class="hub-upload-trigger" type="button" @click="openUploadDialog">
+            <UploadCloud :size="13" />
+            {{ uploadBusy ? (uploadProgress === null ? '上传处理中' : `上传 ${uploadProgress}%`) : '上传 Skill' }}
+          </button>
           <button class="hub-refresh-btn" type="button" @click="refreshCurrentTab">
             <RefreshCw :size="13" :class="loading && 'hub-spin'" />刷新目录
           </button>
@@ -1155,6 +1355,65 @@ onUnmounted(() => {
       </Teleport>
     </div>
 
+    <div v-if="uploadDialog" class="hub-modal-backdrop" @click.self="uploadDialog = false">
+      <section class="hub-modal hub-upload-modal" aria-label="上传 Skill">
+        <h2>上传 Skill 到 SkillMarket</h2>
+        <p>提交一次后平台会自动查询处理进度；上传完成后立即同步能力库目录，无需重复点击。</p>
+        <div :key="uploadInputVersion" class="hub-upload-form">
+          <label class="hub-field">
+            <span>技能提供方</span>
+            <input v-model="uploadSource" :disabled="uploadBusy" autocomplete="off" placeholder="例如：测试效能团队" />
+          </label>
+          <label class="hub-field">
+            <span>所属阶段</span>
+            <select v-model="uploadPhase" :disabled="uploadBusy">
+              <option value="" disabled>请选择阶段</option>
+              <option v-for="phase in SKILL_HUB_UPLOAD_PHASES" :key="phase.value" :value="phase.value">
+                {{ phase.value }} · {{ phase.label }}
+              </option>
+            </select>
+          </label>
+          <label class="hub-upload-file">
+            <span><b>Skill ZIP</b><small>{{ uploadFiles.skillPackage?.name || '根目录必须包含 SKILL.md' }}</small></span>
+            <input :disabled="uploadBusy" type="file" accept=".zip,application/zip" @change="selectUploadFile('skillPackage', $event)" />
+          </label>
+          <label class="hub-upload-file">
+            <span><b>安全审查报告</b><small>{{ uploadFiles.safetyReportPicture?.name || 'PNG / JPG 图片' }}</small></span>
+            <input :disabled="uploadBusy" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" @change="selectUploadFile('safetyReportPicture', $event)" />
+          </label>
+          <label class="hub-upload-file">
+            <span><b>目录结构截图</b><small>{{ uploadFiles.directoryStructurePicture?.name || 'PNG / JPG 图片' }}</small></span>
+            <input :disabled="uploadBusy" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" @change="selectUploadFile('directoryStructurePicture', $event)" />
+          </label>
+          <label class="hub-upload-file">
+            <span><b>运行效果截图</b><small>{{ uploadFiles.runningEffectPicture?.name || 'PNG / JPG 图片' }}</small></span>
+            <input :disabled="uploadBusy" type="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg" @change="selectUploadFile('runningEffectPicture', $event)" />
+          </label>
+        </div>
+        <div v-if="uploadState !== 'IDLE'" class="hub-upload-status" :data-state="uploadState">
+          <div>
+            <Loader2 v-if="uploadBusy" class="hub-spin" :size="15" />
+            <CheckCircle2 v-else-if="uploadState === 'SUCCEEDED'" :size="15" />
+            <Clock3 v-else-if="uploadState === 'TIMED_OUT'" :size="15" />
+            <X v-else :size="15" />
+            <strong>{{ uploadMessage }}</strong>
+          </div>
+          <div v-if="uploadProgress !== null" class="hub-upload-progress" role="progressbar" aria-label="Skill 上传进度" :aria-valuenow="uploadProgress" aria-valuemin="0" aria-valuemax="100">
+            <span :style="{ width: `${uploadProgress}%` }" />
+          </div>
+          <code v-if="uploadTaskId">任务 ID：{{ uploadTaskId }}</code>
+        </div>
+        <footer>
+          <button v-if="uploadState === 'SUCCEEDED' || uploadState === 'FAILED'" class="hub-secondary" type="button" @click="resetUploadForm">清空重填</button>
+          <button v-if="uploadState === 'TIMED_OUT'" class="hub-primary" type="button" @click="continueUploadProgress">继续查询</button>
+          <button class="hub-secondary" type="button" @click="uploadDialog = false">关闭</button>
+          <button v-if="uploadState !== 'TIMED_OUT' && uploadState !== 'SUCCEEDED'" class="hub-primary" type="button" :disabled="!canSubmitUpload" @click="submitSkillHubUpload">
+            {{ uploadState === 'FAILED' ? '重新上传' : '开始上传' }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
     <div v-if="publishDialog" class="hub-modal-backdrop" @click.self="publishDialog = false">
       <section class="hub-modal">
         <h2>发布 {{ selectedAsset?.displayName || selectedAsset?.technicalId }}</h2>
@@ -1208,6 +1467,8 @@ onUnmounted(() => {
 .hub-overview-item.is-alert b{color:#92400e}
 .hub-refresh-btn{display:flex;align-items:center;gap:6px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 12px;color:#334155;font-size:11px;font-weight:600;transition:all .15s ease;cursor:pointer}
 .hub-refresh-btn:hover{background:#f1f5f9;border-color:#94a3b8;color:#0f172a}
+.hub-upload-trigger{display:flex;align-items:center;gap:6px;border:1px solid #2563eb;border-radius:7px;background:#2563eb;padding:6px 12px;color:#fff;font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer}
+.hub-upload-trigger:hover{border-color:#1d4ed8;background:#1d4ed8}
 
 .hub-tabs{display:flex;height:40px;flex:none;align-items:center;gap:4px;border-bottom:1px solid var(--hub-line);background:#fff;padding:0 24px 0 54px}
 .hub-tabs button{display:flex;height:30px;align-items:center;gap:6px;border:0;border-radius:6px;background:transparent;padding:0 12px;color:#64748b;font-size:12px;font-weight:500;transition:all .15s ease;cursor:pointer}
@@ -1374,6 +1635,7 @@ onUnmounted(() => {
 .hub-modal-backdrop{position:absolute;inset:0;z-index:30;display:grid;place-items:center;background:rgba(15,23,42,.48);backdrop-filter:blur(3px)}
 .hub-modal{width:min(560px,calc(100% - 40px));max-height:76%;overflow:auto;border:1px solid #cbd5e1;border-radius:11px;background:#fff;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,.2)}
 .hub-modal.small{width:min(430px,calc(100% - 40px))}
+.hub-modal.hub-upload-modal{width:min(640px,calc(100% - 40px));max-height:88%}
 .hub-modal h2{margin:0;font-size:16px;color:#0f172a}
 .hub-modal p{margin:6px 0 14px;color:#64748b;font-size:11px;line-height:1.55}
 .hub-modal footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
@@ -1386,7 +1648,23 @@ onUnmounted(() => {
 .hub-field{display:flex;flex-direction:column;gap:6px}
 .hub-field span{font-size:11px;font-weight:600;color:#334155}
 .hub-field input{height:34px;border:1px solid #cbd5e1;border-radius:7px;padding:0 10px;font-family:var(--font-mono);font-size:12px;outline:0}
-.hub-field input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.hub-field select{height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:0 10px;color:#0f172a;font-size:12px;outline:0}
+.hub-field input:focus,.hub-field select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.hub-upload-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hub-upload-file{display:flex;min-width:0;align-items:center;justify-content:space-between;gap:12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:10px 12px}
+.hub-upload-file>span{display:flex;min-width:0;flex-direction:column;gap:3px}
+.hub-upload-file b{color:#334155;font-size:11px}
+.hub-upload-file small{overflow:hidden;color:#64748b;font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.hub-upload-file input{max-width:190px;color:#475569;font-size:10px}
+.hub-upload-status{display:flex;flex-direction:column;gap:8px;margin-top:14px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;padding:11px;color:#1d4ed8}
+.hub-upload-status[data-state="SUCCEEDED"]{border-color:#a7f3d0;background:#ecfdf5;color:#047857}
+.hub-upload-status[data-state="FAILED"]{border-color:#fecaca;background:#fef2f2;color:#b91c1c}
+.hub-upload-status[data-state="TIMED_OUT"]{border-color:#fde68a;background:#fffbeb;color:#b45309}
+.hub-upload-status>div:first-child{display:flex;align-items:flex-start;gap:7px}
+.hub-upload-status strong{font-size:10px;line-height:1.5}
+.hub-upload-status code{font-size:9px;word-break:break-all}
+.hub-upload-progress{height:6px;overflow:hidden;border-radius:999px;background:rgba(148,163,184,.28)}
+.hub-upload-progress span{display:block;height:100%;border-radius:inherit;background:currentColor;transition:width .2s ease}
 .hub-conflict{position:absolute;inset:0;z-index:40}
 .hub-binary-conflict{display:grid;place-items:center;background:rgba(248,250,252,.96)}
 .hub-binary-conflict>section{width:min(520px,calc(100% - 40px));border:1px solid #cbd5e1;border-radius:12px;background:#fff;padding:20px;box-shadow:0 20px 50px rgba(0,0,0,.15)}
@@ -1395,5 +1673,5 @@ onUnmounted(() => {
 .hub-binary-conflict p{color:#64748b;font-size:11px;line-height:1.6}
 .hub-binary-conflict section>div{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 
-@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-classification{align-items:stretch;flex-direction:column}.hub-classification-form{justify-content:flex-start}.hub-detail-panel{width:100%!important}.hub-runtime-summary{grid-template-columns:1fr}.hub-detail-resize-handle{display:none}}
+@media (max-width:760px){.hub-header-main{flex-direction:column;align-items:stretch}.hub-header-actions{flex-direction:column;align-items:stretch}.hub-overview{flex-wrap:wrap}.hub-tabs{overflow:auto;padding:0 12px}.hub-tabs button{flex:none}.hub-catalog-head{align-items:stretch;flex-direction:column}.hub-search{width:100%}.hub-classification{align-items:stretch;flex-direction:column}.hub-classification-form{justify-content:flex-start}.hub-upload-form{grid-template-columns:1fr}.hub-upload-file{align-items:flex-start;flex-direction:column}.hub-detail-panel{width:100%!important}.hub-runtime-summary{grid-template-columns:1fr}.hub-detail-resize-handle{display:none}}
 </style>

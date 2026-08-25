@@ -8,6 +8,9 @@ const api = {
   listAgentSkillHubAssets: vi.fn(),
   getAgentSkillHubAsset: vi.fn(),
   materializeAgentSkillHubAsset: vi.fn(),
+  uploadExternalSkillHub: vi.fn(),
+  getExternalSkillHubUploadProgress: vi.fn(),
+  syncExternalSkillHubCatalog: vi.fn(),
   readAgentSkillHubFile: vi.fn(),
   getAgentSkillHubUpdateCount: vi.fn(),
   listAgentSkillHubUpdates: vi.fn(),
@@ -68,6 +71,12 @@ describe("AgentSkillHub", () => {
       subcategory: "TEST_DESIGN",
       classifiedByUserId: "usr_admin",
       classifiedAt: "2026-08-06T00:00:00Z"
+    });
+    api.uploadExternalSkillHub.mockResolvedValue("upload_task_263");
+    api.getExternalSkillHubUploadProgress.mockResolvedValue({ progress: 100, message: "上传完成" });
+    api.syncExternalSkillHubCatalog.mockResolvedValue({
+      assetCount: 263,
+      synchronizedAt: "2026-08-25T00:00:00Z"
     });
   });
 
@@ -304,6 +313,10 @@ describe("AgentSkillHub", () => {
     await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
       type: "SKILL", source: "SKILLHUB"
     })));
+    const selectedSourceCalls = api.listAgentSkillHubAssets.mock.calls.filter(([query]) => query.source === "SKILLHUB").length;
+    await fireEvent.click(view.getByRole("button", { name: "SkillMarket" }));
+    await Promise.resolve();
+    expect(api.listAgentSkillHubAssets.mock.calls.filter(([query]) => query.source === "SKILLHUB")).toHaveLength(selectedSourceCalls);
     expect(view.getByText("SKILL · SkillMarket")).toBeTruthy();
     expect(await view.findByText("创建人：徐丽娜")).toBeTruthy();
     await fireEvent.click(view.getByText("外部测试设计"));
@@ -314,6 +327,49 @@ describe("AgentSkillHub", () => {
       "hub_asset_external", "wrk_personal"
     ));
     expect(api.readAgentSkillHubFile).toHaveBeenCalledWith("hub_rev_external", "SKILL.md");
+  });
+
+  it("submits a SkillHub upload once, polls automatically and refreshes the SkillMarket catalog", async () => {
+    api.getExternalSkillHubUploadProgress
+      .mockResolvedValueOnce({ progress: 50, message: "数据保存 - 开始" })
+      .mockResolvedValueOnce({ progress: 100, message: "完成" });
+    const view = renderHub({ canManage: false, canClassifySkills: true });
+
+    await fireEvent.click(await view.findByRole("button", { name: "上传 Skill" }));
+    await fireEvent.update(view.getByPlaceholderText("例如：测试效能团队"), "测试效能团队");
+    await fireEvent.update(view.getByDisplayValue("请选择阶段"), "04");
+
+    const fileInputs = [...view.container.querySelectorAll<HTMLInputElement>('input[type="file"]')];
+    const files = [
+      new File(["skill"], "skillhub-263.zip", { type: "application/zip" }),
+      new File(["safe"], "安全审查.png", { type: "image/png" }),
+      new File(["tree"], "目录结构.png", { type: "image/png" }),
+      new File(["run"], "运行效果.png", { type: "image/png" })
+    ];
+    for (const [index, input] of fileInputs.entries()) {
+      Object.defineProperty(input, "files", { configurable: true, value: [files[index]] });
+      await fireEvent.change(input);
+    }
+
+    await fireEvent.click(view.getByRole("button", { name: "开始上传" }));
+
+    await waitFor(() => expect(api.uploadExternalSkillHub).toHaveBeenCalledWith({
+      source: "测试效能团队",
+      phase: "04",
+      skillPackage: files[0],
+      safetyReportPicture: files[1],
+      directoryStructurePicture: files[2],
+      runningEffectPicture: files[3]
+    }));
+    await waitFor(() => expect(api.getExternalSkillHubUploadProgress).toHaveBeenCalledTimes(2), { timeout: 2_500 });
+    expect(api.getExternalSkillHubUploadProgress).toHaveBeenNthCalledWith(1, "upload_task_263");
+    expect(api.getExternalSkillHubUploadProgress).toHaveBeenNthCalledWith(2, "upload_task_263");
+    await waitFor(() => expect(api.syncExternalSkillHubCatalog).toHaveBeenCalledTimes(1), { timeout: 2_500 });
+    await waitFor(() => expect(view.getByText("上传成功，能力库已同步 263 个 Skill。")).toBeTruthy());
+    expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SKILL",
+      source: "SKILLHUB"
+    }));
   });
 
   it("lets only a super administrator classify a user-pushed Skill in the detail page", async () => {

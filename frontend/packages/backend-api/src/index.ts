@@ -297,6 +297,22 @@ export type FileUploadProgress = {
   totalBytes: number;
 };
 export type FileUploadProgressHandler = (progress: FileUploadProgress) => void;
+export type SkillHubExternalUploadPayload = {
+  source: string;
+  phase: string;
+  skillPackage: Blob & { readonly name: string };
+  safetyReportPicture: Blob & { readonly name: string };
+  directoryStructurePicture: Blob & { readonly name: string };
+  runningEffectPicture: Blob & { readonly name: string };
+};
+export type SkillHubExternalUploadProgress = {
+  progress: number;
+  message: string;
+};
+export type SkillHubExternalSyncResult = {
+  assetCount: number;
+  synchronizedAt: string;
+};
 
 const WEBSOCKET_OPEN_STATE = 1;
 const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
@@ -572,7 +588,9 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
     headers.set("X-Trace-Id", traceId);
-    if (init.body != null && !headers.has("Content-Type")) {
+    // multipart/form-data 必须由浏览器生成带 boundary 的 Content-Type，不能套用 JSON 默认头。
+    const isFormDataBody = typeof FormData !== "undefined" && init.body instanceof FormData;
+    if (init.body != null && !headers.has("Content-Type") && !isFormDataBody) {
       headers.set("Content-Type", "application/json");
     }
     // 自动附加用户 Token：优先使用 options 中的 apiToken，其次从 sessionStorage 读取
@@ -1152,6 +1170,30 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         `${agentSkillHubBase}/assets/${encodeURIComponent(assetId)}/materialize${query({ targetWorkspaceId })}`,
         { method: "POST" }
       ),
+    uploadExternalSkillHub: (payload: SkillHubExternalUploadPayload) => {
+      const body = new FormData();
+      body.append("source", payload.source);
+      body.append("phase", payload.phase);
+      body.append("file", payload.skillPackage, payload.skillPackage.name);
+      body.append("safetyReportPic", payload.safetyReportPicture, payload.safetyReportPicture.name);
+      body.append(
+        "directoryStructurePic",
+        payload.directoryStructurePicture,
+        payload.directoryStructurePicture.name
+      );
+      body.append("runningEffectPic", payload.runningEffectPicture, payload.runningEffectPicture.name);
+      return request<string>(`${agentSkillHubBase}/external/upload`, {
+        method: "POST",
+        body,
+        timeoutMs: 120_000
+      });
+    },
+    getExternalSkillHubUploadProgress: (taskId: string) =>
+      request<SkillHubExternalUploadProgress>(
+        `${agentSkillHubBase}/external/upload/progress${query({ taskId })}`
+      ),
+    syncExternalSkillHubCatalog: () =>
+      request<SkillHubExternalSyncResult>(`${agentSkillHubBase}/external/sync`, { method: "POST" }),
     readAgentSkillHubFile: (revisionId: string, path: string) =>
       hubReadRpc<AgentSkillHubFileContent>("hub.asset.read", { revisionId, path }),
     publishAgentSkillHubAsset: (assetId: string, dependencyAssetIds: string[] = []) =>

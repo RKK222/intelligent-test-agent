@@ -3537,6 +3537,58 @@ describe("backend-api", () => {
       expect.objectContaining({ method: "POST" }));
   });
 
+  it("uploads a SkillHub package as multipart, polls progress and synchronizes the catalog", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: "upload_task_263"
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { progress: 100, message: "上传完成" }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { assetCount: 263, synchronizedAt: "2026-08-25T00:00:00Z" }
+      }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+    const namedBlob = (content: string, name: string, type: string) =>
+      Object.assign(new Blob([content], { type }), { name });
+
+    await client.uploadExternalSkillHub({
+      source: "测试效能团队",
+      phase: "04",
+      skillPackage: namedBlob("skill", "skillhub-263.zip", "application/zip"),
+      safetyReportPicture: namedBlob("safe", "安全审查.png", "image/png"),
+      directoryStructurePicture: namedBlob("tree", "目录结构.png", "image/png"),
+      runningEffectPicture: namedBlob("run", "运行效果.png", "image/png")
+    });
+    await client.getExternalSkillHubUploadProgress("upload_task_263");
+    await client.syncExternalSkillHubCatalog();
+
+    const uploadRequest = fetcher.mock.calls[0]?.[1];
+    const uploadBody = uploadRequest?.body as FormData;
+    expect(uploadRequest?.method).toBe("POST");
+    expect(uploadBody).toBeInstanceOf(FormData);
+    expect(uploadBody.get("source")).toBe("测试效能团队");
+    expect(uploadBody.get("phase")).toBe("04");
+    expect((uploadBody.get("file") as Blob & { name: string }).name).toBe("skillhub-263.zip");
+    expect((uploadBody.get("safetyReportPic") as Blob & { name: string }).name).toBe("安全审查.png");
+    expect((uploadBody.get("directoryStructurePic") as Blob & { name: string }).name).toBe("目录结构.png");
+    expect((uploadBody.get("runningEffectPic") as Blob & { name: string }).name).toBe("运行效果.png");
+    expect(new Headers(uploadRequest?.headers).get("Content-Type")).toBeNull();
+    expect(fetcher).toHaveBeenNthCalledWith(2,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/external/upload/progress"
+        + "?taskId=upload_task_263",
+      expect.any(Object));
+    expect(fetcher).toHaveBeenNthCalledWith(3,
+      "http://api/api/internal/platform/workspace-management/agent-skill-hub/external/sync",
+      expect.objectContaining({ method: "POST" }));
+  });
+
   it("resolves a relative Hub file websocket ticket against the enterprise same-origin page", async () => {
     vi.stubGlobal("location", { href: "http://mimo.sdc.cs.icbc:9996/hub" });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
