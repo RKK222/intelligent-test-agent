@@ -10,7 +10,7 @@
 ### Why
 
 - 上一批基于 `54aeccceec868647697e0834c62a32a34dae6020` 生成的企业候选包尚未部署，当前本地
-  `release` 已前进到 `2c4b56b2747571fcd45d2102d6dc390e26a9fc6d`，需要作废中间候选并从当前提交重新构建。
+  `release` 的运行代码已前进到 `db76b47228edc8c0aaab3d691d99b15d4a47d87b`，需要作废中间候选并从当前提交重新构建。
 - 本轮客户端主程序、普通用户安装器和前端/后端实例展示均有实际变化，不能只重封旧二进制；worker、manager、
   toolbox 以及已独立部署的 CK/Mem0/BGE/pgvector 没有输入变化，不能重复打包或重启。
 
@@ -21,6 +21,9 @@
   `81605f245d1512e1ab0dd73812391f6da7d008b5`。
 - 当前客户端支持服务端 key 轮换后的安全重新接入、桌面“启动/重连”入口和更早初始化文件日志；后端实例列表只展示
   仍有 Redis 实时连接的实例，前端能力来源文案统一为 `SkillMarket/MIMO`。
+- 同批平台代码同时包含 `5a9c27bdf` 的历史本地工作区安全接管、同用户旧连接撤销和企业模型路由配置下发，以及
+  `db76b4722` 的 SkillHub ZIP/图片一键上传、串行进度刷新、同步并刷新目录。前者修改平台 API/runtime/persistence 和
+  前端工作台，没有修改客户端 JAR、协议源码或安装器指纹输入，因此继续复用尚未部署的同一签名客户端版本，不制造新版本。
 - 组件清单为 worker runtime `reuse`、toolbox `reuse`、local client `included`、LobeHub/memory runtime
   `disabled`；最终平台 ZIP 只保留客户端 `20260825162157`，未携带本机历史 release。
 
@@ -29,7 +32,8 @@
 - 正式发布脚本完成 Spring Bean 构造器门禁、JDK 25 后端封装、VitePress/TypeScript/前端生产构建、客户端签名分发、
   persistence/XXL JAR migration 字节门禁和组件增量检查。
 - JDK 25 Maven reactor 7 模块通过：本地客户端 98 项通过、1 项条件跳过，system-management 72 项通过；
-  前端全量 Vitest 152 个文件通过，2219 项通过、1 项条件跳过。客户端普通用户安装与稳定升级/回滚两套 Shell
+  最新 runtime/API 工作区与模型路由定向测试通过；前端全量 Vitest 152 个文件通过，2221 项通过、1 项条件跳过。
+  客户端普通用户安装与稳定升级/回滚两套 Shell
   验收、固定外层包和逐节点门禁、ZIP CRC 与内外层嵌套摘要检查均通过。
 - 首次补跑 Maven 时系统默认 JDK 17 无法加载 Java 21 字节码，显式切换项目约定的本机 JDK 25 后同一测试范围完整通过；
   该问题未修改源码或制品。
