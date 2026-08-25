@@ -248,9 +248,9 @@ cache_setup_output="$(
 )"
 tail -n "+${cache_http_start_line}" "${TEST_ROOT}/http.log" >"${TEST_ROOT}/cache-http.log"
 [ "$(readlink "${CACHE_INSTALL_ROOT}/current")" = "releases/${NEW_VERSION}" ]
-grep -q '复用已校验的 JDK 本机缓存' <<<"${cache_setup_output}"
-grep -q '复用已校验的 OPENCODE 本机缓存' <<<"${cache_setup_output}"
-grep -q '复用已校验的 PUBLIC_CAPABILITIES 本机缓存' <<<"${cache_setup_output}"
+grep -q '复用已校验的 JDK 内容缓存' <<<"${cache_setup_output}"
+grep -q '复用已校验的 OPENCODE 内容缓存' <<<"${cache_setup_output}"
+grep -q '复用已校验的 PUBLIC_CAPABILITIES 内容缓存' <<<"${cache_setup_output}"
 grep -q "/releases/${NEW_VERSION}/test-agent-local-client.jar " "${TEST_ROOT}/cache-http.log"
 if grep -Eq "/releases/${NEW_VERSION}/(jdk|opencode|public-capabilities)\.tar\.gz(\.sig)? " \
     "${TEST_ROOT}/cache-http.log"; then

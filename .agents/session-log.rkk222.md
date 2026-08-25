@@ -5,6 +5,45 @@
 
 ## Entries
 
+### 2026-08-25 - 合并远程 release 并重建 AAM 与本地客户端企业增量包
+
+### Why
+
+- 用户要求重新拉取远程 `release`，以合并后的本地代码重建企业包；上一批候选尚未部署，不能继续作为现场基线。
+- 远端新增 AAM 登录验真与平台会话安全，当前本地同时已有客户端跨版本依赖缓存、重连恢复和公共配置发布记录展示，均需进入同一批次。
+
+### What
+
+- 拉取并合并远端 `release`，整合 `687b9a324ca8aeb622eaaece40fa96616c53a07b` 的 AAM 安全改动与本地提交；合并提交为
+  `289f5ae6081e79e548dd764c72f905f99b59d0ca`。冲突只发生在前后端 README/PACKAGE 和 `App.vue`，保留 AAM 回调清理、
+  首屏品牌加载以及既有 SkillHub 契约，没有改写 OpenCode 源码或 generated SDK。
+- 新企业客户端不可变版本为 `20260825204745`，公共能力继续锁定
+  `81605f245d1512e1ab0dd73812391f6da7d008b5`，控制和下载域名继续为 `http://mimo.sdc.cs.icbc:9996`；客户端组件
+  `included`，worker runtime/toolbox 为 `reuse`，LobeHub/memory 为 `disabled`。
+- AAM 后端基址固定为 `http://zfw.sdc.cs.icbc`，前端登录入口为
+  `http://zfw.sdc.cs.icbc/aam/onlyLogin/`；平台令牌改为后端验真后签发的不透明会话令牌，并从回调 URL 清除认证参数。
+- 修正 `local-opencode-client-update-test.sh` 中已过时的缓存提示断言，使其与安装器和完整包测试统一使用“内容缓存”；
+  该修正只影响测试，不改变客户端、前后端二进制或部署行为。
+
+### How
+
+- AAM 后端鉴权/会话定向测试、agent-web AAM/backend-api 130 项和类型检查通过；正式发布脚本完成后端、用户手册、前端、
+  客户端签名分发、persistence/XXL migration 字节及组件指纹门禁。
+- 前端全量 Vitest 153 个文件通过，2235 项通过、1 项条件跳过；本地客户端 Maven 下载器测试、麒麟普通用户完整包测试，
+  以及稳定升级/回退/坏版本自动回滚和签名依赖缓存测试均通过。
+- 更新测试首次失败是旧提示词断言，不是升级逻辑；使用执行跟踪定位到精确断言，按当前安装器稳定文案修正后单独复跑通过。
+
+### Result
+
+- 当前正式二进制基线为 `289f5ae6081e79e548dd764c72f905f99b59d0ca`，内层首次完整构建 SHA-256 为
+  `a6cb0cfd98da4e82a4f5594f26db85eda38653e821b7ade33dba5e4b4069c6e6`；记录和测试修正提交后只允许用同批
+  `--zip-only` 重封，不重新编译或混入其它二进制。
+- 相对 2026-08-24 企业已部署数据库历史，PostgreSQL 仍只允许新增
+  `V20260825091459__local_client_instance_replacements_create.sql`，源码 SHA-256
+  `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`、Flyway checksum `749555545`；
+  XXL MySQL 和 ClickHouse 不得新增 history，禁止 `repair`、`outOfOrder` 或手工修改历史表。
+- 本机只完成构建与自动化校验，尚未执行企业 `.4 -> .114 -> .2` 部署、AAM 真实验真或麒麟普通用户清空后首次安装。
+
 ### 2026-08-25 - 基于当前 release 重建企业增量包并更新客户端重接入
 
 ### Why
