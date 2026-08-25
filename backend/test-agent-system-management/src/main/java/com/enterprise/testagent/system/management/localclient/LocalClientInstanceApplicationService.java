@@ -70,8 +70,13 @@ public class LocalClientInstanceApplicationService {
         LocalClientVersionModels.EffectivePolicy effective = LocalClientVersionModels.resolveEffectivePolicy(
                 versionRepository.findGlobalPolicy().orElse(null),
                 versionRepository.findUserPolicy(userId).orElse(null));
+        // PostgreSQL 保留实例历史供外键和审计使用；普通用户投影只展示仍有短 TTL 实时连接的实例。
+        // OpenCode 健康与否不参与过滤，确保在线但异常的客户端仍可从页面发起重启。
         return instanceRepository.findByUserId(userId).stream()
-                .map(instance -> view(instance, effective))
+                .flatMap(instance -> connectionStore.find(instance.clientInstanceId())
+                        .filter(route -> route.userId().equals(instance.userId()))
+                        .stream()
+                        .map(route -> view(instance, effective, route)))
                 .toList();
     }
 
@@ -97,10 +102,8 @@ public class LocalClientInstanceApplicationService {
 
     private LocalClientInstanceResponses.InstanceView view(
             LocalClientInstance instance,
-            LocalClientVersionModels.EffectivePolicy effective) {
-        LocalClientConnectionRoute route = connectionStore.find(instance.clientInstanceId())
-                .filter(candidate -> candidate.userId().equals(instance.userId()))
-                .orElse(null);
+            LocalClientVersionModels.EffectivePolicy effective,
+            LocalClientConnectionRoute route) {
         return new LocalClientInstanceResponses.InstanceView(
                 instance.clientInstanceId().value(),
                 instance.clientName(),
@@ -108,16 +111,16 @@ public class LocalClientInstanceApplicationService {
                 instance.architecture(),
                 instance.clientVersion(),
                 instance.opencodeVersion(),
-                route != null,
-                route == null ? 0 : route.connectionGeneration(),
-                route == null ? List.of() : route.reportedAddresses(),
-                route == null ? null : route.observedRemoteAddress(),
-                route == null ? null : route.opencodePort(),
-                route == null ? "OFFLINE" : route.processStatus().name(),
-                route != null && route.opencodeHealthy(),
-                route == null ? null : route.processId(),
-                route == null ? null : route.processStartedAt(),
-                route == null ? null : route.lastHeartbeatAt(),
+                true,
+                route.connectionGeneration(),
+                route.reportedAddresses(),
+                route.observedRemoteAddress(),
+                route.opencodePort(),
+                route.processStatus().name(),
+                route.opencodeHealthy(),
+                route.processId(),
+                route.processStartedAt(),
+                route.lastHeartbeatAt(),
                 instance.lastConnectedAt(),
                 instance.lastDisconnectedAt(),
                 CAPABILITIES,

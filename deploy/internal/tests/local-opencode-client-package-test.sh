@@ -41,6 +41,7 @@ mkdir -p "${TEST_ROOT}/inputs/jdk/fake-jdk/bin" \
   "${TEST_ROOT}/inputs/opencode"
 cat >"${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" <<'JAVA'
 #!/usr/bin/env sh
+[ -z "${TEST_FAKE_JAVA_LOG:-}" ] || printf '%s\n' "$*" >>"${TEST_FAKE_JAVA_LOG}"
 if [ "${1:-}" = "-version" ]; then
   echo 'openjdk version "21.0.9"' >&2
 fi
@@ -53,6 +54,7 @@ exit 0
 JAVAC
 cat >"${TEST_ROOT}/system-jdk/bin/java" <<'JAVA'
 #!/usr/bin/env sh
+[ -z "${TEST_FAKE_JAVA_LOG:-}" ] || printf '%s\n' "$*" >>"${TEST_FAKE_JAVA_LOG}"
 if [ "${1:-}" = "-version" ]; then
   echo 'openjdk version "21.0.9"' >&2
 fi
@@ -233,6 +235,7 @@ cmp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
   "${USER_PACKAGE_ROOT}/resources/test-agent-local-client"
 file "${USER_PACKAGE_ROOT}/TestAgent-Local-Client" | grep -Eq 'ELF 64-bit.*ARM aarch64'
 grep -q '不需要 sudo' "${USER_PACKAGE_ROOT}/README.txt"
+grep -q '系统应用菜单打开“Test Agent 本地客户端”恢复连接' "${USER_PACKAGE_ROOT}/README.txt"
 test -z "$(find "${TEST_ROOT}/dist/local-opencode-client" -maxdepth 1 -type f -name '*.deb' -print -quit)"
 
 "${ROOT_DIR}/deploy/internal/verify-local-opencode-client-distribution.sh" \
@@ -360,6 +363,8 @@ test "$(stat -f '%Lp' "${TEST_ROOT}/install/config/credentials.properties" 2>/de
 
 # 无管理员权限安装时，下载脚本必须先自安装为用户级启动器，再创建 user systemd 和桌面入口。
 mkdir -p "${TEST_ROOT}/user-home" "${TEST_ROOT}/fake-systemctl"
+printf '%s\n' 'credential rejected' >"${TEST_ROOT}/install/state/re-enrollment-required"
+chmod 0600 "${TEST_ROOT}/install/state/re-enrollment-required"
 printf '#!/usr/bin/env sh\nprintf "%%s\\n" "$*" >>"${TEST_SYSTEMCTL_LOG:?}"\n' \
   >"${TEST_ROOT}/fake-systemctl/systemctl"
 chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
@@ -367,6 +372,7 @@ chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
   cd "${TEST_ROOT}/dist/local-opencode-client"
   HOME="${TEST_ROOT}/user-home" \
   TEST_SYSTEMCTL_LOG="${TEST_ROOT}/systemctl.log" \
+  TEST_FAKE_JAVA_LOG="${TEST_ROOT}/fake-java.log" \
   PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
   TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
   TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
@@ -375,16 +381,32 @@ chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
   TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
     sh install.sh setup
 )
+grep -Fq 'test-agent-local-client.jar enroll' "${TEST_ROOT}/fake-java.log"
+test ! -e "${TEST_ROOT}/install/state/re-enrollment-required"
 test -x "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
 test ! -L "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
 cmp "${TEST_ROOT}/dist/local-opencode-client/install.sh" \
   "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client"
 grep -Fxq "ExecStart=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client run" \
   "${TEST_ROOT}/user-home/.config/systemd/user/test-agent-local-opencode-client.service"
-grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client enroll" \
+grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client start" \
   "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
 grep -Fxq "Icon=test-agent-local-client" \
   "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
+
+# 用户主动正常退出后，应用菜单使用 start 显式恢复 user service；无失效标记时不重复 enroll。
+before_start_enroll_count="$(grep -F -c 'test-agent-local-client.jar enroll' "${TEST_ROOT}/fake-java.log")"
+HOME="${TEST_ROOT}/user-home" \
+TEST_SYSTEMCTL_LOG="${TEST_ROOT}/systemctl.log" \
+TEST_FAKE_JAVA_LOG="${TEST_ROOT}/fake-java.log" \
+PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install/runtime" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install/state" \
+  sh "${TEST_ROOT}/user-home/.local/bin/test-agent-local-client" start
+test "$(grep -F -c 'test-agent-local-client.jar enroll' "${TEST_ROOT}/fake-java.log")" = "${before_start_enroll_count}"
 grep -Fxq -- '--user daemon-reload' "${TEST_ROOT}/systemctl.log"
 grep -Fxq -- '--user enable test-agent-local-opencode-client.service' "${TEST_ROOT}/systemctl.log"
 grep -Fxq -- '--user restart test-agent-local-opencode-client.service' "${TEST_ROOT}/systemctl.log"

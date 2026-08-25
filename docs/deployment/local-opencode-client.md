@@ -250,13 +250,23 @@ user systemd 服务安装到当前账号的 `~/.local` / `~/.config`。运行时
 
 同一普通用户再次双击新版安装包时仍执行 `setup`：启动器必须重新下载并验证签名 catalog，安装缺失的最新不可变
 release，原子切换 `current`，保留原 `credentials.properties`、`state.json`、工作区根映射和 OpenCode 数据，并对
-已有 user systemd service 执行 restart。验收时在重复安装前后记录 `state.json` 内的 `clientInstanceId`、
+已有 user systemd service 执行 restart。若客户端此前因服务端拒绝旧 Key 写入 `state/re-enrollment-required`，
+重复安装必须先在本机重新执行 enroll，成功后删除标记再重启；不能因旧 `credentials.properties` 仍存在而跳过。
+验收时在重复安装前后记录 `state.json` 内的 `clientInstanceId`、
 `credentials.properties` 摘要和下方 `--version` 输出；前两者必须不变，版本必须更新到 catalog 最新值。
 JDK、OpenCode 和公共能力归档未变化时，打包结果保持确定性摘要；安装器仍逐项按
 新 manifest 校验大小、SHA-256 和 RSA 签名后从当前 release 复制，不再通过 HTTP 重复下载。客户端 JAR 或其它实际
 发生变化的制品继续正常下载并写入新的完整 release，不能跨目录硬链接或跳过签名。
 若实例 ID 变化，应先检查安装脚本与 Java 进程是否
 使用同一 `TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR/STATE_DIR`，不得通过伪造数据库实例归属代替修复。
+
+用户从托盘主动“退出”时，user systemd 的 `Restart=on-failure` 会尊重正常退出，不自动拉起。需要恢复时从应用菜单
+打开“Test Agent 本地客户端”，其桌面入口执行稳定启动器 `start`，重新安装/刷新 user service 并发起连接；若检测到
+上述失效标记，则先交互式重新接入。也可在当前用户终端执行：
+
+~~~bash
+"$HOME/.local/bin/test-agent-local-client" start
+~~~
 
 **机器：同一普通用户的真实交互终端，仅用于验收状态**。应用菜单完成首次接入后执行：
 

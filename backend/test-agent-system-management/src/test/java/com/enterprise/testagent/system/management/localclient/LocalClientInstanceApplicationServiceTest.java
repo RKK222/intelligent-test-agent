@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientCredential;
 import com.enterprise.testagent.domain.localclient.LocalClientCredentialRepository;
@@ -11,9 +12,11 @@ import com.enterprise.testagent.domain.localclient.LocalClientCredentialStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientProcessStatus;
 import com.enterprise.testagent.domain.localclient.LocalClientRolloutRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionModels;
 import com.enterprise.testagent.domain.localclient.LocalClientVersionRepository;
+import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
 import com.enterprise.testagent.domain.user.UserId;
 import java.time.Instant;
 import java.util.List;
@@ -34,8 +37,10 @@ class LocalClientInstanceApplicationServiceTest {
         Instant now = Instant.parse("2026-08-20T10:00:00Z");
         when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
                 userId, LocalClientCredentialStatus.ACTIVE, now, null)));
-        when(instances.findByUserId(userId)).thenReturn(List.of(instance(
-                "lci_local_instance_view", userId, now)));
+        LocalClientInstance instance = instance("lci_local_instance_view", userId, now);
+        when(instances.findByUserId(userId)).thenReturn(List.of(instance));
+        when(connections.find(instance.clientInstanceId())).thenReturn(Optional.of(route(
+                instance, LocalClientProcessStatus.RUNNING, true, now)));
         when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
                 "20260820200000", 6, userId, now)));
         when(versions.findUserPolicy(userId)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
@@ -53,6 +58,39 @@ class LocalClientInstanceApplicationServiceTest {
         assertThat(view.updateDirection()).isEqualTo("ROLLBACK");
         assertThat(view.lastUpdateStatus()).isEqualTo("SUCCEEDED");
         assertThat(view.lastUpdateAt()).isEqualTo(now);
+    }
+
+    @Test
+    void hidesOfflineHistoryButKeepsConnectedUnhealthyInstanceForRecovery() {
+        UserId userId = new UserId("usr_local_instance_online_only");
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientCredentialRepository credentials = mock(LocalClientCredentialRepository.class);
+        LocalClientRolloutRepository rollout = mock(LocalClientRolloutRepository.class);
+        Instant now = Instant.parse("2026-08-20T10:00:00Z");
+        LocalClientInstance offline = instance("lci_local_instance_history", userId, now.minusSeconds(60));
+        LocalClientInstance connected = instance("lci_local_instance_current", userId, now);
+        when(credentials.findByUserId(userId)).thenReturn(Optional.of(credential(
+                userId, LocalClientCredentialStatus.ACTIVE, now, null)));
+        when(instances.findByUserId(userId)).thenReturn(List.of(offline, connected));
+        when(connections.find(offline.clientInstanceId())).thenReturn(Optional.empty());
+        when(connections.find(connected.clientInstanceId())).thenReturn(Optional.of(route(
+                connected, LocalClientProcessStatus.UNHEALTHY, false, now)));
+        when(rollout.isEnabled(userId)).thenReturn(true);
+
+        LocalClientInstanceApplicationService service =
+                new LocalClientInstanceApplicationService(instances, connections, versions, credentials);
+        service.setRolloutRepository(rollout);
+
+        assertThat(service.list(userId))
+                .singleElement()
+                .satisfies(view -> {
+                    assertThat(view.clientInstanceId()).isEqualTo(connected.clientInstanceId().value());
+                    assertThat(view.online()).isTrue();
+                    assertThat(view.opencodeHealthy()).isFalse();
+                    assertThat(view.processStatus()).isEqualTo("UNHEALTHY");
+                });
     }
 
     @Test
@@ -135,5 +173,26 @@ class LocalClientInstanceApplicationServiceTest {
                 now,
                 now.minusSeconds(30),
                 revokedAt);
+    }
+
+    private static LocalClientConnectionRoute route(
+            LocalClientInstance instance,
+            LocalClientProcessStatus processStatus,
+            boolean healthy,
+            Instant now) {
+        return new LocalClientConnectionRoute(
+                instance.clientInstanceId(),
+                instance.userId(),
+                new BackendProcessId("bjp_local_instance_view"),
+                8,
+                "10.0.0.8",
+                List.of("192.0.2.8"),
+                4096,
+                processStatus,
+                4321L,
+                now.minusSeconds(30),
+                healthy,
+                now.minusSeconds(60),
+                now);
     }
 }

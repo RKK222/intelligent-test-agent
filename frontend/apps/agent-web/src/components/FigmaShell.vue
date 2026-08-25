@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Download, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, Plus, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, Plus, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
@@ -93,8 +93,6 @@ const props = withDefaults(
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeEndpoints?: OpencodeEndpoint[];
     opencodeEndpointsLoading?: boolean;
-    /** 实例接口至少成功返回过一次；后台轮询中的 isFetching 不能让下载入口反复消失。 */
-    opencodeEndpointsResolved?: boolean;
     /** 实例接口成功确认管理员关闭后隐藏服务端状态；个人重启入口仍保留。 */
     showServerOpencodeStatus?: boolean;
     /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏全部客户端相关功能。 */
@@ -156,7 +154,6 @@ const props = withDefaults(
     processRestarting: false,
     opencodeEndpoints: () => [],
     opencodeEndpointsLoading: false,
-    opencodeEndpointsResolved: false,
     showServerOpencodeStatus: true,
     localClientVisible: false,
     canRevokeLocalClientKey: false,
@@ -715,14 +712,7 @@ const localClientEndpoints = computed(() => visibleOpencodeEndpoints.value.filte
   endpoint => endpoint.runtimeKind === "LOCAL_CLIENT"
 ));
 
-/** 已有任一在线客户端时隐藏安装入口，避免把“再下载”误当成后续操作。 */
-const showLocalClientDownload = computed(() =>
-  props.localClientVisible === true
-  && props.opencodeEndpointsResolved === true
-  && !localClientEndpoints.value.some(endpoint => endpoint.online)
-);
-
-/** 以平台注册实例为安装完成依据；多台本地设备时汇总健康数量，不依赖浏览器下载记录。 */
+/** 用户实例接口只返回实时连接；兼容旧响应时仍按 online 汇总健康数量。 */
 const localClientHealthDisplay = computed(() => {
   const endpoints = localClientEndpoints.value;
   if (!endpoints.length) {
@@ -2942,20 +2932,6 @@ function submitJoinApp() {
               <Activity class="figma-user-menu-icon" />
               <span class="figma-user-menu-service-text">{{ localClientHealthDisplay.text }}</span>
             </div>
-            <a
-              v-if="!fixedWorkspace && showLocalClientDownload"
-              class="figma-user-menu-item"
-              role="menuitem"
-              data-testid="download-local-client"
-              href="/downloads/local-opencode-client/installer"
-              @click="userMenuOpen = false"
-            >
-              <Download class="figma-user-menu-icon" />
-              <span class="figma-local-client-download-text">
-                <strong>下载本地客户端用户包</strong>
-                <small data-testid="local-client-install-hint">仅支持麒麟 ARM64；解压后双击 TestAgent-Local-Client，无需 sudo</small>
-              </span>
-            </a>
             <button
               v-if="!fixedWorkspace"
               type="button"
@@ -5271,24 +5247,6 @@ function submitJoinApp() {
 
 .figma-user-menu-item:disabled:hover {
   background: transparent;
-}
-
-.figma-local-client-download-text {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.figma-local-client-download-text strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.figma-local-client-download-text small {
-  color: #71717a;
-  font-size: 10px;
-  line-height: 1.4;
 }
 
 .figma-user-menu-icon {

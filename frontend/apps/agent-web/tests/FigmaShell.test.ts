@@ -1472,7 +1472,6 @@ describe("FigmaShell", () => {
       props: {
         currentUserName: "developer",
         localClientVisible: true,
-        opencodeEndpointsResolved: true,
         canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
@@ -1489,14 +1488,7 @@ describe("FigmaShell", () => {
     });
 
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
-    const downloadLink = wrapper.get('[data-testid="download-local-client"]');
-    expect(downloadLink.text()).toContain("下载本地客户端用户包");
-    expect(downloadLink.attributes("href")).toBe("/downloads/local-opencode-client/installer");
-    expect(downloadLink.attributes("download")).toBeUndefined();
-    expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
-      .toContain("麒麟 ARM64");
-    expect(wrapper.get('[data-testid="local-client-install-hint"]').text())
-      .toContain("无需 sudo");
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
     const restartButton = wrapper.get('[data-testid="restart-own-process"]');
     expect(restartButton.attributes("disabled")).toBeUndefined();
     await restartButton.trigger("click");
@@ -1515,7 +1507,7 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="revoke-local-client-key"]').exists()).toBe(false);
   });
 
-  it("hides the local client download when independent access is absent or false", async () => {
+  it("never renders the local client download in the avatar menu", async () => {
     const wrapper = mountShell({ props: { currentUserName: "developer" } });
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
@@ -1551,12 +1543,11 @@ describe("FigmaShell", () => {
     expect(wrapper.find('[data-testid="restart-local-client-stale-local-client"]').exists()).toBe(false);
   });
 
-  it("hides the installer while a local client is online and restores it after disconnect", async () => {
+  it("shows only connected local client health and keeps download out of the avatar menu", async () => {
     const wrapper = mountShell({
       props: {
         currentUserName: "developer",
         localClientVisible: true,
-        opencodeEndpointsResolved: true,
         canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
@@ -1596,16 +1587,14 @@ describe("FigmaShell", () => {
 
     const currentEndpoints = wrapper.props("opencodeEndpoints") as OpencodeEndpoint[];
     await wrapper.setProps({
-      opencodeEndpoints: currentEndpoints.map((endpoint) => endpoint.runtimeKind === "LOCAL_CLIENT"
-        ? { ...endpoint, online: false, healthy: false }
-        : endpoint)
+      opencodeEndpoints: currentEndpoints.filter((endpoint) => endpoint.runtimeKind !== "LOCAL_CLIENT")
     });
-    expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
-    expect(wrapper.get('[data-testid="restart-local-client-local-client-1"]').attributes("disabled")).toBeDefined();
-    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="local-client-health"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="restart-local-client-local-client-1"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
 
     await wrapper.setProps({ opencodeEndpointsLoading: true });
-    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(false);
   });
 
   it("opens the focused side-question input directly when the process and main session are ready", async () => {

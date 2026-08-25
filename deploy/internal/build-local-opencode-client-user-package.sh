@@ -93,9 +93,10 @@ chmod 0755 "${PACKAGE_ROOT}/TestAgent-Local-Client"
     '使用方法：' \
     '1. 完整解压本压缩包。' \
     '2. 双击 TestAgent-Local-Client。' \
-    '3. 按提示输入统一认证号和 Client Key，等待安装完成。' \
+    '3. 首次安装或凭据失效时，按提示输入统一认证号和 Client Key，等待安装完成。' \
     '' \
     '本客户端只写入当前用户的 ~/.local 与 ~/.config，不需要 sudo，也不会调用 dpkg。' \
+    '如果曾在托盘中主动退出，请从系统应用菜单打开“Test Agent 本地客户端”恢复连接。' \
     '如果文件管理器禁止双击可执行文件，请在本目录打开终端，运行：' \
     '  ./TestAgent-Local-Client' \
     '' \

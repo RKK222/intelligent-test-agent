@@ -24,14 +24,17 @@ public final class LocalClientMain {
             return;
         }
 
+        // 日志目录必须在任何可能获取 Logger 的桌面类初始化前完成，否则 Logback 会固定到未展开的占位路径。
+        Path logsDirectory = LocalClientPaths.logsDirectory();
+        Files.createDirectories(logsDirectory);
+        System.setProperty("testagent.localclient.logDir", logsDirectory.toString());
+
         // 已配置客户端使用菜单栏模式；首次配置必须保留 Dock 和可见窗口，避免用户安装后找不到入口。
         if (!LocalClientFirstRunSetup.requiresFirstRunSetup()) {
             System.setProperty("apple.awt.UIElement", "true");
         }
         // 必须在 apple.awt.UIElement 决策之后初始化 Swing，避免 macOS 首次配置窗口被一并隐藏。
         LocalClientDesktopTheme.install();
-        Files.createDirectories(LocalClientPaths.logsDirectory());
-        System.setProperty("testagent.localclient.logDir", LocalClientPaths.logsDirectory().toString());
         if (!LocalClientFirstRunSetup.ensureConfigured()) {
             return;
         }

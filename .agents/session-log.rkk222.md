@@ -14306,3 +14306,38 @@
 
 - 能力库来源文案与产品命名一致；接口、事件和数据库结构均未变化。
 - 待用户导出 SkillHub 元数据后，再生成可审计的精确分类映射和更新 SQL；不会用未经确认的宽泛关键词直接修改全库。
+
+## 2026-08-25 - 修复企业本地客户端失效重接入与历史实例展示
+
+### Why
+
+- 企业现场日志确认 WSS 已到达两台 Java，但服务端轮换 Client key 后，存量客户端持续以旧摘要认证并收到
+  `UNAUTHENTICATED`；客户端已经写入 `re-enrollment-required`，重复下载/安装却因凭据文件仍存在而跳过 enroll。
+- 版本升级留下的离线实例仍进入用户投影，头像菜单重复提供安装包；用户主动正常退出后，systemd
+  `Restart=on-failure` 会尊重退出，但缺少可发现的手工启动/重连入口。客户端日志属性又在桌面 Logger 初始化后才设置，
+  现场因此缺少预期 `client.log`。
+
+### What
+
+- `instances/me` 只投影仍有 Redis 短 TTL 实时连接的实例，离线历史继续保留数据库外键和审计；在线但 OpenCode
+  不健康的实例仍返回，保留受控重启能力。
+- 稳定安装器新增 `ensure_enrolled` 与 `start`：`setup/start` 识别安全的重新接入标记，成功 enroll 后清除标记并
+  重启 user service；桌面入口改为“Test Agent 本地客户端”启动/重连，主动退出仍不自动拉起。
+- 日志目录和 Logback 属性提前到任何桌面主题/Logger 初始化之前；头像菜单删除客户端下载入口，个人设置保留唯一下载；
+  同步后端/前端 README、架构、HTTP API、部署手册、用户包 README 和内置用户手册。
+
+### How
+
+- system-management 全模块依赖链测试通过；本地客户端全模块 98 项通过、1 项既有条件跳过；前端定向 Vitest
+  75 项、agent-web typecheck、前后端完整生产构建均通过。
+- 本地客户端签名用户包与稳定升级两套 Shell 回归通过，覆盖失效标记触发 enroll、标记清除、桌面 `start` 恢复
+  user service、无标记不重复 enroll、签名制品与稳定身份复用。
+- 按 `.env.test` / `test` / JDK 25 尝试完整重启；构建成功，但本机 Docker 的 ClickHouse 容器停留在 `Created`，
+  `docker run -d` 持续不返回。已终止精确悬挂进程并移除本次创建但未运行的容器，旧服务未被启动脚本切换。
+
+### Result
+
+- 代码级、模块级、签名安装包和完整构建已验证；新代码的本地运行级启动因 Docker 阻塞未验证，企业环境仍需发布新
+  后端/前端/本地客户端完整 release 后，使用真实麒麟用户完成重新接入、唯一在线实例和 `client.log` 验收。
+- 本次不新增部署节点，不改数据库结构、SQL、Flyway、RunEvent/SSE、generated SDK、OpenCode 源码或环境配置；
+  HTTP 路径/DTO 字段保持兼容，仅收紧实例列表投影。企业 `local_client_releases` 仍需在制品发布后同步签名 catalog。

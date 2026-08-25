@@ -530,6 +530,19 @@ enroll_client() {
     || fail "凭据文件权限必须为 0600"
 }
 
+ensure_enrolled() {
+  re_enrollment_marker="${STATE_DIR}/re-enrollment-required"
+  [ ! -L "${re_enrollment_marker}" ] || fail "重新接入标记不能是符号链接"
+  if [ -e "${re_enrollment_marker}" ] && [ ! -f "${re_enrollment_marker}" ]; then
+    fail "重新接入标记必须是普通文件"
+  fi
+  if [ -f "${CONFIG_DIR}/credentials.properties" ] && [ ! -f "${re_enrollment_marker}" ]; then
+    return 0
+  fi
+  enroll_client
+  rm -f "${re_enrollment_marker}"
+}
+
 install_user_service() {
   [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ] || return 0
   unit_dir="${HOME}/.config/systemd/user"
@@ -570,9 +583,9 @@ install_user_service() {
   } >"${unit_dir}/test-agent-local-opencode-client.service"
   chmod 0600 "${unit_dir}/test-agent-local-opencode-client.service"
   {
-    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Test Agent 本地客户端接入' \
-      'Comment=输入统一认证号和 Client key 重新接入'
-    printf 'Exec=%s enroll\n' "${service_launcher}"
+    printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Test Agent 本地客户端' \
+      'Comment=启动或重新连接 TestAgent 平台；凭据失效时重新接入'
+    printf 'Exec=%s start\n' "${service_launcher}"
     printf '%s\n' 'Icon=test-agent-local-client' 'Terminal=true' \
       'Categories=Development;Utility;'
   } >"${desktop_dir}/test-agent-local-client.desktop"
@@ -753,9 +766,7 @@ case "${command_name}" in
     # 重复双击安装也是显式升级动作：重新校验签名 catalog 并原子切换到最新 release。
     bootstrap_release
     ensure_runtime
-    if [ ! -f "${CONFIG_DIR}/credentials.properties" ]; then
-      enroll_client
-    fi
+    ensure_enrolled
     install_user_service
     printf '麒麟 ARM64 本地客户端已安装并接入。\n'
     ;;
@@ -766,6 +777,13 @@ case "${command_name}" in
     rm -f "${STATE_DIR}/re-enrollment-required"
     install_user_service
     printf '本地客户端重新接入成功。\n'
+    ;;
+  start)
+    [ "$#" -eq 1 ] || fail "start 不接受额外参数"
+    ensure_runtime
+    ensure_enrolled
+    install_user_service
+    printf '本地客户端已启动并开始重新连接平台。\n'
     ;;
   run)
     [ "$#" -eq 1 ] || fail "run 不接受额外参数"

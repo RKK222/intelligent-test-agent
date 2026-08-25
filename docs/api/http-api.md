@@ -2226,7 +2226,9 @@ POST /api/internal/platform/local-opencode-client/instances/{clientInstanceId}/u
 `GET /api/internal/platform/local-opencode-client/instances/me` 在既有字段上 additive 增加
 `selfUpdateSupported`、`targetClientVersion`、`updateDirection`、`lastUpdateStatus`、`lastUpdateAt`。旧节点没有
 这些字段时，客户端必须按不支持自更新处理。版本是北京时间 `yyyyMMddHHmmss`：目标大于当前为 `UPDATE`，
-小于为 `ROLLBACK`，相同为 `SAME`；旧 `0.1.0` 客户端可继续注册，但必须显示“安装新 DEB”，且不接收更新帧。
+小于为 `ROLLBACK`，相同为 `SAME`；旧 `0.1.0` 客户端可继续注册，但必须提示安装新用户包，且不接收更新帧。
+该列表只返回当前仍有 Redis 短 TTL 连接的实例；离线历史继续保留在关系库但不进入用户投影。在线连接即使
+`opencodeHealthy=false` 仍返回，以便用户调用受控重启命令。
 
 旧 `/api/sessions/**` 和 `/api/workspaces/{workspaceId}/sessions` 已作废，返回 `410 API_GONE`。
 
@@ -4327,7 +4329,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/copy` | `PlaintextKey(clientKey)` | 仅 `revealAvailable=true` 的首次调用成功；成功后消费展示资格，第二次返回 `409 CONFLICT` 且不再解密。强制 `no-store/no-cache/no-referrer`；调用记审计。 |
 | `POST` | `/api/internal/platform/local-opencode-client/credentials/me/rotate` | 新 `CredentialView` | 原子提升版本，重置新版本的首次展示资格，并撤销全部连接与模型 grant。 |
 | `DELETE` | `/api/internal/platform/local-opencode-client/credentials/me` | `{revoked:true}` | 撤销全部连接与模型 grant，并隐藏本地实例及工作区投影；不删除平台记录或本地目录。 |
-| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户有效 Client key 且客户端灰度可见时的稳定实例及在线、generation、OpenCode 状态 | 主动撤销或关闭灰度后返回空列表；记录保留。灰度关闭不撤销 Key 或断开客户端。reported/observed 地址仅展示。 |
+| `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户有效 Client key 且客户端灰度可见时，仍有 Redis 短 TTL 连接的实例及 generation、OpenCode 状态 | 离线历史、主动撤销或关闭灰度均返回空投影；关系记录保留。在线但 OpenCode 不健康的实例仍返回，便于重启。灰度关闭不撤销 Key 或断开客户端。reported/observed 地址仅展示。 |
 | `GET` | `/api/internal/platform/local-opencode-client/download-access/me` | `{allowed}` | 兼容路径返回当前用户客户端相关功能是否可见；控制下载、实例状态、本地工作区和个人客户端设置。该接口不跟随 OpenCode 进程归属转发；查询异常失败关闭为 `false`。 |
 | `GET` | `/api/internal/platform/local-opencode-client/admin/rollout-users?page={page}&size={size}` | 本地客户端功能可见性灰度用户分页 | 仅 `SUPER_ADMIN`；只返回启用记录和最近操作人/时间。 |
 | `POST` | `/api/internal/platform/local-opencode-client/admin/rollout-users` | `{userId}` → 灰度用户 | 仅 `SUPER_ADMIN`；目标必须是存在且可登录的平台用户，重复添加幂等启用。 |
@@ -4337,7 +4339,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 网页兜底注册；客户端先验证真实绝对目录，再事务性注册；离线失败。同步反向 RPC 调度到 `boundedElastic`。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 校验当前用户与有效本地绑定后，复用全局最近工作区偏好保存本次选择；重新登录或打开工作台时优先恢复该本地工作区，后续选择服务器工作区会覆盖此偏好。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
-| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加灰度可见的有效本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时只省略服务端实例，本地实例独立保留。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段，网页客户端功能以独立 `download-access/me` 为权威结果。 |
+| `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加灰度可见且当前在线的本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时只省略服务端实例，本地实例独立保留。离线本地历史不返回；在线但 OpenCode 不健康的实例仍返回。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段，网页客户端功能以独立 `download-access/me` 为权威结果。 |
 
 `revealAvailable` 为 `true` 时才可消费明文；历史凭据升级后已写入展示时间，视为已经展示，必须 rotate 后才能再次
 获得一次 copy 机会。任何客户端或浏览器都不得缓存、记录或转发 `clientKey`。

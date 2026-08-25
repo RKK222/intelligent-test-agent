@@ -8,6 +8,10 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 - 麒麟稳定启动器的重复 `setup` 是就地升级入口：每次重新校验签名 catalog，安装并原子切换最新 release，随后 restart
   已有 user systemd service；配置、凭据、`state.json`、OpenCode 数据和工作区根映射位于 release 目录之外并保持不变。
+- 服务端拒绝旧 Client key 时，Java 会写入 `state/re-enrollment-required`。重复 `setup` 或应用菜单中的“Test Agent
+  本地客户端”启动动作会先识别该标记，要求用户在本机重新输入统一认证号和当前 Client key，成功后清除标记并重启
+  user systemd service；没有标记时普通启动不会重复索取凭据。用户从托盘主动退出后服务保持停止，必须由该桌面入口
+  显式启动，避免违背主动退出意图。
 - JDK/OpenCode 归档采用确定性打包；新版本优先复用当前 release 中与新签名 manifest 的大小、SHA-256 和 RSA 签名
   全部一致的归档。release 目录仍是完整不可变单元；缓存校验失败时重新下载，不信任文件名或本机目录存在性。
 - 启动器对 enroll、运行、自更新激活和候选 self-check 显式传入同一配置/状态目录，防止 XDG 环境差异让 Java 读取另一份
@@ -21,6 +25,8 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 - 托盘点击弹层改由 `LocalClientTrayPopup` 使用同一 FlatLaf 主题渲染，顶部复用小兔子和实时连接状态，动作分组、圆角、
   轻边框与工作区选择窗口保持一致；不再使用无法消费 Swing 主题的原生 AWT `PopupMenu`。会话进度与能力确认继续使用
   无遗留 Java 吉祥物图标的纯内容对话框。
+- `LocalClientMain` 在任何桌面主题或 Logger 初始化前创建 state 日志目录并设置 Logback 路径，确保 `client.log` 稳定写入
+  用户状态目录，避免首次启动因占位路径过早固化而缺失文件。
 
 ## Git 权限巡检
 
