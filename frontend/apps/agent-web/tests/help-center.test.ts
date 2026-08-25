@@ -129,6 +129,10 @@ describe("help center", () => {
     expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
     expect(prompt).toContain("本地 OpenCode 客户端（按账号灰度开放）");
     expect(prompt).toContain("客户端灰度");
+    expect(prompt).toContain("2026 年 8 月 24 日—8 月 30 日");
+    expect(prompt).toContain("从顶部或左下角直接新增版本");
+    expect(prompt).toContain("下载本地客户端用户包");
+    expect(prompt).toContain("TestAgent-Local-Client");
     expect(prompt.length).toBeLessThan(8_100);
   });
 
@@ -144,8 +148,11 @@ describe("help center", () => {
     expect(settings).toContain("不停止客户端、不重启本地 OpenCode，也不撤销 client key");
     expect(overview).toContain("平台全局记忆配置可用");
     expect(overview).toContain("本地 OpenCode 客户端");
+    expect(overview).toContain("来自 SkillHub 的 Skill 卡片和详情会显示“创建人”");
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
+    expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
+    expect(faq).toContain("为什么“新增版本”不可用或创建失败？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
