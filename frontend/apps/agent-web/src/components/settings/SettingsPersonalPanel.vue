@@ -474,9 +474,16 @@ function formatLocalClientTime(value?: string | null) {
           <h4 class="ta-section-title">本地 OpenCode 客户端</h4>
           <p class="ta-section-description">控制通道使用 HTTPS/WSS；client key 仅用于客户端认证，不参与 HTTP 制品下载。</p>
         </div>
-        <el-button size="small" :loading="localClientLoading" @click="loadLocalClientState()">
-          <el-icon><Refresh /></el-icon> 刷新
-        </el-button>
+        <div class="ta-row-actions">
+          <el-link
+            data-testid="download-latest-local-client"
+            type="primary"
+            href="/downloads/local-opencode-client/installer"
+          >下载最新客户端包</el-link>
+          <el-button size="small" :loading="localClientLoading" @click="loadLocalClientState()">
+            <el-icon><Refresh /></el-icon> 刷新
+          </el-button>
+        </div>
       </div>
 
       <div class="ta-credential-card">

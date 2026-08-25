@@ -93,6 +93,8 @@ const props = withDefaults(
     opencodeProcessStatus?: UserOpencodeProcess | null;
     opencodeEndpoints?: OpencodeEndpoint[];
     opencodeEndpointsLoading?: boolean;
+    /** 实例接口至少成功返回过一次；后台轮询中的 isFetching 不能让下载入口反复消失。 */
+    opencodeEndpointsResolved?: boolean;
     /** 实例接口成功确认管理员关闭后隐藏服务端状态；个人重启入口仍保留。 */
     showServerOpencodeStatus?: boolean;
     /** 独立灰度接口的权威结果；加载失败或缺省时严格隐藏全部客户端相关功能。 */
@@ -154,6 +156,7 @@ const props = withDefaults(
     processRestarting: false,
     opencodeEndpoints: () => [],
     opencodeEndpointsLoading: false,
+    opencodeEndpointsResolved: false,
     showServerOpencodeStatus: true,
     localClientVisible: false,
     canRevokeLocalClientKey: false,
@@ -715,7 +718,7 @@ const localClientEndpoints = computed(() => visibleOpencodeEndpoints.value.filte
 /** 已有任一在线客户端时隐藏安装入口，避免把“再下载”误当成后续操作。 */
 const showLocalClientDownload = computed(() =>
   props.localClientVisible === true
-  && !props.opencodeEndpointsLoading
+  && props.opencodeEndpointsResolved === true
   && !localClientEndpoints.value.some(endpoint => endpoint.online)
 );
 

@@ -1472,6 +1472,7 @@ describe("FigmaShell", () => {
       props: {
         currentUserName: "developer",
         localClientVisible: true,
+        opencodeEndpointsResolved: true,
         canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
@@ -1555,6 +1556,7 @@ describe("FigmaShell", () => {
       props: {
         currentUserName: "developer",
         localClientVisible: true,
+        opencodeEndpointsResolved: true,
         canRevokeLocalClientKey: true,
         opencodeEndpoints: [{
           runtimeKind: "SERVER_PROCESS",
@@ -1600,6 +1602,9 @@ describe("FigmaShell", () => {
     });
     expect(wrapper.get('[data-testid="local-client-health"]').text()).toContain("离线");
     expect(wrapper.get('[data-testid="restart-local-client-local-client-1"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
+
+    await wrapper.setProps({ opencodeEndpointsLoading: true });
     expect(wrapper.find('[data-testid="download-local-client"]').exists()).toBe(true);
   });
 

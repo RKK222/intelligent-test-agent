@@ -268,33 +268,77 @@ verify_manifest() {
     || fail "稳定启动器版本不兼容"
 }
 
+read_artifact_metadata() {
+  kind="$1"
+  ARTIFACT_PATH="$(artifact_string "${kind}" path)"
+  ARTIFACT_SIGNATURE_PATH="$(artifact_string "${kind}" signaturePath)"
+  ARTIFACT_SHA="$(artifact_string "${kind}" sha256)"
+  ARTIFACT_SIZE="$(artifact_number "${kind}" size)"
+  safe_relative_path "${ARTIFACT_PATH}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+    || fail "${kind} 路径不受信任"
+  safe_relative_path "${ARTIFACT_SIGNATURE_PATH}" "${EXPECTED_DOWNLOAD_PREFIX}" \
+    || fail "${kind} 签名路径不受信任"
+  valid_sha_length="$(expr "${ARTIFACT_SHA}" : '[0-9a-f][0-9a-f]*$')"
+  [ "${valid_sha_length}" -eq 64 ] || fail "${kind} SHA-256 无效"
+  case "${ARTIFACT_SIZE}" in ''|*[!0-9]*) fail "${kind} 大小无效" ;; esac
+  [ "${ARTIFACT_SIZE}" -ge 1 ] && [ "${ARTIFACT_SIZE}" -le 4294967296 ] \
+    || fail "${kind} 大小超限"
+}
+
 download_artifact() {
   kind="$1"
   local_name="$2"
   destination_root="$3"
-  artifact_path="$(artifact_string "${kind}" path)"
-  artifact_signature_path="$(artifact_string "${kind}" signaturePath)"
-  artifact_sha="$(artifact_string "${kind}" sha256)"
-  artifact_size="$(artifact_number "${kind}" size)"
-  safe_relative_path "${artifact_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
-    || fail "${kind} 路径不受信任"
-  safe_relative_path "${artifact_signature_path}" "${EXPECTED_DOWNLOAD_PREFIX}" \
-    || fail "${kind} 签名路径不受信任"
-  valid_sha_length="$(expr "${artifact_sha}" : '[0-9a-f][0-9a-f]*$')"
-  [ "${valid_sha_length}" -eq 64 ] || fail "${kind} SHA-256 无效"
-  case "${artifact_size}" in ''|*[!0-9]*) fail "${kind} 大小无效" ;; esac
-  [ "${artifact_size}" -ge 1 ] && [ "${artifact_size}" -le 4294967296 ] \
-    || fail "${kind} 大小超限"
-  download_relative "${artifact_path}" "${destination_root}/${local_name}"
-  download_relative "${artifact_signature_path}" "${destination_root}/${local_name}.sig"
-  [ "$(file_size "${destination_root}/${local_name}")" = "${artifact_size}" ] \
+  read_artifact_metadata "${kind}"
+  download_relative "${ARTIFACT_PATH}" "${destination_root}/${local_name}"
+  download_relative "${ARTIFACT_SIGNATURE_PATH}" "${destination_root}/${local_name}.sig"
+  [ "$(file_size "${destination_root}/${local_name}")" = "${ARTIFACT_SIZE}" ] \
     || fail "${kind} 文件大小与签名清单不一致"
-  [ "$(sha256_file "${destination_root}/${local_name}")" = "${artifact_sha}" ] \
+  [ "$(sha256_file "${destination_root}/${local_name}")" = "${ARTIFACT_SHA}" ] \
     || fail "${kind} SHA-256 校验失败"
   openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
     -signature "${destination_root}/${local_name}.sig" \
     "${destination_root}/${local_name}" >/dev/null \
     || fail "${kind} 制品签名校验失败"
+}
+
+# 新旧 release 仍保持完整、不可变目录；这里只复用与新签名清单摘要完全一致的下载归档。
+# 旧归档还必须由当前安装器内置公钥验签，避免把历史目录当成未经认证的本机缓存。
+reuse_signed_artifact() {
+  reuse_kind="$1"
+  reuse_local_name="$2"
+  reuse_source_root="$3"
+  reuse_destination_root="$4"
+  [ -n "${reuse_source_root}" ] && [ -d "${reuse_source_root}" ] && [ ! -L "${reuse_source_root}" ] \
+    || return 1
+  reuse_source_file="${reuse_source_root}/${reuse_local_name}"
+  reuse_source_signature="${reuse_source_file}.sig"
+  [ -f "${reuse_source_file}" ] && [ ! -L "${reuse_source_file}" ] \
+    && [ -f "${reuse_source_signature}" ] && [ ! -L "${reuse_source_signature}" ] \
+    || return 1
+  read_artifact_metadata "${reuse_kind}"
+  [ "$(file_size "${reuse_source_file}")" = "${ARTIFACT_SIZE}" ] \
+    && [ "$(sha256_file "${reuse_source_file}")" = "${ARTIFACT_SHA}" ] \
+    || return 1
+  openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+    -signature "${reuse_source_signature}" "${reuse_source_file}" >/dev/null 2>&1 \
+    || return 1
+  cp "${reuse_source_file}" "${reuse_destination_root}/${reuse_local_name}" \
+    && cp "${reuse_source_signature}" "${reuse_destination_root}/${reuse_local_name}.sig" \
+    || fail "无法复用 ${reuse_kind} 本机缓存"
+  printf '复用已校验的 %s 本机缓存。\n' "${reuse_kind}"
+}
+
+obtain_artifact() {
+  obtain_kind="$1"
+  obtain_local_name="$2"
+  obtain_source_root="$3"
+  obtain_destination_root="$4"
+  if reuse_signed_artifact \
+      "${obtain_kind}" "${obtain_local_name}" "${obtain_source_root}" "${obtain_destination_root}"; then
+    return 0
+  fi
+  download_artifact "${obtain_kind}" "${obtain_local_name}" "${obtain_destination_root}"
 }
 
 verify_release_directory() {
@@ -377,6 +421,13 @@ bootstrap_release() {
   if [ -d "${final_directory}" ]; then
     verify_release_directory "${final_directory}" ""
   else
+    cached_release_directory=""
+    if cached_version="$(current_version 2>/dev/null)" && valid_version "${cached_version}"; then
+      cached_candidate="${RELEASES_DIR}/${cached_version}"
+      if [ -d "${cached_candidate}" ] && [ ! -L "${cached_candidate}" ]; then
+        cached_release_directory="${cached_candidate}"
+      fi
+    fi
     staging_parent="${RELEASES_DIR}/.bootstrap-$$"
     staging_directory="${staging_parent}/${version}"
     mkdir -p "${staging_directory}"
@@ -393,8 +444,8 @@ bootstrap_release() {
       printf '检测到完整系统 JDK 21；复制到私有发布单元。\n'
       copy_system_jdk "${system_jdk_home}" "${staging_directory}"
     else
-      printf '未检测到完整 JDK 21，先下载签名 ARM64 JDK。\n'
-      download_artifact JDK jdk.tar.gz "${staging_directory}"
+      printf '未检测到完整 JDK 21，准备签名 ARM64 JDK。\n'
+      obtain_artifact JDK jdk.tar.gz "${cached_release_directory}" "${staging_directory}"
       tar -C "${staging_directory}" -xzf "${staging_directory}/jdk.tar.gz"
       [ -x "${staging_directory}/jdk/bin/java" ] && [ -x "${staging_directory}/jdk/bin/javac" ] \
         || fail "JDK 归档布局无效"
@@ -402,10 +453,11 @@ bootstrap_release() {
         && [ "$(javac_major "${staging_directory}/jdk/bin/javac")" = 21 ] \
         || fail "下载的 JDK 主版本不是 21"
     fi
-    download_artifact CLIENT_JAR test-agent-local-client.jar "${staging_directory}"
-    download_artifact OPENCODE opencode.tar.gz "${staging_directory}"
+    obtain_artifact CLIENT_JAR test-agent-local-client.jar "${cached_release_directory}" "${staging_directory}"
+    obtain_artifact OPENCODE opencode.tar.gz "${cached_release_directory}" "${staging_directory}"
     if [ -n "$(artifact_string PUBLIC_CAPABILITIES path)" ]; then
-      download_artifact PUBLIC_CAPABILITIES public-capabilities.tar.gz "${staging_directory}"
+      obtain_artifact PUBLIC_CAPABILITIES public-capabilities.tar.gz \
+        "${cached_release_directory}" "${staging_directory}"
     fi
     tar -C "${staging_directory}" -xzf "${staging_directory}/opencode.tar.gz"
     [ -x "${staging_directory}/opencode/bin/opencode" ] || fail "OpenCode 归档布局无效"

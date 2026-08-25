@@ -31,6 +31,9 @@ DIST_ROOT="${TEST_ROOT}/dist/local-opencode-client"
 INSTALL_ROOT="${TEST_ROOT}/install/runtime"
 CONFIG_DIR="${TEST_ROOT}/install/config"
 STATE_DIR="${TEST_ROOT}/install/state"
+CACHE_INSTALL_ROOT="${TEST_ROOT}/cache-install/runtime"
+CACHE_CONFIG_DIR="${TEST_ROOT}/cache-install/config"
+CACHE_STATE_DIR="${TEST_ROOT}/cache-install/state"
 
 mkdir -p "${TEST_ROOT}/inputs/jdk/fake-jdk/bin" "${TEST_ROOT}/inputs/opencode"
 cat >"${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" <<'JAVA'
@@ -167,6 +170,33 @@ for _ in $(seq 1 30); do
   sleep 0.1
 done
 
+# 模拟没有系统 JDK 的普通用户机器，验证后续版本只下载发生变化的签名制品。
+TOOLS_WITHOUT_JAVA="${TEST_ROOT}/tools-without-java"
+mkdir -p "${TOOLS_WITHOUT_JAVA}"
+for tool in awk basename chmod cmp cp curl dirname env expr find getconf grep hostname ldd ln mkdir mktemp mv \
+  openssl readlink rm rmdir sh sha256sum shasum sort stat tail tar tr wc; do
+  tool_path="$(command -v "${tool}" || true)"
+  [[ -n "${tool_path}" ]] || continue
+  ln -s "${tool_path}" "${TOOLS_WITHOUT_JAVA}/${tool}"
+done
+mkdir -p "${CACHE_CONFIG_DIR}"
+cat >"${CACHE_CONFIG_DIR}/credentials.properties" <<'CREDENTIALS'
+unifiedAuthId=test-user
+clientKey=tack_v1_test-only-value
+CREDENTIALS
+chmod 0700 "${CACHE_CONFIG_DIR}"
+chmod 0600 "${CACHE_CONFIG_DIR}/credentials.properties"
+PATH="${TOOLS_WITHOUT_JAVA}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${CACHE_INSTALL_ROOT}" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CACHE_CONFIG_DIR}" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${CACHE_STATE_DIR}" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${DIST_ROOT}/install.sh" setup >/dev/null
+[ "$(readlink "${CACHE_INSTALL_ROOT}/current")" = "releases/${OLD_VERSION}" ]
+[ -f "${CACHE_INSTALL_ROOT}/current/jdk.tar.gz" ]
+
 mkdir -p "${CONFIG_DIR}"
 cat >"${CONFIG_DIR}/credentials.properties" <<'CREDENTIALS'
 unifiedAuthId=test-user
@@ -192,6 +222,42 @@ chmod 0600 "${STATE_DIR}/state.json"
 state_digest="$(sha256_file "${STATE_DIR}/state.json")"
 
 package_release "${NEW_VERSION}"
+old_jdk_digest="$(sha256_file "${DIST_ROOT}/releases/${OLD_VERSION}/jdk.tar.gz")"
+new_jdk_digest="$(sha256_file "${DIST_ROOT}/releases/${NEW_VERSION}/jdk.tar.gz")"
+old_opencode_digest="$(sha256_file "${DIST_ROOT}/releases/${OLD_VERSION}/opencode.tar.gz")"
+new_opencode_digest="$(sha256_file "${DIST_ROOT}/releases/${NEW_VERSION}/opencode.tar.gz")"
+[[ "${old_jdk_digest}" == "${new_jdk_digest}" ]] || {
+  echo "相同 JDK 输入生成了不同发布摘要" >&2
+  exit 1
+}
+[[ "${old_opencode_digest}" == "${new_opencode_digest}" ]] || {
+  echo "相同 OpenCode 输入生成了不同发布摘要" >&2
+  exit 1
+}
+
+cache_http_start_line=$(( $(wc -l <"${TEST_ROOT}/http.log") + 1 ))
+cache_setup_output="$(
+  PATH="${TOOLS_WITHOUT_JAVA}" \
+  TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+  TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+  TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${CACHE_INSTALL_ROOT}" \
+  TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CACHE_CONFIG_DIR}" \
+  TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${CACHE_STATE_DIR}" \
+  TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+    sh "${DIST_ROOT}/install.sh" setup
+)"
+tail -n "+${cache_http_start_line}" "${TEST_ROOT}/http.log" >"${TEST_ROOT}/cache-http.log"
+[ "$(readlink "${CACHE_INSTALL_ROOT}/current")" = "releases/${NEW_VERSION}" ]
+grep -q '复用已校验的 JDK 本机缓存' <<<"${cache_setup_output}"
+grep -q '复用已校验的 OPENCODE 本机缓存' <<<"${cache_setup_output}"
+grep -q '复用已校验的 PUBLIC_CAPABILITIES 本机缓存' <<<"${cache_setup_output}"
+grep -q "/releases/${NEW_VERSION}/test-agent-local-client.jar " "${TEST_ROOT}/cache-http.log"
+if grep -Eq "/releases/${NEW_VERSION}/(jdk|opencode|public-capabilities)\.tar\.gz(\.sig)? " \
+    "${TEST_ROOT}/cache-http.log"; then
+  echo "未变化的客户端依赖被重复下载" >&2
+  exit 1
+fi
+
 run_launcher "${NEW_VERSION}" UPDATE READY
 [ "$(readlink "${INSTALL_ROOT}/current")" = "releases/${NEW_VERSION}" ]
 grep -q '^status=SUCCEEDED$' "${STATE_DIR}/update-result.properties"
@@ -225,4 +291,4 @@ TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
 [ "$(sha256_file "${CONFIG_DIR}/credentials.properties")" = "${credential_digest}" ]
 [ "$(sha256_file "${STATE_DIR}/state.json")" = "${state_digest}" ]
 
-echo "Stable launcher update, repeated setup upgrade, automatic rollback and stable identity reuse verified"
+echo "Stable launcher update, signed dependency cache reuse, automatic rollback and stable identity reuse verified"

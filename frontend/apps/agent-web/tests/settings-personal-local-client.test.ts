@@ -99,6 +99,14 @@ describe("SettingsPersonalPanel local-client version state", () => {
     expect(client.commandLocalClientOpencode).not.toHaveBeenCalled();
   });
 
+  it("keeps a manual latest-package download in personal settings even while a client is online", async () => {
+    const view = renderPanel(api(), true);
+
+    const download = await view.findByRole("link", { name: "下载最新客户端包" });
+    expect(download.getAttribute("href")).toBe("/downloads/local-opencode-client/installer");
+    expect(await view.findByText("麒麟工作站", { selector: ".ta-item-title" })).toBeTruthy();
+  });
+
   it.each([
     ["UPDATE", "更新", "20260821183000"],
     ["ROLLBACK", "回退", "20260819183000"],

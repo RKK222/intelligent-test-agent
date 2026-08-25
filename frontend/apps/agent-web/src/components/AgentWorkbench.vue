@@ -12474,6 +12474,7 @@ async function handleLogout() {
     :opencode-process-status="selectedRuntimeProcessStatus"
     :opencode-endpoints="opencodeEndpoints"
     :opencode-endpoints-loading="opencodeEndpointQuery.isFetching.value"
+    :opencode-endpoints-resolved="opencodeEndpointQuery.data.value !== undefined"
     :show-server-opencode-status="showServerOpencodeStatus"
     :local-client-visible="localClientVisible"
     :can-revoke-local-client-key="canRevokeLocalClientKey"

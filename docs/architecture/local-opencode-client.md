@@ -40,7 +40,8 @@ flowchart LR
 值严格为 true 时展示下载入口、本地实例状态、本地工作区和个人客户端设置。`opencode-endpoints/me` 继续
 保留 `localClientDownload` additive capability，但它可能按进程归属转发到滚动升级中的旧 Java，因此不再
 作为网页权威灰度来源。独立接口缺字段、查询失败或名单为空都失败关闭为隐藏，实例健康轮询也不会覆盖
-灰度结论。
+灰度结论。头像菜单只在实例接口首次成功后判断安装入口；5 秒后台刷新期间保留上一成功投影，不能让入口闪烁。
+已有在线客户端时头像菜单隐藏安装入口，但个人设置始终提供“下载最新客户端包”作为覆盖升级和人工恢复入口。
 
 该名单只控制 UI 可见性，不扩大认证权限：Nginx HTTP 制品仍按内网 ACL 提供，客户端连接仍必须使用有效
 `tack_v1_` key 认证。默认传输为 HTTPS/WSS；当前企业 `mimo.sdc.cs.icbc:9996` 是前后台同时显式批准的可信内网
@@ -64,6 +65,8 @@ client key、稳定 `lci_...` 实例 ID、平台、架构和版本；认证成�
 安装器的配置目录和状态目录由稳定启动器显式传给每次 Java 进程，避免桌面会话中的 XDG 变量变化使
 `state.json` 漂移到另一目录并生成新实例 ID。重复执行 `setup` 会重新读取并校验签名 catalog，原子切换到最新
 release，保留 `credentials.properties`、`state.json` 和 OpenCode 数据目录，并明确重启已有 user systemd 服务。
+JDK 和 OpenCode 归档使用固定条目顺序、元数据和 gzip header 生成确定性摘要；新 release 只复用当前 release 中与
+新签名清单大小、SHA-256 和 RSA 签名均一致的归档，再复制到新的完整不可变目录，任何一项不一致都重新下载。
 
 ## 认证与模型密钥
 

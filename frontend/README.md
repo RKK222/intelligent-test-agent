@@ -291,10 +291,12 @@ tools/dev-phase11-real-e2e.sh --start-services
 个人设置页提供 client key 创建/复制/轮换/撤销、实例状态与生命周期控制、本地只读目录选择和 Workspace
 注册。明文 key 只在 API 方法局部变量中直接写剪贴板，不渲染、不进入 TanStack Query cache 或浏览器
 存储。头像菜单合并服务端和本地 OpenCode 实例，显示平台、上报/观察地址、端口、版本、状态和最后心跳。
-实例列表下方的“下载本地客户端用户包”经 `/downloads/local-opencode-client/installer` 下载麒麟 Linux ARM64
+头像菜单在没有在线本地客户端时显示“下载本地客户端用户包”，个人设置的“本地 OpenCode 客户端”区域则始终提供
+“下载最新客户端包”，两者都经 `/downloads/local-opencode-client/installer` 下载麒麟 Linux ARM64
 `tar.gz`；普通用户完整解压后双击静态 ARM64 启动器，安装仅写入 `~/.local` / `~/.config`，不调用 sudo/dpkg。
 用户包内部摘要用于发现随包资源损坏，平台 RSA 签名继续保护运行时制品，但两者都不能冒充操作系统代码签名。任一
-本地客户端在线时隐藏该入口，全部离线且仍有下载灰度权限时恢复显示。工作区默认从客户端托盘直接选择并注册，
+本地客户端在线时隐藏头像菜单入口，全部离线且仍有下载灰度权限时恢复显示；个人设置的最新包入口不受在线状态影响。
+工作区默认从客户端托盘直接选择并注册，
 网页个人设置只保留目录浏览和手工注册兜底。客户端注册成功会打开只携带逻辑 Workspace ID 的工作台深链；页面
 校验当前用户归属后切换到 `LOCAL_CLIENT` 工作区，通过既有文件 WebSocket 加载目录，不把本机绝对路径写入 URL。
 本地工作区使用客户端已实现的 `workspace.list` 普通目录 RPC，不调用仅服务端组合引用视图支持的

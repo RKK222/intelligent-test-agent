@@ -8,6 +8,8 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 - 麒麟稳定启动器的重复 `setup` 是就地升级入口：每次重新校验签名 catalog，安装并原子切换最新 release，随后 restart
   已有 user systemd service；配置、凭据、`state.json`、OpenCode 数据和工作区根映射位于 release 目录之外并保持不变。
+- JDK/OpenCode 归档采用确定性打包；新版本优先复用当前 release 中与新签名 manifest 的大小、SHA-256 和 RSA 签名
+  全部一致的归档。release 目录仍是完整不可变单元；缓存校验失败时重新下载，不信任文件名或本机目录存在性。
 - 启动器对 enroll、运行、自更新激活和候选 self-check 显式传入同一配置/状态目录，防止 XDG 环境差异让 Java 读取另一份
   `state.json`。`clientInstanceId` 只在该稳定状态文件首次创建时生成，普通重装和升级不得生成新值。
 

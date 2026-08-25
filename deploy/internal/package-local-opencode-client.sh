@@ -140,6 +140,40 @@ fetch_source() {
   }
 }
 
+# release 版本只表示客户端发布批次；相同 JDK/OpenCode 内容必须生成相同摘要，客户端才能安全复用缓存。
+normalize_runtime_metadata() {
+  local root="$1"
+  # 1980 避免 UTC+ 时区把本地 1970-01-01 换算成 ustar 无法表示的负时间。
+  find "${root}" -exec touch -h -t 198001010000.00 {} +
+}
+
+archive_create_runtime_tar_gz() {
+  local output="$1" base_dir="$2"
+  shift 2
+  local -a metadata_flags=() owner_flags=() exclude_flags=()
+  local value
+  while IFS= read -r value; do
+    [[ -z "${value}" ]] || metadata_flags+=("${value}")
+  done < <(archive_tar_metadata_flags)
+  for value in "${TEST_AGENT_ARCHIVE_METADATA_EXCLUDES[@]}"; do
+    exclude_flags+=("--exclude=${value}")
+  done
+  if tar --version 2>&1 | grep -qi 'bsdtar'; then
+    owner_flags=(--uid 0 --gid 0 --uname root --gname root)
+  else
+    owner_flags=(--owner=0 --group=0 --numeric-owner)
+  fi
+  (
+    cd "${base_dir}"
+    # 固定条目顺序、ustar 元数据和 gzip header，避免发布时间进入 JDK/OpenCode 摘要。
+    find "$@" -print | LC_ALL=C sort | \
+      COPYFILE_DISABLE=1 COPY_EXTENDED_ATTRIBUTES_DISABLE=1 \
+      tar "${metadata_flags[@]}" "${exclude_flags[@]}" "${owner_flags[@]}" \
+        --no-recursion --format ustar -cf - -T - | gzip -n >"${output}"
+  )
+  archive_strip_file_metadata "${output}"
+}
+
 normalize_jdk() {
   local archive="$1" output="$2" work="$3" java_binary java_home stage
   mkdir -p "${work}/extract"
@@ -152,7 +186,8 @@ normalize_jdk() {
   mkdir -p "${stage}/jdk"
   cp -a "${java_home}/." "${stage}/jdk/"
   chmod 0755 "${stage}/jdk/bin/java" "${stage}/jdk/bin/javac"
-  archive_create_tar_gz "${output}" "${stage}" jdk
+  normalize_runtime_metadata "${stage}/jdk"
+  archive_create_runtime_tar_gz "${output}" "${stage}" jdk
 }
 
 normalize_opencode() {
@@ -171,13 +206,17 @@ normalize_opencode() {
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
   fi
-  archive_create_tar_gz "${output}" "${stage}" opencode
+  normalize_runtime_metadata "${stage}/opencode"
+  archive_create_runtime_tar_gz "${output}" "${stage}" opencode
 }
 
 require_command openssl
 require_command curl
 require_command tar
 require_command find
+require_command touch
+require_command gzip
+require_command sort
 [[ -n "${SIGNING_KEY}" && -f "${SIGNING_KEY}" ]] || {
   echo "TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY or --signing-key is required" >&2
   exit 1
