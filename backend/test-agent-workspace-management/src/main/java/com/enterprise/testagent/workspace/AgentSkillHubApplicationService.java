@@ -1051,7 +1051,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 || !Objects.equals(downloaded.version(), asset.externalVersion())) {
             throw new PlatformException(ErrorCode.CONFLICT, "SkillHub 下载版本与当前目录不一致，请刷新后重试");
         }
-        Map<String, byte[]> files = unzipExternalSkill(downloaded.content());
+        Map<String, byte[]> files = unzipDownloadedExternalSkill(downloaded.content());
         validateExternalSkillManifest(asset.technicalId(), files.get("SKILL.md"));
         PushedAsset pushed = pushedAsset(AssetType.SKILL, asset.technicalId(), files);
         Revision existing = repository.findExternalRevision(
@@ -1067,8 +1067,60 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
                 firstText(pushed.description(), asset.catalogDescription()), Instant.now());
     }
 
-    /** ZIP 只读入内存映射，不在文件系统展开，因此链接附件也不会被解释为链接。 */
+    /** 上传包会原样交给 SkillHub，因此继续严格要求根目录中的大写 SKILL.md。 */
     private Map<String, byte[]> unzipExternalSkill(byte[] zipBytes) {
+        Map<String, byte[]> files = readExternalSkillZip(zipBytes);
+        if (files.isEmpty() || !files.containsKey("SKILL.md")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 上传包根目录必须包含 SKILL.md");
+        }
+        return Map.copyOf(files);
+    }
+
+    /**
+     * 下载包允许 SkillHub 在能力文件外包一层唯一目录，也兼容清单文件名大小写。
+     * 归一化前必须能唯一确定能力根，防止把多个包或额外根文件静默合并。
+     */
+    private Map<String, byte[]> unzipDownloadedExternalSkill(byte[] zipBytes) {
+        Map<String, byte[]> files = readExternalSkillZip(zipBytes);
+        List<String> manifestPaths = files.keySet().stream()
+                .filter(this::isExternalSkillManifestPath)
+                .toList();
+        if (manifestPaths.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                    "SkillHub 下载 ZIP 未包含可识别的 SKILL.md（/list 只返回目录元数据）");
+        }
+        if (manifestPaths.size() > 1) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包包含多个 SKILL.md");
+        }
+
+        String manifestPath = manifestPaths.getFirst();
+        int separator = manifestPath.lastIndexOf('/');
+        String packagePrefix = separator < 0 ? "" : manifestPath.substring(0, separator + 1);
+        if (!packagePrefix.isEmpty() && files.keySet().stream().anyMatch(path -> !path.startsWith(packagePrefix))) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                    "SkillHub 下载包包含多个根目录，无法确定 SKILL.md 所属能力");
+        }
+
+        Map<String, byte[]> normalized = new LinkedHashMap<>();
+        files.forEach((path, content) -> {
+            String relativePath = packagePrefix.isEmpty() ? path : path.substring(packagePrefix.length());
+            String targetPath = path.equals(manifestPath) ? "SKILL.md" : relativePath;
+            if (normalized.putIfAbsent(targetPath, content) != null) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                        "SkillHub 下载包归一化后包含重复路径", Map.of("path", targetPath));
+            }
+        });
+        return Map.copyOf(normalized);
+    }
+
+    private boolean isExternalSkillManifestPath(String path) {
+        int separator = path.lastIndexOf('/');
+        String filename = separator < 0 ? path : path.substring(separator + 1);
+        return "SKILL.md".equalsIgnoreCase(filename);
+    }
+
+    /** ZIP 只读入内存映射，不在文件系统展开，因此链接附件也不会被解释为链接。 */
+    private Map<String, byte[]> readExternalSkillZip(byte[] zipBytes) {
         if (zipBytes == null || zipBytes.length == 0 || zipBytes.length > MAX_UNCOMPRESSED_BYTES) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包大小无效");
         }
@@ -1105,10 +1157,7 @@ public class AgentSkillHubApplicationService implements AgentSkillHubPushIndexer
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包不是有效 ZIP", Map.of(), exception);
         }
-        if (files.isEmpty() || !files.containsKey("SKILL.md")) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "SkillHub 下载包根目录必须包含 SKILL.md");
-        }
-        return Map.copyOf(files);
+        return files;
     }
 
     private void validateExternalSkillManifest(String expectedName, byte[] skillMarkdown) {

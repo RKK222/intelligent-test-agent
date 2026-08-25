@@ -116,7 +116,7 @@
 
 1. SkillHub `/list`、`/upload`、`/upload/progress` 和 `/download/{id}` 只能通过 `SkillHubGateway` 领域端口及 integration 适配器完成；访问密钥只从部署环境注入，所有请求固定使用 `X-Skill-Access-Key`，日志和错误响应不得记录该请求头或第三方正文。
 2. 平台上传入口必须按文档业务字段固定接收六个 multipart 字段，适配器再补入当前 `AuthPrincipal.unifiedAuthId` 作为上游第七个必填 `userId`；浏览器不得提供或覆盖该身份。响应只读取文档 `result` taskId 或 `result.progress/message`；平台入口只允许 `SUPER_ADMIN` 显式触发，不得由应用 Git push 隐式上传。`progress=100` 后由目录对账发现新条目。
-3. `/download/{id}` 的渠道固定由 `SkillHubDownloadChannel.PLATFORM(3)` 生成，并把当前认证主体或文件 ticket 已冻结的统一认证号作为必填 `userId`；业务层和前端不得传入任意整数或自报身份。目录同步只保存元数据，ZIP 只允许在显式预览、引用或更新时按需下载。标准响应按文档使用 `application/octet-stream`、附件文件名和 `Content-Length`；为兼容企业反向代理，适配器也可接受 `application/zip`、chunked 传输及缺失的附件元数据，但必须继续执行压缩体上限和下游 ZIP 内容校验。上游非 200 错误可以返回安全的 `upstreamStatus`，禁止回显 URL、请求头、统一认证号或正文。
+3. `/download/{id}` 的渠道固定由 `SkillHubDownloadChannel.PLATFORM(3)` 生成，并把当前认证主体或文件 ticket 已冻结的统一认证号作为必填 `userId`；业务层和前端不得传入任意整数或自报身份。目录同步只保存元数据，ZIP 只允许在显式预览、引用或更新时按需下载。下载包可将唯一外层目录及大小写不同的清单文件归一化为根 `SKILL.md`，但多清单、多根目录、路径穿越与重复项仍必须拒绝。标准响应按文档使用 `application/octet-stream`、附件文件名和 `Content-Length`；为兼容企业反向代理，适配器也可接受 `application/zip`、chunked 传输及缺失的附件元数据，但必须继续执行压缩体上限和下游 ZIP 内容校验。上游非 200 错误可以返回安全的 `upstreamStatus`，禁止回显 URL、请求头、统一认证号或正文。
 4. 上传和下载的外部 ZIP 必须限制压缩体、文件数量、路径、重复项、根 `SKILL.md`、UTF-8 和稳定名称；三张上传图片分别限制 5 MiB。相同外部 ID+版本出现不同内容摘要时失败关闭，不得覆盖已保存修订。
 
 ### SSE 与事件

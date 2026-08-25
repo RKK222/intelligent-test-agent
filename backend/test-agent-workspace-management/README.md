@@ -76,7 +76,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## Agent & Skill Hub
 
 - Skill 目录由两类来源组成：公共配置 Git 内置 Skill 与应用成功 push 共同归入 `PLATFORM`，外部 `/list` 只同步元数据的 Skill 归入 `SKILLHUB`；公共内置 Skill 直接展示且无需发布。外部目录由 Redis 分布式锁保护的定时任务完整对账，下架只隐藏发现入口并保留当前应用已有引用。
-- 外部 ZIP 仅在预览、引用或更新时按需下载；应用服务把当前认证主体或文件 ticket 中的统一认证号作为新版文档必填 `userId` 交给 SkillHub，不接受浏览器自报身份。下载后复用既有内容寻址制品编码，并校验 20 MiB/256 文件、路径、重复项、根 `SKILL.md`、UTF-8 和稳定 `name`。外部 `name` 按 SkillHub 原值保存并作为技术 ID，只允许大小写字母、数字、点、下划线和短横线，首字符必须是字母或数字；不再额外限制为小写短横线格式。相同外部 ID+版本不同摘要拒绝覆盖。
+- 外部 ZIP 仅在预览、引用或更新时按需下载；应用服务把当前认证主体或文件 ticket 中的统一认证号作为新版文档必填 `userId` 交给 SkillHub，不接受浏览器自报身份。下载后复用既有内容寻址制品编码，并校验 20 MiB/256 文件、路径、重复项、UTF-8 和稳定 `name`；可将唯一外层目录及大小写不同的清单文件安全归一化为根 `SKILL.md`，但多清单或多根目录仍拒绝。外部 `name` 按 SkillHub 原值保存并作为技术 ID，只允许大小写字母、数字、点、下划线和短横线，首字符必须是字母或数字；不再额外限制为小写短横线格式。相同外部 ID+版本不同摘要拒绝覆盖。
 - 外部 Skill 写入管理员个人 worktree 后，push 摘要未变则仍是外部引用并排除重复平台卡片；发生编辑则同一事务自动转为记录 `forkedFrom*` 的平台派生资产，初始为已推送未发布，仍需管理员显式发布。
 - 超级管理员可通过平台 HTTP 入口显式调用 SkillHub `/upload`，必须同时提供 ZIP 和安全审查报告、目录结构、运行效果三张图片；应用服务校验阶段枚举、20 MiB ZIP、三个 5 MiB 图片、ZIP 安全路径及根 `SKILL.md`，并从当前认证主体补入新版文档必填的统一认证号 `userId`，前端不能覆盖。上传返回上游 `result` taskId，进度查询返回上游 `result.progress/message`；完成后由下一轮目录对账或手工 `/external/sync` 纳入能力库。应用 Git push 不自动上传 SkillHub，因为该流程没有三张必填图片。
 - `AgentSkillHubApplicationService` 在应用 feature push 成功后从精确 Git commit 扫描 `.opencode/agents/*.md` 与完整 `.opencode/skills/{id}/**`，按同一物理仓库组逐工作空间目录生成不可变压缩快照；平台外部 push 由具备该应用刷新权限的管理员通过应用 Git 刷新发现，远端提交同步完成后立即执行同一组索引。Hub 不依赖用户个人 worktree 拉取，定时对账本机 READY 副本仅用于补偿漏记。

@@ -272,7 +272,7 @@ describe("AgentSkillHub", () => {
     expect(view.getByText("测试 · 测试设计")).toBeTruthy();
   });
 
-  it("filters skillmarket Skills and downloads content only after explicit preview", async () => {
+  it("filters SkilMarket Skills and downloads content only after explicit preview", async () => {
     const external = {
       ...hubAsset(), assetId: "hub_asset_external", type: "SKILL", technicalId: "case-design",
       displayName: "外部测试设计", sourceAppId: null, sourceWorkspaceId: null,
@@ -299,11 +299,11 @@ describe("AgentSkillHub", () => {
     const view = renderHub({ canManage: true });
 
     await fireEvent.click(await view.findByRole("button", { name: "Skill" }));
-    await fireEvent.click(view.getByRole("button", { name: "skillmarket" }));
+    await fireEvent.click(view.getByRole("button", { name: "SkilMarket" }));
     await waitFor(() => expect(api.listAgentSkillHubAssets).toHaveBeenCalledWith(expect.objectContaining({
       type: "SKILL", source: "SKILLHUB"
     })));
-    expect(view.getByText("SKILL · skillmarket")).toBeTruthy();
+    expect(view.getByText("SKILL · SkilMarket")).toBeTruthy();
     expect(await view.findByText("创建人：徐丽娜")).toBeTruthy();
     await fireEvent.click(view.getByText("外部测试设计"));
     expect(await view.findByText(/版本 1\.2\.0 .* 创建人：徐丽娜/)).toBeTruthy();

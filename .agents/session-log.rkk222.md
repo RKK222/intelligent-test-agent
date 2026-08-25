@@ -14153,3 +14153,29 @@
 
 - 增量包只重建并携带本轮需要更新的平台代码、前后端制品和已变化的客户端完整离线单元；不会重启或替换现有 worker/manager、工具盒子、模型清单、CK、mem0、BGE、pgvector。
 - 本次门禁修改不新增部署节点，不改变 API、RunEvent/SSE、数据库结构或安全契约；数据库结构变化来自已提交的客户端实例替换 migration。真实企业部署、Flyway 现场历史核对和麒麟真机从清空用户目录开始的安装验收仍待执行；未推送远端。
+
+## 2026-08-25 - 修复企业 SkillHub 预览 ZIP 结构误判
+
+### Why
+
+- 企业内部实测中，SkillHub 目录能正常展示，但点击预览后返回 `VALIDATION_ERROR`，提示下载包根目录必须包含 `SKILL.md`。
+- `/list` 只返回目录元数据，不返回 ZIP 条目；原实现却把下载包限定为根目录精确大写 `SKILL.md`，会误拒 SkillHub 外包唯一目录或返回 `skill.md` 的有效能力包。
+
+### What
+
+- 下载物化新增安全归一化：大小写不敏感识别唯一 `SKILL.md`，当所有文件位于同一能力目录时去掉共同前缀，并将清单规范为根 `SKILL.md`。
+- 保留原有压缩体/解压大小、文件数、重复路径和路径穿越校验；多个清单、多根目录和额外根文件继续失败关闭。
+- `/upload` 因为会原样将 ZIP 交给 SkillHub，仍严格执行接口文档的根目录大写 `SKILL.md`，不复用下载兼容逻辑。
+- 前端能力来源按用户指定从 `skillmarket` 统一改为 `SkilMarket`，同步工程 README、包说明、HTTP API 与安全/后端规范。
+
+### How
+
+- `AgentSkillHubApplicationServiceTest` 24 项全部通过，新增单一外层目录+小写清单成功物化、多根目录拒绝、多清单拒绝、上传仍严格要求根清单四类回归。
+- `agent-skill-hub.test.ts` 14 项通过；`agent-web` typecheck、用户手册构建和前端生产构建均成功。
+- JDK 25 下执行 `mvn -pl test-agent-app -am -DskipTests package`，24 模块 Spring Boot 应用打包成功；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次 SkillHub 服务、测试、前端组件和文档冲突的并行成果；工作区既有 `.reasonix/`、Vite cache、`node_modules/` 及结束时出现的本地客户端/工作台未暂存改动均保留原状，不纳入本次提交。
+
+### Result
+
+- 代码已支持 SkillHub 下载 ZIP 的唯一包目录和清单大小写差异，同时不放宽路径与多能力混包安全边界。
+- 本次不新增部署节点，不修改 HTTP 路径/DTO、RunEvent/SSE、数据库、SQL、Flyway、性能模型、环境配置、generated SDK 或 OpenCode 只读源码；只调整物化行为并保留安全校验。真实企业环境还需部署新后端/前端制品后用原条目再次预览验收。

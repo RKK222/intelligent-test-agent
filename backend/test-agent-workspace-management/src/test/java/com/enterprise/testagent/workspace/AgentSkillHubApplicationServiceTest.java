@@ -16,6 +16,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
@@ -24,6 +26,7 @@ import com.enterprise.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Artifact;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.Asset;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetSummary;
 import com.enterprise.testagent.domain.hub.AgentSkillHubModels.AssetType;
@@ -62,6 +65,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
@@ -225,14 +229,118 @@ class AgentSkillHubApplicationServiceTest {
                 anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any());
     }
 
+    @Test
+    void externalMaterializationNormalizesSinglePackageRootAndManifestCase() throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        Asset external = externalAsset();
+        when(repository.findAsset(external.assetId())).thenReturn(Optional.of(external));
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.download(42, "1.2.0", "AUTH_001")).thenReturn(new ExternalSkillPackage(
+                42, "1.2.0", zip(Map.of(
+                        "case-design/skill.md", "---\nname: case-design\n---\n",
+                        "case-design/templates/request.md", "template"))));
+        when(repository.saveExternalRevision(
+                anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any()))
+                .thenThrow(new PlatformException(ErrorCode.CONFLICT, "stop after package normalization"));
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.materializeExternalAsset(
+                external.assetId(), null, new UserId("usr_1"), "AUTH_001"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("stop after package normalization");
+
+        ArgumentCaptor<Artifact> artifact = ArgumentCaptor.forClass(Artifact.class);
+        verify(repository).saveExternalRevision(
+                anyString(), anyLong(), anyString(), artifact.capture(), anyString(), any(), any(), any());
+        assertThat(artifact.getValue().manifestJson())
+                .contains("\"path\":\"SKILL.md\"")
+                .contains("\"path\":\"templates/request.md\"")
+                .doesNotContain("case-design/");
+    }
+
+    @Test
+    void externalMaterializationRejectsFilesOutsideDetectedPackageRoot() throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        Asset external = externalAsset();
+        when(repository.findAsset(external.assetId())).thenReturn(Optional.of(external));
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.download(42, "1.2.0", "AUTH_001")).thenReturn(new ExternalSkillPackage(
+                42, "1.2.0", zip(Map.of(
+                        "case-design/SKILL.md", "name: case-design",
+                        "README.md", "another root"))));
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.materializeExternalAsset(
+                external.assetId(), null, new UserId("usr_1"), "AUTH_001"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("多个根目录");
+        verify(repository, never()).saveExternalRevision(
+                anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void externalMaterializationRejectsMultipleManifestCandidates() throws Exception {
+        AgentSkillHubRepository repository = mock(AgentSkillHubRepository.class);
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        Asset external = externalAsset();
+        when(repository.findAsset(external.assetId())).thenReturn(Optional.of(external));
+        when(gateway.enabled()).thenReturn(true);
+        when(gateway.download(42, "1.2.0", "AUTH_001")).thenReturn(new ExternalSkillPackage(
+                42, "1.2.0", zip(Map.of(
+                        "case-design/SKILL.md", "name: case-design",
+                        "case-design/docs/skill.MD", "name: another-skill"))));
+        AgentSkillHubApplicationService service = service(repository);
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.materializeExternalAsset(
+                external.assetId(), null, new UserId("usr_1"), "AUTH_001"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("多个 SKILL.md");
+        verify(repository, never()).saveExternalRevision(
+                anyString(), anyLong(), anyString(), any(), anyString(), any(), any(), any());
+    }
+
+    @Test
+    void externalUploadStillRequiresCanonicalRootManifest() throws Exception {
+        SkillHubGateway gateway = mock(SkillHubGateway.class);
+        when(gateway.enabled()).thenReturn(true);
+        AgentSkillHubApplicationService service = service(mock(AgentSkillHubRepository.class));
+        service.setSkillHubGateway(gateway);
+
+        assertThatThrownBy(() -> service.uploadExternalSkillHub(uploadRequest(
+                "研发团队", "04", zip("case-design/SKILL.md", "name: case-design"))))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("上传包根目录必须包含 SKILL.md");
+        verify(gateway, never()).upload(any());
+    }
+
     private byte[] zip(String path, String content) throws Exception {
+        return zip(Map.of(path, content));
+    }
+
+    private byte[] zip(Map<String, String> files) throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(output)) {
-            zip.putNextEntry(new ZipEntry(path));
-            zip.write(content.getBytes(StandardCharsets.UTF_8));
-            zip.closeEntry();
+            for (Map.Entry<String, String> file : files.entrySet()) {
+                zip.putNextEntry(new ZipEntry(file.getKey()));
+                zip.write(file.getValue().getBytes(StandardCharsets.UTF_8));
+                zip.closeEntry();
+            }
         }
         return output.toByteArray();
+    }
+
+    private Asset externalAsset() {
+        Instant now = Instant.parse("2026-08-20T00:00:00Z");
+        return new Asset(
+                "hub_asset_external", null, null, AssetType.SKILL, "case-design",
+                SkillCategory.OTHER, null, null, null, now, now,
+                SourceKind.SKILLHUB, true, 42L, "1.2.0", "official", "test",
+                "stable", "稳定", "team", 7L, "测试设计", "生成案例", null, null);
     }
 
     private SkillHubUploadRequest uploadRequest(String source, String phase, byte[] packageBytes) {
