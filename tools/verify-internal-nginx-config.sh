@@ -85,6 +85,8 @@ grep -Fq 'location ^~ /toolbox/apps/it-tools/ {' "${CONF_PATH}"
 grep -Fq 'location ^~ /toolbox/apps/omni-tools/ {' "${CONF_PATH}"
 grep -Fq 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}"
 grep -A1 -F 'location = /api/internal/agent/opencode/ui-test-tool/config {' "${CONF_PATH}" | grep -Fq 'return 404;'
+test "$(grep -Fc 'add_header Referrer-Policy "no-referrer" always;' "${CONF_PATH}")" = 1
+grep -B2 -F 'add_header Referrer-Policy "no-referrer" always;' "${CONF_PATH}" | grep -Fq 'access_log off;'
 grep -Fq 'location = /downloads/local-opencode-client/install.sh {' "${CONF_PATH}"
 grep -Fq 'location = /downloads/local-opencode-client/installer {' "${CONF_PATH}"
 grep -Fq 'location = /downloads/local-opencode-client/TestAgent-Local-Client-Kylin-arm64.deb {' "${CONF_PATH}"

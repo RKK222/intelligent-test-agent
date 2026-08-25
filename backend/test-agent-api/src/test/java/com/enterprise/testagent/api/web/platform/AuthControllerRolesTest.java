@@ -1,5 +1,6 @@
 package com.enterprise.testagent.api.web.platform;
 
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
@@ -13,6 +14,7 @@ import com.enterprise.testagent.system.management.auth.AuthApplicationService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -122,5 +124,46 @@ class AuthControllerRolesTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.roles[0]").isEqualTo("APP_ADMIN");
+    }
+
+    @Test
+    void unifiedAuthLoginKeepsRequestCompatibilityAndReturnsPlatformTokenWithTraceId() {
+        AuthApplicationService service = org.mockito.Mockito.mock(AuthApplicationService.class);
+        DictionaryRepository dictionaryRepository = org.mockito.Mockito.mock(DictionaryRepository.class);
+        AtomicReference<String> serviceThread = new AtomicReference<>();
+        when(service.loginByUnifiedAuthId("AUTH_1", "aam-token", "unknown", null))
+                .thenAnswer(invocation -> {
+                    serviceThread.set(Thread.currentThread().getName());
+                    return new AuthPrincipal(
+                            "platform-token",
+                            new UserId("usr_1234567890abcdef"),
+                            "auth-user",
+                            "AUTH_1",
+                            List.of(Dictionary.ROLE_USER),
+                            Instant.parse("2026-06-23T00:00:00Z"),
+                            Instant.parse("2026-06-24T00:00:00Z"));
+                });
+        WebTestClient client = WebTestClient.bindToController(new AuthController(service, dictionaryRepository))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.post()
+                .uri("/api/auth/login-by-unified-auth")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"unifiedAuthId":"AUTH_1","token":"aam-token"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectHeader().valueEquals("X-Trace-Id", "trace_1234567890abcdef")
+                .expectBody()
+                .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
+                .jsonPath("$.data.token").isEqualTo("platform-token")
+                .jsonPath("$.data.unifiedAuthId").isEqualTo("AUTH_1")
+                .jsonPath("$.data.roles[0]").isEqualTo("USER");
+
+        verify(service).loginByUnifiedAuthId("AUTH_1", "aam-token", "unknown", null);
+        org.assertj.core.api.Assertions.assertThat(serviceThread.get()).contains("boundedElastic");
     }
 }

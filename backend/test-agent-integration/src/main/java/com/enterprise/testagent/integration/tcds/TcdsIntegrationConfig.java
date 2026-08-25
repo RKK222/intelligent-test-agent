@@ -3,6 +3,7 @@ package com.enterprise.testagent.integration.tcds;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.http.HttpClient;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,7 +30,7 @@ public class TcdsIntegrationConfig {
     @Bean
     TcdsHttpGateway tcdsGateway(
             TcdsHttpRequestFactory requestFactory,
-            HttpClient tcdsHttpClient,
+            @Qualifier("tcdsHttpClient") HttpClient tcdsHttpClient,
             ObjectMapper objectMapper) {
         return new TcdsHttpGateway(requestFactory, tcdsHttpClient, objectMapper);
     }
@@ -37,7 +38,7 @@ public class TcdsIntegrationConfig {
     @Bean
     TcdsCaseMaintenanceService tcdsCaseMaintenanceService(
             TcdsHttpRequestFactory requestFactory,
-            HttpClient tcdsHttpClient,
+            @Qualifier("tcdsHttpClient") HttpClient tcdsHttpClient,
             ObjectMapper objectMapper) {
         return new TcdsCaseMaintenanceService(requestFactory, tcdsHttpClient, objectMapper);
     }

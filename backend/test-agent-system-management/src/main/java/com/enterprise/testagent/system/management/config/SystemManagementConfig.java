@@ -1,6 +1,7 @@
 package com.enterprise.testagent.system.management.config;
 
 import com.enterprise.testagent.domain.auth.TokenStore;
+import com.enterprise.testagent.domain.auth.AamLoginTokenVerifier;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
 import com.enterprise.testagent.domain.user.UserLoginLogRepository;
@@ -48,13 +49,15 @@ public class SystemManagementConfig {
             TokenStore tokenStore,
             UserLoginLogRepository loginLogRepository,
             UserRoleRepository userRoleRepository,
-            DictionaryRepository dictionaryRepository) {
+            DictionaryRepository dictionaryRepository,
+            AamLoginTokenVerifier aamLoginTokenVerifier) {
         return new AuthApplicationService(
                 userDomainService,
                 tokenStore,
                 loginLogRepository,
                 userRoleRepository,
-                dictionaryRepository);
+                dictionaryRepository,
+                aamLoginTokenVerifier);
     }
 
     /**

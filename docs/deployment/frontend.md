@@ -56,6 +56,7 @@ FRONTEND_OPENCODE_REAL_API_BASE_URL=http://127.0.0.1:8080 corepack pnpm e2e:real
 
 ```bash
 VITE_TEST_AGENT_API_BASE_URL=https://<frontend-entry>   # agent-web backend-api 的统一 base URL；同域部署可留空走 /api
+VITE_AAM_BASE_URL=http://zfw.sdc.cs.icbc/aam/onlyLogin/ # AAM 完整登录入口；变更后必须重新构建
 VITE_TEST_AGENT_LOBEHUB_ENABLED=false                   # 仅显式 true 时开放通用问答入口和路由
 ```
 
@@ -64,6 +65,7 @@ VITE_TEST_AGENT_LOBEHUB_ENABLED=false                   # 仅显式 true 时开�
 - 该值应填写浏览器实际访问的前端入口 origin，而不是实体 Nginx 内网地址或 Java 地址；例如当前现场是 `http://mimo.sdc.cs.icbc:9996`，实体 Nginx 仍监听 `122.233.30.2:80`。
 - `VITE_TEST_AGENT_BUILD_VERSION` 由 Vite 配置内部生成，不是部署参数，不得在 `nginx.env` 或外部构建环境中覆盖。
 - 前端不得把密钥写入源码、`localStorage` 或构建产物；`TEST_AGENT_API_TOKEN` 等 Bearer token 由前端通过受控方式获取并经 `backend-api` 携带，不固化在构建环境。
+- AAM 回调的 `userId/token/SSIAuth/SSISign` 会在请求后端前立即从地址栏删除；浏览器只在当前标签页 `sessionStorage` 保存平台 Token。Nginx SPA fallback 必须 `access_log off` 并返回 `Referrer-Policy: no-referrer`，不能记录回调 query。
 - 本地重启脚本未显式设置 `TEST_AGENT_BASE_URL` 时，会把自动探测到的后端内网地址注入为 `VITE_TEST_AGENT_API_BASE_URL`，避免通过局域网地址访问前端时仍请求浏览器本机 `127.0.0.1`。
 
 ## 运行

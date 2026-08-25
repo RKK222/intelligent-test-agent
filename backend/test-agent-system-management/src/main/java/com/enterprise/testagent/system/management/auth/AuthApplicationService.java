@@ -1,6 +1,7 @@
 package com.enterprise.testagent.system.management.auth;
 
 import com.enterprise.testagent.common.id.RuntimeIdGenerator;
+import com.enterprise.testagent.domain.auth.AamLoginTokenVerifier;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.dictionary.DictionaryRepository;
 import com.enterprise.testagent.domain.dictionary.UserRoleRepository;
@@ -27,6 +28,7 @@ public class AuthApplicationService {
     private final UserLoginLogRepository loginLogRepository;
     private final UserRoleRepository userRoleRepository;
     private final DictionaryRepository dictionaryRepository;
+    private final AamLoginTokenVerifier aamLoginTokenVerifier;
 
     /**
      * 构造认证服务，注入依赖的领域服务和仓储。
@@ -36,12 +38,14 @@ public class AuthApplicationService {
             TokenStore tokenStore,
             UserLoginLogRepository loginLogRepository,
             UserRoleRepository userRoleRepository,
-            DictionaryRepository dictionaryRepository) {
+            DictionaryRepository dictionaryRepository,
+            AamLoginTokenVerifier aamLoginTokenVerifier) {
         this.userDomainService = userDomainService;
         this.tokenStore = tokenStore;
         this.loginLogRepository = loginLogRepository;
         this.userRoleRepository = userRoleRepository;
         this.dictionaryRepository = dictionaryRepository;
+        this.aamLoginTokenVerifier = aamLoginTokenVerifier;
     }
 
     /**
@@ -98,16 +102,18 @@ public class AuthApplicationService {
     }
 
     /**
-     * 通过统一认证号登录：验证用户存在后使用第三方 Token 存入 Redis，保存登录日志。
+     * 通过统一认证号登录：先向 AAM 验真，再完成建号并签发独立的平台 Token。
      *
      * @param unifiedAuthId 统一认证号（来自 AAM）
-     * @param token         第三方登录平台返回的 Token（作为系统 Token 使用）
+     * @param token         AAM 回调携带的短期登录 Token，仅用于本次验真
      * @param ipAddress     请求 IP
      * @param userAgent     浏览器 User-Agent
      * @return 认证成功后的 {@link AuthPrincipal}，包含 Token 和用户基本信息
      * @throws com.enterprise.testagent.common.error.PlatformException 用户不存在或账户已停用时
      */
     public AuthPrincipal loginByUnifiedAuthId(String unifiedAuthId, String token, String ipAddress, String userAgent) {
+        // 验真必须先于任何用户查询、建号、Redis 写入和成功日志，避免伪造回调产生副作用。
+        aamLoginTokenVerifier.verify(unifiedAuthId, token);
         User user = userDomainService.findOrCreateByUnifiedAuthId(unifiedAuthId);
 
         if (!user.canLogin()) {
@@ -115,9 +121,10 @@ public class AuthApplicationService {
                     com.enterprise.testagent.common.error.ErrorCode.FORBIDDEN, "用户账户已停用");
         }
 
+        String platformToken = newPlatformToken(token);
         Instant now = Instant.now();
         AuthPrincipal principal = new AuthPrincipal(
-                token, user.userId(), user.username(), user.unifiedAuthId(),
+                platformToken, user.userId(), user.username(), user.unifiedAuthId(),
                 loadRoleValues(user),
                 now, now.plus(TOKEN_TTL));
 
@@ -128,6 +135,15 @@ public class AuthApplicationService {
         loginLogRepository.save(successLog);
 
         return principal;
+    }
+
+    /** 生成与外部凭据无关的平台随机 Token，并显式排除极端碰撞。 */
+    private String newPlatformToken(String externalToken) {
+        String platformToken;
+        do {
+            platformToken = UUID.randomUUID().toString().replace("-", "");
+        } while (platformToken.equals(externalToken));
+        return platformToken;
     }
 
     /**

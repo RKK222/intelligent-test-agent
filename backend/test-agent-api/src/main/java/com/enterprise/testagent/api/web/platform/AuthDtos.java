@@ -27,7 +27,7 @@ public final class AuthDtos {
     }
 
     /**
-     * 统一认证登录请求体（通过 AAM 跳转后登录）。
+     * 统一认证登录请求体（通过 AAM 跳转后单次兑换平台 Token）。
      */
     public record UnifiedAuthLoginRequest(String unifiedAuthId, String token) {
 

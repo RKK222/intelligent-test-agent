@@ -11,6 +11,41 @@ import {
 } from "../src";
 
 describe("backend-api", () => {
+  it("exchanges AAM credentials without old authorization or the global 401 handler", async () => {
+    const unauthorized = vi.fn();
+    (window as unknown as Record<string, unknown>).__handleUnauthorized = unauthorized;
+    sessionStorage.setItem("test-agent.auth.token", "stale-session-token");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      code: "UNAUTHENTICATED",
+      message: "未认证",
+      traceId: "trace_fixed"
+    }), { status: 401 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "stale-option-token",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.loginByUnifiedAuth({
+      unifiedAuthId: "AUTH_001",
+      token: "secret-aam-token"
+    })).rejects.toMatchObject({ status: 401, code: "UNAUTHENTICATED" });
+
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe("http://api/api/auth/login-by-unified-auth");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({
+      unifiedAuthId: "AUTH_001",
+      token: "secret-aam-token"
+    }));
+    expect(new Headers(init?.headers).get("Authorization")).toBeNull();
+    expect(unauthorized).not.toHaveBeenCalled();
+    sessionStorage.clear();
+    delete (window as unknown as Record<string, unknown>).__handleUnauthorized;
+  });
+
   it("keeps collaboration-share credentials on the dedicated client only", async () => {
     const exchanges: Array<Record<string, unknown>> = [];
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({

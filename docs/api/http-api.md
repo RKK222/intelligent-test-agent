@@ -590,7 +590,7 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/auth/login` | 用户登录，返回 Token。 |
-| `POST` | `/api/auth/login-by-unified-auth` | AAM 统一认证登录；首次建号时同时授予普通用户角色。 |
+| `POST` | `/api/auth/login-by-unified-auth` | AAM 回调凭据验真并兑换平台 Token；首次建号时同时授予普通用户角色。 |
 | `POST` | `/api/auth/logout` | 用户登出，删除 Token。 |
 | `GET` | `/api/auth/me` | 获取当前登录用户信息。 |
 | `POST` | `/api/auth/refresh` | 刷新 Token，旧 Token 失效。 |
@@ -616,6 +616,21 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 }
 ```
 
+`POST /api/auth/login-by-unified-auth` 请求体保持兼容：
+
+```json
+{
+  "unifiedAuthId": "AUTH_001",
+  "token": "aam-callback-token"
+}
+```
+
+- 后端先调用 `POST {TEST_AGENT_AAM_BASE_URL}/aam/checkLogin`，仅在外部数值 `code=200` 时继续；外部请求字段固定为 `{"Token":"...","userId":"..."}`。
+- HTTP 401/403 或外部业务 `code != 200` 返回 `401 UNAUTHENTICATED`；超时、连接失败、其它 HTTP 状态、非法或超过 64 KiB 的响应返回 `503 EXTERNAL_API_UNAVAILABLE`。
+- AAM 原始 Token 只存在于本次请求和外部调用方法局部，不写 Redis、登录日志或响应；后端成功后另行生成无格式承诺的平台 opaque Token。
+- 验真失败不会查询或创建用户、写 Redis 或记录成功登录。首次建号继续在同一数据库事务内写用户和最小 `USER` 角色。
+- 平台不向前端暴露 AAM 地址、响应包络、错误正文或调用异常。
+
 `GET /api/auth/me` 响应 `CurrentUserResponse`：
 
 ```json
@@ -639,8 +654,9 @@ ticket 响应中的 `webSocketUrl` 是签发 ticket 的当前 Java 绝对地址�
 
 兼容性：
 - 登录路径当前保留 `/api/auth/login` 和 AAM 使用的 `/api/auth/login-by-unified-auth`；后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
+- 上述两个登录路径是精确匿名入口；`logout/me/refresh` 和业务接口继续要求有效平台 Bearer Token，静态 `TEST_AGENT_API_TOKEN` 的兼容范围不扩大。
 - `/api/auth/login-by-unified-auth` 的首次建号会在同一数据库事务内写入 `users` 和 `USER` 角色；`USER` 字典缺失时拒绝建号，不生成空角色用户。已存在的空角色账号不会在登录时静默改权，由超级管理员在用户管理页筛选“未分配角色”后手工处理。
-- Token 存储在 Redis，1 天过期。
+- 平台 Token 存储在 Redis，1 天过期；命名空间为 `test-agent:token:v2:` 和 `test-agent:token-session:v2:`。旧 v1 key 不再参与鉴权、登出、刷新或批量撤销，上线后全部存量会话需要重新登录，旧 key 按原 TTL 自然过期。
 - 登录、刷新和 `/api/auth/me` 会返回当前用户全局角色 `roles`，以及中文展示名 `roleLabels`。旧 token 或旧响应缺少字段时前端按空列表兼容。
 - 认证失败统一返回 `UNAUTHENTICATED` 错误码。
 - 未配置 Token 时 `/api/` 默认放行（本地开发）。

@@ -15,6 +15,7 @@
 2. 新增环境变量前必须先评估能否复用 `common_parameters`、Spring 配置项、数据库配置或既有 dotenv 变量；只有部署期密钥、外部端点、进程身份、启动引导路径或资源容量这类必须由运行环境注入的值，才允许新增环境变量。
 3. 确需新增环境变量时，必须同步说明用途、默认值、适用 profile、是否敏感、配置缺失时的失败语义，并更新 `backend/README.md`、`docs/deployment/backend.md`、相关模块 README、启动脚本或 dotenv 示例以及配置绑定/启动测试。
 4. 通用参数消费方默认每次通过 `CommonParameterValues` 读取数据库，不得自行增加 JVM/Redis 缓存。只有经确认并实现 `CommonParameterMemoryEntry` 的条目才进入统一本机注册表；注册键必须唯一，启动必须严格加载，匹配的 `CommonParameterReloadedEvent` 和显式手工刷新都必须重新查库后再原子替换。运行中失败只能保留上一有效值并记录安全状态，禁止回退环境变量或代码默认值。当前首个条目为 `NIGHT_EXECUTION_SLOT_CAPACITY`，其它通用参数不因该例外改变直读语义。
+5. AAM 登录验真外部端点通过 `test-agent.aam.base-url` / `TEST_AGENT_AAM_BASE_URL` 配置，只允许不含用户凭据、query、fragment 和业务路径的 HTTP/HTTPS origin；所有 Java 节点必须保持一致。连接、请求和响应大小边界分别由 `TEST_AGENT_AAM_CONNECT_TIMEOUT`、`TEST_AGENT_AAM_REQUEST_TIMEOUT`、`TEST_AGENT_AAM_MAX_RESPONSE_BYTES` 控制，调用不得自动重试，日志和异常不得包含用户号、Token、请求 URL 或上游正文。
 
 ## 分层规则
 

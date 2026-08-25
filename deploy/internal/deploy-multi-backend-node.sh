@@ -279,6 +279,11 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_XXL_JOB_COOKIE_SECURE false
   require_exact_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     http://tcds-prod.sdc.icbc:9080
+  require_exact_value "${backend_env}" TEST_AGENT_AAM_BASE_URL \
+    http://zfw.sdc.cs.icbc
+  require_exact_value "${backend_env}" TEST_AGENT_AAM_CONNECT_TIMEOUT 3s
+  require_exact_value "${backend_env}" TEST_AGENT_AAM_REQUEST_TIMEOUT 5s
+  require_exact_value "${backend_env}" TEST_AGENT_AAM_MAX_RESPONSE_BYTES 65536
   require_exact_value "${backend_env}" TEST_AGENT_SKILLHUB_ENABLED true
   require_exact_value "${backend_env}" TEST_AGENT_SKILLHUB_BASE_URL \
     http://ai-code.sdc.icbc/icbc/skill

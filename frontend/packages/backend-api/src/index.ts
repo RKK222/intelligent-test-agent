@@ -248,6 +248,7 @@ import type {
   UpdateUserRolePayload,
   UpdateUserRolesPayload,
   UpdateUserRolesResult,
+  UnifiedAuthLoginRequest,
   UserIdsPayload,
   UserManagementQuery,
   UpdateRepositoryPayload,
@@ -491,7 +492,13 @@ export type AutomationReferenceWorkspaceReconciliation = {
   warnings: string[];
 };
 
-export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
+export type ExtraRequestInit = RequestInit & {
+  timeoutMs?: number;
+  /** 匿名认证入口禁止附带浏览器中残留的平台 Token。 */
+  omitAuth?: boolean;
+  /** 由调用方处理预期的 401，避免全局未认证处理器抢先跳转。 */
+  suppressUnauthorizedHandler?: boolean;
+};
 
 type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
 
@@ -576,7 +583,9 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       headers.set("Content-Type", "application/json");
     }
     // 自动附加用户 Token：优先使用 options 中的 apiToken，其次从 sessionStorage 读取
-    const userToken = options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
+    const userToken = init.omitAuth
+      ? null
+      : options.apiToken ?? (typeof sessionStorage !== "undefined" ? sessionStorage.getItem("test-agent.auth.token") : null);
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
     }
@@ -615,7 +624,12 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     };
     let rawExchangeReported = false;
     try {
-      const { timeoutMs: _, ...restInit } = init;
+      const {
+        timeoutMs: _,
+        omitAuth: __,
+        suppressUnauthorizedHandler: ___,
+        ...restInit
+      } = init;
       const response = await fetcher(url, { ...restInit, headers, signal: controller.signal });
       const responseText = await response.text();
       rawExchangeReported = true;
@@ -633,6 +647,7 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
         // 401 未认证：触发全局跳转到登录页
         if (response.status === 401
+          && !init.suppressUnauthorizedHandler
           && !headers.has(SUPPORT_ACCESS_GRANT_HEADER)
           && typeof window !== "undefined") {
           const handler = (window as unknown as Record<string, unknown>).__handleUnauthorized;
@@ -3116,7 +3131,18 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     login: (payload: LoginRequest) =>
       request<LoginResponse>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        omitAuth: true,
+        suppressUnauthorizedHandler: true
+      }),
+
+    /** 使用 AAM 回调凭据换取独立的平台 Token。 */
+    loginByUnifiedAuth: (payload: UnifiedAuthLoginRequest) =>
+      request<LoginResponse>("/api/auth/login-by-unified-auth", {
+        method: "POST",
+        body: JSON.stringify(payload),
+        omitAuth: true,
+        suppressUnauthorizedHandler: true
       }),
 
     /**

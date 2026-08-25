@@ -2626,3 +2626,19 @@
 - Result:
   - `release` 现已包含“允许非空单行节点使用 HTML、Markdown、SQL 等特殊字符，继续禁止空节点和保留注释”的优化；`<script>` 仅作为普通文字显示，不执行。
   - 本次仅做前端既有功能的跨长期分支选择性同步，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、部署节点、依赖、性能路径、后端安全边界或兼容协议；未修改 `.env*`、generated SDK、OpenCode 只读源码，未新建分支或推送远端。
+
+### 2026-08-25 - AAM 登录 Token 验真与平台会话改造
+
+- Why:
+  - 既有统一认证回调直接把 AAM Token 当作平台 Token 使用，后端没有向 AAM 验真，伪造 `userId + token` 即可能建号并登录；浏览器地址栏、日志和长期缓存也存在凭据泄露与身份混用风险。
+- What:
+  - 新增领域端口与 AAM HTTP 适配器，固定调用 `/aam/checkLogin`，只接受数值 `code=200`；连接/请求默认 `3s/5s`、响应上限 64 KiB、不重试，拒绝与上游不可用分别映射为稳定 `401/503`，异常不包含用户号、Token、URL 或正文。
+  - 统一认证登录改为“先验真、再查询/首次建号、签发独立平台随机 Token、写 Redis、记录成功日志”；阻塞式 AAM 与用户仓储编排调度到 `boundedElastic`，不占用 WebFlux 事件循环。Redis Token 与 session marker 全部切到 v2 命名空间，旧 v1 不再鉴权并按原 TTL 过期。密码登录和 AAM 兑换保持精确匿名，登出、当前用户、刷新及业务接口继续要求平台 Bearer Token。
+  - 前端统一通过 `backend-api.loginByUnifiedAuth` 兑换且明确不附带旧平台 Token；回调先清除地址栏敏感参数和旧认证状态，再发请求。成功仅把平台 Token 写入 `sessionStorage`；AAM 拒绝重新登录，其它异常进入手工重试安全页。企业 Nginx SPA 入口关闭访问日志并返回 `Referrer-Policy: no-referrer`，部署配置、校验脚本和稳定文档同步更新。
+- How:
+  - 后端 AAM、认证编排、Redis、过滤器和 Controller 定向测试全部通过；最终相关 API 回归 17/17，通过后完成 26 模块 `mvn clean package -DskipTests`。
+  - 前端全量 Vitest 151/151 文件通过，2219 passed / 1 skipped；全 workspace typecheck 与 agent-web production build 通过。企业脚本 `bash -n`、单/多节点 Nginx 模板渲染和 reload 测试通过；本机无预置 Nginx Docker 镜像，仓库脚本按设计跳过真实 `nginx -t`。
+  - `git diff --check`、旧 AAM URL 扫描和全部 `.agents/session-log*.md` 近期记录回顾通过；工作区开始时 clean，未发现冲突、合并标记或需要保留的并行未提交成果。
+- Result:
+  - 浏览器不再持有或复用 AAM 原始 Token，后端只有在 AAM 验真成功后才产生用户与平台会话；上线时旧 Redis 登录态和绑定旧 marker 的派生会话统一失效并要求重新登录。
+  - 本次变更既有 HTTP 登录接口的安全语义、平台 Token 兼容边界、Redis key、前端回调与企业配置；不新增部署节点，不涉及数据库、SQL、Flyway、RunEvent/SSE、generated SDK 或 OpenCode 只读源码，未修改 `.env.local`。尚未连接企业真实 AAM 或在目标 Nginx 上部署验证，发布需按“全部 Java 配置并升级完成后再发布前端”的顺序执行。

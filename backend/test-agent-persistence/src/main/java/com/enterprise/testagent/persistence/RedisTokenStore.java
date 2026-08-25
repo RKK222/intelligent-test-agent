@@ -21,15 +21,15 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * Redis Token 存储，使用 StringRedisTemplate 将认证信息序列化为 JSON 存储。
- * Key 格式：{@code test-agent:token:{token}}
+ * Key 格式：{@code test-agent:token:v2:{token}}
  * TTL：与 AuthPrincipal.expiresAt 一致（1天）
  */
 public class RedisTokenStore implements TokenStore, TokenSessionMarkerStore {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RedisTokenStore.class);
 
-    private static final String KEY_PREFIX = "test-agent:token:";
-    private static final String SESSION_MARKER_KEY_PREFIX = "test-agent:token-session:";
+    private static final String KEY_PREFIX = "test-agent:token:v2:";
+    private static final String SESSION_MARKER_KEY_PREFIX = "test-agent:token-session:v2:";
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -53,7 +53,7 @@ public class RedisTokenStore implements TokenStore, TokenSessionMarkerStore {
             }
             Duration ttl = Duration.ofSeconds(ttlSeconds);
             redisTemplate.opsForValue().set(key, value, ttl);
-            // 第三方会话只持有该摘要 marker；平台登出/刷新时和原 Token 一起删除。
+            // 派生会话只持有该摘要 marker；平台登出/刷新时和原 Token 一起删除。
             redisTemplate.opsForValue().set(markerKey(digest(principal.token())), principal.userId().value(), ttl);
         } catch (JsonProcessingException exception) {
             LOGGER.error("Failed to serialize AuthPrincipal to JSON", exception);
@@ -84,10 +84,10 @@ public class RedisTokenStore implements TokenStore, TokenSessionMarkerStore {
     }
 
     /**
-     * 使用增量 SCAN 查找目标用户的历史 Token，避免管理员批量删除时执行阻塞式 KEYS。
+     * 使用增量 SCAN 查找目标用户的 v2 Token，避免管理员批量删除时执行阻塞式 KEYS。
      *
-     * <p>Token 最长只保留一天，删除属于低频高权限操作；逐条解析现有 AuthPrincipal
-     * 能兼容上线前已经签发、尚未建立用户反向索引的 Token。
+     * <p>Token 最长只保留一天，删除属于低频高权限操作；v1 命名空间不再参与鉴权或撤销，
+     * 由原 TTL 自然过期。
      */
     @Override
     public void deleteByUserIds(Collection<UserId> userIds) {

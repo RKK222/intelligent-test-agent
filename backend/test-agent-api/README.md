@@ -23,7 +23,7 @@
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 工作空间列表和应用工作空间模板响应增量返回 `gitAccessStatus/gitAccessReason/gitAccessMessage/gitAccessCheckedAt`。API 只投影持久化巡检事实；没有结果时字段为 `null`，只有明确 `INACCESSIBLE` 由前端置灰，`UNKNOWN` 仍保持可选。响应不包含仓库 URL、本地路径、Git 命令或 stderr。
-- 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|logout|me|refresh` 保留为稳定入口。
+- 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|login-by-unified-auth|logout|me|refresh` 保留为稳定入口。只有密码登录和 AAM 兑换是精确匿名路径，静态 API Token 兼容边界不扩大；AAM 兑换在 `boundedElastic` 执行阻塞式外部验真和用户仓储编排，只返回平台 Token，不暴露上游地址、响应或错误正文。
 - `web.platform` 承载平台自身接口，`web.agent` 承载 agent runtime 代理入口，`web.common` 承载 traceId、鉴权、限流、旧接口作废拦截和统一异常等入口支撑。
 - CORS allowed headers 包含前端可选的 `X-Test-Agent-Linux-Server-Id`、会话协作专用 `X-Test-Agent-Session-Share` 和排查专用 `X-Support-Access-Grant`。分享头只解析单个 Session/Workspace 的代操作上下文，不替换真实 `AuthPrincipal`；跨 Java HTTP/SSE 转发保留该头，目标 Java 必须重新鉴权。Linux Server 首跳提示在生产由 Nginx 静态白名单消费并在转发前删除；排查头只绑定限时排查授权，不参与用户路由。API 层仍执行既有权威路由与鉴权。
 - 会话消息、Run、夜间任务与重发 DTO additive 返回实际 actor 的用户 ID、可选当前姓名、统一认证号快照和代操作标记；同一响应页按用户 ID 缓存姓名查询，旧节点或目录无法解析时姓名保持可空。

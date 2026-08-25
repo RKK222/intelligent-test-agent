@@ -6,6 +6,7 @@
 
 ## 当前能力
 
+- `AamHttpLoginTokenVerifier` 固定调用 `POST {TEST_AGENT_AAM_BASE_URL}/aam/checkLogin`，只发送 `Token/userId` 并只读取数值 `code`；仅 `200` 通过。HTTP 401/403 或其它业务 code 收敛为 `UNAUTHENTICATED`，超时、连接失败、其它 HTTP 状态、非法或超过 64 KiB 的响应收敛为 `EXTERNAL_API_UNAVAILABLE`。基础地址只接受无凭据、无路径、无 query/fragment 的 HTTP/HTTPS origin，默认连接/请求超时为 3 秒/5 秒，不重试，日志和异常不包含用户号、Token、URL 或正文。
 - `SkillHubHttpGateway` 使用固定基础地址调用文档提供的 `/list`、`/upload`、`/upload/progress` 和 `/download/{id}`，全部请求携带只从环境注入的 `X-Skill-Access-Key`。上传严格使用 `source/phase/file/safetyReportPic/directoryStructurePic/runningEffectPic` 六个 multipart 字段，提交响应读取 `result` taskId，进度响应读取 `result.progress/message`；下载渠道由 `SkillHubDownloadChannel.PLATFORM(3)` 固定，调用方不能传任意 channel。目录和 JSON 响应限制 4 MiB，ZIP 限制 20 MiB，HTTP/业务错误统一收敛为 `SKILLHUB_UNAVAILABLE`，日志不记录密钥或正文。
 - `TcdsHttpGateway` 统一实现用户、TCDS 应用目录、需求子条目、文档元数据和受限下载；基础地址默认使用企业局域网 `http://tcds-prod.sdc.icbc:9080`，允许 `TEST_AGENT_TCDS_BASE_URL` 覆盖，固定接口用 `URI.resolve` 构造。登录、用户、应用、子条目、文档元数据及 TCDS 同源文档请求统一携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；重定向到跨域对象存储后不透传该 header。文档 URL 只接受重新查询的 TCDS 响应，限定 HTTP/HTTPS、10 秒连接、30 秒请求、3 次重定向及调用方容量上限，日志不记录 token、签名 URL 或正文。
 - 从 `src/main/resources/toolbox/catalog-v1.json` 加载锁定 IT-Tools / OmniTools 的版本化离线目录，启动时校验 193 项的稳定 ID、深链接、双语字段、分类和顺序。
@@ -44,7 +45,7 @@
 
 ## 验证
 
-`ToolboxCatalogServiceTest` 验证目录与生产装配。
+`AamHttpLoginTokenVerifierTest` 覆盖固定路径、字段大小写、业务拒绝、HTTP 401/403、超时、连接失败、非法/超限响应和脱敏异常；`ToolboxCatalogServiceTest` 验证目录与生产装配。
 
 `RunnerPublicKeyEncryptionServiceTest` 覆盖超过RSA-OAEP明文上限的真实长度私钥可由版本化混合信封往返解密。
 `ExternalSshKeyEnvelopeServiceTest` 固化 TAEK1 测试向量并覆盖错误 Key/AAD/密文篡改；`ExternalUserSshKeyApplicationServiceTest` 覆盖 scope、用户状态、404 收敛、旧格式 409 和无明文响应。
