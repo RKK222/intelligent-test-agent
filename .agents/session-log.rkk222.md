@@ -14263,18 +14263,21 @@
 
 ### Why
 
-- 用户需要为分享对话、长期记忆、本地客户端和 Skill Market/能力库四项近期能力制作一张图文并茂的宣传海报，并指定使用 light 视觉风格。
+- 用户需要为近期能力制作一张图文并茂的宣传海报，并指定使用 light 视觉风格。
+- 首版画面因网格、技术标签和小截图过多，显得像说明板而非营销海报；用户明确反馈视觉效果不佳，要求重新设计。
+- 用户随后明确最终内容只保留本地客户端（灰度）、长期记忆（灰度），并重点强调与智能研发门户 `Skill Market` 的打通。
 
 ### What
 
-- 新增 `docs/assets/marketing/mimo-recent-features-poster.png`，采用 1800×2400 的暖白画布、冰蓝/靛青/薄荷绿/紫色系统视觉，包含四项功能卖点、真实产品截图、能力流动主视觉和账号灰度提示。
-- 新增 `docs/assets/marketing/mimo-recent-features-poster-philosophy.md`，记录“流动的能力”设计哲学，作为海报后续复用和精修的视觉依据。
+- 新增并重绘 `docs/assets/marketing/mimo-recent-features-poster.png`：最终稿采用 1800×2400 的轻量产品画册风格，以“能力，不止在一个工作台里。”为主张，使用留白、三张高辨识度功能卡片和真实产品截图组织视觉。
+- 最终三项内容为“本地客户端 / 灰度开放”“长期记忆 / 灰度开放”“打通智能研发门户 Skill Market”；第三项最大化呈现 MIMO 能力库、Skill Market 与智能研发门户之间的发现、预览、引用、更新关系。
+- 新增并重写 `docs/assets/marketing/mimo-recent-features-poster-philosophy.md`，以“好事发生”取代首版“流动的能力”，明确拒绝密集网格与功能清单式构图。
 
 ### How
 
-- 复用用户手册中的分享设置、长期记忆和本地客户端脱敏截图；Skill Market 使用与产品语义一致的能力 Hub 图形化表达。
-- 使用 canvas-design 规范先编写设计哲学，再用 Pillow 渲染 PNG；最终检查 4 张卡片中的截图与卖点未互相遮挡，并用 `python3 .tmp/render_mimo_features_poster.py` 完成可重复渲染验证。
+- 复用用户手册中的长期记忆和本地客户端脱敏截图；Skill Market 使用“MIMO 能力库 → Skill Market → 智能研发门户”的桥接卡片，表达可发现、按需预览、引用与更新的实际边界。
+- 使用 canvas-design 规范先编写设计哲学，再用 Pillow 渲染；根据用户反馈多次收敛为更少文字、更大留白与更强主张的布局，使用 `python3 .tmp/render_mimo_features_poster_v3.py` 完成最终渲染并视觉检查标签、截图和文字不再互相遮挡。
 
 ### Result
 
-- Light 海报已生成并通过视觉检查，尺寸为 1800×2400，PNG 可正常读取；本次仅新增宣传素材与设计说明，不涉及 API、事件、数据库、部署、性能、安全、环境配置或生成 SDK。
+- 最终 Light 海报已生成并通过视觉检查，尺寸为 1800×2400，PNG 可正常读取；本次仅新增宣传素材与设计说明，不涉及 API、事件、数据库、部署、性能、安全、环境配置或生成 SDK。
