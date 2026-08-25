@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-08-25 - 将重复打包与签名问题固化到企业部署技能
+
+### Why
+
+- 企业发布主对话反复出现“最后构建包”和“最后成功部署包”混用、相同代码重复打包、客户端版本误触发大组件、签名私钥位置及用途混淆、SkillHub Access Key 被误认为客户端签名 key 等问题。
+- 原企业部署技能覆盖了完整逐机流程，但上述高频判断分散在历史会话和部署文档中，后续打包仍需反复重新归纳。
+
+### What
+
+- 保留既有 `enterprise-offline-deploy` 作为唯一入口，新增按需参考，集中记录成功部署基线、重构建与 `--zip-only` 边界、组件计划和包体排查、内外层 SHA 一致性及未部署候选作废规则。
+- 区分客户端 release 组织 RSA 密钥、Java JAR 内置 SSH 混合加密密钥、麒麟系统包签名和 SkillHub Access Key，并提供不回显私钥或业务 key 的 Mac/企业检查命令。
+- 固化 worker/toolbox/client 增量门禁、`.4` models 灰度、已部署 CK/Mem0/BGE/pgvector、Workflow/LobeHub 默认关闭、TCDS/客户端域名和 Flyway 外置 persistence JAR 等现场边界。
+
+### How
+
+- 完整读取技能维护规范和原企业部署技能，对照当前部署文档、打包脚本及近期全部会话记录提炼已实际发生的问题。
+- 使用技能 `quick_validate.py` 校验目录和 frontmatter，检查参考链接存在，并执行 `git diff --check`。
+
+### Result
+
+- 原企业部署技能现在会在重复打包、签名、包体异常、指纹或 Flyway 问题中按需读取同一技能目录下的参考，不会注册或触发第二个企业部署技能。
+- 本次只修改技能说明和会话记录；不涉及业务代码、API、RunEvent、数据库/Flyway SQL、环境配置、generated SDK、OpenCode 源码、企业制品或服务重启。
+
 ### 2026-08-25 - 修复企业客户端归档并重建当前 release 增量包
 
 ### Why

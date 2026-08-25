@@ -27,6 +27,11 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - 新版不再配置 `OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_LINUX_SERVER_ID`。
 - 当前前端实体 Nginx 安装在 `/data/apps/nginx`；单后台现场先运行 `configure-single-deployment.sh frontend` 生成 `nginx.env`，不要用 PATH 中可能读取 `/root/conf/nginx.conf` 的其他 `nginx`。
 
+## 重复发布问题路由
+
+用户提出“重新打包/再打一次/基于最新代码打包”、质疑包体积或未变化组件、询问签名私钥/公钥、反馈客户端安装失败，或现场出现组件指纹、SkillHub key、Flyway 启动错误时，执行前必须阅读并应用
+[重复打包、签名与部署常见问题](references/release-rebuild-signing-pitfalls.md)。该参考明确区分最后成功部署基线与最后一次构建候选、同批次重封装与新代码重构建、三套签名/密钥，以及已部署数据面和灰度配置不应被平台包重复更新的边界。
+
 ## 企业公共能力权威源
 
 涉及本地客户端使用公共 Agent、Skill、Tool 时，部署设计和操作说明必须遵守以下规则：
