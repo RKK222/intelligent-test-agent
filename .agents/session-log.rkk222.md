@@ -38,6 +38,21 @@
 - 当前正式二进制基线为 `289f5ae6081e79e548dd764c72f905f99b59d0ca`，内层首次完整构建 SHA-256 为
   `a6cb0cfd98da4e82a4f5594f26db85eda38653e821b7ade33dba5e4b4069c6e6`；记录和测试修正提交后只允许用同批
   `--zip-only` 重封，不重新编译或混入其它二进制。
+- 同批重封后的最终内层 SHA-256 为 `88694763fa53e2a1e2962283fea4ca7c9c4c8fc964662c0a2d63df2f2df709c8`，
+  固定名外层包 SHA-256 为 `f8e725bcf5a5876a2e194e527ce76d73fd14a116d14940eb8acac77c7f84c25a`；外层嵌入
+  的内层与独立内层逐字节一致。三份节点归档 `.4/.114/.2` 的 SHA-256 分别为
+  `01a45de27b4d621319f130e4b604bf7b06eb165027d3aa6c165252630121cc17`、
+  `848cd2fa809b2652cbdad9e970f4ec50aed11952cde4eff6a665bcd420e81f50`、
+  `94530d48cc30e12627f694cb260bb80f482cf1aec78ad696fd209d385465642d`。
+- 后端应用 JAR、persistence JAR、XXL integration JAR、前端 tar 和麒麟普通用户包 SHA-256 分别为
+  `490b42b6dd2368839136b0f0318c6e8f6a7b7e161919370be12121ed8bebac36`、
+  `70f9228de25a31180bb050a5be59c80db2a70343256709b3d44480c100713ef7`、
+  `cff9cd51ed648ebc4ae11e6a2378f4b6e145ba48fc498dc03c025cff47f461fb`、
+  `29d7f7ee5ad64ee8274a38899842290c17fe1405fa2ba541eff6bc91d50d65d6`、
+  `6b573faca5b26288ad1d4384238b8b6c6f1b9016a75e0b2f0d8d6b45ca02e75b`；固定名包和校验文件已覆盖到
+  `/Users/kaka/Desktop/mimoagent/0709/` 并再次通过 SHA-256 与 ZIP CRC 校验。
+- 固定包、逐节点、Nginx 渲染/失败关闭和客户端签名分发门禁通过；本机 Docker CLI 在现存 Nginx 镜像的 `docker run`
+  阶段无响应，因此真实容器 `nginx -t` 被终止并以无 Docker 路径复跑其余全部断言，企业目标机的真实 `nginx -t` 仍是现场闸门。
 - 相对 2026-08-24 企业已部署数据库历史，PostgreSQL 仍只允许新增
   `V20260825091459__local_client_instance_replacements_create.sql`，源码 SHA-256
   `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`、Flyway checksum `749555545`；
