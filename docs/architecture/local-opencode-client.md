@@ -4,7 +4,7 @@
 
 本地客户端让用户把自己机器上的绝对目录注册为平台 Workspace，同时继续由浏览器只访问后台 Java。
 一个客户端实例监管一个 OpenCode 1.18.4 进程，可承载多个已注册工作区；同一用户的服务端 OpenCode
-与多个本地客户端可以同时在线。首版支持聊天、OpenCode Agent 自身工具、文件管理和夜间任务，不开放
+与一个本地客户端可以同时在线，同一用户不同本地实例不能同时保持实时连接。首版支持聊天、OpenCode Agent 自身工具、文件管理和夜间任务，不开放
 浏览器终端、Git 发布、Agent 配置管理、附件或协作分享。
 
 ```mermaid
@@ -59,8 +59,9 @@ client key、稳定 `lci_...` 实例 ID、平台、架构和版本；认证成�
 协议支持注册、5 秒心跳、生命周期命令、OpenCode HTTP/SSE、文件请求、256 KiB Base64 二进制分片、
 模型 grant 更新、取消和稳定错误帧。发送方等待 WebSocket `sendText` 完成后才发送下一分片，形成有界
 背压；请求由 requestId 关联并支持中断。Redis 在线记录 TTL 为 15 秒，只信任
-`backendProcessId + connectionGeneration`。相同实例的新认证连接会 fencing 旧连接，旧 generation 的
-心跳、响应、文件票据和模型授权全部失效。客户端上报地址、端口只用于展示，绝不用于路由。
+`backendProcessId + connectionGeneration`。注册先锁定同一用户的数据库行，发布新 route 后撤销该用户其它实例的
+Redis route、模型 grant 和物理连接；并发注册也按锁串行，最后完成认证的 generation 是唯一在线连接。相同实例的
+新认证连接继续 fencing 旧 generation；旧连接的心跳、响应、文件票据和模型授权全部失效。客户端上报地址、端口只用于展示，绝不用于路由。
 
 安装器的配置目录和状态目录由稳定启动器显式传给每次 Java 进程，避免桌面会话中的 XDG 变量变化使
 `state.json` 漂移到另一目录并生成新实例 ID。重复执行 `setup` 会重新读取并校验签名 catalog，原子切换到最新
@@ -82,8 +83,11 @@ OpenCode 不健康时仍返回状态，便于执行重启。主动撤销后凭�
 
 平台模型 key 永不下发。客户端启动 loopback 模型中继，并给 OpenCode 注入随机本地 token；后台只签发
 绑定用户、客户端实例、generation 和持有 Java 的短 TTL grant。断连、换代、轮换或撤销都会使 grant
-立即失效。公共模型同步入口识别 `LOCAL_CLIENT` 后只向 OpenCode PATCH loopback relay 的环境变量引用和
-供应商路由 ID；后台/上游真实密钥、UCID 均不进入隧道，UCID 由模型代理按 grant 所属用户重新解析并覆盖。
+立即失效。声明 `MANAGED_MODEL_CONFIG_V1` 时，企业来源以 `OPENCODE_PUBLIC_CONFIG_DIR/opencode.jsonc` 的
+`model/small_model/enabled_providers/provider` 为配置事实源；OpenCode provider 名称与 Java 路由 ID 通过
+`options.headers.X-Enterprise-Model-Provider` 显式映射，且只有能在 `InternalModelProviderRegistry` 同代快照中解析到
+已启用供应商和 Token 的条目才下发。服务端把地址、API key 改写为 loopback 环境变量，只保留安全超时参数和路由头，
+不会下发公共配置中的 UCID、服务器地址或密钥。UCID 由模型代理按 grant 所属用户重新解析并覆盖。
 
 ## 本地进程与目录安全
 
@@ -110,9 +114,10 @@ HTTP 代理。
 根校验时阻塞同一连接的 `FILE_RESPONSE`。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
 选中、双击才进入下一级。注册按用户行串行化；同一用户、客户端实例和 root digest 命中时复用既有 Workspace ID，
 并重新下发 `workspace.registerRoot` 恢复客户端状态，不再创建可能触发唯一约束的临时 Workspace。若重装导致
-`clientInstanceId` 变化，用户在新客户端重新选择同一目录后，后台只有在旧实例离线且客户端重新校验得到的
+`clientInstanceId` 变化时，用户从工作台选择历史工作区即可触发恢复：后台把已保存的规范路径交给当前唯一在线客户端
+重新校验，只有旧实例离线且客户端返回的
 `rootDigest + fileSystemIdentity` 与唯一历史绑定完全一致时才保留 workspaceId 并切换绑定；多个候选或旧实例在线均
-失败关闭。接管事务同步迁移该工作区的 Session 冻结目标和尚未投递的夜间任务；旧实例的全部工作区都接管完成后写入
+失败关闭。用户从托盘重新选择同一目录仍作为目录位置变化时的人工兜底。接管事务同步迁移该工作区的 Session 冻结目标和尚未投递的夜间任务；旧实例的全部工作区都接管完成后写入
 替换关系，但保留旧实例、Run 和终态任务历史外键。用户活动实例列表本身只消费实时连接，因此旧实例离线后即不展示；
 旧实例若真实重新认证则清除替换标记并重新进入活动列表，其目录仍需逐个重新校验，不能仅凭客户端名称自动抢占。
 
@@ -122,14 +127,15 @@ HTTP 代理。
 复制入口。文件树调用客户端已实现的 `workspace.list` 普通目录操作，不调用服务端托管工作区专用的组合引用视图
 `workspace.view.list`。ticket 签发涉及的 MyBatis/Redis 同步校验在 `boundedElastic` 执行，不占用 WebFlux
 event-loop。工作台顶部直接复用平台 Workspace 列表展示已持久化的本地工作区，可按逻辑 ID 重开其它已注册目录，
-并可返回最近服务器应用工作区；浏览器不另存本机绝对路径。登录页的受控 `redirect` 会保留该同源深链查询参数。
+并可返回最近服务器应用工作区。前端必须先调用上述激活接口并使用返回的新实例身份，再切换 Workspace 和发起文件
+WebSocket；激活失败时不能先渲染不可读工作区。浏览器不另存本机绝对路径。登录页的受控 `redirect` 会保留该同源深链查询参数。
 
 ## Session、Run 与夜间任务
 
 `RuntimeKind` 取 `SERVER_PROCESS` 或 `LOCAL_CLIENT`。本地工作区绑定稳定实例 ID，不创建服务端 process 或
 binding。Session 创建时冻结目标，Run manifest/context/execution node 再冻结并传播同一目标；本地实例
-离线或换代不回退服务端进程，也不按在线状态任意切换到同一用户的其它客户端。唯一例外是上节经真实目录身份校验的
-显式工作区接管，它在同一数据库事务内同步改写 Workspace、Session 和待执行夜间任务的本地实例目标。路由仓储读取失败同样失败关闭；
+离线或换代不回退服务端进程，也不在 Run 路由时按在线状态任意切换到其它客户端。唯一例外是用户显式选择历史工作区后，
+上节激活接口在当前唯一在线实例完成真实目录身份校验并接管；它在同一数据库事务内同步改写 Workspace、Session 和待执行夜间任务的本地实例目标。路由仓储读取失败同样失败关闭；
 workspace/session 在 path、query 或请求体中的入口都先解析本地目标，再决定连接持有 Java。
 
 存量 `agent_session_bindings`、Session 旧映射和 `routing_decisions` 仍以外键引用

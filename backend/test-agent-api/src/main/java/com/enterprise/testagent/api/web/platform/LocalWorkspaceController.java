@@ -98,15 +98,28 @@ public class LocalWorkspaceController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /** 持久化最近选择，使客户端重新打开网页后仍能恢复上一次本地工作区。 */
+    /** 激活本地根映射并持久化最近选择；历史离线绑定可安全接管到唯一在线客户端。 */
     @PostMapping(BASE + "/{workspaceId}/recent")
     public Mono<ApiResponse<LocalWorkspaceView>> markRecent(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return Mono.fromCallable(() -> ApiResponse.ok(
-                        service.markRecent(userId, new WorkspaceId(workspaceId)), traceId))
+        return Mono.fromCallable(() -> {
+                    WorkspaceId requestedWorkspace = new WorkspaceId(workspaceId);
+                    LocalClientConnectionRoute route = service.requireWorkspaceActivationRoute(
+                            userId, requestedWorkspace);
+                    BackendJavaProcess backend = routeResolver.requireBackend(route.backendProcessId());
+                    if (!routeResolver.isCurrent(backend.backendProcessId())) {
+                        requireNotAlreadyRouted(exchange);
+                        return forwarder.forwardTyped(
+                                exchange,
+                                backend,
+                                null,
+                                new TypeReference<ApiResponse<LocalWorkspaceView>>() { });
+                    }
+                    return ApiResponse.ok(service.markRecent(userId, requestedWorkspace, traceId), traceId);
+                })
                 .subscribeOn(Schedulers.boundedElastic());
     }
 

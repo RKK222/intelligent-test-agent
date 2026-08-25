@@ -23,6 +23,8 @@ public interface LocalClientMapper {
 
     List<LocalClientInstanceRow> findInstancesByUserId(@Param("userId") String userId);
 
+    List<LocalClientInstanceRow> findInstancesByUserIdIncludingReplaced(@Param("userId") String userId);
+
     List<LocalClientInstanceRow> findAllInstances();
 
     int upsertInstance(LocalClientInstanceRow row);

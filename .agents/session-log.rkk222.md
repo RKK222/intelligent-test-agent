@@ -14382,3 +14382,38 @@
   后端/前端/本地客户端完整 release 后，使用真实麒麟用户完成重新接入、唯一在线实例和 `client.log` 验收。
 - 本次不新增部署节点，不改数据库结构、SQL、Flyway、RunEvent/SSE、generated SDK、OpenCode 源码或环境配置；
   HTTP 路径/DTO 字段保持兼容，仅收紧实例列表投影。企业 `local_client_releases` 仍需在制品发布后同步签名 catalog。
+
+## 2026-08-25 - 修复历史本地工作区接管与企业模型路由
+
+### Why
+
+- 企业现场证据确认用户主键就是 `001177621`，旧工作区仍绑定已离线实例 `lci_ca417...`，而新实例
+  `lci_be6f...` 已在线；原最近工作区接口只保存偏好，既不恢复客户端重启后丢失的根映射，也不把历史绑定安全接管到新实例。
+- 最新失败请求把 `enterprise-openai` 作为 `X-Enterprise-Model-Provider` 发给 Java，但企业库实际启用的是
+  `qwen-prod/deepseek-prod`；公共 `opencode.jsonc` 已提供 `enterprise-qwen/enterprise-deepseek` 到上述路由 ID 的精确映射。
+
+### What
+
+- 最近本地工作区接口改为激活入口：先路由到原绑定或用户唯一在线客户端，使用保存路径执行真实目录校验；同实例恢复
+  根映射，旧实例离线时按完全一致的 `rootDigest + fileSystemIdentity` 保留 workspaceId 并接管 Session/待投递夜间任务。
+- 客户端注册复用 `users` 行锁串行化同一用户连接，在新 route/grant 发布后撤销其它实例的 route/grant 和物理连接；
+  撤销查询通过独立 MyBatis XML 按用户包含替换历史读取，不做全表扫描。
+- 新增受管模型配置生成器：企业来源读取当前公共 `opencode.jsonc`，按 `X-Enterprise-Model-Provider` 映射并由运行时
+  Provider 注册表过滤未启用或缺 Token 的条目；下发前把地址和 key 强制改写为 loopback 环境变量并移除 UCID、服务端地址及密钥。
+- 前端在切换本地 Workspace 前先调用激活接口并采用返回的新实例身份；同步 API、架构、部署和模块 README。
+
+### How
+
+- JDK 25 下定向 Maven 覆盖 runtime/API/persistence 共 11 项，全部通过；前端工作区测试 15 项和 agent-web typecheck 通过。
+- `restart-dev-services.sh --profile test --env-file .env.test` 完成 26 模块后端打包、manager 构建和前端生产构建，随后仍因
+  Docker Desktop 的 ClickHouse `docker run` 无返回而终止。使用同一暂存 JAR、`.env.test` 生成环境并仅在一次性命令关闭
+  不可用的 ClickHouse 后，主服务在 18081 启动，readiness 为 UP、CORS 预检 200；总 health 因旧服务占用 XXL-JOB 18080 为 DOWN，临时进程已停止。
+- 提交前执行 `git diff --check`、冲突文件检查并回顾全部 `.agents/session-log*.md` 近期条目；不纳入并行的 SkillHub
+  `frontend/packages/backend-api/src/index.ts` 修改及 `.reasonix/`、Vite cache、根 `node_modules/`。
+
+### Result
+
+- 代码和定向运行级验证表明：历史工作区只有完成真实目录身份校验才会转绑；新认证连接会成为该用户唯一实时实例；
+  企业客户端不再硬编码不存在的 `enterprise-openai`，而采用公共配置与数据库运行快照一致的路由 ID。
+- 本次不新增部署节点，不改数据库结构、Flyway、RunEvent/SSE、generated SDK、OpenCode 源码或 `.env*`；既有 HTTP 路径和
+  DTO 形状保持兼容，新增一条 MyBatis XML 查询。企业现场仍需部署新后端/前端/客户端制品后，用 `001177621` 完成真实接管和对话复测。

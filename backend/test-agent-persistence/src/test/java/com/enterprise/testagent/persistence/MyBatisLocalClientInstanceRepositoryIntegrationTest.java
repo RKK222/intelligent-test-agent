@@ -187,6 +187,7 @@ class MyBatisLocalClientInstanceRepositoryIntegrationTest {
 
         assertThat(repository.findById(INSTANCE_ID)).contains(expected);
         assertThat(repository.findByUserId(USER_ID)).containsExactly(expected);
+        assertThat(repository.findByUserIdIncludingReplaced(USER_ID)).containsExactly(expected);
         assertThat(repository.findAll()).containsExactly(expected);
     }
 
@@ -201,6 +202,8 @@ class MyBatisLocalClientInstanceRepositoryIntegrationTest {
         repository.markReplaced(USER_ID, INSTANCE_ID, replacementId, CONNECTED_AT.plusSeconds(120));
 
         assertThat(repository.findByUserId(USER_ID)).containsExactly(replacementInstance);
+        assertThat(repository.findByUserIdIncludingReplaced(USER_ID))
+                .containsExactly(replacementInstance, oldInstance);
         assertThat(repository.findById(INSTANCE_ID)).contains(oldInstance);
         assertThat(repository.findAll()).containsExactly(replacementInstance, oldInstance);
 

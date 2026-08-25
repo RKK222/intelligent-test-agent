@@ -19,6 +19,10 @@
 - `LocalClientConnectionWebSocketHandler` 仅允许持久化注册能力为 `SELF_UPDATE_V1` 的连接收发版本帧。终态
   `UPDATE_STATUS` 由协调器完成关系库幂等提交后才返回 `UPDATE_STATUS_ACK`；ACK 绑定原命令的实例、generation
   和数据库实际终态，不能由一次 WebSocket 写入代替持久化确认；冲突终态返回错误且不发 ACK。
+- `LocalClientConnectionWebSocketHandler` 完成认证注册时由 runtime 在同一用户行锁内发布新 route，并通过
+  `LocalClientConnectionRevoker` 删除其它实例 route/grant、跨 Java 关闭物理连接，保证每用户至多一个实时本地实例。
+  声明 `MANAGED_MODEL_CONFIG_V1` 的企业客户端由 runtime 从公共 `opencode.jsonc` 生成受管配置，API 只负责写入
+  `REGISTERED`，不在 handler 中拼接供应商或模型。
 
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
@@ -196,6 +200,8 @@ runtime-state DTO 的 `resend` 均为可选 additive 字段，分享 runtime-sta
 代理和反向 WSS 入口；`LocalWorkspaceController` 与现有文件 route/ticket/handler 承载网页目录浏览兜底和文件
 RPC，客户端托盘的 `WORKSPACE_REGISTER` 则由反向 WSS 入口调用同一个 `LocalWorkspaceApplicationService`。
 HTTP 注册/注销会同步等待反向文件 RPC，Controller 必须调度到 `boundedElastic`，不得阻塞 WebFlux event-loop。
+`POST /local-workspaces/{workspaceId}/recent` 同时是激活入口：先按原绑定或唯一在线实例路由到连接持有 Java，完成
+历史路径校验、同实例根恢复或跨实例安全接管后才保存偏好并返回新实例身份；前端必须在切换 Workspace 前调用。
 跨 Java 必须按连接记录的 backendProcessId/generation 复用公共 resolver/forwarder，Controller 不读取
 Redis 快照、不直接控制本地 supervisor。Workspace/Session/Run/夜间及统一 OpenCode 实例响应仅追加
 runtime/capability 字段，旧服务端路径保持兼容。完整契约见 `docs/api/http-api.md` 与

@@ -1674,19 +1674,28 @@ async function clearLocalWorkspaceRouteQuery() {
   await router.replace({ name: "workbench", query });
 }
 
-/** 客户端注册成功后打开此深链；先切换并渲染逻辑 Workspace，文件目录继续通过 WebSocket 后台加载。 */
+/** 客户端注册成功后打开此深链；先恢复或接管本地根映射，再切换并后台加载文件目录。 */
 async function activateLocalWorkspace(workspaceId: string, sequence: number, clearRouteQuery: boolean) {
   rememberManagedWorkspaceBeforeLocal();
   try {
-    const workspace = workspaces.value.find((item) => item.workspaceId === workspaceId)
+    const candidate = workspaces.value.find((item) => item.workspaceId === workspaceId)
       ?? await api.getWorkspace(workspaceId);
     if (sequence !== localWorkspaceRouteSequence) return;
-    if (workspace.runtimeKind !== "LOCAL_CLIENT") {
+    if (candidate.runtimeKind !== "LOCAL_CLIENT") {
       throw new Error("目标不是本地客户端工作区");
     }
-    if (workspace.gitAccessStatus === "INACCESSIBLE") {
-      throw new Error(workspace.gitAccessMessage || "本地工作区 Git 权限已失效");
+    if (candidate.gitAccessStatus === "INACCESSIBLE") {
+      throw new Error(candidate.gitAccessMessage || "本地工作区 Git 权限已失效");
     }
+    const activated = await api.markRecentLocalWorkspace(candidate.workspaceId);
+    if (sequence !== localWorkspaceRouteSequence) return;
+    const workspace: Workspace = {
+      ...candidate,
+      runtimeKind: activated.runtimeKind,
+      localClientInstanceId: activated.localClientInstanceId,
+      online: activated.online,
+      capabilities: activated.capabilities
+    };
     appSelectionSeq += 1;
     selectingAppId = undefined;
     cancelExperienceWorkspaceFlow("WORKSPACE_SWITCHED");
@@ -1702,14 +1711,6 @@ async function activateLocalWorkspace(workspaceId: string, sequence: number, cle
       isCurrent: () => sequence === localWorkspaceRouteSequence
     });
     if (!switched || sequence !== localWorkspaceRouteSequence) return;
-    try {
-      await api.markRecentLocalWorkspace(workspace.workspaceId);
-    } catch (error) {
-      if (sequence !== localWorkspaceRouteSequence) return;
-      feedback.value = errorFeedback("本地工作区已打开，但最近选择保存失败", error);
-      if (clearRouteQuery) await clearLocalWorkspaceRouteQuery();
-      return;
-    }
     if (sequence !== localWorkspaceRouteSequence) return;
     feedback.value = {
       kind: "success",

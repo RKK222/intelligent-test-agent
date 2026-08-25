@@ -312,7 +312,9 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 `MyBatisLocalClientInstanceRepositoryIntegrationTest` 覆盖按实例、按用户和全量查询，防止包装类型反射调用再次导致客户端注册后断线。
 `V20260825091459__local_client_instance_replacements_create.sql` 新增实例替换关系。`LocalClientMapper.xml` 按用户锁串行化
 跨实例工作区注册，以真实根摘要和文件系统身份查询历史绑定并 CAS 切换客户端；用户实例查询排除已替换旧实例，按 ID 和
-全量管理查询仍保留旧行。`SessionRuntimeTargetMapper.xml` 与 `NightExecutionTaskMapper.xml` 分别迁移同工作区 Session 和
+全量管理查询仍保留旧行；连接撤销使用按用户且包含替换历史的独立 MyBatis XML 查询，避免为单个注册扫描全表。同一
+`users` 行锁也由实例注册复用，使新连接发布和其它实例 route/grant 撤销严格串行；该行为复用已有
+`lockCredentialUser` MyBatis XML 查询，不新增 JDBC SQL 或数据库结构。`SessionRuntimeTargetMapper.xml` 与 `NightExecutionTaskMapper.xml` 分别迁移同工作区 Session 和
 尚未投递任务目标，历史 Run 与已投递 attempt 不改写。
 
 `LocalClientVersionMapper.xml` / `MyBatisLocalClientVersionRepository` 保存受签名 release、artifact、全局/用户

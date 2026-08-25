@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.localclient.LocalClientReleaseVersion;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionRevoker;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
@@ -38,6 +39,7 @@ public class LocalClientRegistrationService {
     private final LocalClientConnectionStore connectionStore;
     private final LocalClientModelGrantStore modelGrantStore;
     private final Clock clock;
+    private LocalClientConnectionRevoker connectionRevoker;
 
     @Autowired
     public LocalClientRegistrationService(
@@ -58,12 +60,29 @@ public class LocalClientRegistrationService {
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
+    /** 方法注入保持既有构造测试稳定；生产注册在用户行锁内收敛为唯一实时连接。 */
+    @Autowired
+    void setConnectionRevoker(LocalClientConnectionRevoker connectionRevoker) {
+        this.connectionRevoker = Objects.requireNonNull(connectionRevoker);
+    }
+
     @Transactional
     public Registration register(
             UserId userId,
             LocalClientPayloads.Register payload,
             BackendProcessId backendProcessId,
             String observedRemoteAddress) {
+        return register(userId, payload, backendProcessId, observedRemoteAddress, null);
+    }
+
+    @Transactional
+    public Registration register(
+            UserId userId,
+            LocalClientPayloads.Register payload,
+            BackendProcessId backendProcessId,
+            String observedRemoteAddress,
+            String traceId) {
+        instanceRepository.lockUser(userId);
         LocalClientInstanceId clientInstanceId = new LocalClientInstanceId(payload.clientInstanceId());
         String platform = normalizePlatform(payload.platform());
         String architecture = normalizeArchitecture(payload.architecture());
@@ -145,6 +164,14 @@ public class LocalClientRegistrationService {
                 modelGrantStore.delete(grantFingerprint);
             }
             throw exception;
+        }
+        if (connectionRevoker != null) {
+            connectionRevoker.revokeAllExcept(
+                    userId,
+                    clientInstanceId,
+                    generation,
+                    "USER_CONNECTION_SUPERSEDED",
+                    traceId);
         }
         // 路由发布后再清除替换标记：与工作区接管并发时，在线旧实例最终一定重新进入活动实例投影。
         // 其工作区仍需逐个通过目录身份校验，不能因重连自动抢回。

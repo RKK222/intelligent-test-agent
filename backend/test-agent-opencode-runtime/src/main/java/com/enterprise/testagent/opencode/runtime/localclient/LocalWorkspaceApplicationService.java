@@ -73,19 +73,58 @@ public class LocalWorkspaceApplicationService {
         this.objectMapper = Objects.requireNonNull(objectMapper);
     }
 
-    /** 记录当前用户最近选择的本地工作区，复用全局工作区偏好以支持重新登录后自动恢复。 */
+    /**
+     * 激活并记录当前用户最近选择的本地工作区。
+     *
+     * <p>客户端进程重启时会丢失内存中的根目录注册；客户端重装又会产生新实例 ID。因此这里必须先让
+     * 当前连接重新校验历史绝对路径：同实例恢复根映射；历史实例离线时，只允许唯一在线实例凭完全一致的
+     * rootDigest + fileSystemIdentity 接管。校验成功后才保存最近工作区，避免页面先切换到不可读目录。</p>
+     */
     @Transactional
-    public LocalWorkspaceView markRecent(UserId userId, WorkspaceId workspaceId) {
+    public LocalWorkspaceView markRecent(UserId userId, WorkspaceId workspaceId, String traceId) {
         LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
-        Workspace workspace = workspaceRepository.findById(workspaceId)
+        workspaceRepository.findById(workspaceId)
                 .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "本地工作区不可用"));
+        LocalClientConnectionRoute route = requireWorkspaceActivationRoute(userId, workspaceId);
+        requireCurrentConnection(route);
+
+        localWorkspaceRepository.lockRegistration(userId, route.clientInstanceId());
+        binding = requireOwnedBinding(userId, workspaceId);
+        JsonNode input = objectMapper.createObjectNode()
+                .put("absolutePath", binding.normalizedRootPath());
+        RootRegistration validated = registration(fileGateway.invoke(
+                route.clientInstanceId().value(),
+                route.connectionGeneration(),
+                null,
+                null,
+                "workspace.validateRoot",
+                input,
+                traceId));
+        if (!binding.rootDigest().equals(validated.rootDigest())
+                || !binding.fileSystemIdentity().equals(validated.fileSystemIdentity())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "历史本地工作区目录身份已变化，请重新选择目录注册");
+        }
+
+        LocalWorkspaceView activated;
+        if (binding.clientInstanceId().equals(route.clientInstanceId())) {
+            activated = restoreExistingWorkspace(
+                    binding, validated, input, route.connectionGeneration(), traceId);
+        } else {
+            if (connectionStore.find(binding.clientInstanceId()).isPresent()) {
+                throw new PlatformException(ErrorCode.CONFLICT, "历史本地工作区绑定的客户端已经重新上线");
+            }
+            activated = reclaimExistingWorkspace(
+                    binding,
+                    route.clientInstanceId(),
+                    validated,
+                    input,
+                    route.connectionGeneration(),
+                    traceId);
+        }
         managedWorkspaceRepository.savePreference(new UserWorkspacePreference(
                 userId, null, workspaceId, Instant.now()));
-        boolean online = connectionStore.find(binding.clientInstanceId())
-                .filter(route -> route.userId().equals(userId))
-                .isPresent();
-        return LocalWorkspaceView.from(workspace, binding.clientInstanceId(), online);
+        return activated;
     }
 
     public LocalClientConnectionRoute requireOwnedOnlineRoute(
@@ -106,6 +145,33 @@ public class LocalWorkspaceApplicationService {
         LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
         return connectionStore.find(binding.clientInstanceId())
                 .filter(route -> route.userId().equals(userId));
+    }
+
+    /**
+     * 解析工作区激活应落到的连接：原绑定在线时固定原实例；原绑定离线时只接受该用户唯一在线实例。
+     */
+    public LocalClientConnectionRoute requireWorkspaceActivationRoute(
+            UserId userId,
+            WorkspaceId workspaceId) {
+        LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
+        Optional<LocalClientConnectionRoute> boundRoute = connectionStore.find(binding.clientInstanceId())
+                .filter(route -> route.userId().equals(userId));
+        if (boundRoute.isPresent()) {
+            return boundRoute.orElseThrow();
+        }
+        List<LocalClientConnectionRoute> onlineRoutes = instanceRepository.findByUserId(userId).stream()
+                .map(LocalClientInstance::clientInstanceId)
+                .map(connectionStore::find)
+                .flatMap(Optional::stream)
+                .filter(route -> route.userId().equals(userId))
+                .toList();
+        if (onlineRoutes.isEmpty()) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "没有在线本地客户端可打开该工作区");
+        }
+        if (onlineRoutes.size() > 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "检测到多个在线本地客户端，请等待连接收敛后重试");
+        }
+        return onlineRoutes.getFirst();
     }
 
     @Transactional

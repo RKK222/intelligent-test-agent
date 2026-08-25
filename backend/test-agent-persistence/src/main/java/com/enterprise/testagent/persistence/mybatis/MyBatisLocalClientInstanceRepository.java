@@ -20,6 +20,14 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
     }
 
     @Override
+    public void lockUser(UserId userId) {
+        // 与凭据轮换复用 users 行锁，保证同一用户的新连接发布和旧连接撤销严格串行。
+        if (mapper.lockCredentialUser(userId.value()) == null) {
+            throw new IllegalStateException("local client instance owner does not exist");
+        }
+    }
+
+    @Override
     public Optional<LocalClientInstance> findById(LocalClientInstanceId clientInstanceId) {
         return Optional.ofNullable(mapper.findInstanceById(clientInstanceId.value())).map(this::toDomain);
     }
@@ -27,6 +35,13 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
     @Override
     public List<LocalClientInstance> findByUserId(UserId userId) {
         return mapper.findInstancesByUserId(userId.value()).stream().map(this::toDomain).toList();
+    }
+
+    @Override
+    public List<LocalClientInstance> findByUserIdIncludingReplaced(UserId userId) {
+        return mapper.findInstancesByUserIdIncludingReplaced(userId.value()).stream()
+                .map(this::toDomain)
+                .toList();
     }
 
     @Override

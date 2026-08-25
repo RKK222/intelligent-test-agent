@@ -4337,7 +4337,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/opencode/commands` | `{action: START\|RESTART\|STOP\|STATUS}` | 复用公共启动/停止/状态服务；跨 Java 精确转发到持有 generation 的节点。 |
 | `POST` | `/api/internal/platform/workspace-management/local-clients/{clientInstanceId}/directory-picker/file-ws-route` | 文件 WS route | 网页目录浏览兜底；只允许实例 owner，目标固定持有连接 Java。 |
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces` | `{clientInstanceId,name,rootPath}` → Workspace | 网页兜底注册；客户端先验证真实绝对目录，再事务性注册；离线失败。同步反向 RPC 调度到 `boundedElastic`。 |
-| `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 校验当前用户与有效本地绑定后，复用全局最近工作区偏好保存本次选择；重新登录或打开工作台时优先恢复该本地工作区，后续选择服务器工作区会覆盖此偏好。 |
+| `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 激活并保存最近工作区。原绑定在线时先在原客户端重新校验历史路径并恢复根映射；原绑定离线时只允许当前用户唯一在线实例在 `rootDigest + fileSystemIdentity` 完全一致后接管，并同步迁移 Session 与未投递夜间任务目标。请求按连接持有 Java 精确转发并在 `boundedElastic` 执行；目录缺失、身份变化、没有在线实例或出现多个在线实例均失败关闭，失败时不更新最近偏好。后续选择服务器工作区会覆盖此偏好。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
 | `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加灰度可见且当前在线的本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时只省略服务端实例，本地实例独立保留。离线本地历史不返回；在线但 OpenCode 不健康的实例仍返回。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段，网页客户端功能以独立 `download-access/me` 为权威结果。 |
 

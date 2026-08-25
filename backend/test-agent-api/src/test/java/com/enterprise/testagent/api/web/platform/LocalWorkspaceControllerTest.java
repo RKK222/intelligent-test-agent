@@ -46,7 +46,13 @@ class LocalWorkspaceControllerTest {
                 .thenReturn(new LocalWorkspaceApplicationService.LocalWorkspaceView(
                         "wrk_local_workspace", "project", "/Users/test/project",
                         RuntimeKind.LOCAL_CLIENT, instanceId.value(), true, Map.of()));
-        when(service.markRecent(userId, new com.enterprise.testagent.domain.workspace.WorkspaceId("wrk_local_workspace")))
+        when(service.requireWorkspaceActivationRoute(
+                userId, new com.enterprise.testagent.domain.workspace.WorkspaceId("wrk_local_workspace")))
+                .thenReturn(route);
+        when(service.markRecent(
+                userId,
+                new com.enterprise.testagent.domain.workspace.WorkspaceId("wrk_local_workspace"),
+                "trace_local_workspace"))
                 .thenAnswer(ignored -> {
                     assertThat(Thread.currentThread().getName()).contains("boundedElastic");
                     return new LocalWorkspaceApplicationService.LocalWorkspaceView(

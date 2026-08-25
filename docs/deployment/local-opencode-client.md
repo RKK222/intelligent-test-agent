@@ -47,8 +47,10 @@ test -r "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}"
 `GET /api/internal/platform/workspace-management/agent-config/public/client-capabilities/{bundleDigest}/artifact`
 导出此处的完整包。禁止用空能力包或只写一个 commit 字符串代替实际基线。
 公共能力包不包含 `opencode.jsonc` 或模型密钥；支持 `MANAGED_MODEL_CONFIG_V1` 的客户端在 WSS 注册后从服务端接收
-无密钥 provider 配置，并只通过本机 loopback 模型中继访问平台。发布验收必须确认旧客户端仍可注册、新客户端的
-`REGISTERED` 不泄露平台地址、统一认证号或上游密钥。
+无密钥 provider 配置，并只通过本机 loopback 模型中继访问平台。企业来源的 OpenCode provider 名称和模型来自当前
+`OPENCODE_PUBLIC_CONFIG_DIR/opencode.jsonc`，`options.headers.X-Enterprise-Model-Provider` 必须精确对应数据库中已启用且
+已配置 Token 的 `internal_model_providers.provider_id`，不能回退为历史默认 `enterprise-openai`。发布验收必须确认旧客户端
+仍可注册、新客户端的 `REGISTERED` 不泄露平台地址、统一认证号或上游密钥。
 
 **机器：外网 Mac（同一终端）**。执行真实打包，使用独立输出目录，避免污染固定 deploy/internal/dist。
 
@@ -279,10 +281,15 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
 短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
-若历史版本已经生成了新实例 ID，用户需在新客户端重新选择原目录；平台核验真实路径摘要与文件系统身份后保留原
-workspaceId 接管绑定。旧实例在线、身份不一致或同目录存在多个历史 Workspace 时必须先停止并人工消除歧义。
+若历史版本已经生成了新实例 ID，用户可直接在工作台选择历史工作区；平台会把已保存路径交给当前唯一在线客户端，
+核验真实路径摘要与文件系统身份后保留原 workspaceId 接管绑定。目录已经移动时再从客户端托盘重新选择原目录。
+旧实例在线、身份不一致、同目录存在多个历史 Workspace 或该用户出现多个在线 route 时必须先停止并人工消除歧义。
 
-**机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
+**机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认有且只有一个实例，且
+online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。新实例完成认证后，后台会在同一用户
+行锁内删除其它实例的 Redis route、模型 grant 并关闭物理连接；设置页只展示这一条实时连接，不展示离线历史。此项与本机
+active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、
+.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 
 全新企业环境可以尚未设置本地客户端全局/个人目标版本；这时版本策略表为空属于合法状态，客户端必须保持在线，
 不能为了通过接入验收写入假策略或修改 `flyway_schema_history`。若日志表现为反复 `REGISTERED` 后立即断线，先确认

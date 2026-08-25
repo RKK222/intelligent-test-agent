@@ -95,7 +95,7 @@ describe("app source workspace state", () => {
     expect(agentWorkbenchSource).toContain(
       "workspaceFilesAsViewEntries(await api.listFiles(workspaceId, target.locator.path))"
     );
-    expect(agentWorkbenchSource).toContain("await api.markRecentLocalWorkspace(workspace.workspaceId)");
+    expect(agentWorkbenchSource).toContain("await api.markRecentLocalWorkspace(candidate.workspaceId)");
     expect(agentWorkbenchSource).toContain("function tryRestoreRecentLocalWorkspace()");
     expect(agentWorkbenchSource).toContain(
       '|| selectedWorkspaceKind.value === "LOCAL_CLIENT"\n        ? await collectOrdinaryWorkspaceDownloadFiles'
@@ -109,6 +109,8 @@ describe("app source workspace state", () => {
 
     expect(activationSource).toContain('kind: "LOCAL_CLIENT"');
     expect(activationSource).toContain("awaitDirectory: false");
+    expect(activationSource.indexOf("await api.markRecentLocalWorkspace(candidate.workspaceId)"))
+      .toBeLessThan(activationSource.indexOf("await switchWorkspace(workspace"));
     expect(activationSource).not.toContain("selectedAppId.value = undefined");
     expect(agentWorkbenchSource).toContain('if (selectedWorkspaceKind.value !== "LOCAL_CLIENT") return undefined;');
     expect(agentWorkbenchSource).toContain(

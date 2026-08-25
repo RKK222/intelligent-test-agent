@@ -5,6 +5,7 @@ import com.enterprise.testagent.domain.localclient.LocalClientConnectionRevoker;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionRoute;
 import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientInstance;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
 import com.enterprise.testagent.domain.localclient.LocalClientModelGrantStore;
 import com.enterprise.testagent.domain.opencodeprocess.BackendJavaProcess;
@@ -13,6 +14,8 @@ import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnecti
 import com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.enterprise.testagent.xxljob.XxlJobProperties;
 import com.fasterxml.jackson.core.type.TypeReference;
+import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,14 +54,37 @@ public class LocalClientConnectionRevokerService implements LocalClientConnectio
 
     @Override
     public void revokeAll(UserId userId, String reason, String traceId) {
-        for (LocalClientInstance instance : instanceRepository.findByUserId(userId)) {
+        for (LocalClientInstance instance : allOwnedInstances(userId)) {
             connectionStore.find(instance.clientInstanceId()).ifPresent(route -> revoke(route, reason, traceId));
         }
     }
 
+    @Override
+    public void revokeAllExcept(
+            UserId userId,
+            LocalClientInstanceId retainedClientInstanceId,
+            long retainedGeneration,
+            String reason,
+            String traceId) {
+        for (LocalClientInstance instance : allOwnedInstances(userId)) {
+            connectionStore.find(instance.clientInstanceId())
+                    .filter(route -> !route.clientInstanceId().equals(retainedClientInstanceId)
+                            || route.connectionGeneration() != retainedGeneration)
+                    .ifPresent(route -> revoke(route, reason, traceId));
+        }
+    }
+
+    private List<LocalClientInstance> allOwnedInstances(UserId userId) {
+        // 已替换实例也可能残留短 TTL 路由；撤销语义不能受用户投影过滤影响。
+        return instanceRepository.findByUserIdIncludingReplaced(userId);
+    }
+
     private void revoke(LocalClientConnectionRoute route, String reason, String traceId) {
-        connectionStore.delete(route.clientInstanceId(), route.connectionGeneration());
+        boolean deleted = connectionStore.delete(route.clientInstanceId(), route.connectionGeneration());
         grantStore.deleteForConnection(route.clientInstanceId(), route.connectionGeneration());
+        if (deleted) {
+            instanceRepository.markDisconnected(route.clientInstanceId(), Instant.now());
+        }
         try {
             if (routeResolver.isCurrent(route.backendProcessId())) {
                 localConnections.close(route.clientInstanceId(), route.connectionGeneration(), reason);

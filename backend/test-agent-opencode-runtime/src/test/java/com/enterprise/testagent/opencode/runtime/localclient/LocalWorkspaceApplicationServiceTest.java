@@ -138,7 +138,8 @@ class LocalWorkspaceApplicationServiceTest {
         verify(workspaces, never()).save(any());
         verify(bindings, never()).save(any());
 
-        LocalWorkspaceApplicationService.LocalWorkspaceView recent = service.markRecent(userId, workspaceId);
+        LocalWorkspaceApplicationService.LocalWorkspaceView recent = service.markRecent(
+                userId, workspaceId, "trace_new");
         assertThat(recent.online()).isTrue();
         verify(recentWorkspaces).savePreference(argThat((UserWorkspacePreference preference) ->
                 preference.userId().equals(userId)
@@ -219,5 +220,85 @@ class LocalWorkspaceApplicationServiceTest {
                 eq(workspaceId), eq(oldClientId), eq(newClientId), any(Instant.class));
         verify(instances).markReplaced(eq(userId), eq(oldClientId), eq(newClientId), any(Instant.class));
         verify(workspaces, never()).save(any());
+    }
+
+    @Test
+    void selectingHistoricalWorkspaceReclaimsItThroughSoleOnlineClient() {
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        ManagedWorkspaceRepository recentWorkspaces = mock(ManagedWorkspaceRepository.class);
+        LocalClientWorkspaceRepository bindings = mock(LocalClientWorkspaceRepository.class);
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientWorkspaceFileGateway files = mock(LocalClientWorkspaceFileGateway.class);
+        SessionRuntimeTargetRepository sessionTargets = mock(SessionRuntimeTargetRepository.class);
+        NightExecutionTaskRepository nightTasks = mock(NightExecutionTaskRepository.class);
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
+                workspaces, recentWorkspaces, bindings, instances, connections, files,
+                sessionTargets, nightTasks, routes, objectMapper);
+
+        Instant now = Instant.parse("2026-08-25T08:30:00Z");
+        UserId userId = new UserId("001177621");
+        LocalClientInstanceId oldClientId = new LocalClientInstanceId("lci_ca417_history");
+        LocalClientInstanceId newClientId = new LocalClientInstanceId("lci_be6f_current");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_f557_history");
+        BackendProcessId backendProcessId = new BackendProcessId("bjp_enterprise_current");
+        LocalClientInstance newInstance = mock(LocalClientInstance.class);
+        LocalClientConnectionRoute newRoute = mock(LocalClientConnectionRoute.class);
+        LocalClientWorkspaceBinding oldBinding = new LocalClientWorkspaceBinding(
+                workspaceId,
+                userId,
+                oldClientId,
+                "/home/001177621/Desktop/mimoagent",
+                "history-root-digest",
+                "history-file-system",
+                now.minusSeconds(86400),
+                now.minusSeconds(86400));
+        Workspace workspace = new Workspace(
+                workspaceId,
+                "mimoagent",
+                "/home/001177621/Desktop/mimoagent",
+                WorkspaceStatus.ACTIVE,
+                now.minusSeconds(86400),
+                now.minusSeconds(86400),
+                null,
+                "trace_history");
+        ObjectNode registration = objectMapper.createObjectNode()
+                .put("normalizedRootPath", "/home/001177621/Desktop/mimoagent")
+                .put("rootDigest", "history-root-digest")
+                .put("fileSystemIdentity", "history-file-system");
+
+        when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(oldBinding));
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
+        when(newInstance.clientInstanceId()).thenReturn(newClientId);
+        when(instances.findByUserId(userId)).thenReturn(List.of(newInstance));
+        when(connections.find(oldClientId)).thenReturn(Optional.empty());
+        when(connections.find(newClientId)).thenReturn(Optional.of(newRoute));
+        when(newRoute.userId()).thenReturn(userId);
+        when(newRoute.clientInstanceId()).thenReturn(newClientId);
+        when(newRoute.connectionGeneration()).thenReturn(21L);
+        when(newRoute.backendProcessId()).thenReturn(backendProcessId);
+        when(routes.isCurrent(backendProcessId)).thenReturn(true);
+        when(files.invoke(
+                eq(newClientId.value()), eq(21L), eq(null), eq(null),
+                eq("workspace.validateRoot"), any(), eq("trace_activate_history")))
+                .thenReturn(registration);
+        when(files.invoke(
+                eq(newClientId.value()), eq(21L), eq(workspaceId.value()), eq(null),
+                eq("workspace.registerRoot"), any(), eq("trace_activate_history")))
+                .thenReturn(registration);
+        when(bindings.rebind(any(LocalClientWorkspaceBinding.class), eq(oldClientId))).thenReturn(true);
+        when(bindings.findByClientInstanceId(oldClientId)).thenReturn(List.of());
+
+        LocalWorkspaceApplicationService.LocalWorkspaceView result = service.markRecent(
+                userId, workspaceId, "trace_activate_history");
+
+        assertThat(result.workspaceId()).isEqualTo(workspaceId.value());
+        assertThat(result.localClientInstanceId()).isEqualTo(newClientId.value());
+        assertThat(result.online()).isTrue();
+        verify(bindings).lockRegistration(userId, newClientId);
+        verify(bindings).rebind(any(LocalClientWorkspaceBinding.class), eq(oldClientId));
+        verify(recentWorkspaces).savePreference(any(UserWorkspacePreference.class));
     }
 }

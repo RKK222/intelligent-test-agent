@@ -17,6 +17,7 @@ import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnectionRegistry;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientConnectionSender;
+import com.enterprise.testagent.opencode.runtime.localclient.LocalClientManagedModelConfigService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientRegistrationService;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientTunnelGateway;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientUpdateCoordinator;
@@ -77,6 +78,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private ManagerControlSettings managerSettings;
     private LocalClientPublicCapabilityCoordinator publicCapabilityCoordinator;
     private ModelCatalogApplicationService modelCatalogService;
+    private LocalClientManagedModelConfigService managedModelConfigService;
 
     /** 方法注入保持既有 handler 单测构造器兼容，同时让生产连接具备 Trace 归档能力。 */
     @Autowired
@@ -103,6 +105,12 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     @Autowired
     void setModelCatalogService(ModelCatalogApplicationService service) {
         this.modelCatalogService = Objects.requireNonNull(service);
+    }
+
+    /** 企业来源从公共 opencode.jsonc 生成映射；方法注入保持既有 handler 单测构造器兼容。 */
+    @Autowired
+    void setManagedModelConfigService(LocalClientManagedModelConfigService service) {
+        this.managedModelConfigService = Objects.requireNonNull(service);
     }
 
     public LocalClientConnectionWebSocketHandler(
@@ -235,7 +243,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             userId,
                             payload,
                             routeResolver.currentBackendProcessId(),
-                            clientAddress);
+                            clientAddress,
+                            frame.traceId());
                     supersessionService.supersede(
                             registration.previousRoute(), registration.route(), frame.traceId());
                     ConnectionState state = new ConnectionState(
@@ -262,11 +271,13 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             sender);
                     boolean managedModelConfigSupported = payload.capabilities() != null
                             && payload.capabilities().contains("MANAGED_MODEL_CONFIG_V1");
-                    Map<String, Object> managedModelConfig = managedModelConfigSupported
-                            && modelCatalogService != null
-                            && modelCatalogService.managedSourceEnabled()
-                                    ? modelCatalogService.localClientProviderConfig()
-                                    : null;
+                    Map<String, Object> managedModelConfig = null;
+                    if (managedModelConfigSupported && modelCatalogService != null
+                            && modelCatalogService.managedSourceEnabled()) {
+                        managedModelConfig = managedModelConfigService == null
+                                ? modelCatalogService.localClientProviderConfig()
+                                : managedModelConfigService.managedProviderConfig();
+                    }
                     emit(outbound, new LocalClientFrame(
                             LocalClientProtocol.VERSION,
                             LocalClientFrameType.REGISTERED,

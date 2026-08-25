@@ -140,6 +140,13 @@
         ORDER BY updated_at DESC, client_instance_id ASC
     </select>
 
+    <select id="findInstancesByUserIdIncludingReplaced" resultMap="instanceRow">
+        SELECT <include refid="instanceColumns"/>
+        FROM local_client_instances
+        WHERE user_id = #{userId}
+        ORDER BY updated_at DESC, client_instance_id ASC
+    </select>
+
     <select id="findAllInstances" resultMap="instanceRow">
         SELECT <include refid="instanceColumns"/>
         FROM local_client_instances

@@ -8,9 +8,15 @@ import java.util.Optional;
 /** 本地客户端实例仓储端口。 */
 public interface LocalClientInstanceRepository {
 
+    /** 串行化同一用户的客户端注册与连接接管。 */
+    void lockUser(UserId userId);
+
     Optional<LocalClientInstance> findById(LocalClientInstanceId clientInstanceId);
 
     List<LocalClientInstance> findByUserId(UserId userId);
+
+    /** 包含已替换历史行，供连接撤销等控制面按用户完整扫描。 */
+    List<LocalClientInstance> findByUserIdIncludingReplaced(UserId userId);
 
     List<LocalClientInstance> findAll();
 

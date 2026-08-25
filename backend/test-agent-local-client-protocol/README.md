@@ -22,6 +22,9 @@ ACK 后清 marker。deadline 失败可由迟到 `SUCCEEDED/AUTO_ROLLED_BACK` 条
 
 声明 `MANAGED_MODEL_CONFIG_V1` 的客户端会在 `REGISTERED.managedModelConfig` 接收无密钥 OpenCode 模型配置；字段仅包含
 `model/small_model/enabled_providers/provider`，provider 的地址与 API key 使用客户端进程内的 loopback 环境变量占位符。
+企业来源从平台当前公共 `opencode.jsonc` 读取 OpenCode provider 名称、模型和
+`X-Enterprise-Model-Provider` Java 路由 ID，并只保留数据库运行快照中已启用且已配置 Token 的映射；不得用历史
+`ModelCatalogProperties.providerId` 覆盖公共配置中的路由 ID。
 旧客户端或未声明该能力的客户端继续收到不含此字段的原 JSON 形状。该配置不写入公共能力包，也不携带平台地址、
 Client key、统一认证号或上游模型密钥。
 
