@@ -50,9 +50,9 @@
 - `InactiveOpencodeProcessMapper.xml` 按 ACTIVE binding 和本机 Linux 服务器查询 `RUNNING/UNHEALTHY` 用户进程，以该用户全部来源 Run 的最大 `updated_at` 聚合最近 OpenCode 活动；无 Run 时回退 manager 权威 `started_at`。SQL 先收窄相关进程，再分别利用 `runs.triggered_by_user_id` 和 `sessions.created_by_user_id` 现有索引聚合直接归属与 legacy Run，避免按每个候选重复全表扫描；同时通过 `night_execution_tasks(owner_user_id,status,slot_start)` 现有索引排除执行窗口尚未结束的跨夜遗留任务和北京时间当天 `SCHEDULED/DISPATCHING` 任务。候选和闸门内精确复核都走该 MyBatis XML，不向存量进程 JDBC Repository 新增 SQL，也不新增数据库结构。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
-- `UserDeletionMapper.xml` / `MyBatisUserDeletionRepository` 以 MyBatis XML 锁定目标用户、汇总受保护业务引用，并按外键顺序清理账号附属数据；不级联删除会话、工作区、进程或调度历史。`RedisTokenStore` 使用增量 `SCAN` 撤销目标用户上线前已签发的 Token，不执行阻塞式 `KEYS`，也不记录 Token key/value。
+- `UserDeletionMapper.xml` / `MyBatisUserDeletionRepository` 以 MyBatis XML 锁定目标用户、汇总受保护业务引用，并按外键顺序清理账号附属数据；不级联删除会话、工作区、进程或调度历史。`RedisTokenStore` 只扫描 `test-agent:token:v2:*` 撤销目标用户当前平台 Token，不执行阻塞式 `KEYS`，也不记录 Token key/value；旧 v1 key 不再被鉴权或撤销代码识别，按原 TTL 自然过期。
 - Redis 会话运行上下文、Run 运行数据面、限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。用户级 OpenCode dispose 闸门与 `active:user`、`runtime-user` marker 使用同一 `{userId}` slot：普通 dispose 先清理过期 active 成员并原子确认空闲，个人重启维护租约允许已有活动 Run 但与 dispose 使用同一互斥键；两类租约都按 token 续租/释放，新 Run 在同一 Lua 中先检查闸门再登记 active/marker。
-- `RedisTokenStore` 在保存平台 Token 时同步写入 SHA-256 session marker，并使用相同绝对过期时间；删除、刷新或过期清理 Token 时同步删除 marker。原始 Token 不进入 marker key/value，XXL 只持有 digest。
+- `RedisTokenStore` 使用 `test-agent:token:v2:` 与 `test-agent:token-session:v2:`；保存平台 Token 时同步写入 SHA-256 session marker，并使用相同绝对过期时间，删除、刷新或批量撤销时同步删除 marker。原始 Token 不进入 marker key/value，XXL 只持有 digest。
 - `RedisSupportAccessGrantStore` 以 Lua 原子轮换/撤销同一平台登录会话的当前排查授权，只保存 `sessionDigest/grantTokenDigest` 与有界 payload，TTL 与 grant 到期时间一致；查找时同时校验 token key 和 session 当前摘要，不降级 JVM 内存。
 
 ## 建表规范

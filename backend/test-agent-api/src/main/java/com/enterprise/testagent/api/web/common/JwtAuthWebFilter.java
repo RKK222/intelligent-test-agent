@@ -9,6 +9,7 @@ import com.enterprise.testagent.observability.TraceIdSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -21,7 +22,7 @@ import reactor.core.publisher.Mono;
 
 /**
  * 用户 Token 鉴权过滤器。在 ApiTokenWebFilter 之前执行，优先判断用户 Bearer Token。
- * - 登录接口 /api/auth/login 不需要 Token，直接放行。
+ * - 密码登录与 AAM 兑换两个精确入口不需要 Token，直接放行。
  * - 存在有效 Bearer Token 时设置认证属性，供 Controller 使用。
  * - Token 无效（过期或格式错误）返回 401。
  * - 无 Token 时直接放行，由后续 ApiTokenWebFilter 或 Controller 判断是否有必要鉴权。
@@ -34,7 +35,9 @@ import reactor.core.publisher.Mono;
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class JwtAuthWebFilter implements WebFilter {
 
-    private static final String LOGIN_PATH = "/api/auth/login";
+    private static final Set<String> ANONYMOUS_AUTH_PATHS = Set.of(
+            "/api/auth/login",
+            "/api/auth/login-by-unified-auth");
 
     private final TokenStore tokenStore;
     private final ObjectMapper objectMapper;
@@ -48,18 +51,18 @@ public class JwtAuthWebFilter implements WebFilter {
     }
 
     /**
-     * 对 /api/ 路径执行用户 Token 校验，跳过登录接口。
+     * 对 /api/ 路径执行用户 Token 校验，跳过两个精确匿名登录入口。
      */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().pathWithinApplication().value();
         String token = AuthWebSupport.extractBearerToken(exchange);
 
-        // 非 API 路径或登录接口直接放行
+        // 非 API 路径或两个精确匿名登录入口直接放行
         if (!path.startsWith("/api/")) {
             return chain.filter(exchange);
         }
-        if (path.equals(LOGIN_PATH) || ExternalApiWebSupport.isExternalPath(path) || token == null) {
+        if (ANONYMOUS_AUTH_PATHS.contains(path) || ExternalApiWebSupport.isExternalPath(path) || token == null) {
             return chain.filter(exchange);
         }
 

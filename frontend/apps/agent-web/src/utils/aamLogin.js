@@ -1,10 +1,16 @@
-export function getAamUrl(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
-  const baseStr = encodeToUrl(url);
-  return baseURL + baseStr;
+export const DEFAULT_AAM_LOGIN_BASE_URL = "http://zfw.sdc.cs.icbc/aam/onlyLogin/";
+
+export function resolveAamLoginBaseUrl(baseURL) {
+  const configured = typeof baseURL === "string" ? baseURL.trim() : "";
+  return `${(configured || DEFAULT_AAM_LOGIN_BASE_URL).replace(/\/+$/, "")}/`;
 }
-export function jumpAam(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
-  const aamUrl = baseURL;
-  window.location.href = aamUrl + encodeToUrl(url);
+
+export function getAamUrl(url, baseURL = DEFAULT_AAM_LOGIN_BASE_URL) {
+  const baseStr = encodeToUrl(url);
+  return resolveAamLoginBaseUrl(baseURL) + baseStr;
+}
+export function jumpAam(url, baseURL = DEFAULT_AAM_LOGIN_BASE_URL) {
+  window.location.replace(getAamUrl(url, baseURL));
 }
 function encodeToUrl(url) {
   const encoder = new TextEncoder();

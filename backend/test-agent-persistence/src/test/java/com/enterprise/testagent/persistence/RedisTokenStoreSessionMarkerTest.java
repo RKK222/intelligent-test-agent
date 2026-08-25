@@ -40,13 +40,13 @@ class RedisTokenStoreSessionMarkerTest {
         String digest = store.digest("secret-platform-token");
         assertThat(digest).hasSize(64).doesNotContain("secret-platform-token");
         verify(values).set(
-                eq("test-agent:token-session:" + digest),
+                eq("test-agent:token-session:v2:" + digest),
                 eq("usr_xxl_marker"),
                 eq(Duration.ofHours(1)));
 
         store.delete("secret-platform-token");
 
-        verify(redis).delete("test-agent:token-session:" + digest);
+        verify(redis).delete("test-agent:token-session:v2:" + digest);
     }
 
     @Test
@@ -57,7 +57,7 @@ class RedisTokenStoreSessionMarkerTest {
         when(redis.opsForValue()).thenReturn(values);
         RedisTokenStore store = new RedisTokenStore(redis, new ObjectMapper());
         String digest = TokenSessionMarkerStore.sha256("token");
-        when(values.get("test-agent:token-session:" + digest)).thenReturn("usr_xxl_marker");
+        when(values.get("test-agent:token-session:v2:" + digest)).thenReturn("usr_xxl_marker");
 
         assertThat(store.isActive(digest)).isTrue();
         assertThat(store.isActiveForUser(digest, new UserId("usr_xxl_marker"))).isTrue();

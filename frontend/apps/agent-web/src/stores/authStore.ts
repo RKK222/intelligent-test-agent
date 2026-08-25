@@ -7,6 +7,7 @@ import { ref } from "vue";
  * Token 在 sessionStorage 中的存储 key。
  */
 const TOKEN_KEY = "test-agent.auth.token";
+const LEGACY_UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 
 /**
  * 认证状态管理 Store。
@@ -19,6 +20,8 @@ export const useAuthStore = defineStore("auth", () => {
   const token = ref<string | null>(sessionStorage.getItem(TOKEN_KEY));
   // 是否正在加载
   const loading = ref(false);
+  // AAM 兑换失败时由安全错误页接管，避免清理旧 Token 的 watcher 再次自动跳转形成循环。
+  const suppressAutoLoginRedirect = ref(false);
 
   /**
    * 是否已登录（有有效的 Token）。
@@ -33,6 +36,8 @@ export const useAuthStore = defineStore("auth", () => {
   const saveToken = (newToken: string) => {
     token.value = newToken;
     sessionStorage.setItem(TOKEN_KEY, newToken);
+    sessionStorage.removeItem(LEGACY_UNIFIED_AUTH_ID_KEY);
+    suppressAutoLoginRedirect.value = false;
   };
 
   /**
@@ -42,6 +47,17 @@ export const useAuthStore = defineStore("auth", () => {
     token.value = null;
     currentUser.value = null;
     sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_UNIFIED_AUTH_ID_KEY);
+    suppressAutoLoginRedirect.value = false;
+  };
+
+  /** 开始 AAM 凭据兑换，同时清除可能属于上一用户的本地认证状态。 */
+  const beginAamExchange = () => {
+    token.value = null;
+    currentUser.value = null;
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_UNIFIED_AUTH_ID_KEY);
+    suppressAutoLoginRedirect.value = true;
   };
 
   /**
@@ -91,11 +107,13 @@ export const useAuthStore = defineStore("auth", () => {
     currentUser,
     token,
     loading,
+    suppressAutoLoginRedirect,
     isAuthenticated,
     login,
     logout,
     fetchCurrentUser,
     clearAuth,
+    beginAamExchange,
     saveToken
   };
 });

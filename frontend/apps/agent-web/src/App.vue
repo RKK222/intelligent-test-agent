@@ -4,10 +4,10 @@ import { zhCnWithArabicMonths } from "./utils/locale";
 import { useAuthStore } from "./stores/authStore";
 import { watch, onMounted, ref } from "vue";
 import { RouterView, useRouter } from "vue-router";
-import { jumpAam } from "./utils/aamLogin";
+import { jumpAam, resolveAamLoginBaseUrl } from "./utils/aamLogin";
 import logoUrl from "./assets/figma/logo.png";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login2//";
+const AAM_BASE_URL = resolveAamLoginBaseUrl(import.meta.env.VITE_AAM_BASE_URL);
 const APP_ENV = import.meta.env.VITE_ENV ?? "";
 const IS_LOCAL_ENV = APP_ENV === "localhost";
 
@@ -39,7 +39,10 @@ onMounted(() => {
 watch(
   () => authStore.token,
   (newToken) => {
-    if (!newToken && router.currentRoute.value.name !== "login") {
+    if (!newToken
+      && !authStore.suppressAutoLoginRedirect
+      && router.currentRoute.value.name !== "login"
+      && router.currentRoute.value.name !== "aam-error") {
       if (IS_LOCAL_ENV) {
         router.replace({ name: "login" });
       } else {
@@ -54,7 +57,6 @@ watch(
  * 任何组件遇到 401 错误时可调用此方法。
  */
 function handleUnauthorized() {
-  console.log('>>>>>>>>>>登录校验>>>>>>>>>>',AAM_BASE_URL)
   authStore.clearAuth();
   if (IS_LOCAL_ENV) {
     router.replace({ name: "login" });

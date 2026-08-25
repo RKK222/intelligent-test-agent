@@ -226,6 +226,9 @@ server {
     }
 
     location / {
+        # SPA 回调可能短暂携带 AAM 凭据，入口不记录 URI/query，并禁止向后续页面发送 Referer。
+        access_log off;
+        add_header Referrer-Policy "no-referrer" always;
         try_files $uri $uri/ /index.html;
     }
 }

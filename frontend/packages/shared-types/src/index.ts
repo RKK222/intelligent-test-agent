@@ -3345,6 +3345,14 @@ export type LoginRequest = {
 };
 
 /**
+ * AAM 回调凭据兑换请求体。token 只用于单次后端验真，不作为平台会话 Token。
+ */
+export type UnifiedAuthLoginRequest = {
+  unifiedAuthId: string;
+  token: string;
+};
+
+/**
  * 登录成功响应体。
  */
 export type LoginResponse = {

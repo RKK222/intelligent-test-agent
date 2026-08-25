@@ -5,17 +5,17 @@ import {
   releaseFeatures,
   type ReleaseFeatureFlags
 } from "./release-features";
-import { jumpAam } from "./utils/aamLogin";
+import { handleAamCallback } from "./auth/aamAuth";
+import { jumpAam, resolveAamLoginBaseUrl } from "./utils/aamLogin";
 import { useAuthStore } from "./stores/authStore";
 import { useMemoryAccessStore } from "./stores/memoryAccessStore";
 
 const TOKEN_KEY = "test-agent.auth.token";
-const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 const DEFAULT_WORKBENCH_PATH = "/workbench";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
+const AAM_BASE_URL = resolveAamLoginBaseUrl(import.meta.env.VITE_AAM_BASE_URL);
 const API_BASE_URL = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const memoryAccessApi = createBackendApiClient({ baseUrl: API_BASE_URL });
+const backendApi = createBackendApiClient({ baseUrl: API_BASE_URL });
 
 /**
  * 当前环境标识：localhost 表示本地开发模式，其他值走 AAM 统一认证。
@@ -43,6 +43,11 @@ export const router = createRouter({
       path: "/985211",
       name: "login",
       component: () => import("./views/LoginView.vue"),
+    },
+    {
+      path: "/auth/aam-error",
+      name: "aam-error",
+      component: () => import("./views/AamAuthErrorView.vue"),
     },
 
     {
@@ -169,38 +174,36 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
 router.beforeEach(async (to, _from) => {
   const authStore = useAuthStore();
 
-  // 统一认证登录：URL 携带 userId + token 时，先完成登录再继续路由
-  const unifiedAuthId = to.query.userId;
-  const urlToken = to.query.token;
-  if (unifiedAuthId && typeof unifiedAuthId === "string" && urlToken && typeof urlToken === "string") {
-    const { token: _, userId: __, SSIAuth: ___, SSISign: ____, ...restQuery } = to.query;
-    try {
-      const baseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-      const response = await fetch(`${baseUrl}/api/auth/login-by-unified-auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ unifiedAuthId, token: urlToken }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data.data && data.data.token) {
-        authStore.saveToken(data.data.token);
-        sessionStorage.setItem(UNIFIED_AUTH_ID_KEY, unifiedAuthId);
-      }
-    } catch (error) {
-      console.error("统一认证登录失败:", error);
-    }
-    return { path: to.path, query: restQuery, replace: true };
+  const callbackOutcome = await handleAamCallback({
+    currentUrl: new URL(to.fullPath, window.location.origin).toString(),
+    replaceAddress: (sanitizedPath) => {
+      window.history.replaceState(window.history.state, "", sanitizedPath);
+    },
+    beginExchange: authStore.beginAamExchange,
+    loginByUnifiedAuth: backendApi.loginByUnifiedAuth,
+    savePlatformToken: authStore.saveToken
+  });
+  if (callbackOutcome.kind === "success") {
+    return callbackOutcome.retryPath;
+  }
+  if (callbackOutcome.kind === "rejected") {
+    jumpAam(new URL(callbackOutcome.retryPath, window.location.origin).toString(), AAM_BASE_URL);
+    return false;
+  }
+  if (callbackOutcome.kind === "error") {
+    return {
+      path: "/auth/aam-error",
+      query: { reason: callbackOutcome.reason, retry: callbackOutcome.retryPath },
+      replace: true
+    };
   }
 
   if (!isReleaseFeaturePathEnabled(to.path)) {
     return { name: "workbench", replace: true };
+  }
+
+  if (to.name === "aam-error") {
+    return true;
   }
 
   if (to.name === "login") {
@@ -233,7 +236,7 @@ router.beforeEach(async (to, _from) => {
 
   if (to.name === "memories") {
     // 直达记忆路由必须在工作台挂载前重新确认总开关与灰度授权；异常时同样失败关闭。
-    const memoryAllowed = await useMemoryAccessStore().refresh(memoryAccessApi, authStore.token);
+    const memoryAllowed = await useMemoryAccessStore().refresh(backendApi, authStore.token);
     if (!memoryAllowed) {
       return { name: "workbench", replace: true };
     }
@@ -241,7 +244,7 @@ router.beforeEach(async (to, _from) => {
 
   if (to.name === "traces") {
     // 菜单隐藏不是权限边界；直达路由先刷新当前角色，后台接口还会再次执行 SUPER_ADMIN 强校验。
-    const currentUser = authStore.currentUser ?? await authStore.fetchCurrentUser(memoryAccessApi);
+    const currentUser = authStore.currentUser ?? await authStore.fetchCurrentUser(backendApi);
     if (!currentUser?.roles?.includes("SUPER_ADMIN")) {
       return { name: "workbench", replace: true };
     }

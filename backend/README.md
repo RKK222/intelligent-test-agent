@@ -156,6 +156,8 @@ cp .env.local.example .env.local
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
 | `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
 | `TEST_AGENT_TCDS_BASE_URL` | TCDS HTTP/HTTPS 基础地址；默认使用现场确认的企业局域网入口 `http://tcds-prod.sdc.icbc:9080`，其它环境可显式覆盖。 |
+| `TEST_AGENT_AAM_BASE_URL` | AAM HTTP/HTTPS origin，默认 `http://zfw.sdc.cs.icbc`；禁止凭据、路径、query 和 fragment，固定 `/aam/checkLogin` 由适配器追加。所有 Java 节点必须保持一致。 |
+| `TEST_AGENT_AAM_CONNECT_TIMEOUT` / `TEST_AGENT_AAM_REQUEST_TIMEOUT` / `TEST_AGENT_AAM_MAX_RESPONSE_BYTES` | AAM 验真的连接超时、请求超时和响应上限，默认 `3s/5s/65536`；不自动重试。 |
 | `TEST_AGENT_SKILLHUB_ENABLED` | 是否启用 SkillHub 外部 Skill 目录、显式上传/进度、下载和定时对账；应用默认 `false`，本地研发保持关闭，企业 `backend.env` 显式启用后必须同时配置基础地址和访问密钥。 |
 | `TEST_AGENT_SKILLHUB_BASE_URL` | SkillHub HTTP/HTTPS 基础地址；只作为部署期外部端点注入。 |
 | `TEST_AGENT_SKILLHUB_ACCESS_KEY` | SkillHub 访问密钥；敏感值，仅从部署环境注入，禁止写入 Git/YAML 默认值、普通发布包和日志；企业目标机只保存在 `0600` 的敏感 `backend.env`。 |

@@ -11,7 +11,7 @@
 已完成用户认证相关的基础能力：
 
 - **用户管理**：用户注册、组合查询、手工用户名修正、密码校验（BCrypt）；统一认证首次登录创建用户时在同一短事务内授予 `USER` 普通用户角色，TCDS 外部查询不占用数据库事务；角色管理支持显式多用户和按筛选快照全选的一次性事务更新。手工修正只更新唯一用户名，不修改统一认证号或授权，也不撤销现有 Token；TCDS 后续同步可覆盖该用户名。
-- **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
+- **认证服务**：密码登录、AAM 验真后登录、登出、Token 校验和刷新。AAM 验真先于用户查询/首次建号，成功后签发与 AAM Token 无关的 1 天平台随机 Token；验真失败不查建用户、不写 Redis、不写成功日志。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
 - **测试造号与角色调整**：创建测试用户时使用事务同时写入用户和角色，调整角色时在同一事务内替换用户全局角色；当前测试管理入口由超级管理员直接操作，不包含普通用户审批通知流。
 - **权限即时失效**：用户删除、停用或角色调整除失效运行上下文外，还批量撤销该用户全部平台 Token 及对应 session marker。
@@ -40,7 +40,7 @@
 
 - `UserDomainService`：用户注册、密码校验，以及统一认证首次建号与普通用户角色的原子写入。
 - `UserManagementApplicationService`：超级管理员测试用户组合查询、创建、手工用户名修正、单个/批量单角色调整、安全删除和 TCDS 存量信息同步；改名复用现有用户仓储保存能力并保留统一认证号、权限和业务关系；批量角色调整单次最多 5000 人，排除当前操作者并把关系型修改放在一个事务内，Token 在事务前后各按整批撤销一次，避免旧页面按用户重复扫描 Redis；外部查询完成后才开启短事务写入，删除通过领域端口清理账号附属数据并保护业务资产。
-- `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
+- `AuthApplicationService`：登录/登出/Token 刷新，调用 `AamLoginTokenVerifier`、`UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；AAM 验真通过后才进入既有首次建号/最小 `USER` 角色流程，登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
 - `SupportAccessApplicationService`：实时复核登录会话、用户状态和数据库角色，校验/轮换 Redis grant 摘要，并通过 `SupportAccessRepository` 保存授权和一年期审计；不接受共享激活暗号，不依赖 persistence 实现类。
 - `ExternalApiCredentialApplicationService` / `ExternalApiCredentialRegistry`：API Key 生命周期、RSA 密文、不可变认证快照和跨 Java 刷新；业务层只依赖领域 Repository/广播端口，不依赖 persistence 实现。
 
@@ -50,6 +50,7 @@
 
 ## 测试覆盖
 
+- `AuthApplicationServiceTest` 覆盖 AAM 验真调用顺序、拒绝无副作用、停用用户、独立平台 Token 和 Redis 保存失败不记录成功登录。
 - `SupportAccessApplicationServiceTest` 覆盖无共享暗号签发、每次生成唯一排查单号、登录会话绑定、Linux 纳秒时钟与 PostgreSQL 微秒持久化兼容、实时角色撤销、成功读取先审计和审计不可用时正文 fail-closed。
 - `ExternalApiKeyGeneratorTest`、`ExternalApiCredentialApplicationServiceTest`、`ExternalApiCredentialRegistryTest`、`ExternalApiCredentialUpdateBroadcasterTest` 覆盖 Key 格式、无明文持久化、CRUD/轮换、不可变快照、启动失败、本机/远端刷新、空广播载荷和生产构造器的真实 Spring 容器装配。
 

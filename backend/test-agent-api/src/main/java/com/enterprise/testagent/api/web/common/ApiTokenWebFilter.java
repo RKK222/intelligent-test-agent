@@ -6,6 +6,7 @@ import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
@@ -25,6 +26,10 @@ import reactor.core.publisher.Mono;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class ApiTokenWebFilter implements WebFilter {
+
+    private static final Set<String> ANONYMOUS_AUTH_PATHS = Set.of(
+            "/api/auth/login",
+            "/api/auth/login-by-unified-auth");
 
     private static final String INTERNAL_MODEL_PROXY_PATH =
             "/api/internal/platform/opencode-runtime/internal-model-proxy/v1/";
@@ -89,6 +94,7 @@ public class ApiTokenWebFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().pathWithinApplication().value();
         if (!path.startsWith("/api/")
+                || ANONYMOUS_AUTH_PATHS.contains(path)
                 || ExternalApiWebSupport.isExternalPath(path)
                 || path.equals(INTERNAL_MODEL_PROXY_ROOT_PATH)
                 || path.startsWith(INTERNAL_MODEL_PROXY_PATH)

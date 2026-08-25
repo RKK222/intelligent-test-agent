@@ -30,12 +30,16 @@
 
 认证方式（按优先级）：
 
-1. **用户 Token 鉴权**（`JwtAuthWebFilter`）：所有 `/api/` 请求自动检查 Bearer Token。Token 通过 UUID 生成，存储在 Redis，1 天过期。登录接口 `/api/auth/login` 无需 Token。
+1. **用户 Token 鉴权**（`JwtAuthWebFilter`）：所有 `/api/` 请求自动检查 Bearer Token。平台 Token 是无格式承诺的随机 opaque string，存储在 Redis v2 命名空间并在 1 天后过期。只有精确 `/api/auth/login` 与 `/api/auth/login-by-unified-auth` 无需 Token。
 2. **静态 API Token 兜底**（`ApiTokenWebFilter`）：未配置用户 Token 时，检查 `TEST_AGENT_API_TOKEN` 环境变量，向后兼容。
 
 Token 校验流程：
 - `JwtAuthWebFilter`（Order +10）优先检查用户 Token，有效时设置 `AuthPrincipal` 到请求属性。
 - `ApiTokenWebFilter`（Order +20）作为静态 API Token 兜底，未配置时放行。
+- AAM 兑换入口必须先通过 `AamLoginTokenVerifier` 调用固定 `/aam/checkLogin` 验真，再查询/创建用户并签发独立平台 Token；AAM Token 禁止写入 Redis、日志或响应。401/403/业务拒绝收敛为 `UNAUTHENTICATED`，网络、协议、响应超限或非法响应收敛为 `EXTERNAL_API_UNAVAILABLE`。
+- AAM 基础地址只接受无 user-info、路径、query、fragment 的 HTTP/HTTPS origin；连接/请求默认上限为 3 秒/5 秒，响应上限 64 KiB，不自动重试。日志与异常不得包含 AAM Token、用户号、URL 或正文。
+- 浏览器 AAM 回调只接受唯一 `userId + token`，必须先通过 `history.replaceState` 清除 `userId/token/SSIAuth/SSISign`，再清旧平台认证并兑换。只允许在 `sessionStorage` 保存返回的平台 Token；AAM 拒绝重新登录，其它异常进入无自动跳转的安全错误页。
+- 企业 Nginx 的 SPA history fallback 必须关闭访问日志并返回 `Referrer-Policy: no-referrer`，避免短暂回调 query 进入日志或 Referer。
 - opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；用户已有 ACTIVE binding 且属于其他服务器时，API 层只允许把用户进程状态、初始化、个人重启、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java，并必须透传原始用户 Authorization 和 traceId，由目标 Java 继续鉴权。只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
 - RunEvent SSE 跨 Java 路由必须在鉴权过滤器之后执行，按 Run 原始归属定位生产 Java，并透传原始 `Authorization`、`X-Trace-Id`、`Last-Event-ID` 和 query；目标 Java 收到 `X-Test-Agent-Backend-Routed=true` 后跳过二次路由，但仍执行同一 Controller 和业务校验。
 - Run cancel 是跨 Java 写操作，不得仅凭 `X-Test-Agent-Backend-Routed` 跳过生产节点解析，因为该 HTTP 头可由浏览器伪造；每一跳都必须通过 `RunEventSseRouteService.forwardTargetStrict` 重新确认 Run 原始生产服务器和当前被选中的 Java，到达本机 owner 后才允许进入 Controller。

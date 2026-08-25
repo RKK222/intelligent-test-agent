@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 认证控制器，提供登录、登出、当前用户查询和 Token 刷新接口。
@@ -66,28 +68,32 @@ public class AuthController {
     }
 
     /**
-     * 通过统一认证号登录（AAM 跳转后使用）。成功后返回 Token，Token 在 Redis 中保存 1 天。
+     * 通过统一认证号登录（AAM 跳转后使用）。后端先向 AAM 验真，再返回独立的平台 Token。
      */
     @PostMapping("/api/auth/login-by-unified-auth")
-    public ResponseEntity<ApiResponse<AuthDtos.LoginResponse>> loginByUnifiedAuth(
+    public Mono<ResponseEntity<ApiResponse<AuthDtos.LoginResponse>>> loginByUnifiedAuth(
             @Valid @RequestBody AuthDtos.UnifiedAuthLoginRequest request,
             ServerWebExchange exchange) {
         String traceId = traceIdFrom(exchange);
+        String ipAddress = ipFrom(exchange);
+        String userAgent = userAgentFrom(exchange);
 
-        AuthPrincipal principal = authApplicationService.loginByUnifiedAuthId(
-                request.unifiedAuthId(),
-                request.token(),
-                ipFrom(exchange),
-                userAgentFrom(exchange));
-
-        AuthDtos.LoginResponse response = new AuthDtos.LoginResponse(
-                principal.token(),
-                principal.userId().value(),
-                principal.username(),
-                principal.unifiedAuthId(),
-                principal.roles());
-
-        return ResponseEntity.ok(ApiResponse.ok(response, traceId));
+        // AAM 和用户仓储均为阻塞边界，匿名兑换不能占用 WebFlux 事件循环。
+        return Mono.fromCallable(() -> authApplicationService.loginByUnifiedAuthId(
+                        request.unifiedAuthId(),
+                        request.token(),
+                        ipAddress,
+                        userAgent))
+                .subscribeOn(Schedulers.boundedElastic())
+                .map(principal -> {
+                    AuthDtos.LoginResponse response = new AuthDtos.LoginResponse(
+                            principal.token(),
+                            principal.userId().value(),
+                            principal.username(),
+                            principal.unifiedAuthId(),
+                            principal.roles());
+                    return ResponseEntity.ok(ApiResponse.ok(response, traceId));
+                });
     }
 
     /**
