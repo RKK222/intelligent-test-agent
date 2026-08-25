@@ -14061,3 +14061,23 @@
 
 - 新版安装包可安全覆盖安装并立即运行新版，不会因普通重装生成第二实例；已产生新 ID 的历史安装可在重新选择同一目录后安全恢复原工作区和会话。
 - 本次不新增部署节点、不修改 HTTP API、RunEvent/SSE、generated SDK、OpenCode 源码或 `.env*`；新增一条前向 Flyway 结构 migration，并同步架构、部署、模块与数据库说明。
+
+## 2026-08-25 - 修正本地客户端 Key 截图并补齐本地目录使用说明
+
+### Why
+
+- 原手册把 SSH Key 页面误用为客户端 Client Key 截图，不能帮助用户确认实际入口；客户端注册本地目录后的托盘操作、网页兜底和工作台打开路径也不完整。
+
+### What
+
+- 用当前“本地 OpenCode 客户端”界面重新生成脱敏 Client Key 截图，并新增网页兜底目录选择截图；删除周报中错误的客户端截图引用。
+- 在每周更新、设置、工作区和 FAQ 中写明默认托盘“选择并注册工作区…”、目录选择、自动打开失败时的“打开网页”、顶部“工作空间 → 本地工作区”以及无托盘时的网页兜底路径。
+
+### How
+
+- 复用 `SettingsPersonalPanel` 的真实 Client Key、客户端状态和目录选择组件生成截图；Client Key 只以掩码展示，目录为示例路径。
+- 执行 `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts`（16 项通过）和 `corepack pnpm --filter @test-agent/user-manual build`；在已运行的本地帮助中心逐页确认周报、设置和工作区文字与两张截图均渲染。
+
+### Result
+
+- 用户可从正确的 Client Key 页面创建并安全保存密钥，再通过托盘或网页兜底注册本地目录，并在工作台重新打开；不涉及 API、事件、数据库、性能、安全契约、部署或环境配置，未加入游戏内容。

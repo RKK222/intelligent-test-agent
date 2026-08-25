@@ -133,6 +133,8 @@ describe("help center", () => {
     expect(prompt).toContain("从顶部或左下角直接新增版本");
     expect(prompt).toContain("下载本地客户端用户包");
     expect(prompt).toContain("TestAgent-Local-Client");
+    expect(prompt).toContain("选择并注册工作区…");
+    expect(prompt).toContain("工作空间 → 本地工作区");
     expect(prompt.length).toBeLessThan(8_100);
   });
 
@@ -152,6 +154,7 @@ describe("help center", () => {
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
+    expect(faq).toContain("客户端注册了本地目录后，怎样在工作台打开？");
     expect(faq).toContain("为什么“新增版本”不可用或创建失败？");
   });
 
