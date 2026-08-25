@@ -132,6 +132,7 @@ APPLICATION_WORKSPACE_GIT_ACCESS_MIGRATION_RESOURCE="db/migration/V2026082319102
 APPLICATION_WORKSPACE_GIT_ACCESS_MIGRATION_SHA256="12cfe3bbaa4b0d562f2dca2a69290180c81d42aca79b1ff4aaf6ad5cf32419e2"
 LOCAL_CLIENT_INSTANCE_REPLACEMENTS_MIGRATION_RESOURCE="db/migration/V20260825091459__local_client_instance_replacements_create.sql"
 LOCAL_CLIENT_INSTANCE_REPLACEMENTS_MIGRATION_SHA256="6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3"
+LOCAL_CLIENT_INSTANCE_REPLACEMENTS_FLYWAY_CHECKSUM="749555545"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_RESOURCE="xxl-job/db/migration/V10__register_internal_model_probe_task.sql"
 XXL_INTERNAL_MODEL_PROBE_MIGRATION_SHA256="665b22835a9871828fcaceca2941d1ca83de248698fde76f3380b12bec49fb47"
 XXL_INTERNAL_MODEL_RETENTION_MIGRATION_RESOURCE="xxl-job/db/migration/V11__register_internal_model_observability_retention_task.sql"
@@ -495,6 +496,17 @@ require_file "${SCRIPT_DIR}/deploy-backend-node.sh"
 require_file "${SCRIPT_DIR}/deploy-frontend-node.sh"
 require_file "${SCRIPT_DIR}/init-backend-node-config.sh"
 require_file "${SCRIPT_DIR}/register-backend-on-frontend.sh"
+require_file "${SCRIPT_DIR}/MULTI-BACKEND.md"
+# 现场入口必须与本轮 JAR 门禁同步，避免部署脚本正确但 START-HERE 仍沿用旧 Flyway 基线。
+for release_guide_marker in \
+  "$(basename "${LOCAL_CLIENT_INSTANCE_REPLACEMENTS_MIGRATION_RESOURCE}")" \
+  "${LOCAL_CLIENT_INSTANCE_REPLACEMENTS_MIGRATION_SHA256}" \
+  "Flyway checksum 固定为 \`${LOCAL_CLIENT_INSTANCE_REPLACEMENTS_FLYWAY_CHECKSUM}\`"; do
+  if ! grep -Fq "${release_guide_marker}" "${SCRIPT_DIR}/MULTI-BACKEND.md"; then
+    echo "MULTI-BACKEND.md is missing the current Flyway release marker: ${release_guide_marker}" >&2
+    exit 1
+  fi
+done
 
 NODE_4="${NODES_DIR}/test-agent-two-backend-122.233.30.4-SENSITIVE.tar.gz"
 NODE_114="${NODES_DIR}/test-agent-two-backend-122.233.30.114-SENSITIVE.tar.gz"

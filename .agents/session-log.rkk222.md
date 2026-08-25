@@ -39,6 +39,7 @@
 
 - 客户端运行时归档先将输出文件规范为绝对路径，再进入 JDK/OpenCode staging 目录执行确定性打包。
 - 企业内层 ZIP 只暂存当前客户端 release、当前用户包、stable 清单和安装器；若本机构建 catalog 含历史版本，则使用固定组织私钥生成并签署只含当前版本的 catalog，再用对应公钥验签，私钥不进入制品。
+- 修正双后台 `START-HERE.md` 的现网 Flyway 基线：本轮只允许 PostgreSQL 新增 `20260825091459`，XXL/ClickHouse 不新增；外层封装增加文件名、SHA-256 和 Flyway checksum 三项文档同步门禁。
 - 增加相对输出路径回归、历史客户端 release 泄漏回归和裁剪后 catalog 签名回归；部署 README 明确本机构建历史与企业交付快照的边界。
 
 ### How
