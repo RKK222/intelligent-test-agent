@@ -301,8 +301,9 @@ test "$(find "${OUTPUT_DIR}" -maxdepth 1 -type f -name 'test-agent-two-backend-c
 # 外层封装不能只相信内层 ZIP SHA；内层 persistence JAR 的企业 migration 字节错误时必须拒绝。
 BAD_PERSISTENCE_ROOT="${TMP_ROOT}/bad-persistence-root"
 mkdir -p "${BAD_PERSISTENCE_ROOT}/db/migration"
-printf 'wrong enterprise migration fixture\n' \
-  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+cp -a "${PERSISTENCE_JAR_ROOT}/." "${BAD_PERSISTENCE_ROOT}/"
+printf 'wrong local client replacement migration fixture\n' \
+  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260825091459__local_client_instance_replacements_create.sql"
 rm -f "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar"
 (cd "${BAD_PERSISTENCE_ROOT}" && zip -qr \
   "${RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)

@@ -14129,3 +14129,27 @@
 
 - 代码和文档已对齐新版 `userId` 契约，同时保留接口提供方此前明确的企业平台渠道 `channel=3`；需将新应用包部署到企业测试环境后再做真实 SkillHub 下载验证。
 - 本次不新增部署节点，不修改浏览器 HTTP 路径/请求字段、RunEvent/SSE、数据库、SQL、Flyway、性能模型、环境配置、generated SDK 或 OpenCode 只读源码；安全边界收紧为服务端可信身份派生。
+
+## 2026-08-25 - 基于最新 release 重建企业增量包并锁定客户端替换迁移
+
+### Why
+
+- 用户确认上一轮企业包尚未部署，要求基于当前本地 `release` 最新代码重新封装；企业现网已部署 worker、manager、工具盒子和独立 CK/mem0/BGE/pgvector 节点，未变化的大组件不能重复进入增量包。
+- 当前代码新增 `V20260825091459__local_client_instance_replacements_create.sql`，正式打包、外层封装和目标机安装脚本原先尚未锁定该 migration 字节，存在 persistence JAR 携带错误版本却未被拒绝的发布风险。
+
+### What
+
+- 在 `package-release.sh`、`package-two-backend-complete.sh` 和 `deploy-internal-release.sh` 中锁定客户端实例替换 migration 的资源名与 SHA-256 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；对应负向测试改为复制完整 persistence JAR 后只篡改该 migration，确保缺失和字节不一致都会被拒绝。
+- 基于当前 `release` 工作树重建后端、前端和组织密钥签名的麒麟 ARM64 普通用户客户端；客户端版本为 `20260825103533`，公共配置继续锁定 `81605f245d1512e1ab0dd73812391f6da7d008b5`（8 Agent / 16 Skill / 8 Tool），下载与服务地址使用 `http://mimo.sdc.cs.icbc:9996`。
+- 组件清单确认 worker runtime `reuse`、toolbox `reuse`、LobeHub `disabled`、memory runtime `disabled`、local client `included`；新客户端 release 目录只含 `20260825103533`，旧客户端版本未重复封装。两台后台继续携带 TCDS `http://tcds-prod.sdc.icbc:9080`、既有 CK/mem0/SkillHub 配置，密钥只做非空门禁且未输出。
+
+### How
+
+- Shell 语法、企业外层包和多后台节点两个负向门禁测试通过；内外 ZIP CRC、内嵌内层 ZIP SHA、三份节点包 SHA、persistence JAR migration 字节、组件指纹和客户端签名清单全部通过。
+- 客户端离线安装/升级/自动回滚两套 shell 验收通过；前端帮助中心 16/16；后端客户端托盘、工作区接管、SkillHub 上传下载和 MyBatis 实例替换 7 类定向测试全部通过。首次后端测试因 shell 使用 Java 17、现有测试类为 Java 21 字节码而未执行，切换本机 JDK 25 后同一命令完整通过。
+- 最终内层 ZIP SHA-256 为 `197b6a7eddb7f952fab235eb9fdfcf751443033f442291ee7b1fe62fe44b2463`；外层固定名包 SHA-256 为 `2abe82a7bb1a03d4c1d43fc3c8cb2eb083e0fb1af80cbf9d4bb23af88e21a9b6`。后端应用 JAR、persistence JAR、前端 tar 和麒麟用户包分别为 `00811815965034ba2e32315db997671d8e0b9589c54fc4d8930462cb73ea2d10`、`b7c6be7b7cfa925b2620b3f891f287bb450093314c923ad75cdd7cfdf73e191b`、`80fd5f5882391608529ae1472db7171986a7afc420be638c1ac2010706928c67`、`59ec4449cedb317f92a1996b24cb28d7d7fb4ff362b66baccbbb6e3b43711531`。
+
+### Result
+
+- 增量包只重建并携带本轮需要更新的平台代码、前后端制品和已变化的客户端完整离线单元；不会重启或替换现有 worker/manager、工具盒子、模型清单、CK、mem0、BGE、pgvector。
+- 本次门禁修改不新增部署节点，不改变 API、RunEvent/SSE、数据库结构或安全契约；数据库结构变化来自已提交的客户端实例替换 migration。真实企业部署、Flyway 现场历史核对和麒麟真机从清空用户目录开始的安装验收仍待执行；未推送远端。

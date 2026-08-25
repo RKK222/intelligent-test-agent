@@ -232,8 +232,9 @@ BAD_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-bad-flyway-release.zip"
 BAD_PERSISTENCE_ROOT="${TMP_ROOT}/bad-persistence-jar-root"
 cp -R "${RELEASE_ROOT}" "${BAD_RELEASE_ROOT}"
 mkdir -p "${BAD_PERSISTENCE_ROOT}/db/migration"
-printf 'wrong enterprise migration fixture\n' \
-  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260728160800__create_toolbox_click_tracking.sql"
+cp -a "${PERSISTENCE_JAR_ROOT}/." "${BAD_PERSISTENCE_ROOT}/"
+printf 'wrong local client replacement migration fixture\n' \
+  >"${BAD_PERSISTENCE_ROOT}/db/migration/V20260825091459__local_client_instance_replacements_create.sql"
 rm -f "${BAD_RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar"
 (cd "${BAD_PERSISTENCE_ROOT}" && zip -qr \
   "${BAD_RELEASE_ROOT}/dist/backend/lib/test-agent-persistence-0.1.0-SNAPSHOT.jar" .)
