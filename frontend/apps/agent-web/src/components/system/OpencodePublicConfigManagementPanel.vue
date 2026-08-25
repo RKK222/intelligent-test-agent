@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { AlertTriangle, CheckCircle2, GitBranch, Loader2, RefreshCw } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle2, ChevronRight, GitBranch, Loader2, RefreshCw } from "lucide-vue-next";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
+  ApplicationGitRefreshScope,
   CurrentUser,
   PublicAgentConfigRolloutServerStatus,
   PublicAgentConfigRolloutStatus,
   PublicAgentConfigRolloutTargetStatus,
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
+import AgentConfigRolloutTargetDisclosure from "./AgentConfigRolloutTargetDisclosure.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -19,11 +21,13 @@ const api = inject<BackendApiClient>("api")!;
 const rows = ref<PublicAgentRepositoryStatus[]>([]);
 const rollout = ref<PublicAgentConfigRolloutStatus | null>(null);
 const applicationRollouts = ref<PublicAgentConfigRolloutStatus[]>([]);
+const applicationScopes = ref<ApplicationGitRefreshScope[]>([]);
 const loading = ref(false);
 const initializing = ref(false);
 const pulling = ref(false);
 const superseding = ref(false);
 const errorMessage = ref("");
+const applicationScopeErrorMessage = ref("");
 const successMessage = ref("");
 const dialogOpen = ref(false);
 const pullDialogOpen = ref(false);
@@ -61,6 +65,21 @@ const canSubmitSupersede = computed(() =>
   && !supersedeBranchesLoading.value
 );
 const dirtyServers = computed(() => rows.value.filter((row) => row.localChangesPresent || row.status === "CONFLICT"));
+const applicationRolloutDisplayByVersion = computed(() => {
+  const result = new Map<string, { appName: string; workspaceName: string; version: string }>();
+  for (const application of applicationScopes.value) {
+    for (const group of application.groups) {
+      for (const workspace of group.workspaces) {
+        result.set(workspace.versionId, {
+          appName: application.appName,
+          workspaceName: workspace.workspaceName,
+          version: group.version
+        });
+      }
+    }
+  }
+  return result;
+});
 
 onMounted(() => {
   if (hasSuperAdmin.value && props.pageActive) {
@@ -73,20 +92,33 @@ onBeforeUnmount(stopRolloutPolling);
 async function refresh() {
   loading.value = true;
   errorMessage.value = "";
+  applicationScopeErrorMessage.value = "";
   try {
-    const [repositories, latestRollout, latestApplicationRollouts] = await Promise.all([
+    const [repositories, latestRollout, latestApplicationRollouts, latestApplicationScopes] = await Promise.all([
       api.listPublicAgentRepositories(),
       api.getPublicAgentConfigRollout(),
-      api.getApplicationAgentConfigRollouts()
+      api.getApplicationAgentConfigRollouts(),
+      loadApplicationScopes()
     ]);
     rows.value = repositories;
     rollout.value = latestRollout;
     applicationRollouts.value = latestApplicationRollouts;
+    applicationScopes.value = latestApplicationScopes;
     scheduleRolloutPolling();
   } catch (error) {
     errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
   } finally {
     loading.value = false;
+  }
+}
+
+/** 名称映射失败不能阻断公共 Git 运维；页面保留分支/commit 摘要并给出可见提示。 */
+async function loadApplicationScopes() {
+  try {
+    return await api.listApplicationGitRefreshScopes();
+  } catch (error) {
+    applicationScopeErrorMessage.value = formatError(error, "加载应用、工作空间和版本名称失败");
+    return [];
   }
 }
 
@@ -417,24 +449,6 @@ function targetOwner(target: PublicAgentConfigRolloutTargetStatus) {
   return target.username?.trim() || target.userId?.trim() || "无法识别用户";
 }
 
-function pendingTargetDetails(server: PublicAgentConfigRolloutServerStatus) {
-  return server.pendingTargets ?? [];
-}
-
-function omittedPendingTargetCount(server: PublicAgentConfigRolloutServerStatus) {
-  return Math.max(0, server.targetPending - pendingTargetDetails(server).length);
-}
-
-function targetStatusText(target: PublicAgentConfigRolloutTargetStatus) {
-  if (target.forceStop) {
-    return "等待强制停止";
-  }
-  return ({
-    PROCESSING: "正在检查",
-    RETRY_WAIT: "等待重试"
-  } as Record<string, string>)[target.status] ?? target.status;
-}
-
 function worktreeProgress(server: PublicAgentConfigRolloutServerStatus) {
   const total = server.worktreeTotal ?? 0;
   const synced = server.worktreeSynced ?? 0;
@@ -444,6 +458,22 @@ function worktreeProgress(server: PublicAgentConfigRolloutServerStatus) {
   }
   const summary = `补偿已收敛 ${synced}/${total}`;
   return pending > 0 ? `${summary}，待用户处理 ${pending}` : summary;
+}
+
+/** 历史标题保留待处理总数，让详情默认收起时仍能直接识别需要人工关注的发布。 */
+function rolloutPendingTargetCount(item: PublicAgentConfigRolloutStatus) {
+  return item.servers.reduce((total, server) => total + server.targetPending, 0);
+}
+
+function rolloutStatusClass(status: string) {
+  if (status === "COMPLETED") return "is-completed";
+  if (status === "PREPARING" || status === "DRAINING") return "is-active";
+  return "is-problem";
+}
+
+function applicationRolloutDisplay(item: PublicAgentConfigRolloutStatus) {
+  const scopeKey = item.scopeKey?.trim();
+  return scopeKey ? applicationRolloutDisplayByVersion.value.get(scopeKey) ?? null : null;
 }
 
 function statusText(row: PublicAgentRepositoryStatus) {
@@ -579,43 +609,12 @@ function newOperationId() {
               </tr>
               <tr v-if="server.targetPending > 0" class="ta-opencode-config-target-detail-row">
                 <td colspan="5">
-                  <div class="ta-opencode-config-target-detail-header">
-                    <strong>未排空用户</strong>
-                    <span v-if="omittedPendingTargetCount(server) > 0" class="ta-opencode-config-muted">
-                      当前展示 {{ pendingTargetDetails(server).length }} 个，另有 {{ omittedPendingTargetCount(server) }} 个目标
-                    </span>
-                  </div>
-                  <div v-if="pendingTargetDetails(server).length" class="ta-opencode-config-target-list">
-                    <article
-                      v-for="target in pendingTargetDetails(server)"
-                      :key="target.targetId"
-                      class="ta-opencode-config-target"
-                    >
-                      <div class="ta-opencode-config-target-owner">
-                        <strong>{{ targetOwner(target) }}</strong>
-                        <span class="ta-opencode-config-muted">{{ formatNullable(target.userId) }}</span>
-                      </div>
-                      <div class="ta-opencode-config-target-state">
-                        <span>{{ targetStatusText(target) }}</span>
-                        <span>重试 {{ target.retryCount }}</span>
-                        <span v-if="target.lastError" class="ta-opencode-config-target-error">{{ target.lastError }}</span>
-                      </div>
-                      <div class="ta-opencode-config-mono ta-opencode-config-target-process">
-                        {{ target.containerId }}:{{ target.port }} · PID {{ target.processPid ?? "-" }}
-                      </div>
-                      <button
-                        type="button"
-                        class="ta-opencode-config-btn is-danger"
-                        :aria-label="`关闭 ${targetOwner(target)} 的 OpenCode`"
-                        :disabled="closingTargetId !== null"
-                        @click="closePendingTarget(target)"
-                      >
-                        <Loader2 v-if="closingTargetId === target.targetId" class="ta-opencode-config-icon is-spin" />
-                        关闭该用户 OpenCode
-                      </button>
-                    </article>
-                  </div>
-                  <div v-else class="ta-opencode-config-muted">目标明细尚未返回，请等待下一轮刷新或确认后端版本。</div>
+                  <AgentConfigRolloutTargetDisclosure
+                    :server="server"
+                    action-mode="stop"
+                    :busy-target-id="closingTargetId"
+                    @action="closePendingTarget"
+                  />
                 </td>
               </tr>
             </template>
@@ -626,93 +625,79 @@ function newOperationId() {
         </table>
       </section>
 
-      <section class="ta-opencode-config-rollout" aria-label="应用 Agent 与 Tool 发布状态">
+      <section class="ta-opencode-config-rollout" aria-label="应用 Agent 与 Tool 运行态更新">
         <header>
           <div>
-            <strong>应用更新配置</strong>
-            <span>最近 {{ applicationRollouts.length }} 次发布；Tool 变更会在会话空闲后受管重启，有待处理用户时可在用户行右侧立即操作</span>
+            <strong>应用 Agent / Tool 运行态更新</strong>
+            <span>最近 {{ applicationRollouts.length }} 次发布；这里只处理发布后的用户进程重载，Git 分支刷新请使用“应用 Git 刷新”</span>
           </div>
         </header>
+        <div v-if="applicationScopeErrorMessage" class="ta-opencode-config-diagnostic">
+          {{ applicationScopeErrorMessage }}；当前仅展示分支和提交信息。
+        </div>
         <div v-if="!applicationRollouts.length" class="ta-opencode-config-application-rollout-empty">
           当前没有应用 Agent / Tool 发布记录；产生尚未重启或 dispose 的用户后，会在这里逐人显示“立即受管重启”。
         </div>
-        <article
+        <details
           v-for="applicationRollout in applicationRollouts"
           :key="applicationRollout.rolloutId"
           class="ta-opencode-config-application-rollout"
         >
-          <div class="ta-opencode-config-application-rollout-title">
-            <div>
-              <strong>{{ formatNullable(applicationRollout.scopeKey) }}</strong>
-              <span>{{ rolloutStatusText(applicationRollout.status) }}</span>
-              <span>{{ applicationRollout.branch }} · {{ shortHash(applicationRollout.commitHash) }}</span>
+          <summary class="ta-opencode-config-application-rollout-title">
+            <ChevronRight class="ta-opencode-config-disclosure-chevron" :stroke-width="1.8" aria-hidden="true" />
+            <div class="ta-opencode-config-application-rollout-summary-main">
+              <strong>{{ applicationRolloutDisplay(applicationRollout)?.appName ?? "应用信息待刷新" }}</strong>
+              <span class="ta-opencode-config-identity-separator">/</span>
+              <span>{{ applicationRolloutDisplay(applicationRollout)?.workspaceName ?? "工作空间信息待刷新" }}</span>
+              <span class="ta-opencode-config-version">
+                版本 {{ applicationRolloutDisplay(applicationRollout)?.version ?? "待刷新" }}
+              </span>
+              <span :class="['ta-opencode-config-rollout-status', rolloutStatusClass(applicationRollout.status)]">
+                {{ rolloutStatusText(applicationRollout.status) }}
+              </span>
+              <span class="ta-opencode-config-muted">分支 {{ applicationRollout.branch }}</span>
+              <span class="ta-opencode-config-muted">提交 {{ shortHash(applicationRollout.commitHash) }}</span>
             </div>
-            <span class="ta-opencode-config-muted">{{ applicationRollout.rolloutId }}</span>
-          </div>
-          <table class="ta-opencode-config-rollout-table">
-            <thead>
-              <tr>
-                <th>服务器</th>
-                <th>同步 / 重载</th>
-                <th>个人 worktree 补偿</th>
-                <th>重试</th>
-                <th>last_error</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="server in applicationRollout.servers" :key="`${applicationRollout.rolloutId}:${server.linuxServerId}`">
+            <span v-if="rolloutPendingTargetCount(applicationRollout) > 0" class="ta-opencode-config-pending-count">
+              待处理用户 {{ rolloutPendingTargetCount(applicationRollout) }}
+            </span>
+            <span class="ta-opencode-config-muted">{{ applicationRollout.servers.length }} 台服务器</span>
+          </summary>
+          <div class="ta-opencode-config-application-rollout-body">
+            <table class="ta-opencode-config-rollout-table">
+              <thead>
                 <tr>
-                  <td>{{ server.linuxServerId }}</td>
-                  <td>{{ serverProgress(server) }}</td>
-                  <td>{{ worktreeProgress(server) }}</td>
-                  <td>{{ server.retryCount }}</td>
-                  <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
+                  <th>服务器</th>
+                  <th>同步 / 重载</th>
+                  <th>个人 worktree 补偿</th>
+                  <th>重试</th>
+                  <th>last_error</th>
                 </tr>
-                <tr v-if="server.targetPending > 0" class="ta-opencode-config-target-detail-row">
-                  <td colspan="5">
-                    <div class="ta-opencode-config-target-detail-header">
-                      <strong>尚未重启 / dispose 的用户</strong>
-                      <span v-if="omittedPendingTargetCount(server) > 0" class="ta-opencode-config-muted">
-                        当前展示 {{ pendingTargetDetails(server).length }} 个，另有 {{ omittedPendingTargetCount(server) }} 个目标
-                      </span>
-                    </div>
-                    <div v-if="pendingTargetDetails(server).length" class="ta-opencode-config-target-list">
-                      <article
-                        v-for="target in pendingTargetDetails(server)"
-                        :key="target.targetId"
-                        class="ta-opencode-config-target"
-                      >
-                        <div class="ta-opencode-config-target-owner">
-                          <strong>{{ targetOwner(target) }}</strong>
-                          <span class="ta-opencode-config-muted">{{ formatNullable(target.userId) }}</span>
-                        </div>
-                        <div class="ta-opencode-config-target-state">
-                          <span>{{ targetStatusText(target) }}</span>
-                          <span>重试 {{ target.retryCount }}</span>
-                          <span v-if="target.lastError" class="ta-opencode-config-target-error">{{ target.lastError }}</span>
-                        </div>
-                        <div class="ta-opencode-config-mono ta-opencode-config-target-process">
-                          {{ target.containerId }}:{{ target.port }} · PID {{ target.processPid ?? "-" }}
-                        </div>
-                        <button
-                          type="button"
-                          class="ta-opencode-config-btn is-danger"
-                          :aria-label="`重启 ${targetOwner(target)} 的 OpenCode`"
-                          :disabled="restartingTargetId !== null"
-                          @click="restartPendingApplicationTarget(target)"
-                        >
-                          <Loader2 v-if="restartingTargetId === target.targetId" class="ta-opencode-config-icon is-spin" />
-                          立即受管重启
-                        </button>
-                      </article>
-                    </div>
-                    <div v-else class="ta-opencode-config-muted">目标明细尚未返回，请等待下一轮定时巡检。</div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </article>
+              </thead>
+              <tbody>
+                <template v-for="server in applicationRollout.servers" :key="`${applicationRollout.rolloutId}:${server.linuxServerId}`">
+                  <tr>
+                    <td>{{ server.linuxServerId }}</td>
+                    <td>{{ serverProgress(server) }}</td>
+                    <td>{{ worktreeProgress(server) }}</td>
+                    <td>{{ server.retryCount }}</td>
+                    <td class="ta-opencode-config-message">{{ formatNullable(server.lastError) }}</td>
+                  </tr>
+                  <tr v-if="server.targetPending > 0" class="ta-opencode-config-target-detail-row">
+                    <td colspan="5">
+                      <AgentConfigRolloutTargetDisclosure
+                        :server="server"
+                        action-mode="restart"
+                        :busy-target-id="restartingTargetId"
+                        @action="restartPendingApplicationTarget"
+                      />
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </details>
       </section>
 
       <div class="ta-opencode-config-table-wrap">
@@ -935,22 +920,93 @@ function newOperationId() {
   line-height: 1.45;
 }
 .ta-opencode-config-application-rollout + .ta-opencode-config-application-rollout {
-  margin-top: 12px;
-  border-top: 1px solid #e5e7eb;
-  padding-top: 12px;
+  margin-top: 6px;
 }
 .ta-opencode-config-application-rollout-title {
   display: flex;
+  min-height: 38px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 9px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  cursor: pointer;
   font-size: 12px;
+  list-style: none;
+  padding: 0 10px;
+  user-select: none;
 }
-.ta-opencode-config-application-rollout-title > div {
+.ta-opencode-config-application-rollout-title::-webkit-details-marker {
+  display: none;
+}
+.ta-opencode-config-application-rollout-title:hover,
+.ta-opencode-config-application-rollout-title:focus-visible {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  outline: none;
+}
+.ta-opencode-config-application-rollout-summary-main {
   display: flex;
+  min-width: 0;
   align-items: center;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
   gap: 8px;
+}
+.ta-opencode-config-application-rollout-summary-main > strong {
+  color: #1e3a5f;
+  font-size: 13px;
+}
+.ta-opencode-config-identity-separator {
+  color: #94a3b8;
+}
+.ta-opencode-config-version {
+  border-radius: 4px;
+  background: #e8f0ff;
+  color: #1d4ed8;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.ta-opencode-config-disclosure-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #64748b;
+  transition: transform 150ms ease;
+}
+.ta-opencode-config-application-rollout[open] .ta-opencode-config-disclosure-chevron {
+  transform: rotate(90deg);
+}
+.ta-opencode-config-rollout-status,
+.ta-opencode-config-pending-count {
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.ta-opencode-config-rollout-status.is-completed {
+  background: #ecfdf5;
+  color: #047857;
+}
+.ta-opencode-config-rollout-status.is-active,
+.ta-opencode-config-pending-count {
+  background: #fff7ed;
+  color: #b45309;
+}
+.ta-opencode-config-rollout-status.is-problem {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.ta-opencode-config-application-rollout-body {
+  border: 1px solid #e5e7eb;
+  border-top: 0;
+  border-radius: 0 0 6px 6px;
+  padding: 0 8px 8px;
+}
+.ta-opencode-config-application-rollout[open] .ta-opencode-config-application-rollout-title {
+  border-radius: 6px 6px 0 0;
+  background: #eff6ff;
 }
 .ta-opencode-config-application-rollout-empty {
   border: 1px dashed #cbd5e1;
@@ -1066,59 +1122,6 @@ function newOperationId() {
 .ta-opencode-config-target-detail-row > td {
   background: #f8fafc;
   padding: 10px;
-}
-.ta-opencode-config-target-detail-header,
-.ta-opencode-config-target,
-.ta-opencode-config-target-owner,
-.ta-opencode-config-target-state {
-  display: flex;
-  align-items: center;
-}
-.ta-opencode-config-target-detail-header {
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-.ta-opencode-config-target-list {
-  display: grid;
-  gap: 6px;
-}
-.ta-opencode-config-target {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.9fr) minmax(220px, 1.5fr) minmax(180px, 1fr) auto;
-  gap: 10px;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #fff;
-  padding: 8px;
-}
-.ta-opencode-config-target-owner,
-.ta-opencode-config-target-state {
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 5px 8px;
-}
-.ta-opencode-config-target-owner {
-  flex-direction: column;
-  align-items: flex-start;
-}
-.ta-opencode-config-target-state > span:not(.ta-opencode-config-target-error) {
-  white-space: nowrap;
-}
-.ta-opencode-config-target-error {
-  width: 100%;
-  color: #b45309;
-  overflow-wrap: anywhere;
-}
-.ta-opencode-config-target-process {
-  align-self: center;
-  color: #4b5563;
-  overflow-wrap: anywhere;
-}
-@media (max-width: 1080px) {
-  .ta-opencode-config-target {
-    grid-template-columns: minmax(140px, 1fr) minmax(220px, 1.5fr);
-  }
 }
 .ta-opencode-config-table-wrap {
   flex: 1;
@@ -1274,6 +1277,12 @@ function newOperationId() {
 @keyframes ta-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ta-opencode-config-disclosure-chevron {
+    transition: none;
   }
 }
 </style>

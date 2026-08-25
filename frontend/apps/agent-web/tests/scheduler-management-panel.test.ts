@@ -668,7 +668,7 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("shows the blocking rollout user and reuses the existing managed-process stop API", async () => {
+  it("keeps blocking rollout users collapsed until requested and reuses the existing managed-process stop API", async () => {
     const latestRollout = {
       rolloutId: "acr_1",
       status: "DRAINING",
@@ -716,6 +716,11 @@ describe("scheduler management panel", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
 
+    const targetDisclosure = (await view.findByText("未排空用户")).closest("details") as HTMLDetailsElement;
+    expect(targetDisclosure.open).toBe(false);
+    await fireEvent.click(targetDisclosure.querySelector("summary")!);
+
+    expect(targetDisclosure.open).toBe(true);
     expect(await view.findByText("张三")).toBeTruthy();
     expect(view.getAllByText("SESSION_RUNNING").length).toBeGreaterThan(0);
     await fireEvent.click(view.getByRole("button", { name: "关闭 张三 的 OpenCode" }));
@@ -727,7 +732,21 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("shows pending application Tool users and allows a managed restart", async () => {
+  it("opens application history by branch and keeps its user details collapsed by default", async () => {
+    const matchingApplicationScope: ApplicationGitRefreshScope = {
+      ...applicationScope,
+      appName: "F-BASE",
+      groups: [{
+        ...applicationScope.groups[0]!,
+        version: "20260820",
+        branch: "feature_testagent_20260820",
+        workspaces: [{
+          ...applicationScope.groups[0]!.workspaces[0]!,
+          versionId: "awv_20260820",
+          workspaceName: "接口测试"
+        }]
+      }]
+    };
     const applicationRollout = {
       rolloutId: "acr_application_tool",
       configScope: "APPLICATION",
@@ -772,12 +791,28 @@ describe("scheduler management panel", () => {
       }]
     };
     const backendApi = api({
-      getApplicationAgentConfigRollouts: vi.fn().mockResolvedValue([applicationRollout])
+      getApplicationAgentConfigRollouts: vi.fn().mockResolvedValue([applicationRollout]),
+      listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([matchingApplicationScope])
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
 
-    expect(await view.findByText("应用更新配置")).toBeTruthy();
+    expect(await view.findByText("应用 Agent / Tool 运行态更新")).toBeTruthy();
+    expect(await view.findByText("F-BASE")).toBeTruthy();
+    expect(await view.findByText("接口测试")).toBeTruthy();
+    expect(await view.findByText("版本 20260820")).toBeTruthy();
+    expect(view.queryByText("awv_20260820")).toBeNull();
+    const historyDisclosure = (await view.findByText("F-BASE")).closest("details") as HTMLDetailsElement;
+    expect(historyDisclosure.open).toBe(false);
+    expect(await view.findByText("待处理用户 1")).toBeTruthy();
+
+    await fireEvent.click(historyDisclosure.querySelector("summary")!);
+    expect(historyDisclosure.open).toBe(true);
+
+    const targetDisclosure = (await view.findByText("尚未重启 / dispose 的用户")).closest("details") as HTMLDetailsElement;
+    expect(targetDisclosure.open).toBe(false);
+    await fireEvent.click(targetDisclosure.querySelector("summary")!);
+    expect(targetDisclosure.open).toBe(true);
     expect(await view.findByText("李四")).toBeTruthy();
     await fireEvent.click(view.getByRole("button", { name: "重启 李四 的 OpenCode" }));
 
@@ -790,7 +825,7 @@ describe("scheduler management panel", () => {
   it("keeps the application update section discoverable when no rollout is pending", async () => {
     const view = renderWithApi(OpencodePublicConfigManagementPanel, api());
 
-    expect(await view.findByText("应用更新配置")).toBeTruthy();
+    expect(await view.findByText("应用 Agent / Tool 运行态更新")).toBeTruthy();
     expect(await view.findByText(/会在这里逐人显示“立即受管重启”/)).toBeTruthy();
     expect(view.queryByRole("button", { name: /重启 .* 的 OpenCode/ })).toBeNull();
     view.queryClient.clear();

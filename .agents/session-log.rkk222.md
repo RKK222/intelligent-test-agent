@@ -14575,3 +14575,27 @@
 
 - 只有客户端 JAR 变化时，制品层只下载新 JAR；未变化的 JDK、OpenCode 和公共能力包可跨版本、跨旧 release 删除继续复用，单项缓存失效不会触发全量下载。
 - 最近本地工作区在客户端重连后默认可用，离线列表视觉统一。未新增部署节点、HTTP API、RunEvent/SSE、数据库、SQL 或 Flyway；未修改环境文件、generated SDK 或只读 OpenCode 源码。整栈后端启动仍受本机 Docker ClickHouse 卡住影响，属于未完成的运行态验证风险。
+
+## 2026-08-25 - 收起公共配置发布明细并补充应用业务标识
+
+### Why
+
+- 公共配置管理页把 rollout 历史、服务器和用户进程一次性全部展开，信息密度过高；应用发布只显示内部版本键，管理员无法直接判断具体应用、工作空间和版本，也容易误以为与相邻的“应用 Git 刷新”重复。
+
+### What
+
+- 公共 rollout 的用户进程明细改为默认收起；应用 rollout 采用“历史记录 → 用户进程”两级原生折叠，摘要直接展示应用、工作空间、版本、分支、提交、状态、服务器数和待处理用户数，内部版本键不再渲染到页面。
+- 复用既有 `listApplicationGitRefreshScopes()` 数据完成业务名称映射，不新增接口；映射失败时保留分支与提交摘要并显示诊断提示，2 秒活动 rollout 轮询不重复请求范围数据。
+- 将应用区明确命名为“应用 Agent / Tool 运行态更新”：相邻“应用 Git 刷新”负责仓库与 worktree 同步，本区只处理发布后的用户进程 dispose / 受管重启。公共和应用用户明细复用同一折叠组件，危险操作只在展开后可见。
+- 同步 agent-web、前端总览、模块图和前端交互规范，并补充默认折叠、业务标识和既有停止/重启 API 复用的组件回归。
+
+### How
+
+- `scheduler-management-panel.test.ts` 23/23 通过，agent-web `vue-tsc` 类型检查和 production build 通过；真实浏览器分别检查历史收起、历史展开和用户展开三种状态，确认业务摘要可见、内部版本键不进入 DOM、控制台无错误。
+- 按 `.env.test` / `test` profile 执行整栈重启，26 模块后端 package 与前端 production build 成功；启动再次卡在 Docker Desktop 的 ClickHouse 容器创建（状态停在 `Created`），脚本在停止旧服务前中止。原后端 `127.0.0.1:8080` health 为 `UP`，前端 `127.0.0.1:3000` 返回 200，ClickHouse `18123` 未就绪。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，未发现与本次前端折叠和应用名称映射冲突的并行成果；不纳入 `.reasonix/`、Vite cache 和根 `node_modules/`。
+
+### Result
+
+- 管理员无需理解内部版本键即可定位具体应用、工作空间和版本；页面默认保持紧凑，需要排障时再逐层展开服务器和用户进程。
+- 本次仅修改前端展示、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、依赖、安全协议、环境配置、generated SDK 或只读 OpenCode 源码。整栈进程未切换到新构建，运行态验证由现有前后端进程与真实浏览器页面完成，Docker ClickHouse 卡住仍是本机启动风险。
