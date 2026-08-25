@@ -14258,3 +14258,23 @@
 
 - 代码已支持 SkillHub 下载 ZIP 的唯一包目录和清单大小写差异，同时不放宽路径与多能力混包安全边界。
 - 本次不新增部署节点，不修改 HTTP 路径/DTO、RunEvent/SSE、数据库、SQL、Flyway、性能模型、环境配置、generated SDK 或 OpenCode 只读源码；只调整物化行为并保留安全校验。真实企业环境还需部署新后端/前端制品后用原条目再次预览验收。
+
+## 2026-08-25 - 新增近期功能 Light 宣传海报
+
+### Why
+
+- 用户需要为分享对话、长期记忆、本地客户端和 Skill Market/能力库四项近期能力制作一张图文并茂的宣传海报，并指定使用 light 视觉风格。
+
+### What
+
+- 新增 `docs/assets/marketing/mimo-recent-features-poster.png`，采用 1800×2400 的暖白画布、冰蓝/靛青/薄荷绿/紫色系统视觉，包含四项功能卖点、真实产品截图、能力流动主视觉和账号灰度提示。
+- 新增 `docs/assets/marketing/mimo-recent-features-poster-philosophy.md`，记录“流动的能力”设计哲学，作为海报后续复用和精修的视觉依据。
+
+### How
+
+- 复用用户手册中的分享设置、长期记忆和本地客户端脱敏截图；Skill Market 使用与产品语义一致的能力 Hub 图形化表达。
+- 使用 canvas-design 规范先编写设计哲学，再用 Pillow 渲染 PNG；最终检查 4 张卡片中的截图与卖点未互相遮挡，并用 `python3 .tmp/render_mimo_features_poster.py` 完成可重复渲染验证。
+
+### Result
+
+- Light 海报已生成并通过视觉检查，尺寸为 1800×2400，PNG 可正常读取；本次仅新增宣传素材与设计说明，不涉及 API、事件、数据库、部署、性能、安全、环境配置或生成 SDK。
