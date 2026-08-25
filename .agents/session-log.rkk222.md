@@ -14283,3 +14283,26 @@
 ### Result
 
 - 最终 Light 海报已生成并通过视觉检查，尺寸为 1800×2400，PNG 可正常读取；本次仅新增宣传素材与设计说明，不涉及 API、事件、数据库、部署、性能、安全、环境配置或生成 SDK。
+
+## 2026-08-25 - 统一能力来源文案并确认 Skill 分类批处理路径
+
+### Why
+
+- 能力库来源文案把 `SkillMarket` 误写成 `SkilMarket`，平台来源“平台更新”也需要统一改为产品名 `MIMO`。
+- SkillHub 已同步数百个 Skill，逐条由超级管理员在页面分类成本过高，需要支持先导出目录元数据、审核映射后批量更新。
+
+### What
+
+- 将能力库来源按钮和卡片统一展示为 `SkillMarket/MIMO`，内部 `SKILLHUB/PLATFORM` 枚举及 API 参数保持不变；同步组件测试、agent-web/package/backend-api README 与 HTTP API 文档。
+- 确认外部 Skill 分类保存在 `agent_skill_hub_assets.skill_category/skill_subcategory`，可按 `asset_id` 通过 PostgreSQL 事务批量更新；分类组合仍受现有数据库约束限制。
+
+### How
+
+- 复用现有 `AgentSkillHub.vue` 来源筛选与卡片渲染，没有新增组件、接口或状态路径。
+- `agent-skill-hub.test.ts` 14 项通过，`agent-web` TypeScript 检查通过；Vite 实际启动在 `http://127.0.0.1:3001/`，`/hub` 返回 HTTP 200。
+- 分类处理采用“只读导出 SkillHub 元数据 → 生成逐资产映射 → 事务校验和更新”的流程，本轮未执行任何数据库更新。
+
+### Result
+
+- 能力库来源文案与产品命名一致；接口、事件和数据库结构均未变化。
+- 待用户导出 SkillHub 元数据后，再生成可审计的精确分类映射和更新 SQL；不会用未经确认的宽泛关键词直接修改全库。

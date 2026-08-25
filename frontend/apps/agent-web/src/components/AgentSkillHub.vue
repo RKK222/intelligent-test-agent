@@ -861,8 +861,8 @@ onUnmounted(() => {
           <div class="hub-taxonomy-row">
             <span>能力来源</span>
             <button type="button" :class="skillSource === 'ALL' && 'is-active'" @click="selectSkillSource('ALL')">全部</button>
-            <button type="button" :class="skillSource === 'SKILLHUB' && 'is-active'" @click="selectSkillSource('SKILLHUB')">SkilMarket</button>
-            <button type="button" :class="skillSource === 'PLATFORM' && 'is-active'" @click="selectSkillSource('PLATFORM')">平台更新</button>
+            <button type="button" :class="skillSource === 'SKILLHUB' && 'is-active'" @click="selectSkillSource('SKILLHUB')">SkillMarket</button>
+            <button type="button" :class="skillSource === 'PLATFORM' && 'is-active'" @click="selectSkillSource('PLATFORM')">MIMO</button>
           </div>
           <div class="hub-taxonomy-row">
             <span>事项分类</span>
@@ -922,7 +922,7 @@ onUnmounted(() => {
           >
             <span class="hub-card-top">
               <span class="hub-asset-avatar" :data-type="asset.type"><Bot v-if="asset.type === 'AGENT'" :size="18" /><Sparkles v-else :size="18" /></span>
-              <span class="hub-card-type">{{ asset.type }} · {{ asset.sourceKind === 'SKILLHUB' ? 'SkilMarket' : '平台更新' }}</span>
+              <span class="hub-card-type">{{ asset.type }} · {{ asset.sourceKind === 'SKILLHUB' ? 'SkillMarket' : 'MIMO' }}</span>
               <span :class="['hub-asset-status', assetStatus(asset).key]" :title="assetStatus(asset).title">
                 <CheckCircle2 v-if="['builtin', 'published', 'referenced'].includes(assetStatus(asset).key)" :size="11" />
                 <RefreshCw v-else-if="assetStatus(asset).key === 'update'" :size="11" />
