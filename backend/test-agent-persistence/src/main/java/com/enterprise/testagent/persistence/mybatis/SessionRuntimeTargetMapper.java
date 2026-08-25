@@ -13,4 +13,9 @@ public interface SessionRuntimeTargetMapper {
             @Param("sessionId") String sessionId,
             @Param("runtimeKind") String runtimeKind,
             @Param("localClientInstanceId") String localClientInstanceId);
+
+    int rebindLocalClientTargets(
+            @Param("workspaceId") String workspaceId,
+            @Param("expectedClientInstanceId") String expectedClientInstanceId,
+            @Param("replacementClientInstanceId") String replacementClientInstanceId);
 }

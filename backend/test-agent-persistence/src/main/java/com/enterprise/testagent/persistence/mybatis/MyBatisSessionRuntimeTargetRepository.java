@@ -5,6 +5,7 @@ import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.session.SessionRuntimeTarget;
 import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
@@ -32,6 +33,17 @@ public class MyBatisSessionRuntimeTargetRepository implements SessionRuntimeTarg
         if (updated != 1) {
             throw new IllegalStateException("session runtime target update did not affect one row");
         }
+    }
+
+    @Override
+    public int rebindLocalClientTargets(
+            WorkspaceId workspaceId,
+            LocalClientInstanceId expectedClientInstanceId,
+            LocalClientInstanceId replacementClientInstanceId) {
+        return mapper.rebindLocalClientTargets(
+                workspaceId.value(),
+                expectedClientInstanceId.value(),
+                replacementClientInstanceId.value());
     }
 
     private SessionRuntimeTarget toDomain(SessionRuntimeTargetRow row) {

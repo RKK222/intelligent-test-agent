@@ -42,6 +42,17 @@ public class MyBatisLocalClientWorkspaceRepository implements LocalClientWorkspa
     }
 
     @Override
+    public List<LocalClientWorkspaceBinding> findByOwnerRootIdentity(
+            UserId userId,
+            String rootDigest,
+            String fileSystemIdentity) {
+        return mapper.findWorkspacesByOwnerRootIdentity(
+                        userId.value(), rootDigest, fileSystemIdentity).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
+    @Override
     public void lockRegistration(UserId userId, LocalClientInstanceId clientInstanceId) {
         if (mapper.lockWorkspaceRegistration(userId.value(), clientInstanceId.value()) == null) {
             throw new IllegalStateException("local client instance disappeared before workspace registration");
@@ -62,6 +73,21 @@ public class MyBatisLocalClientWorkspaceRepository implements LocalClientWorkspa
         if (updated != 1) {
             throw new IllegalStateException("local client workspace owner changed during upsert");
         }
+    }
+
+    @Override
+    public boolean rebind(
+            LocalClientWorkspaceBinding binding,
+            LocalClientInstanceId expectedClientInstanceId) {
+        return mapper.rebindWorkspace(
+                        binding.workspaceId().value(),
+                        binding.userId().value(),
+                        expectedClientInstanceId.value(),
+                        binding.clientInstanceId().value(),
+                        binding.normalizedRootPath(),
+                        binding.rootDigest(),
+                        binding.fileSystemIdentity(),
+                        binding.updatedAt()) == 1;
     }
 
     @Override

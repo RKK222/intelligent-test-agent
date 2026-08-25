@@ -248,6 +248,12 @@ user systemd 服务安装到当前账号的 `~/.local` / `~/.config`。运行时
 签名清单逐项验证；只在本机输入统一认证号和 Client key，不要把 Key 放到命令、环境变量、URL、截图或日志中。
 用户包不会写 `/usr` 或 `/var/lib/dpkg`，因此不再生成或交付 DEB。
 
+同一普通用户再次双击新版安装包时仍执行 `setup`：启动器必须重新下载并验证签名 catalog，安装缺失的最新不可变
+release，原子切换 `current`，保留原 `credentials.properties`、`state.json`、工作区根映射和 OpenCode 数据，并对
+已有 user systemd service 执行 restart。验收时在重复安装前后记录 `state.json` 内的 `clientInstanceId` 和下方
+`--version` 输出；前者必须不变，后者必须更新到 catalog 最新版本。若实例 ID 变化，应先检查安装脚本与 Java 进程是否
+使用同一 `TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR/STATE_DIR`，不得通过伪造数据库实例归属代替修复。
+
 **机器：同一普通用户的真实交互终端，仅用于验收状态**。应用菜单完成首次接入后执行：
 
 ~~~bash
@@ -259,6 +265,8 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
 短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
+若历史版本已经生成了新实例 ID，用户需在新客户端重新选择原目录；平台核验真实路径摘要与文件系统身份后保留原
+workspaceId 接管绑定。旧实例在线、身份不一致或同目录存在多个历史 Workspace 时必须先停止并人工消除歧义。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认该实例 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。此项与本机 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、.4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 

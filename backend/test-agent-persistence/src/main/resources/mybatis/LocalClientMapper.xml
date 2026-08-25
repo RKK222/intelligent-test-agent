@@ -130,8 +130,13 @@
 
     <select id="findInstancesByUserId" resultMap="instanceRow">
         SELECT <include refid="instanceColumns"/>
-        FROM local_client_instances
+        FROM local_client_instances instances
         WHERE user_id = #{userId}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM local_client_instance_replacements replacements
+              WHERE replacements.replaced_client_instance_id = instances.client_instance_id
+          )
         ORDER BY updated_at DESC, client_instance_id ASC
     </select>
 
@@ -200,6 +205,15 @@
           AND root_digest = #{rootDigest}
     </select>
 
+    <select id="findWorkspacesByOwnerRootIdentity" resultMap="workspaceRow">
+        SELECT <include refid="workspaceColumns"/>
+        FROM local_client_workspaces
+        WHERE user_id = #{userId}
+          AND root_digest = #{rootDigest}
+          AND file_system_identity = #{fileSystemIdentity}
+        ORDER BY updated_at DESC, workspace_id ASC
+    </select>
+
     <select id="findWorkspacesByClientInstanceId" resultMap="workspaceRow">
         SELECT <include refid="workspaceColumns"/>
         FROM local_client_workspaces
@@ -208,11 +222,13 @@
     </select>
 
     <select id="lockWorkspaceRegistration" resultType="java.lang.String">
-        SELECT client_instance_id
-        FROM local_client_instances
-        WHERE user_id = #{userId}
-          AND client_instance_id = #{clientInstanceId}
-        FOR UPDATE
+        SELECT users.user_id
+        FROM users
+        JOIN local_client_instances
+          ON local_client_instances.user_id = users.user_id
+         AND local_client_instances.client_instance_id = #{clientInstanceId}
+        WHERE users.user_id = #{userId}
+        FOR UPDATE OF users
     </select>
 
     <insert id="upsertWorkspace">
@@ -231,6 +247,53 @@
         WHERE local_client_workspaces.user_id = EXCLUDED.user_id
           AND local_client_workspaces.client_instance_id = EXCLUDED.client_instance_id
     </insert>
+
+    <update id="rebindWorkspace">
+        UPDATE local_client_workspaces
+        SET client_instance_id = #{replacementClientInstanceId},
+            normalized_root_path = #{normalizedRootPath},
+            root_digest = #{rootDigest},
+            file_system_identity = #{fileSystemIdentity},
+            updated_at = #{updatedAt}
+        WHERE workspace_id = #{workspaceId}
+          AND user_id = #{userId}
+          AND client_instance_id = #{expectedClientInstanceId}
+    </update>
+
+    <insert id="markInstanceReplaced" databaseId="postgresql">
+        INSERT INTO local_client_instance_replacements(
+            replaced_client_instance_id, replacement_client_instance_id, user_id, replaced_at
+        ) VALUES (
+            #{replacedClientInstanceId}, #{replacementClientInstanceId}, #{userId}, #{replacedAt}
+        )
+        ON CONFLICT (replaced_client_instance_id) DO UPDATE SET
+            replacement_client_instance_id = EXCLUDED.replacement_client_instance_id,
+            user_id = EXCLUDED.user_id,
+            replaced_at = EXCLUDED.replaced_at
+    </insert>
+
+    <insert id="markInstanceReplaced">
+        MERGE INTO local_client_instance_replacements target
+        USING (VALUES (
+            #{replacedClientInstanceId}, #{replacementClientInstanceId}, #{userId}, #{replacedAt}
+        )) incoming(replaced_client_instance_id, replacement_client_instance_id, user_id, replaced_at)
+        ON target.replaced_client_instance_id = incoming.replaced_client_instance_id
+        WHEN MATCHED THEN UPDATE SET
+            replacement_client_instance_id = incoming.replacement_client_instance_id,
+            user_id = incoming.user_id,
+            replaced_at = incoming.replaced_at
+        WHEN NOT MATCHED THEN INSERT(
+            replaced_client_instance_id, replacement_client_instance_id, user_id, replaced_at
+        ) VALUES (
+            incoming.replaced_client_instance_id, incoming.replacement_client_instance_id,
+            incoming.user_id, incoming.replaced_at
+        )
+    </insert>
+
+    <delete id="clearInstanceReplacement">
+        DELETE FROM local_client_instance_replacements
+        WHERE replaced_client_instance_id = #{clientInstanceId}
+    </delete>
 
     <delete id="deleteWorkspaceById">
         DELETE FROM local_client_workspaces WHERE workspace_id = #{workspaceId}

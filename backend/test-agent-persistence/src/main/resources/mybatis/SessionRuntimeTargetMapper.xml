@@ -23,4 +23,12 @@
             local_client_instance_id = #{localClientInstanceId}
         WHERE session_id = #{sessionId}
     </update>
+
+    <update id="rebindLocalClientTargets">
+        UPDATE sessions
+        SET local_client_instance_id = #{replacementClientInstanceId}
+        WHERE workspace_id = #{workspaceId}
+          AND runtime_kind = 'LOCAL_CLIENT'
+          AND local_client_instance_id = #{expectedClientInstanceId}
+    </update>
 </mapper>

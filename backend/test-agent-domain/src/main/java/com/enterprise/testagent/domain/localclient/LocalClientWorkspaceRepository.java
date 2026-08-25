@@ -15,12 +15,23 @@ public interface LocalClientWorkspaceRepository {
             LocalClientInstanceId clientInstanceId,
             String rootDigest);
 
+    /** 跨客户端查找同一用户、同一真实路径和同一文件系统身份的历史绑定。 */
+    List<LocalClientWorkspaceBinding> findByOwnerRootIdentity(
+            UserId userId,
+            String rootDigest,
+            String fileSystemIdentity);
+
     List<LocalClientWorkspaceBinding> findByClientInstanceId(LocalClientInstanceId clientInstanceId);
 
-    /** 串行化同一客户端的根目录注册，防止并发请求绕过摘要查重后同时插入。 */
+    /** 串行化同一用户的根目录注册，防止新旧客户端并发接管同一历史绑定。 */
     void lockRegistration(UserId userId, LocalClientInstanceId clientInstanceId);
 
     void save(LocalClientWorkspaceBinding binding);
+
+    /** 以旧客户端 ID 为 CAS 条件保留 workspaceId 并切换客户端绑定。 */
+    boolean rebind(
+            LocalClientWorkspaceBinding binding,
+            LocalClientInstanceId expectedClientInstanceId);
 
     boolean deleteByWorkspaceId(WorkspaceId workspaceId);
 }

@@ -1879,6 +1879,23 @@ migration，并加载隔离路径
 `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 用真实 PostgreSQL 覆盖正常主链、
 旧 release 与企业 SCM 缺失低版本 migration 的升级、第二次启动解析和未知 checksum 失败关闭。
 
+## V20260825091459 本地客户端实例替换关系
+
+`V20260825091459__local_client_instance_replacements_create.sql` 创建
+`local_client_instance_replacements`。旧实例 ID 为主键，新旧实例分别通过
+`(client_instance_id,user_id)` 复合外键约束为同一用户，并通过 CHECK 禁止自替换；`replaced_at` 记录最后一个旧工作区
+完成安全接管的时间。该表只保存实例谱系，不删除 `local_client_instances`，因此既有 Session、Run、夜间任务和审计外键
+继续有效；用户活动实例查询排除已替换旧实例，按 ID 与管理侧全量历史查询仍可读取。
+
+应用仅在新客户端重新校验目录、`root_digest + file_system_identity` 唯一命中离线旧实例且该旧实例已无其它工作区后写入
+替换关系；迁移本身不扫描、不合并也不删除任何现场数据。接管事务同时更新该 Workspace 的本地绑定、Session 冻结目标和
+`SCHEDULED` 夜间任务目标，历史 Run 与已进入 `DISPATCHING` 的 attempt 不改写。旧实例真实重新认证会删除其替换标记，
+但不会自动抢回目录。
+
+升级前无需数据清理；新版本首次启动由 Flyway 建表。代码回滚时该孤立关系表可保留，旧代码仍会展示历史实例但不受表结构
+影响。若需物理删除必须在备份和停机窗口按精确实例处理，禁止把个人/演示数据清理写进 migration，禁止修改已执行文件或
+`flyway_schema_history`。正式发布需从每套已知 PostgreSQL 基线升级并核对源码、persistence JAR 和最终发布包内字节一致。
+
 ## V20260817193414 本地客户端功能可见性灰度用户
 
 `V20260817193414__local_client_rollout_users_create.sql` 新增 `local_client_rollout_users`。`user_id` 是引用

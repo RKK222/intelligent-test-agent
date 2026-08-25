@@ -44,6 +44,11 @@ public interface LocalClientMapper {
             @Param("clientInstanceId") String clientInstanceId,
             @Param("rootDigest") String rootDigest);
 
+    List<LocalClientWorkspaceRow> findWorkspacesByOwnerRootIdentity(
+            @Param("userId") String userId,
+            @Param("rootDigest") String rootDigest,
+            @Param("fileSystemIdentity") String fileSystemIdentity);
+
     List<LocalClientWorkspaceRow> findWorkspacesByClientInstanceId(
             @Param("clientInstanceId") String clientInstanceId);
 
@@ -52,6 +57,24 @@ public interface LocalClientMapper {
             @Param("clientInstanceId") String clientInstanceId);
 
     int upsertWorkspace(LocalClientWorkspaceRow row);
+
+    int rebindWorkspace(
+            @Param("workspaceId") String workspaceId,
+            @Param("userId") String userId,
+            @Param("expectedClientInstanceId") String expectedClientInstanceId,
+            @Param("replacementClientInstanceId") String replacementClientInstanceId,
+            @Param("normalizedRootPath") String normalizedRootPath,
+            @Param("rootDigest") String rootDigest,
+            @Param("fileSystemIdentity") String fileSystemIdentity,
+            @Param("updatedAt") Instant updatedAt);
+
+    int markInstanceReplaced(
+            @Param("userId") String userId,
+            @Param("replacedClientInstanceId") String replacedClientInstanceId,
+            @Param("replacementClientInstanceId") String replacementClientInstanceId,
+            @Param("replacedAt") Instant replacedAt);
+
+    int clearInstanceReplacement(@Param("clientInstanceId") String clientInstanceId);
 
     int deleteWorkspaceById(@Param("workspaceId") String workspaceId);
 

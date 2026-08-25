@@ -55,6 +55,26 @@ public class MyBatisLocalClientInstanceRepository implements LocalClientInstance
     }
 
     @Override
+    public void markReplaced(
+            UserId userId,
+            LocalClientInstanceId replacedClientInstanceId,
+            LocalClientInstanceId replacementClientInstanceId,
+            Instant replacedAt) {
+        if (mapper.markInstanceReplaced(
+                        userId.value(),
+                        replacedClientInstanceId.value(),
+                        replacementClientInstanceId.value(),
+                        replacedAt) != 1) {
+            throw new IllegalStateException("local client instance replacement was not persisted");
+        }
+    }
+
+    @Override
+    public void clearReplacement(LocalClientInstanceId clientInstanceId) {
+        mapper.clearInstanceReplacement(clientInstanceId.value());
+    }
+
+    @Override
     public void markDisconnected(LocalClientInstanceId clientInstanceId, Instant disconnectedAt) {
         mapper.markInstanceDisconnected(clientInstanceId.value(), disconnectedAt);
     }

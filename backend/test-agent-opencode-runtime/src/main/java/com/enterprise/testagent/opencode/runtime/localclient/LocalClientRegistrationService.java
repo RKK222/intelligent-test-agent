@@ -146,6 +146,9 @@ public class LocalClientRegistrationService {
             }
             throw exception;
         }
+        // 路由发布后再清除替换标记：与工作区接管并发时，在线旧实例最终一定重新进入活动实例投影。
+        // 其工作区仍需逐个通过目录身份校验，不能因重连自动抢回。
+        instanceRepository.clearReplacement(clientInstanceId);
         return new Registration(
                 route,
                 previousRoute.orElse(null),

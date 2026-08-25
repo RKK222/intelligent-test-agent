@@ -409,6 +409,8 @@ bootstrap_release() {
     fi
     tar -C "${staging_directory}" -xzf "${staging_directory}/opencode.tar.gz"
     [ -x "${staging_directory}/opencode/bin/opencode" ] || fail "OpenCode 归档布局无效"
+    TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
+    TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
     "${staging_directory}/jdk/bin/java" -jar \
       "${staging_directory}/test-agent-local-client.jar" \
       self-check "${staging_directory}" "${version}" >/dev/null \
@@ -467,6 +469,8 @@ ensure_runtime() {
 
 enroll_client() {
   active_version="$(current_version)"
+  TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
+  TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
   "${RELEASES_DIR}/${active_version}/jdk/bin/java" -jar \
     "${RELEASES_DIR}/${active_version}/test-agent-local-client.jar" enroll
   [ -f "${CONFIG_DIR}/credentials.properties" ] || fail "接入成功后未生成凭据文件"
@@ -522,7 +526,8 @@ install_user_service() {
   } >"${desktop_dir}/test-agent-local-client.desktop"
   chmod 0600 "${desktop_dir}/test-agent-local-client.desktop"
   systemctl --user daemon-reload
-  systemctl --user enable --now test-agent-local-opencode-client.service
+  systemctl --user enable test-agent-local-opencode-client.service
+  systemctl --user restart test-agent-local-opencode-client.service
 }
 
 validate_pending() {
@@ -582,6 +587,8 @@ rollback_pending() {
 run_activation_process() {
   active_version="$(current_version)"
   active_release="${RELEASES_DIR}/${active_version}"
+  TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
+  TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
   "${active_release}/jdk/bin/java" -jar "${active_release}/test-agent-local-client.jar" &
   client_pid="$!"
   timeout_seconds="${TEST_AGENT_LOCAL_CLIENT_ACTIVATION_TIMEOUT_SECONDS:-70}"
@@ -649,6 +656,8 @@ run_client() {
     else
       active_release="${RELEASES_DIR}/${active_version}"
       set +e
+      TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
+      TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
       "${active_release}/jdk/bin/java" -jar "${active_release}/test-agent-local-client.jar"
       client_rc="$?"
       set -e
@@ -689,6 +698,8 @@ command_name="${1:-setup}"
 case "${command_name}" in
   setup)
     [ "$#" -le 1 ] || fail "setup 不接受额外参数"
+    # 重复双击安装也是显式升级动作：重新校验签名 catalog 并原子切换到最新 release。
+    bootstrap_release
     ensure_runtime
     if [ ! -f "${CONFIG_DIR}/credentials.properties" ]; then
       enroll_client

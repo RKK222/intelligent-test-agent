@@ -186,6 +186,10 @@ TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
 [ "$(readlink "${INSTALL_ROOT}/current")" = "releases/${OLD_VERSION}" ]
 grep -qx 'source=system-jdk21' "${INSTALL_ROOT}/current/jdk.provenance"
 credential_digest="$(sha256_file "${CONFIG_DIR}/credentials.properties")"
+printf '{"clientInstanceId":"lci_shell_state_machine","processIdentity":null,"workspaceRoots":{}}\n' \
+  >"${STATE_DIR}/state.json"
+chmod 0600 "${STATE_DIR}/state.json"
+state_digest="$(sha256_file "${STATE_DIR}/state.json")"
 
 package_release "${NEW_VERSION}"
 run_launcher "${NEW_VERSION}" UPDATE READY
@@ -209,4 +213,16 @@ grep -q '^errorCode=OPENCODE_START_FAILED$' "${STATE_DIR}/update-result.properti
 grep -q '^clientInstanceId=lci_shell_state_machine$' "${CONFIG_DIR}/credentials.properties"
 [ "$(sha256_file "${CONFIG_DIR}/credentials.properties")" = "${credential_digest}" ]
 
-echo "Stable launcher silent update, downgrade, automatic rollback and credential reuse verified"
+# 用户重新双击安装包时必须升级到签名 catalog 最新版本，同时保留稳定实例状态和凭据。
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${INSTALL_ROOT}" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${DIST_ROOT}/install.sh" setup
+[ "$(readlink "${INSTALL_ROOT}/current")" = "releases/${NEW_VERSION}" ]
+[ "$(sha256_file "${CONFIG_DIR}/credentials.properties")" = "${credential_digest}" ]
+[ "$(sha256_file "${STATE_DIR}/state.json")" = "${state_digest}" ]
+
+echo "Stable launcher update, repeated setup upgrade, automatic rollback and stable identity reuse verified"

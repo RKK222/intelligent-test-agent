@@ -12,7 +12,9 @@ import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.UserWorkspacePreference;
+import com.enterprise.testagent.domain.nightexecution.NightExecutionTaskRepository;
 import com.enterprise.testagent.domain.runtime.RuntimeKind;
+import com.enterprise.testagent.domain.session.SessionRuntimeTargetRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -22,6 +24,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -42,6 +45,8 @@ public class LocalWorkspaceApplicationService {
     private final LocalClientInstanceRepository instanceRepository;
     private final LocalClientConnectionStore connectionStore;
     private final LocalClientWorkspaceFileGateway fileGateway;
+    private final SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
+    private final NightExecutionTaskRepository nightExecutionTaskRepository;
     private final com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver routeResolver;
     private final ObjectMapper objectMapper;
 
@@ -52,6 +57,8 @@ public class LocalWorkspaceApplicationService {
             LocalClientInstanceRepository instanceRepository,
             LocalClientConnectionStore connectionStore,
             LocalClientWorkspaceFileGateway fileGateway,
+            SessionRuntimeTargetRepository sessionRuntimeTargetRepository,
+            NightExecutionTaskRepository nightExecutionTaskRepository,
             com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver routeResolver,
             ObjectMapper objectMapper) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository);
@@ -60,6 +67,8 @@ public class LocalWorkspaceApplicationService {
         this.instanceRepository = Objects.requireNonNull(instanceRepository);
         this.connectionStore = Objects.requireNonNull(connectionStore);
         this.fileGateway = Objects.requireNonNull(fileGateway);
+        this.sessionRuntimeTargetRepository = Objects.requireNonNull(sessionRuntimeTargetRepository);
+        this.nightExecutionTaskRepository = Objects.requireNonNull(nightExecutionTaskRepository);
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.objectMapper = Objects.requireNonNull(objectMapper);
     }
@@ -116,8 +125,8 @@ public class LocalWorkspaceApplicationService {
                 clientInstanceId.value(), route.connectionGeneration(), null, null,
                 "workspace.validateRoot", input, traceId));
 
-        // 校验发生在用户桌面，随后用客户端实例行锁串行查重；同一路径重复选择时复用既有 Workspace，
-        // 同时重新下发 registerRoot，以修复客户端重装或状态文件丢失后的本地根映射。
+        // 校验发生在用户桌面，随后按用户串行查重；同一实例重复选择时恢复根映射，实例 ID 因重装变化时
+        // 只有目录摘要与文件系统身份都一致且旧实例离线，才允许保留 workspaceId 完成安全接管。
         localWorkspaceRepository.lockRegistration(userId, clientInstanceId);
         Optional<LocalClientWorkspaceBinding> existingBinding =
                 localWorkspaceRepository.findByOwnerClientAndRootDigest(
@@ -125,6 +134,27 @@ public class LocalWorkspaceApplicationService {
         if (existingBinding.isPresent()) {
             return restoreExistingWorkspace(
                     existingBinding.orElseThrow(), validated, input, route.connectionGeneration(), traceId);
+        }
+        List<LocalClientWorkspaceBinding> historicalBindings = localWorkspaceRepository
+                .findByOwnerRootIdentity(
+                        userId, validated.rootDigest(), validated.fileSystemIdentity()).stream()
+                .filter(binding -> !binding.clientInstanceId().equals(clientInstanceId))
+                .toList();
+        if (historicalBindings.size() > 1) {
+            throw new PlatformException(ErrorCode.CONFLICT, "同一本地目录存在多个历史客户端绑定，请先归档重复工作区");
+        }
+        if (historicalBindings.size() == 1) {
+            LocalClientWorkspaceBinding historicalBinding = historicalBindings.getFirst();
+            if (connectionStore.find(historicalBinding.clientInstanceId()).isPresent()) {
+                throw new PlatformException(ErrorCode.CONFLICT, "该本地目录仍由在线旧客户端绑定，不能自动接管");
+            }
+            return reclaimExistingWorkspace(
+                    historicalBinding,
+                    clientInstanceId,
+                    validated,
+                    input,
+                    route.connectionGeneration(),
+                    traceId);
         }
 
         WorkspaceId workspaceId = new WorkspaceId(RuntimeIdGenerator.workspaceId());
@@ -157,6 +187,65 @@ public class LocalWorkspaceApplicationService {
                 now,
                 now));
         return LocalWorkspaceView.from(workspace, clientInstanceId, true);
+    }
+
+    private LocalWorkspaceView reclaimExistingWorkspace(
+            LocalClientWorkspaceBinding historicalBinding,
+            LocalClientInstanceId replacementClientInstanceId,
+            RootRegistration validated,
+            JsonNode input,
+            long generation,
+            String traceId) {
+        Workspace workspace = workspaceRepository.findById(historicalBinding.workspaceId())
+                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT, "本地工作区历史绑定存在，但 Workspace 已不可用"));
+        RootRegistration registered = registerRoot(
+                replacementClientInstanceId,
+                generation,
+                historicalBinding.workspaceId(),
+                input,
+                traceId);
+        if (!validated.equals(registered)) {
+            bestEffortUnregister(
+                    replacementClientInstanceId, generation, historicalBinding.workspaceId(), traceId);
+            throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在接管期间发生变化");
+        }
+
+        Instant now = Instant.now();
+        LocalClientWorkspaceBinding replacementBinding = new LocalClientWorkspaceBinding(
+                historicalBinding.workspaceId(),
+                historicalBinding.userId(),
+                replacementClientInstanceId,
+                registered.normalizedRootPath(),
+                registered.rootDigest(),
+                registered.fileSystemIdentity(),
+                historicalBinding.createdAt(),
+                now);
+        registerRollbackCompensation(
+                replacementClientInstanceId, generation, historicalBinding.workspaceId(), traceId);
+        if (!localWorkspaceRepository.rebind(
+                replacementBinding, historicalBinding.clientInstanceId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地工作区绑定已被其它请求接管");
+        }
+        sessionRuntimeTargetRepository.rebindLocalClientTargets(
+                historicalBinding.workspaceId(),
+                historicalBinding.clientInstanceId(),
+                replacementClientInstanceId);
+        nightExecutionTaskRepository.rebindScheduledLocalClientTargets(
+                historicalBinding.workspaceId(),
+                historicalBinding.clientInstanceId(),
+                replacementClientInstanceId,
+                now);
+        if (localWorkspaceRepository.findByClientInstanceId(
+                historicalBinding.clientInstanceId()).isEmpty()) {
+            instanceRepository.markReplaced(
+                    historicalBinding.userId(),
+                    historicalBinding.clientInstanceId(),
+                    replacementClientInstanceId,
+                    now);
+        }
+        return LocalWorkspaceView.from(workspace, replacementClientInstanceId, true);
     }
 
     private LocalWorkspaceView restoreExistingWorkspace(

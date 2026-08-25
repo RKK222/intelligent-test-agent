@@ -198,6 +198,19 @@ public class MyBatisNightExecutionTaskRepository implements NightExecutionTaskRe
     }
 
     @Override
+    public int rebindScheduledLocalClientTargets(
+            WorkspaceId workspaceId,
+            LocalClientInstanceId expectedClientInstanceId,
+            LocalClientInstanceId replacementClientInstanceId,
+            Instant updatedAt) {
+        return mapper.rebindScheduledLocalClientTargets(
+                workspaceId.value(),
+                expectedClientInstanceId.value(),
+                replacementClientInstanceId.value(),
+                updatedAt);
+    }
+
+    @Override
     public void delete(NightExecutionTaskId taskId) {
         mapper.deleteTask(taskId.value());
     }

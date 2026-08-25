@@ -4,6 +4,13 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 整客户端自更新和公共 Agent/Skill/Tool 完整能力包激活。客户端不直接访问平台数据库，也不把本地 OpenCode 请求
 回退到服务器运行时。
 
+## 安装与稳定身份
+
+- 麒麟稳定启动器的重复 `setup` 是就地升级入口：每次重新校验签名 catalog，安装并原子切换最新 release，随后 restart
+  已有 user systemd service；配置、凭据、`state.json`、OpenCode 数据和工作区根映射位于 release 目录之外并保持不变。
+- 启动器对 enroll、运行、自更新激活和候选 self-check 显式传入同一配置/状态目录，防止 XDG 环境差异让 Java 读取另一份
+  `state.json`。`clientInstanceId` 只在该稳定状态文件首次创建时生成，普通重装和升级不得生成新值。
+
 ## 桌面界面
 
 - `LocalClientDesktopTheme` 是首次配置、目录选择、会话进度和公共能力确认窗口的统一主题入口。macOS 与麒麟/Linux

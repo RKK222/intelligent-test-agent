@@ -2,8 +2,10 @@ package com.enterprise.testagent.domain.nightexecution;
 
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.session.SessionId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -39,5 +41,11 @@ public interface NightExecutionTaskRepository {
     void deleteSessionLock(SessionId sessionId, NightExecutionTaskId taskId);
     boolean hasSessionLock(SessionId sessionId);
     boolean deleteTerminalIfUnchanged(NightExecutionTaskId taskId, long stateVersion, Instant cutoff);
+    /** 仅迁移尚未投递的夜间任务；已进入投递态的任务继续由原 attempt fencing 收敛。 */
+    int rebindScheduledLocalClientTargets(
+            WorkspaceId workspaceId,
+            LocalClientInstanceId expectedClientInstanceId,
+            LocalClientInstanceId replacementClientInstanceId,
+            Instant updatedAt);
     void delete(NightExecutionTaskId taskId);
 }

@@ -310,6 +310,10 @@ RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线�
 客户端连接、Key 或稳定绑定。migration 不预置任何用户。
 `LocalClientInstanceRow.selfUpdateSupported` 是原始 `boolean`，构造器映射固定使用 MyBatis `_boolean` 别名；
 `MyBatisLocalClientInstanceRepositoryIntegrationTest` 覆盖按实例、按用户和全量查询，防止包装类型反射调用再次导致客户端注册后断线。
+`V20260825091459__local_client_instance_replacements_create.sql` 新增实例替换关系。`LocalClientMapper.xml` 按用户锁串行化
+跨实例工作区注册，以真实根摘要和文件系统身份查询历史绑定并 CAS 切换客户端；用户实例查询排除已替换旧实例，按 ID 和
+全量管理查询仍保留旧行。`SessionRuntimeTargetMapper.xml` 与 `NightExecutionTaskMapper.xml` 分别迁移同工作区 Session 和
+尚未投递任务目标，历史 Run 与已投递 attempt 不改写。
 
 `LocalClientVersionMapper.xml` / `MyBatisLocalClientVersionRepository` 保存受签名 release、artifact、全局/用户
 策略、rollout 快照与 update attempt；所有关系型 SQL 均在 MyBatis XML。runtime 的独立短事务门面把 attempt 终态 CAS 与

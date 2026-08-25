@@ -93,5 +93,11 @@ public interface NightExecutionTaskMapper {
             @Param("stateVersion") long stateVersion,
             @Param("cutoff") Instant cutoff);
 
+    int rebindScheduledLocalClientTargets(
+            @Param("workspaceId") String workspaceId,
+            @Param("expectedClientInstanceId") String expectedClientInstanceId,
+            @Param("replacementClientInstanceId") String replacementClientInstanceId,
+            @Param("updatedAt") Instant updatedAt);
+
     int deleteTask(@Param("taskId") String taskId);
 }

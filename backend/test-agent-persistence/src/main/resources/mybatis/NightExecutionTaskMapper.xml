@@ -81,6 +81,16 @@
         and dispatch_attempt_id=#{attemptId}
         and window_end &gt; #{now}
     </update>
+    <update id="rebindScheduledLocalClientTargets">
+        update night_execution_tasks
+        set target_local_client_instance_id=#{replacementClientInstanceId},
+            updated_at=#{updatedAt},
+            state_version=state_version + 1
+        where workspace_id=#{workspaceId}
+          and status='SCHEDULED'
+          and target_runtime_kind='LOCAL_CLIENT'
+          and target_local_client_instance_id=#{expectedClientInstanceId}
+    </update>
     <insert id="insertTask" parameterType="map">
         insert into night_execution_tasks(
         task_id, owner_user_id, creator_user_id, creator_unified_auth_id, created_by_shared_user,

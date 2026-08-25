@@ -335,11 +335,13 @@ test "$(stat -f '%Lp' "${TEST_ROOT}/install/config/credentials.properties" 2>/de
 
 # 无管理员权限安装时，下载脚本必须先自安装为用户级启动器，再创建 user systemd 和桌面入口。
 mkdir -p "${TEST_ROOT}/user-home" "${TEST_ROOT}/fake-systemctl"
-printf '#!/usr/bin/env sh\nexit 0\n' >"${TEST_ROOT}/fake-systemctl/systemctl"
+printf '#!/usr/bin/env sh\nprintf "%%s\\n" "$*" >>"${TEST_SYSTEMCTL_LOG:?}"\n' \
+  >"${TEST_ROOT}/fake-systemctl/systemctl"
 chmod 0755 "${TEST_ROOT}/fake-systemctl/systemctl"
 (
   cd "${TEST_ROOT}/dist/local-opencode-client"
   HOME="${TEST_ROOT}/user-home" \
+  TEST_SYSTEMCTL_LOG="${TEST_ROOT}/systemctl.log" \
   PATH="${TEST_ROOT}/fake-systemctl:${TEST_ROOT}/inputs/jdk/fake-jdk/bin:${PATH}" \
   TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
   TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
@@ -358,6 +360,9 @@ grep -Fxq "Exec=${TEST_ROOT}/user-home/.local/bin/test-agent-local-client enroll
   "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
 grep -Fxq "Icon=test-agent-local-client" \
   "${TEST_ROOT}/user-home/.local/share/applications/test-agent-local-client.desktop"
+grep -Fxq -- '--user daemon-reload' "${TEST_ROOT}/systemctl.log"
+grep -Fxq -- '--user enable test-agent-local-opencode-client.service' "${TEST_ROOT}/systemctl.log"
+grep -Fxq -- '--user restart test-agent-local-opencode-client.service' "${TEST_ROOT}/systemctl.log"
 
 for scenario in no-java java-only java17 java21-javac17 split-path-java-javac absolute-escaped-javac; do
   case "${scenario}" in

@@ -61,6 +61,10 @@ client key、稳定 `lci_...` 实例 ID、平台、架构和版本；认证成�
 `backendProcessId + connectionGeneration`。相同实例的新认证连接会 fencing 旧连接，旧 generation 的
 心跳、响应、文件票据和模型授权全部失效。客户端上报地址、端口只用于展示，绝不用于路由。
 
+安装器的配置目录和状态目录由稳定启动器显式传给每次 Java 进程，避免桌面会话中的 XDG 变量变化使
+`state.json` 漂移到另一目录并生成新实例 ID。重复执行 `setup` 会重新读取并校验签名 catalog，原子切换到最新
+release，保留 `credentials.properties`、`state.json` 和 OpenCode 数据目录，并明确重启已有 user systemd 服务。
+
 ## 认证与模型密钥
 
 每个用户只有一个 `tack_v1_` client key，可用于该用户的多个客户端实例。数据库保存 RSA 密文、
@@ -99,8 +103,13 @@ HTTP 代理。
 和 generation，异步调用既有 `LocalWorkspaceApplicationService`；该服务仍通过 `FILE_REQUEST` 完成真实路径、
 权限、符号链接和文件系统身份校验与根注册，再事务性持久化。WSS 入站处理必须先释放当前 `concatMap`，避免等待
 根校验时阻塞同一连接的 `FILE_RESPONSE`。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
-选中、双击才进入下一级。同一用户、客户端实例和 root digest 的注册先锁定客户端实例行再查重；命中时复用既有
-Workspace ID，并重新下发 `workspace.registerRoot` 恢复客户端状态，不再创建可能触发唯一约束的临时 Workspace。
+选中、双击才进入下一级。注册按用户行串行化；同一用户、客户端实例和 root digest 命中时复用既有 Workspace ID，
+并重新下发 `workspace.registerRoot` 恢复客户端状态，不再创建可能触发唯一约束的临时 Workspace。若重装导致
+`clientInstanceId` 变化，用户在新客户端重新选择同一目录后，后台只有在旧实例离线且客户端重新校验得到的
+`rootDigest + fileSystemIdentity` 与唯一历史绑定完全一致时才保留 workspaceId 并切换绑定；多个候选或旧实例在线均
+失败关闭。接管事务同步迁移该工作区的 Session 冻结目标和尚未投递的夜间任务；旧实例的全部工作区都接管完成后写入
+替换关系，从用户活动实例列表和健康分母排除，但保留旧实例、Run 和终态任务历史外键。旧实例若真实重新认证则清除
+替换标记，重新进入活动列表，其目录仍需逐个重新校验，不能仅凭客户端名称自动抢占。
 
 客户端收到注册成功帧后自动打开 `/workbench?localWorkspaceId=<workspaceId>`，托盘“打开网页”在本次进程已有最近
 注册结果时使用同一深链。URI 不携带本机绝对路径；前端通过带对象级归属校验的 Workspace API 解析逻辑 ID，切换为
@@ -114,7 +123,8 @@ event-loop。工作台顶部直接复用平台 Workspace 列表展示已持久�
 
 `RuntimeKind` 取 `SERVER_PROCESS` 或 `LOCAL_CLIENT`。本地工作区绑定稳定实例 ID，不创建服务端 process 或
 binding。Session 创建时冻结目标，Run manifest/context/execution node 再冻结并传播同一目标；本地实例
-离线或换代不回退服务端进程，也不切换到同一用户的其它客户端。路由仓储读取失败同样失败关闭；
+离线或换代不回退服务端进程，也不按在线状态任意切换到同一用户的其它客户端。唯一例外是上节经真实目录身份校验的
+显式工作区接管，它在同一数据库事务内同步改写 Workspace、Session 和待执行夜间任务的本地实例目标。路由仓储读取失败同样失败关闭；
 workspace/session 在 path、query 或请求体中的入口都先解析本地目标，再决定连接持有 Java。
 
 存量 `agent_session_bindings`、Session 旧映射和 `routing_decisions` 仍以外键引用

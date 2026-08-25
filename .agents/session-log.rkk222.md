@@ -14036,3 +14036,28 @@
 ### Result
 
 - 用户可以从手册找到新增版本和客户端用户包的准确入口、配置要求与失败处理方式；客户端和记忆功能的灰度边界继续明确，文档变更不涉及 API、事件、数据库、性能、安全、部署或环境配置。
+
+## 2026-08-25 - 修复本地客户端重复安装与重装后工作区失联
+
+### Why
+
+- 稳定安装器的 `setup` 只在没有 `current` 时下载 release，重复双击不会切到新版，且 `systemctl enable --now` 不会重启已运行的旧进程。
+- 客户端状态目录受启动环境影响时可能生成新实例 ID；平台工作区只按旧实例 ID 查重，使同一机器重装后的新客户端无法访问原工作区，旧离线实例还进入健康分母。
+
+### What
+
+- 重复 `setup` 改为重新校验签名 catalog、原子安装/切换最新 release，并显式 restart user systemd 服务；所有 Java 入口固定传入配置和状态目录，保留凭据与 `state.json` 稳定实例 ID。
+- 工作区重新注册改为按用户串行化。新客户端重新选择目录后，只有旧实例离线且 `rootDigest + fileSystemIdentity` 唯一命中历史绑定时才保留 workspaceId 接管；同步迁移 Session 和 `SCHEDULED` 夜间任务目标。
+- 新增 `V20260825091459__local_client_instance_replacements_create.sql` 保存替换谱系。旧实例全部工作区接管后从用户活动实例投影排除，但历史实例、Run 和已投递任务外键保留；旧实例真实重连会清除替换标记。
+
+### How
+
+- `LocalWorkspaceApplicationServiceTest` 2/2；`FlywayMigrationNamingTest` 与 MyBatis 实例/工作区/Session/夜间任务集成测试 19/19；安装包和更新状态机两套 shell 验收均通过。
+- 使用 JDK 25、根目录 `.env.test` 和 `test` profile 执行 `restart-dev-services.sh`，后端 readiness、前端 3000、manager 和 ClickHouse 均启动成功；真实 PostgreSQL 已成功执行 `20260825091459`。
+- migration 在源码、classes、persistence JAR 和 app JAR 中 SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。本机固定测试库只有一个活动客户端实例，无重复行可清理。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；保留并排除工作区已有托盘弹层代码、缓存、日志目录和 node_modules 改动。
+
+### Result
+
+- 新版安装包可安全覆盖安装并立即运行新版，不会因普通重装生成第二实例；已产生新 ID 的历史安装可在重新选择同一目录后安全恢复原工作区和会话。
+- 本次不新增部署节点、不修改 HTTP API、RunEvent/SSE、generated SDK、OpenCode 源码或 `.env*`；新增一条前向 Flyway 结构 migration，并同步架构、部署、模块与数据库说明。

@@ -209,6 +209,11 @@ execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧�
 已冻结目标为准；本地会话不得重新分配服务器进程。Run 接受后必须把实际 runtime kind、客户端实例和 generation
 写回 `runs`，保证历史、刷新和前端状态展示与真实执行位置一致。
 
+客户端重装导致实例 ID 变化时，`LocalWorkspaceApplicationService` 只在旧实例离线、用户从新客户端重新选择目录且
+`rootDigest + fileSystemIdentity` 唯一命中历史绑定后执行接管。接管保留 workspaceId，并在同一事务内 CAS 更新工作区
+绑定、Session 冻结目标和 `SCHEDULED` 夜间任务；`DISPATCHING` attempt 与历史 Run 保持原冻结目标。旧实例已无工作区时
+写入替换关系，使设置页健康统计忽略旧行但仍保留历史外键；仅凭 hostname/clientName 不允许接管。
+
 ## 受保护 Agent/Skill 运行
 
 本模块注册 `protected-opencode` 服务器运行时。本地工作区 Agent 目录只追加 Hub 的 opaque 已发布修订选择；
