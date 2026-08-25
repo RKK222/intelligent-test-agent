@@ -5,6 +5,47 @@
 
 ## Entries
 
+### 2026-08-25 - 基于当前 release 重建企业增量包并更新客户端重接入
+
+### Why
+
+- 上一批基于 `54aeccceec868647697e0834c62a32a34dae6020` 生成的企业候选包尚未部署，当前本地
+  `release` 已前进到 `2c4b56b2747571fcd45d2102d6dc390e26a9fc6d`，需要作废中间候选并从当前提交重新构建。
+- 本轮客户端主程序、普通用户安装器和前端/后端实例展示均有实际变化，不能只重封旧二进制；worker、manager、
+  toolbox 以及已独立部署的 CK/Mem0/BGE/pgvector 没有输入变化，不能重复打包或重启。
+
+### What
+
+- 使用正式发布入口重建后端、同源前端和组织密钥签名的麒麟 ARM64 普通用户客户端；新客户端不可变版本为
+  `20260825162157`，下载与控制地址继续固定为 `http://mimo.sdc.cs.icbc:9996`，公共能力继续锁定
+  `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+- 当前客户端支持服务端 key 轮换后的安全重新接入、桌面“启动/重连”入口和更早初始化文件日志；后端实例列表只展示
+  仍有 Redis 实时连接的实例，前端能力来源文案统一为 `SkillMarket/MIMO`。
+- 组件清单为 worker runtime `reuse`、toolbox `reuse`、local client `included`、LobeHub/memory runtime
+  `disabled`；最终平台 ZIP 只保留客户端 `20260825162157`，未携带本机历史 release。
+
+### How
+
+- 正式发布脚本完成 Spring Bean 构造器门禁、JDK 25 后端封装、VitePress/TypeScript/前端生产构建、客户端签名分发、
+  persistence/XXL JAR migration 字节门禁和组件增量检查。
+- JDK 25 Maven reactor 7 模块通过：本地客户端 98 项通过、1 项条件跳过，system-management 72 项通过；
+  前端全量 Vitest 152 个文件通过，2219 项通过、1 项条件跳过。客户端普通用户安装与稳定升级/回滚两套 Shell
+  验收、固定外层包和逐节点门禁、ZIP CRC 与内外层嵌套摘要检查均通过。
+- 首次补跑 Maven 时系统默认 JDK 17 无法加载 Java 21 字节码，显式切换项目约定的本机 JDK 25 后同一测试范围完整通过；
+  该问题未修改源码或制品。
+
+### Result
+
+- 正式二进制批次已验证；记录提交后只用同批已验证制品执行 `--zip-only` 重封内层，再重建固定名双后台外层包，
+  最终 SHA-256 以交付目录的配套校验文件和后续追溯提交为准。
+- 相对企业 2026-08-24 已部署数据库历史，本轮 PostgreSQL 只允许新增
+  `V20260825091459__local_client_instance_replacements_create.sql`，源码 SHA-256 为
+  `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`，Flyway checksum 为
+  `749555545`；XXL MySQL 和 ClickHouse 本轮不得新增 history。现场历史不符、失败记录、未知更高版本或未知 checksum
+  必须停止，禁止 `repair`、`outOfOrder` 或手工改表。
+- 本次不新增部署节点，不修改 OpenCode 只读源码、generated SDK 或 `.env*`；业务 API 路径、RunEvent/SSE 和数据库
+  migration 字节均未在本轮新改，企业真实 `.4 → .114 → .2` 部署及麒麟用户清空后首次安装仍待现场验收。
+
 ### 2026-08-25 - 将重复打包与签名问题固化到企业部署技能
 
 ### Why
