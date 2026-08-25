@@ -1136,6 +1136,7 @@ describe("AgentConfigPanel", () => {
     const dialog = await view.findByRole("dialog", { name: "删除多个条目" });
     await fireEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(apiClientMock.deletePublicAgentFile).toHaveBeenCalledTimes(2));
+    expect(view.emitted("request-git-commit")).toBeUndefined();
   });
 
   it("moves Ctrl-selected application Agent files together by drag and drop", async () => {
@@ -1239,6 +1240,9 @@ describe("AgentConfigPanel", () => {
         linuxServerId: "linux-1"
       }
     ]]));
+    expect(view.emitted("request-git-commit")).toEqual([[
+      { scope: "PUBLIC", path: "agents/review.md", kind: "FILE", displayName: "review.md" }
+    ]]);
   });
 
   it("recursively deletes an application Agent directory and reports the Diff mutation", async () => {
@@ -1266,6 +1270,9 @@ describe("AgentConfigPanel", () => {
         workspaceId: "wrk_1234567890abcdef"
       }
     ]]));
+    expect(view.emitted("request-git-commit")).toEqual([[
+      { scope: "WORKSPACE", path: "skills/obsolete", kind: "SKILL", displayName: "obsolete" }
+    ]]);
   });
 
 });

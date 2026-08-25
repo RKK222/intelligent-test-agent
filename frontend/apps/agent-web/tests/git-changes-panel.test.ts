@@ -449,6 +449,82 @@ describe("GitChangesPanel", () => {
     }
   });
 
+  it("waits for the deletion revision and retries a stale public quick-commit Diff", async () => {
+    let staged = false;
+    const pendingDiffResolvers: Array<(value: { files: Array<{
+      path: string;
+      status: string;
+      staged: boolean;
+      patch: string;
+    }> }) => void> = [];
+    apiClientMock.getPublicAgentDiff
+      .mockResolvedValueOnce({ files: [] })
+      .mockImplementationOnce(() => new Promise((resolve) => pendingDiffResolvers.push(resolve)))
+      .mockImplementationOnce(() => new Promise((resolve) => pendingDiffResolvers.push(resolve)))
+      .mockImplementation(async () => ({
+        files: [{ path: "opencode/agents/deleted.md", status: "D", staged, patch: "" }]
+      }));
+    apiClientMock.stagePublicAgentFiles.mockImplementation(async () => {
+      staged = true;
+    });
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-08-25T00:00:00Z",
+      updatedAt: "2026-08-25T00:00:00Z"
+    };
+    const wrapper = mount(GitChangesPanel, {
+      props: {
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true,
+        agentConfigRevision: 0
+      },
+      global: { plugins: [pinia] }
+    });
+
+    try {
+      await waitFor(() => expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalledTimes(1));
+      const quickCommit = (wrapper.vm as unknown as {
+        openQuickAgentCommit: (request: {
+          scope: "PUBLIC";
+          path: string;
+          kind: "FILE";
+          displayName: string;
+        }) => Promise<void>;
+      }).openQuickAgentCommit({
+        scope: "PUBLIC",
+        path: "agents/deleted.md",
+        kind: "FILE",
+        displayName: "deleted.md"
+      });
+      const revisionRefresh = wrapper.setProps({ agentConfigRevision: 1 });
+      await waitFor(() => expect(pendingDiffResolvers).toHaveLength(2));
+      pendingDiffResolvers[0]!({ files: [] });
+      pendingDiffResolvers[1]!({ files: [] });
+      await Promise.all([quickCommit, revisionRefresh]);
+
+      expect(apiClientMock.stagePublicAgentFiles).toHaveBeenCalledWith(
+        ["opencode/agents/deleted.md"],
+        "agw_public"
+      );
+      const dialog = within(document.body).getByRole("dialog", { name: "提交并推送 Agent 文档" });
+      expect(dialog.textContent).toContain("已自动暂存 1 个目标文件");
+      expect(wrapper.emitted("quick-agent-commit-failed")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it("does not expose mock data button and loads workspace plus application agent changes", async () => {
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
       files: [

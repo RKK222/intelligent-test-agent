@@ -1644,6 +1644,9 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
       return;
     }
 
+    // 删除事件会先递增父层 revision；等该 watcher 入队后再发起本次刷新，确保快捷提交持有最新 token，
+    // 不会被并发的旧刷新提前取消并误判“没有可提交的 Git 变更”。
+    await nextTick();
     await refreshChanges();
     if (generation !== quickAgentCommitGeneration) return;
     if (activeAgentPublishPending.value) {
@@ -1655,7 +1658,22 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
       return;
     }
 
-    const targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
+    let targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
+    if (targetFiles.length === 0) {
+      // 文件删除后 Git 状态可能比文件 RPC 晚一个刷新周期可见；自动补一次真实刷新，不要求用户手工切换 Diff。
+      await nextTick();
+      await refreshChanges();
+      if (generation !== quickAgentCommitGeneration) return;
+      if (activeAgentPublishPending.value) {
+        failQuickAgentCommit("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
+        return;
+      }
+      if (activeAgentConflicts.value.length > 0) {
+        failQuickAgentCommit("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
+        return;
+      }
+      targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
+    }
     if (targetFiles.length === 0) {
       failQuickAgentCommit(request.kind === "SKILL"
         ? "该 Skill 文件夹当前没有可提交的 Git 变更。"

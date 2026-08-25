@@ -52,6 +52,8 @@ type AgentClipboard = {
   entries: FileTreeEntry[];
   mode: "copy" | "move";
 };
+type QuickCommitEntry = Pick<FileTreeEntry, "path" | "type">
+  & Partial<Pick<FileTreeEntry, "name" | "displayName">>;
 
 const props = defineProps<{
   baseUrl: string;
@@ -441,7 +443,7 @@ function canWriteScope(scope: Scope) {
 }
 
 /** 文件逐个提交；Skill 以 skills 下的一级包目录作为一个完整 Git 提交单元。 */
-function quickCommitKind(entry: FileTreeEntry): AgentQuickCommitRequest["kind"] | null {
+function quickCommitKind(entry: Pick<FileTreeEntry, "path" | "type">): AgentQuickCommitRequest["kind"] | null {
   const path = entry.path.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
   if (entry.type === "directory" && /^skills\/[^/]+$/i.test(path)) return "SKILL";
   if (entry.type === "file" && !/^skills\//i.test(path)) return "FILE";
@@ -452,15 +454,21 @@ function canQuickCommitEntry(entry: FileTreeEntry): boolean {
   return quickCommitKind(entry) !== null;
 }
 
-function requestQuickGitCommit(scope: Scope, entry: FileTreeEntry) {
+function quickGitCommitRequest(scope: Scope, entry: QuickCommitEntry): AgentQuickCommitRequest | null {
   const kind = quickCommitKind(entry);
-  if (!kind || !canWriteScope(scope) || busy.value) return;
-  emit("request-git-commit", {
+  if (!kind || !canWriteScope(scope)) return null;
+  return {
     scope,
     path: entry.path,
     kind,
-    displayName: entry.displayName?.trim() || entry.name
-  });
+    displayName: entry.displayName?.trim() || entry.name?.trim() || fileName(entry.path)
+  };
+}
+
+function requestQuickGitCommit(scope: Scope, entry: FileTreeEntry) {
+  if (busy.value) return;
+  const request = quickGitCommitRequest(scope, entry);
+  if (request) emit("request-git-commit", request);
 }
 
 /** Agent 配置树复用工作空间的新建面板，作用域只负责补齐文件路由上下文。 */
@@ -705,6 +713,7 @@ async function renameAgentEntry(scope: Scope, path: string, name: string) {
 async function deleteAgentEntry(path: string, type: "file" | "directory") {
   const scope = deleteEntryScope.value;
   if (!canWriteScope(scope) || busy.value || !canDeleteEntry(scope, path)) return;
+  let quickCommitRequest: AgentQuickCommitRequest | null = null;
   busy.value = true;
   errorMessage.value = "";
   try {
@@ -738,11 +747,14 @@ async function deleteAgentEntry(path: string, type: "file" | "directory") {
     await loadDirectory(scope, parent, true);
     emitFilesMutated(scope, { paths: [path], deleted: { path, type } });
     notifySuccess(type === "file" ? "Agent 文件已删除" : "Agent 文件夹已删除", path);
+    // 删除落盘并刷新树后再触发快捷提交；Git Changes 会从真实 Diff 中 stage 删除记录。
+    quickCommitRequest = quickGitCommitRequest(scope, { path, type });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, `删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
     notifyError(`删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`, errorMessage.value);
   } finally {
     busy.value = false;
+    if (quickCommitRequest) emit("request-git-commit", quickCommitRequest);
   }
 }
 

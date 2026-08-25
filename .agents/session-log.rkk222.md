@@ -14528,3 +14528,26 @@
 
 - 受管公共 config 已按要求先与远程 `master` 完全一致；随后用户真实失败测试产生的新待重推提交被完整保留。快捷推送成功时底层保持工作区，失败时自动进入 Diff 并保留既有错误与恢复信息。
 - 本次不新增 API、事件协议、数据库、Flyway、部署节点、依赖、性能模型、安全边界、环境配置、generated SDK 或 OpenCode 源码；真实远程副作用由既有 Git 发布接口负责，回归使用 mock 覆盖成功/失败状态收敛。
+
+## 2026-08-25 - 删除 Agent 文档后自动进入快捷提交
+
+### Why
+
+- 行内快捷 Git 入口只能在文件仍存在时点击；普通 Agent 文件或整个 Skill 被删除后，树中不再有入口，用户仍需手工切到 Diff 才能提交删除记录。
+
+### What
+
+- 单个普通 Agent 文件删除成功后自动发起该文件的快捷提交；删除 `skills/{skillName}` 一级目录时按整个 Skill 发起同一流程，由既有 Git Diff 暂存真实删除记录。快捷提交会等待删除 revision 刷新入队，并在首次目标 Diff 仍为空时自动再刷新一次，避免并发刷新误报无变更。
+- 删除 RPC 失败时不发起提交；Ctrl/Cmd 多文件批量删除继续保留在 Diff 统一处理，避免拆成多个提交弹框。
+- 同步 Agent 配置面板测试、agent-web README 与 PACKAGE；未修改提交、推送 API 或失败切换 Diff 的既有收敛逻辑。
+
+### How
+
+- 前端全量 Vitest 152 个文件通过，2229 passed / 1 skipped；agent-web typecheck、用户手册及 agent-web production build、`git diff --check` 均通过；新增回归模拟删除 revision 与快捷刷新并发、首轮 Diff 为空而下一轮出现删除记录。
+- 仅重启本次涉及的真实前端 screen；`127.0.0.1:3000` 返回 200，后端 health/readiness 为 `UP`，登录 CORS 预检为 200。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目；受管公共个人 worktree 中用户当前 `opencode/agents/wr.md` 删除状态保持不变，未替用户暂存、重置或提交。
+
+### Result
+
+- 以后从配置树删除单个普通文件或整个一级 Skill，删除完成即弹出原有提交信息框；成功仍留在工作区，暂存、提交或推送失败仍进入 Diff。
+- 本次仅修改前端交互、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、依赖、性能模型、安全协议、环境配置、generated SDK 或只读 OpenCode 源码。
