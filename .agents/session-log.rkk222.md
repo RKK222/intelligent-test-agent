@@ -14437,3 +14437,26 @@
   企业客户端不再硬编码不存在的 `enterprise-openai`，而采用公共配置与数据库运行快照一致的路由 ID。
 - 本次不新增部署节点，不改数据库结构、Flyway、RunEvent/SSE、generated SDK、OpenCode 源码或 `.env*`；既有 HTTP 路径和
   DTO 形状保持兼容，新增一条 MyBatis XML 查询。企业现场仍需部署新后端/前端/客户端制品后，用 `001177621` 完成真实接管和对话复测。
+
+## 2026-08-25 - 公共配置新增存量案例推荐子智能体
+
+### Why
+
+- 用户要求在独立公共 config 仓库新增存量案例推荐 subagent，并明确以本周同步的 `testagent.7z` 中有效 `opencode/` 配置为准；远程仓库额外的顶层历史会话等内容不作为实现依据。
+
+### What
+
+- 在 `temp/opencode-config` 新增隐藏的 `stock-case-recommendation`，由测试设计入口通过 `STOCK_CASES` 短路调用；审核意图优先，普通文件路径或任意斜杠文本不误触发。
+- 新增最小权限 `asset_case_list` 工具，通过既有 `http_call.py` 查询 `/tcds/cases/by-menu`；返回结构化完整性状态，并拒绝 HTTP/业务错误、分页残片、重复或缺字段案例以及超过安全输出上限的结果。
+- 未采用附件的 `write-file.ts`：运行时已有受 `edit` 权限保护的内置 `write`，附件实现既重复能力，也不能可靠阻止绝对路径、路径穿越和符号链接越界。
+- 同步 `opencode/AGENTS.md`、测试设计 skill 元数据 4.7.0 和三条路由 eval；生成/审核 `policyManifest` 继续保持 4.6.0，以兼容等待恢复的既有设计会话。工具文件使用 `asset_case_list.ts`，确保 OpenCode 1.18.x 按文件名注册的工具 ID 与 prompt/权限一致。
+
+### How
+
+- 运行 OpenCode `debug agent` 确认子 Agent 为 hidden subagent，`asset_case_list/write` 可用且 `bash/task` 禁用；`debug startup` 成功。
+- 使用 Bun 本地模拟资产接口验证成功、空结果、HTTP 错误、分页不完整、重复编号、非法服务配置和 45 KiB 输出门禁；skill 离线校验、eval JSON、frontmatter/引用和 `git diff --check` 通过。
+
+### Result
+
+- 公共 config 仓库 `master` 已提交 `9d0abe0`（`新增存量案例推荐子智能体`），未推送远端；远程额外顶层文件未清理、未继承到本次改动。
+- 主项目不新增部署节点，不修改 API、RunEvent/SSE、数据库、Flyway、性能、安全协议、环境文件、generated SDK 或只读 OpenCode 源码；真实企业资产服务仍需在配置发布后做一次端到端推荐验收。
