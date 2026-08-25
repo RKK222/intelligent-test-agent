@@ -51,8 +51,8 @@
 
 ### Result
 
-- 正式包基于源码提交 `c73b3ddfb9827141e1b53cd72bb6d19efcc8b61f`：客户端版本 `20260825135217`；内层 ZIP SHA-256 `5975ed638831a96826017689aade5e64ff9337bb84bd9ac4b4dc970862e5aaff`；外层固定名包 SHA-256 `2b96ba79c9212201af90a1c1f9c8872871350abd2bef1c84dd141f092f6048f9`。
-- 后端 JAR、前端 tar、麒麟用户包分别为 `4ad56a5862659ea1fb2a335a5678cee93b0de67d477ba74a76e62ace126c0886`、`f26ba562072feec1f36123ee9b6ca69d1942eb1449b791d0947e2d9fdea145a5`、`365a0f17ecd9afb27d83c096ebd4e86c40e7e576d461d71487697218093ba6b2`；三份节点包 `.2/.4/.114` 分别为 `b1ba62b4fecd605a81ad6e0bd7dd6ba0409e755b155907b1318710afb3bf4b5a`、`37c317140daedb9c0f73b4d5ce2f66069030496d912b04cb0cf1f181724dd3cd`、`8279272e5a6786e126a830ccd744143752f475d6053ed93d155a7a84e648bf4b`。
+- 首个候选包复核时发现外层 `START-HERE.md` 仍沿用 8 月 24 日 Flyway 基线，已明确作废且不得分发；修正文档和封包门禁后再生成最终 hash，避免包内追溯记录引用已作废候选。
+- 后端 JAR、前端 tar、麒麟用户包分别固定为 `4ad56a5862659ea1fb2a335a5678cee93b0de67d477ba74a76e62ace126c0886`、`f26ba562072feec1f36123ee9b6ca69d1942eb1449b791d0947e2d9fdea145a5`、`365a0f17ecd9afb27d83c096ebd4e86c40e7e576d461d71487697218093ba6b2`；最终内外层与节点包 hash 在封装完成后追加记录。
 - 组件清单为 worker runtime `reuse`、toolbox `reuse`、客户端 `included`、LobeHub/memory runtime `disabled`；平台 ZIP 从约 697 MiB 降回约 423 MiB，只含当前客户端 release。Flyway 当前待企业库执行的前向迁移仍为 `V20260825091459__local_client_instance_replacements_create.sql`，SHA-256 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。
 - 本次不新增部署节点，不修改业务 HTTP API、RunEvent/SSE、数据库结构、Flyway SQL、generated SDK、OpenCode 源码或 `.env*`；只收紧企业发布归档完整性与增量边界。
 
