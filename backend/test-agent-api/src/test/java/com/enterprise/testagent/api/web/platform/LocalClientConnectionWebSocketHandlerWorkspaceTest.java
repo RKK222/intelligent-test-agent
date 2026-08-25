@@ -22,6 +22,7 @@ import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupS
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -31,6 +32,29 @@ import reactor.test.StepVerifier;
 
 /** 验证客户端主动注册不会阻塞接收同连接上的根目录校验回包。 */
 class LocalClientConnectionWebSocketHandlerWorkspaceTest {
+
+    @Test
+    void restoresRecentWorkspaceAsynchronouslyAfterReconnect() throws Exception {
+        UserId userId = new UserId("usr_recent_reconnect");
+        LocalClientInstanceId instanceId = new LocalClientInstanceId("lci_recent_reconnect");
+        LocalWorkspaceApplicationService workspaceService = mock(LocalWorkspaceApplicationService.class);
+        CountDownLatch restored = new CountDownLatch(1);
+        when(workspaceService.restoreRecentOnReconnect(
+                userId, instanceId, 13L, "trace-reconnect"))
+                .thenAnswer(ignored -> {
+                    restored.countDown();
+                    return Optional.empty();
+                });
+        LocalClientConnectionWebSocketHandler handler = handler(workspaceService);
+        LocalClientConnectionWebSocketHandler.ConnectionState state =
+                new LocalClientConnectionWebSocketHandler.ConnectionState(
+                        userId, instanceId, 13, "grant-fingerprint", "trace-reconnect", true,
+                        ConcurrentHashMap.newKeySet());
+
+        handler.autoRestoreRecentWorkspace(state);
+
+        assertThat(restored.await(2, TimeUnit.SECONDS)).isTrue();
+    }
 
     @Test
     void releasesInboundFlowBeforeBlockingWorkspaceRegistrationCompletes() throws Exception {

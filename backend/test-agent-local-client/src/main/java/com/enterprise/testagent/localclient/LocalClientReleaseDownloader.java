@@ -32,6 +32,9 @@ final class LocalClientReleaseDownloader {
     private static final Set<String> REQUIRED_KINDS = Set.of("CLIENT_JAR", "JDK", "OPENCODE");
     private static final String PUBLIC_CAPABILITIES_KIND = "PUBLIC_CAPABILITIES";
     private static final String SYSTEM_JDK_PROVENANCE = "source=system-jdk21\n";
+    private static final String ARTIFACT_CACHE_DIRECTORY = "artifact-cache";
+    private static final String CACHED_ARTIFACT_FILE = "artifact";
+    private static final String CACHED_SIGNATURE_FILE = "artifact.sig";
 
     private final LocalClientDownloadTrust trust;
     private final Path installRoot;
@@ -107,16 +110,7 @@ final class LocalClientReleaseDownloader {
             writePrivate(staging.resolve("manifest.json.sig"), manifestSignature);
             for (String kind : artifacts.keySet()) {
                 ManifestArtifact artifact = artifacts.get(kind);
-                Path target = staging.resolve(localFileName(kind));
-                fetcher.fetchFile(trust.resolve(artifact.path()), target, artifact.size());
-                if (!Files.isRegularFile(target) || Files.size(target) != artifact.size()) {
-                    throw new SecurityException("release artifact size verification failed");
-                }
-                LocalClientDownloadTrust.requireSha256(target, artifact.sha256());
-                byte[] signature = fetcher.fetchBytes(
-                        trust.resolve(artifact.signaturePath()), MAX_SIGNATURE_BYTES);
-                trust.verifySignature(target, signature);
-                writePrivate(staging.resolve(localFileName(kind) + ".sig"), signature);
+                obtainArtifact(releasesDirectory, staging, kind, artifact);
             }
             extractor.extract(staging.resolve("jdk.tar.gz"), staging);
             extractor.extract(staging.resolve("opencode.tar.gz"), staging);
@@ -133,6 +127,189 @@ final class LocalClientReleaseDownloader {
             // 候选进程必须看到 basename=版本号；无论成功与否都只清理随机暂存父目录。
             deleteTree(stagingRoot);
         }
+    }
+
+    /**
+     * 所有更新入口共用 kind/SHA-256 内容寻址缓存；旧 release 只用于首次升级时迁移填充缓存。
+     */
+    private void obtainArtifact(
+            Path releasesDirectory,
+            Path staging,
+            String kind,
+            ManifestArtifact artifact) throws Exception {
+        Path target = staging.resolve(localFileName(kind));
+        if (reuseCachedArtifact(kind, artifact, target)) {
+            return;
+        }
+        if (reuseExistingReleaseArtifact(releasesDirectory, kind, artifact, target)) {
+            cacheVerifiedArtifact(kind, artifact, target, target.resolveSibling(target.getFileName() + ".sig"));
+            return;
+        }
+
+        fetcher.fetchFile(trust.resolve(artifact.path()), target, artifact.size());
+        if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(target)
+                || Files.size(target) != artifact.size()) {
+            throw new SecurityException("release artifact size verification failed");
+        }
+        LocalClientDownloadTrust.requireSha256(target, artifact.sha256());
+        byte[] signature = fetcher.fetchBytes(
+                trust.resolve(artifact.signaturePath()), MAX_SIGNATURE_BYTES);
+        trust.verifySignature(target, signature);
+        Path signatureTarget = target.resolveSibling(target.getFileName() + ".sig");
+        writePrivate(signatureTarget, signature);
+        cacheVerifiedArtifact(kind, artifact, target, signatureTarget);
+    }
+
+    private boolean reuseCachedArtifact(
+            String kind,
+            ManifestArtifact artifact,
+            Path target) throws IOException {
+        Path cacheRoot = installRoot.resolve(ARTIFACT_CACHE_DIRECTORY);
+        if (!safeExistingCacheDirectory(cacheRoot)) {
+            return false;
+        }
+        if (!safeExistingCacheDirectory(cacheRoot.resolve(kind))) {
+            return false;
+        }
+        Path entry = cacheEntry(kind, artifact.sha256());
+        byte[] signature = verifiedSignature(entry, artifact);
+        if (signature == null) {
+            return false;
+        }
+        copyPrivate(entry.resolve(CACHED_ARTIFACT_FILE), target);
+        writePrivate(target.resolveSibling(target.getFileName() + ".sig"), signature);
+        return true;
+    }
+
+    private boolean reuseExistingReleaseArtifact(
+            Path releasesDirectory,
+            String kind,
+            ManifestArtifact artifact,
+            Path target) throws IOException {
+        try (var releases = Files.list(releasesDirectory)) {
+            List<Path> candidates = releases
+                    .filter(path -> !path.getFileName().toString().startsWith("."))
+                    .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS))
+                    .filter(path -> !Files.isSymbolicLink(path))
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .toList();
+            for (Path candidate : candidates) {
+                byte[] signature = verifiedSignature(
+                        candidate,
+                        localFileName(kind),
+                        localFileName(kind) + ".sig",
+                        artifact);
+                if (signature == null) {
+                    continue;
+                }
+                copyPrivate(candidate.resolve(localFileName(kind)), target);
+                writePrivate(target.resolveSibling(target.getFileName() + ".sig"), signature);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private byte[] verifiedSignature(Path cacheEntry, ManifestArtifact artifact) {
+        return verifiedSignature(
+                cacheEntry, CACHED_ARTIFACT_FILE, CACHED_SIGNATURE_FILE, artifact);
+    }
+
+    private byte[] verifiedSignature(
+            Path directory,
+            String artifactFileName,
+            String signatureFileName,
+            ManifestArtifact artifact) {
+        try {
+            if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(directory)) {
+                return null;
+            }
+            Path artifactFile = directory.resolve(artifactFileName);
+            Path signatureFile = directory.resolve(signatureFileName);
+            if (!Files.isRegularFile(artifactFile, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(artifactFile)
+                    || !Files.isRegularFile(signatureFile, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(signatureFile)
+                    || Files.size(artifactFile) != artifact.size()
+                    || Files.size(signatureFile) < 1
+                    || Files.size(signatureFile) > MAX_SIGNATURE_BYTES) {
+                return null;
+            }
+            LocalClientDownloadTrust.requireSha256(artifactFile, artifact.sha256());
+            byte[] signature = Files.readAllBytes(signatureFile);
+            trust.verifySignature(artifactFile, signature);
+            return signature;
+        } catch (IOException | RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private void cacheVerifiedArtifact(
+            String kind,
+            ManifestArtifact artifact,
+            Path sourceArtifact,
+            Path sourceSignature) throws IOException {
+        Path cacheRoot = requirePrivateDirectory(installRoot.resolve(ARTIFACT_CACHE_DIRECTORY));
+        Path kindDirectory = requirePrivateDirectory(cacheRoot.resolve(kind));
+        Path finalEntry = cacheEntry(kind, artifact.sha256());
+        if (verifiedSignature(finalEntry, artifact) != null) {
+            return;
+        }
+
+        Path staging = cacheRoot.resolve(
+                ".prepare-" + UUID.randomUUID().toString().replace("-", ""));
+        createPrivateDirectory(staging);
+        try {
+            copyPrivate(sourceArtifact, staging.resolve(CACHED_ARTIFACT_FILE));
+            copyPrivate(sourceSignature, staging.resolve(CACHED_SIGNATURE_FILE));
+            if (verifiedSignature(staging, artifact) == null) {
+                throw new SecurityException("verified artifact cache staging changed");
+            }
+            if (verifiedSignature(finalEntry, artifact) != null) {
+                return;
+            }
+            if (Files.exists(finalEntry, LinkOption.NOFOLLOW_LINKS)) {
+                deleteTree(finalEntry);
+            }
+            moveAtomically(staging, kindDirectory.resolve(artifact.sha256()));
+        } finally {
+            deleteTree(staging);
+        }
+    }
+
+    private Path cacheEntry(String kind, String sha256) {
+        Path cacheRoot = installRoot.resolve(ARTIFACT_CACHE_DIRECTORY);
+        Path entry = cacheRoot.resolve(kind).resolve(sha256).normalize();
+        if (!entry.getParent().equals(cacheRoot.resolve(kind))) {
+            throw new SecurityException("artifact cache path escapes install root");
+        }
+        return entry;
+    }
+
+    private static Path requirePrivateDirectory(Path directory) throws IOException {
+        if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(directory)) {
+                throw new SecurityException("artifact cache directory is unsafe");
+            }
+            setPrivateDirectoryPermissions(directory);
+            return directory;
+        }
+        createPrivateDirectory(directory);
+        return directory;
+    }
+
+    private static boolean safeExistingCacheDirectory(Path directory) {
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
+            return false;
+        }
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(directory)) {
+            throw new SecurityException("artifact cache directory is unsafe");
+        }
+        return true;
     }
 
     private ReleaseManifest parseManifest(byte[] bytes) {
@@ -255,6 +432,10 @@ final class LocalClientReleaseDownloader {
 
     private static void createPrivateDirectory(Path directory) throws IOException {
         Files.createDirectory(directory);
+        setPrivateDirectoryPermissions(directory);
+    }
+
+    private static void setPrivateDirectoryPermissions(Path directory) throws IOException {
         try {
             Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
         } catch (UnsupportedOperationException ignored) {
@@ -268,6 +449,23 @@ final class LocalClientReleaseDownloader {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
         } catch (UnsupportedOperationException ignored) {
             // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+        }
+    }
+
+    private static void copyPrivate(Path source, Path target) throws IOException {
+        boolean copied = false;
+        try {
+            Files.copy(source, target);
+            try {
+                Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
+            } catch (UnsupportedOperationException ignored) {
+                // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+            }
+            copied = true;
+        } finally {
+            if (!copied) {
+                Files.deleteIfExists(target);
+            }
         }
     }
 

@@ -256,9 +256,14 @@ release，原子切换 `current`，保留原 `credentials.properties`、`state.j
 重复安装必须先在本机重新执行 enroll，成功后删除标记再重启；不能因旧 `credentials.properties` 仍存在而跳过。
 验收时在重复安装前后记录 `state.json` 内的 `clientInstanceId`、
 `credentials.properties` 摘要和下方 `--version` 输出；前两者必须不变，版本必须更新到 catalog 最新值。
-JDK、OpenCode 和公共能力归档未变化时，打包结果保持确定性摘要；安装器仍逐项按
-新 manifest 校验大小、SHA-256 和 RSA 签名后从当前 release 复制，不再通过 HTTP 重复下载。客户端 JAR 或其它实际
-发生变化的制品继续正常下载并写入新的完整 release，不能跨目录硬链接或跳过签名。
+JDK、OpenCode 和公共能力归档未变化时，打包结果保持确定性摘要。稳定安装器和客户端自更新共用
+`<installRoot>/artifact-cache/<KIND>/<SHA-256>/artifact{,.sig}` 内容缓存，不再把某个旧 release 是否保留作为命中条件。
+每次命中都按新 manifest 重新校验类型、大小、SHA-256，并用当前内置发布公钥验签；缺失、摘要变化或验签失败时只下载
+对应制品并原子修复该缓存项。已有旧 release 仅作为首次升级填充共享缓存的兼容来源。新 release 仍生成完整独立副本，
+不能跨目录硬链接或跳过签名。因而仅客户端 JAR 变化时，除 catalog/manifest 及其签名等控制元数据外，制品层只下载新 JAR。
+发布前应对比上一 release 与新 release manifest：输入未变化时 `JDK`、`OPENCODE` 和 `PUBLIC_CAPABILITIES` 的
+`sha256` 必须分别一致；不一致表示缓存必然无法命中，应停止发布并排查归档确定性。安装回归必须同时覆盖两种情况：
+删除旧 release 后升级仍只请求实际变化的制品；单项缓存损坏只重新请求该项；再次安装同一 release 时除 catalog 外不再请求 release 制品。
 若实例 ID 变化，应先检查安装脚本与 Java 进程是否
 使用同一 `TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR/STATE_DIR`，不得通过伪造数据库实例归属代替修复。
 
@@ -281,8 +286,9 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
 短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
-若历史版本已经生成了新实例 ID，用户可直接在工作台选择历史工作区；平台会把已保存路径交给当前唯一在线客户端，
-核验真实路径摘要与文件系统身份后保留原 workspaceId 接管绑定。目录已经移动时再从客户端托盘重新选择原目录。
+客户端完成重连认证后，平台会自动把全局最近使用的本地工作区交给当前连接，核验真实路径摘要与文件系统身份并恢复
+客户端根映射，不要求用户在页面重复选择。若历史版本已经生成了新实例 ID，同一自动恢复流程会在当前唯一在线客户端上
+保留原 workspaceId 接管绑定；非最近工作区仍可在工作台直接选择并按同一规则恢复。目录已经移动时再从客户端托盘重新选择原目录。
 旧实例在线、身份不一致、同目录存在多个历史 Workspace 或该用户出现多个在线 route 时必须先停止并人工消除歧义。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认有且只有一个实例，且

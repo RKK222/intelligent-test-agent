@@ -24,6 +24,7 @@ sha256_file() {
 
 VERSION=20260820153045
 RELATIVE_OUTPUT_VERSION=20260820153046
+UPGRADE_VERSION=20260820153047
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
@@ -184,6 +185,24 @@ package_relative_output_release() {
   )
 }
 
+package_upgrade_release() {
+  TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jdk-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+    "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+      --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
+      --version "${UPGRADE_VERSION}" \
+      --download-base-url "${DOWNLOAD_ROOT}" \
+      --server-url "${SERVER_ROOT}" \
+      --allow-insecure-control true \
+      --signing-key "${TEST_ROOT}/signing-private.pem" \
+      --client-jar "${TEST_ROOT}/upgrade-test-agent-local-client.jar" \
+      --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+      --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
+      --skip-build
+}
+
 package_release
 package_relative_output_release
 test -f "${TEST_ROOT}/relative-dist/local-opencode-client/releases/${RELATIVE_OUTPUT_VERSION}/jdk.tar.gz"
@@ -302,6 +321,21 @@ for expected_request in \
   "GET /releases/${VERSION}/public-capabilities.tar.gz.sig "; do
   grep -q "${expected_request}" "${TEST_ROOT}/http.log"
 done
+
+# 保留一个使用签名 JDK 归档的首版安装，用于末尾验证内容缓存不依赖旧 release。
+mkdir -p "${TEST_ROOT}/install-upgrade-cache/config"
+cp "${TEST_ROOT}/install/config/credentials.properties" \
+  "${TEST_ROOT}/install-upgrade-cache/config/credentials.properties"
+chmod 0700 "${TEST_ROOT}/install-upgrade-cache/config"
+chmod 0600 "${TEST_ROOT}/install-upgrade-cache/config/credentials.properties"
+PATH="${TOOLS_WITHOUT_JAVA}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${TEST_ROOT}/install-upgrade-cache/runtime" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install-upgrade-cache/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install-upgrade-cache/state" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${TEST_ROOT}/dist/local-opencode-client/install.sh"
 
 # PATH java/javac 虽同指一组命令，home 内的外部 javac 链接仍必须拒绝并回退受签名 JDK。
 mkdir -p "${TEST_ROOT}/install-escaped/config"
@@ -570,5 +604,81 @@ CREDENTIALS
   fi
   test ! -L "${TEST_ROOT}/install-${failure_case}/runtime/current"
 done
+
+# 恢复首版 JDK 后再生成升级 release，保证摘要比较基于原始已签名制品。
+cp "${ORIGINAL_JDK_ARCHIVE}" "${RELEASE_DIR}/jdk.tar.gz"
+cp "${ORIGINAL_JDK_SIGNATURE}" "${RELEASE_DIR}/jdk.tar.gz.sig"
+
+# 相同运行时输入生成新 release 时摘要必须稳定；删除旧 release 后也应只请求新 JAR。
+printf 'test client jar version 2\n' >"${TEST_ROOT}/upgrade-test-agent-local-client.jar"
+package_upgrade_release >/dev/null
+UPGRADE_RELEASE_DIR="${TEST_ROOT}/dist/local-opencode-client/releases/${UPGRADE_VERSION}"
+UPGRADE_RUNTIME="${TEST_ROOT}/install-upgrade-cache/runtime"
+JDK_SHA="$(jq -r '.artifacts[] | select(.kind == "JDK") | .sha256' "${RELEASE_DIR}/manifest.json")"
+OPENCODE_SHA="$(jq -r '.artifacts[] | select(.kind == "OPENCODE") | .sha256' "${RELEASE_DIR}/manifest.json")"
+PUBLIC_CAPABILITIES_SHA="$(jq -r '.artifacts[] | select(.kind == "PUBLIC_CAPABILITIES") | .sha256' \
+  "${RELEASE_DIR}/manifest.json")"
+test "${JDK_SHA}" = \
+  "$(jq -r '.artifacts[] | select(.kind == "JDK") | .sha256' "${UPGRADE_RELEASE_DIR}/manifest.json")"
+test "${OPENCODE_SHA}" = \
+  "$(jq -r '.artifacts[] | select(.kind == "OPENCODE") | .sha256' "${UPGRADE_RELEASE_DIR}/manifest.json")"
+test -f "${UPGRADE_RUNTIME}/artifact-cache/JDK/${JDK_SHA}/artifact"
+test -f "${UPGRADE_RUNTIME}/artifact-cache/OPENCODE/${OPENCODE_SHA}/artifact"
+test -f "${UPGRADE_RUNTIME}/artifact-cache/PUBLIC_CAPABILITIES/${PUBLIC_CAPABILITIES_SHA}/artifact"
+rm -rf "${UPGRADE_RUNTIME}/releases/${VERSION}"
+test ! -e "${UPGRADE_RUNTIME}/releases/${VERSION}"
+: >"${TEST_ROOT}/http.log"
+PATH="${TOOLS_WITHOUT_JAVA}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${UPGRADE_RUNTIME}" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install-upgrade-cache/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install-upgrade-cache/state" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${TEST_ROOT}/dist/local-opencode-client/install.sh" >"${TEST_ROOT}/upgrade-install.log"
+grep -q '复用已校验的 JDK 内容缓存' "${TEST_ROOT}/upgrade-install.log"
+grep -q '复用已校验的 OPENCODE 内容缓存' "${TEST_ROOT}/upgrade-install.log"
+grep -q '复用已校验的 PUBLIC_CAPABILITIES 内容缓存' "${TEST_ROOT}/upgrade-install.log"
+grep -q "GET /releases/${UPGRADE_VERSION}/test-agent-local-client.jar " "${TEST_ROOT}/http.log"
+if grep -Eq "GET /releases/${UPGRADE_VERSION}/(jdk|opencode|public-capabilities)\\.tar\\.gz" \
+    "${TEST_ROOT}/http.log"; then
+  echo "新 release 意外重复下载了未变化的运行时依赖" >&2
+  exit 1
+fi
+
+# 损坏一项缓存并移除新 release，重装时只能重新下载损坏的 JDK 项。
+printf 'tampered-cache\n' >"${UPGRADE_RUNTIME}/artifact-cache/JDK/${JDK_SHA}/artifact"
+rm -rf "${UPGRADE_RUNTIME}/releases/${UPGRADE_VERSION}"
+test ! -e "${UPGRADE_RUNTIME}/releases/${UPGRADE_VERSION}"
+: >"${TEST_ROOT}/http.log"
+PATH="${TOOLS_WITHOUT_JAVA}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${UPGRADE_RUNTIME}" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install-upgrade-cache/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install-upgrade-cache/state" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${TEST_ROOT}/dist/local-opencode-client/install.sh" >"${TEST_ROOT}/repair-cache-install.log"
+grep -q "GET /releases/${UPGRADE_VERSION}/jdk.tar.gz " "${TEST_ROOT}/http.log"
+if grep -Eq "GET /releases/${UPGRADE_VERSION}/(test-agent-local-client\\.jar|opencode|public-capabilities\\.tar\\.gz)" \
+    "${TEST_ROOT}/http.log"; then
+  echo "单项缓存损坏意外触发其它制品下载" >&2
+  exit 1
+fi
+
+# 修复缓存后重复安装同一 release，不再请求任何 release 文件。
+: >"${TEST_ROOT}/http.log"
+PATH="${TOOLS_WITHOUT_JAVA}" \
+TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
+TEST_AGENT_LOCAL_CLIENT_TEST_PLATFORM=linux-arm64-glibc \
+TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT="${UPGRADE_RUNTIME}" \
+TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install-upgrade-cache/config" \
+TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install-upgrade-cache/state" \
+TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
+  sh "${TEST_ROOT}/dist/local-opencode-client/install.sh" >/dev/null
+if grep -q "GET /releases/${UPGRADE_VERSION}/" "${TEST_ROOT}/http.log"; then
+  echo "重复安装同一 release 意外请求了 release 制品" >&2
+  exit 1
+fi
 
 echo "Kylin ARM64 user package, immutable signed release, catalog and bootstrap verified"

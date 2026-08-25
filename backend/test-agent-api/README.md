@@ -21,6 +21,8 @@
   和数据库实际终态，不能由一次 WebSocket 写入代替持久化确认；冲突终态返回错误且不发 ACK。
 - `LocalClientConnectionWebSocketHandler` 完成认证注册时由 runtime 在同一用户行锁内发布新 route，并通过
   `LocalClientConnectionRevoker` 删除其它实例 route/grant、跨 Java 关闭物理连接，保证每用户至多一个实时本地实例。
+  `REGISTERED` 入队后异步调用 runtime 恢复全局最近使用的本地工作区；目录校验失败只记录可观察告警并保留已建立连接，
+  不把历史数据库路径直接视为可信根目录，也不要求页面通过重复选择才能初始化客户端根映射。
   声明 `MANAGED_MODEL_CONFIG_V1` 的企业客户端由 runtime 从公共 `opencode.jsonc` 生成受管配置，API 只负责写入
   `REGISTERED`，不在 handler 中拼接供应商或模型。
 

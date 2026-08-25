@@ -210,8 +210,9 @@ execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧�
 已冻结目标为准；本地会话不得重新分配服务器进程。Run 接受后必须把实际 runtime kind、客户端实例和 generation
 写回 `runs`，保证历史、刷新和前端状态展示与真实执行位置一致。
 
-客户端重装导致实例 ID 变化时，`LocalWorkspaceApplicationService` 在用户选择历史工作区时把保存的规范路径交给当前唯一
-在线客户端重新校验；也保留从新客户端重新选择目录的兜底。两条入口都只在旧实例离线且
+客户端重连完成后，`LocalWorkspaceApplicationService` 会自动恢复全局最近使用的本地工作区；同实例恢复客户端根映射，
+重装导致实例 ID 变化时交给当前唯一在线客户端重新校验并接管，无需页面再次选择。非最近工作区仍可由用户选择恢复，
+也保留从新客户端重新选择目录的兜底。所有入口都只在旧实例离线且
 `rootDigest + fileSystemIdentity` 唯一命中历史绑定后执行接管。接管保留 workspaceId，并在同一事务内 CAS 更新工作区
 绑定、Session 冻结目标和 `SCHEDULED` 夜间任务；`DISPATCHING` attempt 与历史 Run 保持原冻结目标。旧实例已无工作区时
 写入替换关系，使设置页健康统计忽略旧行但仍保留历史外键；仅凭 hostname/clientName 不允许接管。

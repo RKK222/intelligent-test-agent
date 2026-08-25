@@ -14551,3 +14551,27 @@
 
 - 以后从配置树删除单个普通文件或整个一级 Skill，删除完成即弹出原有提交信息框；成功仍留在工作区，暂存、提交或推送失败仍进入 Diff。
 - 本次仅修改前端交互、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、依赖、性能模型、安全协议、环境配置、generated SDK 或只读 OpenCode 源码。
+
+## 2026-08-25 - 本地客户端跨版本制品缓存与工作区重连恢复
+
+### Why
+
+- 企业用户重复安装或客户端自更新时，即使只有客户端 JAR 变化，仍可能重新下载 manifest 中全部运行制品；手工安装的既有复用又依赖旧 release 目录继续存在。
+- 客户端重连后最近本地工作区需要用户重新选择，多个离线工作区还会因当前选择叠加 active 样式而呈现不同颜色。
+
+### What
+
+- 稳定安装器与 Java 自更新统一使用 `<installRoot>/artifact-cache/<KIND>/<SHA-256>/artifact{,.sig}` 内容缓存；每次命中重新校验类型、大小、摘要和当前发布公钥签名，缺失、摘要变化或验签失败只下载并原子修复对应项。旧 release 仅作为第一次升级的迁移来源，新 release 继续保持完整不可变副本且不使用硬链接。
+- 客户端完成 `REGISTERED` 后异步恢复全局最近使用的本地工作区：重新核验真实路径摘要和文件系统身份，在同一实例恢复根映射，或由当前唯一在线实例接管离线旧绑定；失败只记录告警，不断开已认证连接。
+- 工作空间菜单为所有离线本地工作区统一禁用颜色，离线当前项不再叠加红色 active 样式；同步 local client、runtime、API、前端和企业部署说明。
+
+### How
+
+- JDK 25 下运行 `mvn -pl test-agent-local-client -am -Dtest=LocalClientReleaseDownloaderTest -Dsurefire.failIfNoSpecifiedTests=false test`，14 项通过，覆盖只下载变化 JAR、单项缓存损坏只下载该项和旧 release 首次迁移。
+- `bash deploy/internal/tests/local-opencode-client-package-test.sh` 通过，真实删除旧 release 后仅请求新 JAR，破坏 JDK 缓存后仅请求 JDK，修复后重复安装不请求 release 制品；`sh -n`、`bash -n` 和 `git diff --check` 通过。
+- 本轮前序定向验证中，`FigmaShell.test.ts` 67 项通过；工作区恢复 service/handler 6 项通过。最终按 `.env.test` / `test` profile 重跑整栈启动，26 模块后端 package、用户手册和 agent-web production build 均成功；随后 Docker Desktop 创建 ClickHouse 容器超过 60 秒仍停在 `Created`，已只终止本次重启链路的精确 PID。脚本在停止旧服务前被阻断，因此原后端 `127.0.0.1:8080` health/readiness 仍为 `UP`、前端 `127.0.0.1:3000` 返回 200、登录 CORS 预检为 200，但进程仍运行上一份 immutable JAR，新构建未完成整栈切换。
+
+### Result
+
+- 只有客户端 JAR 变化时，制品层只下载新 JAR；未变化的 JDK、OpenCode 和公共能力包可跨版本、跨旧 release 删除继续复用，单项缓存失效不会触发全量下载。
+- 最近本地工作区在客户端重连后默认可用，离线列表视觉统一。未新增部署节点、HTTP API、RunEvent/SSE、数据库、SQL 或 Flyway；未修改环境文件、generated SDK 或只读 OpenCode 源码。整栈后端启动仍受本机 Docker ClickHouse 卡住影响，属于未完成的运行态验证风险。

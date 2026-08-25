@@ -82,11 +82,51 @@ public class LocalWorkspaceApplicationService {
      */
     @Transactional
     public LocalWorkspaceView markRecent(UserId userId, WorkspaceId workspaceId, String traceId) {
+        LocalClientConnectionRoute route = requireWorkspaceActivationRoute(userId, workspaceId);
+        LocalWorkspaceView activated = activateWorkspace(userId, workspaceId, route, traceId);
+        managedWorkspaceRepository.savePreference(new UserWorkspacePreference(
+                userId, null, workspaceId, Instant.now()));
+        return activated;
+    }
+
+    /**
+     * 客户端重连后恢复全局最近使用的本地工作区，不要求页面再次触发选择动作。
+     *
+     * <p>全局最近项也可能是服务器工作区；这种情况直接跳过。恢复仍执行客户端真实路径、摘要和文件系统身份校验，
+     * 并用注册帧携带的 generation 限定当前物理连接，不能仅凭历史数据库路径自动接管。</p>
+     */
+    @Transactional
+    public Optional<LocalWorkspaceView> restoreRecentOnReconnect(
+            UserId userId,
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        Optional<UserWorkspacePreference> preference = managedWorkspaceRepository.findGlobalPreference(userId);
+        if (preference.isEmpty()) {
+            return Optional.empty();
+        }
+        WorkspaceId workspaceId = preference.orElseThrow().workspaceId();
+        Optional<LocalClientWorkspaceBinding> binding = localWorkspaceRepository.findByWorkspaceId(workspaceId)
+                .filter(candidate -> candidate.userId().equals(userId));
+        if (binding.isEmpty()) {
+            return Optional.empty();
+        }
+        LocalClientConnectionRoute route = requireOwnedOnlineRoute(userId, clientInstanceId);
+        if (route.connectionGeneration() != connectionGeneration) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
+        }
+        return Optional.of(activateWorkspace(userId, workspaceId, route, traceId));
+    }
+
+    private LocalWorkspaceView activateWorkspace(
+            UserId userId,
+            WorkspaceId workspaceId,
+            LocalClientConnectionRoute route,
+            String traceId) {
         LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
         workspaceRepository.findById(workspaceId)
                 .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "本地工作区不可用"));
-        LocalClientConnectionRoute route = requireWorkspaceActivationRoute(userId, workspaceId);
         requireCurrentConnection(route);
 
         localWorkspaceRepository.lockRegistration(userId, route.clientInstanceId());
@@ -122,8 +162,6 @@ public class LocalWorkspaceApplicationService {
                     route.connectionGeneration(),
                     traceId);
         }
-        managedWorkspaceRepository.savePreference(new UserWorkspacePreference(
-                userId, null, workspaceId, Instant.now()));
         return activated;
     }
 

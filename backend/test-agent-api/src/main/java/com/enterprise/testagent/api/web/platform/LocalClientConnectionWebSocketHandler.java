@@ -297,11 +297,27 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             state.generation(),
                             routeResolver.currentBackendProcessIdValue(),
                             frame.traceId());
+                    autoRestoreRecentWorkspace(state);
                     autoStart(state);
                     return state;
                 })
                 .subscribeOn(Schedulers.boundedElastic())
                 .then();
+    }
+
+    /** REGISTERED 入队后恢复最近本地工作区；失败只保留为可观察告警，不中断已建立的客户端连接。 */
+    void autoRestoreRecentWorkspace(ConnectionState state) {
+        Mono.fromCallable(() -> workspaceService.restoreRecentOnReconnect(
+                        state.userId(), state.clientInstanceId(), state.generation(), state.traceId()))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe(
+                        restored -> restored.ifPresent(workspace -> LOGGER.info(
+                                "local_client_recent_workspace_restored clientInstanceId={} workspaceId={} generation={} traceId={}",
+                                state.clientInstanceId().value(), workspace.workspaceId(),
+                                state.generation(), state.traceId())),
+                        error -> LOGGER.warn(
+                                "local_client_recent_workspace_restore_failed clientInstanceId={} generation={} traceId={}",
+                                state.clientInstanceId().value(), state.generation(), state.traceId(), error));
     }
 
     /** 注册响应入队后异步走公共启动入口，避免阻塞同一 WebSocket 入站流等待生命周期回包。 */

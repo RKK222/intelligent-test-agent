@@ -2395,8 +2395,11 @@ function submitJoinApp() {
                   :class="[
                     'figma-app-menu-item',
                     'figma-workspace-menu-item',
+                    workspace.online === false && 'is-offline',
                     workspace.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible',
-                    workspace.workspaceId === selectedLocalWorkspaceId && 'is-active'
+                    workspace.online !== false
+                      && workspace.workspaceId === selectedLocalWorkspaceId
+                      && 'is-active'
                   ]"
                   role="option"
                   :aria-selected="workspace.workspaceId === selectedLocalWorkspaceId"
@@ -4702,6 +4705,15 @@ function submitJoinApp() {
 .figma-workspace-menu-item.is-git-inaccessible {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.figma-workspace-menu-item.is-offline {
+  color: #9ca3af;
+}
+
+.figma-workspace-menu-item.is-offline .figma-app-menu-item-check,
+.figma-workspace-menu-item.is-offline .figma-context-menu-type-icon {
+  color: #9ca3af;
 }
 
 .figma-workspace-menu-item .figma-app-menu-item-name {

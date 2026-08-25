@@ -1378,6 +1378,31 @@ describe("FigmaShell", () => {
     });
   });
 
+  it("uses one disabled visual state for all offline local workspaces", async () => {
+    const wrapper = mountShell({
+      props: {
+        workspaceKind: "LOCAL_CLIENT",
+        workspaceName: "offline-selected",
+        selectedLocalWorkspaceId: "wrk-offline-selected",
+        localWorkspaces: [
+          { workspaceId: "wrk-offline-selected", name: "offline-selected", online: false },
+          { workspaceId: "wrk-offline-other", name: "offline-other", online: false }
+        ]
+      } as any
+    });
+
+    await wrapper.get('[data-testid="header-workspace-selector"]').trigger("click");
+    const selected = wrapper.get('[aria-label="打开本地工作区offline-selected"]');
+    const other = wrapper.get('[aria-label="打开本地工作区offline-other"]');
+
+    expect(selected.attributes("disabled")).toBe("");
+    expect(other.attributes("disabled")).toBe("");
+    expect(selected.classes()).toContain("is-offline");
+    expect(other.classes()).toContain("is-offline");
+    expect(selected.classes()).not.toContain("is-active");
+    expect(other.classes()).not.toContain("is-active");
+  });
+
   it("grays out Git-inaccessible local and server workspaces with a safe reason", async () => {
     const deniedServer = {
       workspaceId: "workspace-denied",

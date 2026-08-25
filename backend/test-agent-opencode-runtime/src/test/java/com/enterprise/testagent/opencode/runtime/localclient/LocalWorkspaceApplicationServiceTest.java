@@ -301,4 +301,72 @@ class LocalWorkspaceApplicationServiceTest {
         verify(bindings).rebind(any(LocalClientWorkspaceBinding.class), eq(oldClientId));
         verify(recentWorkspaces).savePreference(any(UserWorkspacePreference.class));
     }
+
+    @Test
+    void reconnectRestoresRecentLocalWorkspaceWithoutSelectingItAgain() {
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        ManagedWorkspaceRepository recentWorkspaces = mock(ManagedWorkspaceRepository.class);
+        LocalClientWorkspaceRepository bindings = mock(LocalClientWorkspaceRepository.class);
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientWorkspaceFileGateway files = mock(LocalClientWorkspaceFileGateway.class);
+        SessionRuntimeTargetRepository sessionTargets = mock(SessionRuntimeTargetRepository.class);
+        NightExecutionTaskRepository nightTasks = mock(NightExecutionTaskRepository.class);
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
+                workspaces, recentWorkspaces, bindings, instances, connections, files,
+                sessionTargets, nightTasks, routes, objectMapper);
+
+        Instant now = Instant.parse("2026-08-25T12:00:00Z");
+        UserId userId = new UserId("usr_reconnect_recent");
+        LocalClientInstanceId clientId = new LocalClientInstanceId("lci_reconnect_recent");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_reconnect_recent");
+        BackendProcessId backendProcessId = new BackendProcessId("bjp_reconnect_recent");
+        LocalClientInstance instance = mock(LocalClientInstance.class);
+        LocalClientConnectionRoute route = mock(LocalClientConnectionRoute.class);
+        LocalClientWorkspaceBinding binding = new LocalClientWorkspaceBinding(
+                workspaceId, userId, clientId, "/home/test/recent", "recent-root-digest",
+                "recent-file-system", now.minusSeconds(60), now.minusSeconds(60));
+        Workspace workspace = new Workspace(
+                workspaceId, "recent", "/home/test/recent", WorkspaceStatus.ACTIVE,
+                now.minusSeconds(60), now.minusSeconds(60), null, "trace_old");
+        ObjectNode registration = objectMapper.createObjectNode()
+                .put("normalizedRootPath", "/home/test/recent")
+                .put("rootDigest", "recent-root-digest")
+                .put("fileSystemIdentity", "recent-file-system");
+
+        when(recentWorkspaces.findGlobalPreference(userId)).thenReturn(Optional.of(
+                new UserWorkspacePreference(userId, null, workspaceId, now.minusSeconds(30))));
+        when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(binding));
+        when(instances.findById(clientId)).thenReturn(Optional.of(instance));
+        when(instance.userId()).thenReturn(userId);
+        when(connections.find(clientId)).thenReturn(Optional.of(route));
+        when(route.userId()).thenReturn(userId);
+        when(route.clientInstanceId()).thenReturn(clientId);
+        when(route.connectionGeneration()).thenReturn(31L);
+        when(route.backendProcessId()).thenReturn(backendProcessId);
+        when(routes.isCurrent(backendProcessId)).thenReturn(true);
+        when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
+        when(files.invoke(
+                eq(clientId.value()), eq(31L), eq(null), eq(null),
+                eq("workspace.validateRoot"), any(), eq("trace_reconnect")))
+                .thenReturn(registration);
+        when(files.invoke(
+                eq(clientId.value()), eq(31L), eq(workspaceId.value()), eq(null),
+                eq("workspace.registerRoot"), any(), eq("trace_reconnect")))
+                .thenReturn(registration);
+
+        Optional<LocalWorkspaceApplicationService.LocalWorkspaceView> restored =
+                service.restoreRecentOnReconnect(userId, clientId, 31L, "trace_reconnect");
+
+        assertThat(restored).isPresent();
+        assertThat(restored.orElseThrow().workspaceId()).isEqualTo(workspaceId.value());
+        assertThat(restored.orElseThrow().online()).isTrue();
+        verify(bindings).lockRegistration(userId, clientId);
+        verify(files).invoke(
+                eq(clientId.value()), eq(31L), eq(workspaceId.value()), eq(null),
+                eq("workspace.registerRoot"), any(), eq("trace_reconnect"));
+        verify(recentWorkspaces, never()).savePreference(any(UserWorkspacePreference.class));
+    }
 }

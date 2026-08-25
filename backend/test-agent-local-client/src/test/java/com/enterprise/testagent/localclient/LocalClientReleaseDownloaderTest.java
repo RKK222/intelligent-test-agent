@@ -15,8 +15,8 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.Signature;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,6 +76,95 @@ class LocalClientReleaseDownloaderTest {
                 "releases/" + TARGET_VERSION + "/jdk.tar.gz"));
         assertThat(fetcher.requestedBytes).contains(trust.resolve(
                 "releases/" + TARGET_VERSION + "/jdk.tar.gz.sig"));
+    }
+
+    @Test
+    void shouldDownloadOnlyChangedClientJarWhenRuntimeArtifactsExistInSharedCache() throws Exception {
+        Path runtime = temporaryDirectory.resolve("runtime-shared-cache");
+        cacheArtifact(runtime, "JDK", "jdk.tar.gz");
+        cacheArtifact(runtime, "OPENCODE", "opencode.tar.gz");
+        cacheArtifact(runtime, "PUBLIC_CAPABILITIES", "public-capabilities.tar.gz");
+        MapFetcher fetcher = new MapFetcher(remote);
+        LocalClientReleaseDownloader downloader = new LocalClientReleaseDownloader(
+                trust,
+                runtime,
+                objectMapper,
+                fetcher,
+                new RecordingExtractor(),
+                new RecordingCandidateChecker());
+
+        downloader.prepare(command(), CURRENT_VERSION);
+
+        assertThat(fetcher.requestedFiles).containsExactly(trust.resolve(
+                "releases/" + TARGET_VERSION + "/test-agent-local-client.jar"));
+        assertThat(fetcher.requestedBytes).containsExactly(
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json"),
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json.sig"),
+                trust.resolve("releases/" + TARGET_VERSION + "/test-agent-local-client.jar.sig"));
+        assertThat(runtime.resolve("artifact-cache/CLIENT_JAR")
+                        .resolve(LocalClientDownloadTrust.sha256(remote.get(trust.resolve(
+                                "releases/" + TARGET_VERSION + "/test-agent-local-client.jar"))))
+                        .resolve("artifact"))
+                .hasContent("client-jar");
+    }
+
+    @Test
+    void shouldSeedSharedCacheFromSignedPreviousReleaseOnFirstUpgrade() throws Exception {
+        Path runtime = temporaryDirectory.resolve("runtime-cache-migration");
+        Path previousRelease = runtime.resolve("releases").resolve(CURRENT_VERSION);
+        copySignedArtifact(previousRelease, "test-agent-local-client.jar");
+        copySignedArtifact(previousRelease, "jdk.tar.gz");
+        copySignedArtifact(previousRelease, "opencode.tar.gz");
+        copySignedArtifact(previousRelease, "public-capabilities.tar.gz");
+        MapFetcher fetcher = new MapFetcher(remote);
+        LocalClientReleaseDownloader downloader = new LocalClientReleaseDownloader(
+                trust,
+                runtime,
+                objectMapper,
+                fetcher,
+                new RecordingExtractor(),
+                new RecordingCandidateChecker());
+
+        downloader.prepare(command(), CURRENT_VERSION);
+
+        assertThat(fetcher.requestedFiles).isEmpty();
+        assertThat(fetcher.requestedBytes).containsExactly(
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json"),
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json.sig"));
+        assertThat(runtime.resolve("artifact-cache/JDK")
+                        .resolve(LocalClientDownloadTrust.sha256(remote.get(trust.resolve(
+                                "releases/" + TARGET_VERSION + "/jdk.tar.gz"))))
+                        .resolve("artifact"))
+                .hasBinaryContent(remote.get(trust.resolve(
+                        "releases/" + TARGET_VERSION + "/jdk.tar.gz")));
+    }
+
+    @Test
+    void shouldDownloadOnlyArtifactWhoseSharedCacheVerificationFails() throws Exception {
+        Path runtime = temporaryDirectory.resolve("runtime-repair-cache");
+        cacheArtifact(runtime, "CLIENT_JAR", "test-agent-local-client.jar");
+        cacheArtifact(runtime, "JDK", "jdk.tar.gz");
+        Path damagedEntry = cacheArtifact(runtime, "OPENCODE", "opencode.tar.gz");
+        cacheArtifact(runtime, "PUBLIC_CAPABILITIES", "public-capabilities.tar.gz");
+        Files.writeString(damagedEntry.resolve("artifact"), "tampered-cache", StandardCharsets.UTF_8);
+        MapFetcher fetcher = new MapFetcher(remote);
+        LocalClientReleaseDownloader downloader = new LocalClientReleaseDownloader(
+                trust,
+                runtime,
+                objectMapper,
+                fetcher,
+                new RecordingExtractor(),
+                new RecordingCandidateChecker());
+
+        downloader.prepare(command(), CURRENT_VERSION);
+
+        URI opencodeUri = trust.resolve("releases/" + TARGET_VERSION + "/opencode.tar.gz");
+        assertThat(fetcher.requestedFiles).containsExactly(opencodeUri);
+        assertThat(fetcher.requestedBytes).containsExactly(
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json"),
+                trust.resolve("releases/" + TARGET_VERSION + "/manifest.json.sig"),
+                trust.resolve("releases/" + TARGET_VERSION + "/opencode.tar.gz.sig"));
+        assertThat(damagedEntry.resolve("artifact")).hasBinaryContent(remote.get(opencodeUri));
     }
 
     @Test
@@ -277,6 +366,27 @@ class LocalClientReleaseDownloaderTest {
             Files.writeString(release.resolve("jdk.provenance"), "source=system-jdk21\n");
         }
         return release;
+    }
+
+    private Path cacheArtifact(Path runtime, String kind, String fileName) throws Exception {
+        URI artifactUri = trust.resolve("releases/" + TARGET_VERSION + "/" + fileName);
+        byte[] artifact = remote.get(artifactUri);
+        Path entry = runtime.resolve("artifact-cache")
+                .resolve(kind)
+                .resolve(LocalClientDownloadTrust.sha256(artifact));
+        Files.createDirectories(entry);
+        Files.write(entry.resolve("artifact"), artifact);
+        Files.write(entry.resolve("artifact.sig"), remote.get(trust.resolve(
+                "releases/" + TARGET_VERSION + "/" + fileName + ".sig")));
+        return entry;
+    }
+
+    private void copySignedArtifact(Path release, String fileName) throws Exception {
+        Files.createDirectories(release);
+        Files.write(release.resolve(fileName), remote.get(trust.resolve(
+                "releases/" + TARGET_VERSION + "/" + fileName)));
+        Files.write(release.resolve(fileName + ".sig"), remote.get(trust.resolve(
+                "releases/" + TARGET_VERSION + "/" + fileName + ".sig")));
     }
 
     private void publishRelease(boolean escapedPath) throws Exception {
