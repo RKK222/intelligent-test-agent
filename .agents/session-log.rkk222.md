@@ -40,8 +40,20 @@
 
 ### Result
 
-- 正式二进制批次已验证；记录提交后只用同批已验证制品执行 `--zip-only` 重封内层，再重建固定名双后台外层包，
-  最终 SHA-256 以交付目录的配套校验文件和后续追溯提交为准。
+- 正式二进制批次已验证；记录提交后只用同批已验证制品执行 `--zip-only` 重封内层，再重建固定名双后台外层包。
+  最终内层 ZIP SHA-256 为 `250848229df7fbe73a84966fc5e983ba6c91d50b96bce305e28b8cdb05b90aa7`，
+  外层固定名包为 `ab2cebf21e8624cfd47c77ed7c84050f34b18e1a93efb43ab0663ec775c8d2ac`；外层嵌入内层与独立内层逐字节一致。
+- 后端应用 JAR、persistence JAR、XXL integration JAR、前端 tar 和麒麟普通用户包 SHA-256 分别为
+  `b04da4c5d27d6c8e5c5909018eb59742b49122d119ff6d2f3bbf183d58c5c1d7`、
+  `47ba584b644c00ad6366512e09770c104e60c0f12b376bb1f4c7c3078735a818`、
+  `6c0fea31cb338e8c7cedb4d2cc45617485f4e4e58ea160fc6d1770082fee3312`、
+  `b824e26153ee1907c7d3ffb61df3c02344f55880a2c988c9977b582588bb52be`、
+  `dd2da4a61e26795cb16ebb2bee2c0989630b2e12626ea0a4950a9dfca9d38784`。
+- 三份节点归档 `.4/.114/.2` 的 SHA-256 分别为
+  `bedd9321dd89a4294453896085a81a8bd5ae6256112d63fe85b5d9293da660c8`、
+  `f2de461015172943d4089269b93b5dd7fe63ee9f93e1ba5c5ddd7caf4922f1cd`、
+  `fb434db3598ab5df0200817120565aab1aa8dd000f7c7bff01cf63ae3b91e942`；固定名外层包和校验文件已复制到
+  `/Users/kaka/Desktop/mimoagent/0709/` 并再次通过 SHA-256 与 ZIP CRC 校验。
 - 相对企业 2026-08-24 已部署数据库历史，本轮 PostgreSQL 只允许新增
   `V20260825091459__local_client_instance_replacements_create.sql`，源码 SHA-256 为
   `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`，Flyway checksum 为
