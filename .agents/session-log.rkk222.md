@@ -14866,3 +14866,27 @@
 
 - 已跟踪 Agent 文件和一级 Skill 删除可在快捷提交弹框内直接反悔；临时未跟踪文件仍静默删除，多文件批量删除仍由 Diff 统一处理。
 - 本次只修改前端交互、测试和稳定文档；不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、性能、安全、部署节点、环境配置、generated SDK 或只读 OpenCode 源码。
+
+## 2026-08-26 - 基于当前 release 重打企业离线包
+
+### Why
+
+- 用户要求基于当前本地代码重新打企业包；本轮不拉取远端，也不把未变化的 worker、toolbox、manager、CK、Mem0、BGE 或 pgvector 重新纳入更新范围。
+- 上一轮生成的企业包尚未收到现场部署完成确认，因此本次不能按构建机组件状态省略其中尚未落地的本地客户端，需继续保留同一客户端版本供企业用户清空后重新下载安装。
+
+### What
+
+- 发布业务代码基线为本地 `release@eabbc26cb55a249ff377907ab0d40a448dcc7e53`；相对上一候选包新增工作区文件树 Shift 连续选择、临时 Agent 文件删除提示修正、已跟踪 Agent/Skill 删除弹框内取消删除，以及对应测试、用户手册和工程文档。
+- 使用企业固定 AAM 地址 `http://zfw.sdc.cs.icbc/aam/onlyLogin/` 和相对后端 API 重建前端；使用 JDK 25 重建后端，并由打包脚本逐项核对持久化、XXL 和 ClickHouse migration 字节。
+- 本地客户端代码没有变化，继续保留版本 `20260826095116`、企业域名 `http://mimo.sdc.cs.icbc:9996`、固定组织签名公钥和公共能力配置提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`；不重新生成客户端版本。
+
+### How
+
+- 在 `frontend` 执行全量 Vitest：157/157 个测试文件通过，2251 passed / 1 skipped；全 workspace `typecheck` 通过，生产 Vite 构建通过。
+- `package-release.sh --backend-only` 生成后端 JAR，SHA-256 为 `ac0528e7338e051303f87ee807696ce6a2a6c69b5a0ae9785c07b02dce5006c0`；`package-release.sh --frontend-only` 生成前端归档，SHA-256 为 `517c8acf48397df002d3b2e7fc846b5e6cc685d13af2d1b52f94c600f0e688d5`。
+- 已回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或会覆盖的并行成果；最终内外层 ZIP、三节点包、客户端签名和 Flyway 独立校验结果在封包完成后补记。
+
+### Result
+
+- 前后台正式构建已通过，正在生成最终企业离线包；本条先随制品收录，最终哈希将在后续同日发布记录提交中补齐。
+- 本次不新增部署节点，不修改 API、RunEvent/SSE、数据库结构、Flyway 文件、环境配置、generated SDK 或只读 OpenCode 源码；尚未在企业目标机部署。
