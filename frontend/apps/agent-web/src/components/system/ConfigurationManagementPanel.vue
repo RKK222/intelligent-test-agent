@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { FolderGit2, GitPullRequest } from "lucide-vue-next";
+import { FolderGit2, GitPullRequest, RefreshCcw } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import OpencodePublicConfigManagementPanel from "./OpencodePublicConfigManagementPanel.vue";
 import ApplicationGitRefreshManagementPanel from "./ApplicationGitRefreshManagementPanel.vue";
@@ -10,7 +10,7 @@ const props = defineProps<{
   pageActive: boolean;
 }>();
 
-type ConfigMenuKey = "opencode-public" | "application-git";
+type ConfigMenuKey = "opencode-public" | "application-runtime" | "application-git";
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const activeKey = ref<ConfigMenuKey>(hasSuperAdmin.value ? "opencode-public" : "application-git");
@@ -34,6 +34,15 @@ watch(hasSuperAdmin, (allowed) => {
         <span>TestAgent公共配置管理</span>
       </button>
       <button
+        v-if="hasSuperAdmin"
+        type="button"
+        :class="['ta-config-submenu-item', { 'is-active': activeKey === 'application-runtime' }]"
+        @click="activeKey = 'application-runtime'"
+      >
+        <RefreshCcw class="ta-config-submenu-icon" :stroke-width="1.6" />
+        <span>应用运行态更新</span>
+      </button>
+      <button
         type="button"
         :class="['ta-config-submenu-item', { 'is-active': activeKey === 'application-git' }]"
         @click="activeKey = 'application-git'"
@@ -45,8 +54,17 @@ watch(hasSuperAdmin, (allowed) => {
     <div class="ta-config-content">
       <OpencodePublicConfigManagementPanel
         v-if="hasSuperAdmin && activeKey === 'opencode-public'"
+        key="public"
         :current-user="currentUser"
         :page-active="props.pageActive"
+        view="public"
+      />
+      <OpencodePublicConfigManagementPanel
+        v-else-if="hasSuperAdmin && activeKey === 'application-runtime'"
+        key="application-runtime"
+        :current-user="currentUser"
+        :page-active="props.pageActive"
+        view="application-runtime"
       />
       <ApplicationGitRefreshManagementPanel v-else :current-user="currentUser" />
     </div>

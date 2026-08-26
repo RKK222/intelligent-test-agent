@@ -12,10 +12,15 @@ import type {
 } from "@test-agent/shared-types";
 import AgentConfigRolloutTargetDisclosure from "./AgentConfigRolloutTargetDisclosure.vue";
 
-const props = defineProps<{
+type ManagementView = "public" | "application-runtime";
+
+const props = withDefaults(defineProps<{
   currentUser: CurrentUser | null;
   pageActive: boolean;
-}>();
+  view?: ManagementView;
+}>(), {
+  view: "public"
+});
 
 const api = inject<BackendApiClient>("api")!;
 const rows = ref<PublicAgentRepositoryStatus[]>([]);
@@ -47,6 +52,7 @@ const restartingTargetId = ref<string | null>(null);
 let rolloutTimer: number | null = null;
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const isPublicView = computed(() => props.view === "public");
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
 const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");
 const applicationRolloutActive = computed(() => applicationRollouts.value.some((item) =>
@@ -94,25 +100,33 @@ async function refresh() {
   errorMessage.value = "";
   applicationScopeErrorMessage.value = "";
   try {
-    const [repositories, latestRollout, latestApplicationRollouts, latestApplicationScopes] = await Promise.all([
-      api.listPublicAgentRepositories(),
-      api.getPublicAgentConfigRollout(),
-      api.getApplicationAgentConfigRollouts(),
-      loadApplicationScopes()
-    ]);
-    rows.value = repositories;
-    rollout.value = latestRollout;
-    applicationRollouts.value = latestApplicationRollouts;
-    applicationScopes.value = latestApplicationScopes;
+    if (isPublicView.value) {
+      const [repositories, latestRollout] = await Promise.all([
+        api.listPublicAgentRepositories(),
+        api.getPublicAgentConfigRollout()
+      ]);
+      rows.value = repositories;
+      rollout.value = latestRollout;
+    } else {
+      const [latestApplicationRollouts, latestApplicationScopes] = await Promise.all([
+        api.getApplicationAgentConfigRollouts(),
+        loadApplicationScopes()
+      ]);
+      applicationRollouts.value = latestApplicationRollouts;
+      applicationScopes.value = latestApplicationScopes;
+    }
     scheduleRolloutPolling();
   } catch (error) {
-    errorMessage.value = formatError(error, "加载公共配置仓库状态失败");
+    errorMessage.value = formatError(
+      error,
+      isPublicView.value ? "加载公共配置仓库状态失败" : "加载应用 Agent / Tool 运行态更新失败"
+    );
   } finally {
     loading.value = false;
   }
 }
 
-/** 名称映射失败不能阻断公共 Git 运维；页面保留分支/commit 摘要并给出可见提示。 */
+/** 名称映射失败不能阻断运行态诊断；页面保留分支/commit 摘要并给出可见提示。 */
 async function loadApplicationScopes() {
   try {
     return await api.listApplicationGitRefreshScopes();
@@ -124,26 +138,29 @@ async function loadApplicationScopes() {
 
 async function refreshRollout() {
   try {
-    const [latest, latestApplicationRollouts] = await Promise.all([
-      api.getPublicAgentConfigRollout(),
-      api.getApplicationAgentConfigRollouts()
-    ]);
-    const wasActive = rolloutActive.value || applicationRolloutActive.value;
-    rollout.value = latest;
-    applicationRollouts.value = latestApplicationRollouts;
-    if (wasActive && !rolloutActive.value && !applicationRolloutActive.value) {
-      rows.value = await api.listPublicAgentRepositories();
+    if (isPublicView.value) {
+      const wasActive = rolloutActive.value;
+      rollout.value = await api.getPublicAgentConfigRollout();
+      if (wasActive && !rolloutActive.value) {
+        rows.value = await api.listPublicAgentRepositories();
+      }
+    } else {
+      applicationRollouts.value = await api.getApplicationAgentConfigRollouts();
     }
     scheduleRolloutPolling();
   } catch (error) {
-    errorMessage.value = formatError(error, "刷新公共 Agent 全局同步状态失败");
+    errorMessage.value = formatError(
+      error,
+      isPublicView.value ? "刷新公共 Agent 全局同步状态失败" : "刷新应用 Agent / Tool 运行态更新失败"
+    );
     scheduleRolloutPolling();
   }
 }
 
 function scheduleRolloutPolling() {
   stopRolloutPolling();
-  if (props.pageActive && (rolloutActive.value || applicationRolloutActive.value)) {
+  const active = isPublicView.value ? rolloutActive.value : applicationRolloutActive.value;
+  if (props.pageActive && active) {
     rolloutTimer = window.setTimeout(() => void refreshRollout(), 2_000);
   }
 }
@@ -155,7 +172,7 @@ function stopRolloutPolling() {
   }
 }
 
-watch(() => props.pageActive, (active) => {
+watch([() => props.pageActive, () => props.view], ([active]) => {
   if (!active) {
     stopRolloutPolling();
     return;
@@ -532,7 +549,7 @@ function newOperationId() {
   <section class="ta-opencode-config">
     <div v-if="!hasSuperAdmin" class="ta-opencode-config-placeholder">当前账号无配置管理权限</div>
     <template v-else>
-      <div class="ta-opencode-config-toolbar">
+      <div v-if="isPublicView" class="ta-opencode-config-toolbar">
         <button type="button" class="ta-opencode-config-btn" :disabled="loading" @click="refresh">
           <Loader2 v-if="loading" class="ta-opencode-config-icon is-spin" />
           <RefreshCw v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
@@ -550,6 +567,16 @@ function newOperationId() {
         </button>
         <span class="ta-opencode-config-toolbar-hint">一次选择远端分支，所有服务器共享副本同步到同一目标 commit</span>
       </div>
+      <div v-else class="ta-opencode-config-toolbar">
+        <button type="button" class="ta-opencode-config-btn" :disabled="loading" @click="refresh">
+          <Loader2 v-if="loading" class="ta-opencode-config-icon is-spin" />
+          <RefreshCw v-else class="ta-opencode-config-icon" :stroke-width="1.6" />
+          刷新
+        </button>
+        <span class="ta-opencode-config-toolbar-hint">
+          查看应用 Agent / Tool 发布后的 dispose 与重启收敛；Git 仓库和个人 worktree 同步请使用“应用 Git 刷新”
+        </span>
+      </div>
 
       <div v-if="errorMessage" class="ta-opencode-config-alert" role="alert">
         <AlertTriangle class="ta-opencode-config-icon" :stroke-width="1.6" />
@@ -560,7 +587,7 @@ function newOperationId() {
         <span>{{ successMessage }}</span>
       </div>
 
-      <section v-if="rollout" class="ta-opencode-config-rollout" aria-label="公共 Agent 全局刷新状态">
+      <section v-if="isPublicView && rollout" class="ta-opencode-config-rollout" aria-label="公共 Agent 全局刷新状态">
         <header>
           <div>
             <strong>{{ rolloutStatusText(rollout.status) }}</strong>
@@ -625,7 +652,11 @@ function newOperationId() {
         </table>
       </section>
 
-      <section class="ta-opencode-config-rollout" aria-label="应用 Agent 与 Tool 运行态更新">
+      <section
+        v-if="!isPublicView"
+        class="ta-opencode-config-rollout is-application-history"
+        aria-label="应用 Agent 与 Tool 运行态更新"
+      >
         <header>
           <div>
             <strong>应用 Agent / Tool 运行态更新</strong>
@@ -700,7 +731,7 @@ function newOperationId() {
         </details>
       </section>
 
-      <div class="ta-opencode-config-table-wrap">
+      <div v-if="isPublicView" class="ta-opencode-config-table-wrap">
         <table class="ta-opencode-config-table">
           <thead>
             <tr>
@@ -756,7 +787,7 @@ function newOperationId() {
       </div>
     </template>
 
-    <Teleport to="body">
+    <Teleport v-if="isPublicView" to="body">
       <div v-if="dialogOpen" class="ta-opencode-config-dialog-backdrop" @keydown.esc="closeInitializeDialog">
         <section role="dialog" aria-modal="true" aria-label="初始化公共配置仓库" class="ta-opencode-config-dialog">
           <header class="ta-opencode-config-dialog-header">
@@ -1097,6 +1128,11 @@ function newOperationId() {
   background: #fff;
   padding: 10px;
   font-size: 12px;
+}
+.ta-opencode-config-rollout.is-application-history {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 14px;
 }
 .ta-opencode-config-rollout > header,
 .ta-opencode-config-rollout > header > div {

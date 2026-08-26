@@ -161,7 +161,7 @@ Agent 配置树的快捷 Git 编排归 `apps/agent-web`：`AgentConfigPanel` 只
 | `packages/event-stream-client` | RunEvent SSE、用户级运行态和通知中心 fetch SSE client，负责按默认 `opencode` agent URL 连接 RunEvent、在空 `baseUrl` 的企业同源构建中保留 `/api/...` 相对地址、携带 Bearer Token 和可选动态服务器首跳提示连接 fetch SSE、自动重连、识别 `run.snapshot.reset`、兼容解析 `permissionCount/PERMISSION`、通知 snapshot/updated 解析、原始 `MessageEvent.data` 回调、事件去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、带加载三态/稳定快照身份/用户内容修订代次/纯文本可视化草稿及真实绝对路径元数据的文件 tab Pinia 状态，统一正文与草稿 dirty 判断，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 
-系统管理公共配置页的 rollout 展示归 `apps/agent-web` 所有：页面通过 `packages/backend-api` 复用应用 Git 刷新范围，把 rollout 内部版本键映射为应用名、工作空间名和版本，再与分支、commit、状态、服务器数和待处理用户数组成默认收起的摘要，内部 ID 不进入 DOM；服务器详情与用户进程详情采用两级折叠，停止/受管重启仍复用既有运行管理接口。相邻“应用 Git 刷新”负责仓库和 worktree 同步，本区只负责 Agent/Tool 发布后的运行态收敛展示；不改变后端 rollout、轮询或持久化补偿边界。
+系统管理配置管理页的 rollout 展示归 `apps/agent-web` 所有：超级管理员的“应用运行态更新”作为独立页签固定在“TestAgent公共配置管理”和“应用 Git 刷新”之间，只在活动时通过 `packages/backend-api` 加载并轮询应用 rollout；公共 rollout 也只在公共页签活动时轮询。运行态页复用应用 Git 刷新范围，把 rollout 内部版本键映射为应用名、工作空间名和版本，再与分支、commit、状态、服务器数和待处理用户数组成默认收起的摘要，内部 ID 不进入 DOM；服务器详情与用户进程详情采用两级折叠，停止/受管重启仍复用既有运行管理接口。相邻“应用 Git 刷新”负责仓库和 worktree 同步，本页只负责 Agent/Tool 发布后的 dispose/重启收敛展示；不改变后端 rollout、轮询或持久化补偿边界。
 | `packages/file-explorer` | 文件树、普通文件复制/剪切/粘贴与拖放、浏览器文件上传选择、`.mind → Tree` 文件图标、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口；实际文件操作由 app 层调用 backend-api。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`，源码区默认按可视宽度自动换行）、语言识别、内容编辑、只读展示、path/model URI 一致时才执行的外部正文同步、Mermaid Flowchart/Sequence/State Diagram 可视化编辑，以及 Markdown `mind` fence 和独立 `.mind` 的受限 Markdown 领域层、紧凑元数据与 SimpleMindMap 懒加载画布。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |

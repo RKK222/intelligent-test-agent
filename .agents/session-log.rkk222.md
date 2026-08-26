@@ -14965,3 +14965,26 @@
 
 - 用户可从本周汇总、功能总览、Agent/Skill 专题和 FAQ 获得一致的删除恢复说明。复用的配置树截图仅示意入口；仍需人工补拍“提交并推送 Agent 文档 → 取消删除”弹框的脱敏真实截图。
 - 本次仅更新用户手册与帮助中心测试，不涉及 API、事件、数据库、性能、安全、兼容性、部署、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-26 - 将应用运行态更新拆为独立页签
+
+### Why
+
+- 超管公共 Agent 配置页内嵌“应用 Agent / Tool 运行态更新”后，应用发布历史会持续占用页面空间，无法把整个应用区域收起，也混淆了公共 Agent 发布、用户进程 dispose / 重启与应用 Git 刷新的职责。
+
+### What
+
+- 在超管配置菜单中把“应用运行态更新”拆为独立页签，并固定放在“TestAgent公共配置管理”和“应用 Git 刷新”之间；应用管理员仍只显示原有应用 Git 页签。
+- 复用既有公共配置组件、应用 rollout 查询、服务器/用户进程折叠明细及停止/重启操作，通过 `public`、`application-runtime` 两种视图隔离渲染、首次加载和活动 rollout 轮询，不新增接口或重复业务组件。
+- 同步前端总览、agent-web README、源码包说明、模块图和前端交互规范，并补充页签顺序、视图隔离、应用历史与空状态回归。
+
+### How
+
+- 在 `frontend` 执行 `corepack pnpm test -- apps/agent-web/tests/scheduler-management-panel.test.ts`，实际全量 157 个测试文件通过，2252 passed / 1 skipped；agent-web `typecheck` 和 production build 通过，`git diff --check` 通过。
+- 按 `.env.test` / `test` profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test`，26 模块后端 package 和前端生产构建成功；依赖启动阶段仍卡在 Docker Desktop 创建 ClickHouse 容器，容器停在 `Created`，脚本在停止旧服务前中止。随后用项目既有参数单独重启 agent-web，Vite 在 `127.0.0.1:3000` 就绪并返回 200；原后端 health/readiness 保持 `UP`，登录 CORS 预检为 200。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，确认本次修改承接既有应用运行态命名、业务标识与折叠交互，没有覆盖其它开发者成果或残留合并标记。
+
+### Result
+
+- 公共 Agent 页只加载和展示公共配置发布；应用运行态页只在进入时加载应用范围与 rollout，并仅在该视图存在活动任务时轮询。管理员可在独立页面查看发布历史并 dispose / 重启全员，不再挤占公共配置区域。
+- 本次不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；相关前端已实际重启验证，整栈切换仍受本机 Docker ClickHouse 启动卡住影响。

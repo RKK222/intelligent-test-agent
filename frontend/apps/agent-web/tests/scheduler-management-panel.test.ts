@@ -445,6 +445,28 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
+  it("places application runtime updates in a dedicated tab between public Agent and application Git", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "config" });
+
+    const navigation = await view.findByRole("navigation", { name: "配置管理导航" });
+    expect(Array.from(navigation.querySelectorAll("button")).map((button) => button.textContent?.trim())).toEqual([
+      "TestAgent公共配置管理",
+      "应用运行态更新",
+      "应用 Git 刷新"
+    ]);
+    expect(view.queryByText("应用 Agent / Tool 运行态更新")).toBeNull();
+    expect(backendApi.getApplicationAgentConfigRollouts).not.toHaveBeenCalled();
+
+    await fireEvent.click(view.getByRole("button", { name: "应用运行态更新" }));
+
+    expect(await view.findByText("应用 Agent / Tool 运行态更新")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "刷新公共 Agent Git" })).toBeNull();
+    await waitFor(() => expect(backendApi.getApplicationAgentConfigRollouts).toHaveBeenCalledTimes(1));
+    expect(backendApi.listPublicAgentRepositories).toHaveBeenCalledTimes(1);
+    view.queryClient.clear();
+  });
+
   it("keeps public repository management unavailable to non-super-admin users", async () => {
     const backendApi = api();
     const appAdmin: CurrentUser = {
@@ -795,7 +817,9 @@ describe("scheduler management panel", () => {
       listApplicationGitRefreshScopes: vi.fn().mockResolvedValue([matchingApplicationScope])
     });
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
+    const view = renderWithApi(SystemManagementPanel, backendApi, currentUser, { activeKey: "config" });
+
+    await fireEvent.click(view.getByRole("button", { name: "应用运行态更新" }));
 
     expect(await view.findByText("应用 Agent / Tool 运行态更新")).toBeTruthy();
     expect(await view.findByText("F-BASE")).toBeTruthy();
@@ -823,7 +847,9 @@ describe("scheduler management panel", () => {
   });
 
   it("keeps the application update section discoverable when no rollout is pending", async () => {
-    const view = renderWithApi(OpencodePublicConfigManagementPanel, api());
+    const view = renderWithApi(SystemManagementPanel, api(), currentUser, { activeKey: "config" });
+
+    await fireEvent.click(view.getByRole("button", { name: "应用运行态更新" }));
 
     expect(await view.findByText("应用 Agent / Tool 运行态更新")).toBeTruthy();
     expect(await view.findByText(/会在这里逐人显示“立即受管重启”/)).toBeTruthy();
