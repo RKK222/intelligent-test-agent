@@ -141,6 +141,8 @@ describe("help center", () => {
     expect(prompt).toContain("客户端重连后恢复历史本地工作区");
     expect(prompt).toContain("在左侧活动栏添加常用内网页面");
     expect(prompt).toContain("从 Agent 或 Skill 配置树快捷提交");
+    expect(weekly).toContain("在快捷提交弹框中“取消删除”恢复文件");
+    expect(weekly).toContain("删除已提交的 Agent 或 Skill 后改变主意");
     expect(prompt.length).toBeLessThan(8_100);
   });
 
@@ -172,6 +174,7 @@ describe("help center", () => {
     expect(overview).toContain("自定义菜单");
     expect(overview).toContain("客户端重新连接后会自动核验并恢复");
     expect(overview).toContain("先普通点击一个文件或目录建立锚点");
+    expect(overview).toContain("点击“取消删除”恢复文件并清除对应 Diff");
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");

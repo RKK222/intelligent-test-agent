@@ -14944,3 +14944,24 @@
 
 - 纯平台增量包已生成并完成本机运行构建与归档校验；目标企业服务器尚未执行本轮部署。
 - 本次不新增部署节点，不修改 API、RunEvent/SSE、数据库结构、Flyway 文件、环境配置、generated SDK 或只读 OpenCode 源码；本条记录提交本身不再触发重新封包，因此记录提交不会出现在上述 ZIP 内。
+
+## 2026-08-26 - 同步 release 用户手册的删除恢复说明
+
+### Why
+
+- `release` 已交付已跟踪 Agent/Skill 删除后的“取消删除”恢复能力；专题与 FAQ 已随功能提交更新，但本周功能汇总和功能总览尚未覆盖该用户可见入口。
+
+### What
+
+- 在本周“每周新功能”增加删除恢复场景、权限与 Git 跟踪前提、准确操作步骤和多文件/冲突边界，并在功能总览补充恢复并清除 Diff 的行为。
+- 增加 Help Center 回归断言，锁定周报与总览中的“取消删除”说明。
+
+### How
+
+- 在 `release@f2b2a10fa00c72e612e93919ccdf440e3a600110` 完成只读门禁，确认没有冲突或用户手册范围外未提交改动；回顾全部 `.agents/session-log*.md` 近期记录后修改。
+- `corepack pnpm test -- apps/agent-web/tests/help-center.test.ts` 通过（157 文件、2251 passed、1 skipped）；VitePress build、agent-web typecheck 和 `git diff --check` 通过。
+
+### Result
+
+- 用户可从本周汇总、功能总览、Agent/Skill 专题和 FAQ 获得一致的删除恢复说明。复用的配置树截图仅示意入口；仍需人工补拍“提交并推送 Agent 文档 → 取消删除”弹框的脱敏真实截图。
+- 本次仅更新用户手册与帮助中心测试，不涉及 API、事件、数据库、性能、安全、兼容性、部署、环境配置、generated SDK 或 OpenCode 只读源码。
