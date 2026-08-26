@@ -28,16 +28,22 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** 本地工作区注册编排；服务端只保存已由客户端 toRealPath 校验过的根目录事实。 */
 @Service
 public class LocalWorkspaceApplicationService {
 
     private static final Map<String, Boolean> CAPABILITIES = capabilities();
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalWorkspaceApplicationService.class);
 
     private final WorkspaceRepository workspaceRepository;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
@@ -49,6 +55,7 @@ public class LocalWorkspaceApplicationService {
     private final NightExecutionTaskRepository nightExecutionTaskRepository;
     private final com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver routeResolver;
     private final ObjectMapper objectMapper;
+    private final TransactionTemplate reconnectTransaction;
 
     public LocalWorkspaceApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -60,7 +67,8 @@ public class LocalWorkspaceApplicationService {
             SessionRuntimeTargetRepository sessionRuntimeTargetRepository,
             NightExecutionTaskRepository nightExecutionTaskRepository,
             com.enterprise.testagent.opencode.runtime.process.BackendJavaRouteResolver routeResolver,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            PlatformTransactionManager transactionManager) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository);
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository);
         this.localWorkspaceRepository = Objects.requireNonNull(localWorkspaceRepository);
@@ -71,6 +79,8 @@ public class LocalWorkspaceApplicationService {
         this.nightExecutionTaskRepository = Objects.requireNonNull(nightExecutionTaskRepository);
         this.routeResolver = Objects.requireNonNull(routeResolver);
         this.objectMapper = Objects.requireNonNull(objectMapper);
+        this.reconnectTransaction = new TransactionTemplate(Objects.requireNonNull(transactionManager));
+        this.reconnectTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -116,6 +126,67 @@ public class LocalWorkspaceApplicationService {
             throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
         }
         return Optional.of(activateWorkspace(userId, workspaceId, route, traceId));
+    }
+
+    /**
+     * 客户端重连后逐个恢复该用户仍存在的本地工作区。
+     *
+     * <p>旧版本安装可能留下不同的实例 ID，因此不能只恢复全局最近项。每个历史目录仍独立执行真实路径、
+     * 摘要和文件系统身份校验；目录已删除或身份变化时仅跳过该项，不能阻塞同一用户的其它有效目录。</p>
+     */
+    public ReconnectRestoreResult restoreAvailableOnReconnect(
+            UserId userId,
+            LocalClientInstanceId clientInstanceId,
+            long connectionGeneration,
+            String traceId) {
+        LocalClientConnectionRoute route = requireOwnedOnlineRoute(userId, clientInstanceId);
+        if (route.connectionGeneration() != connectionGeneration) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
+        }
+        requireCurrentConnection(route);
+
+        // 最近项优先恢复，随后复用包含已替换实例的完整实例投影收集其余历史绑定。
+        Map<WorkspaceId, LocalClientWorkspaceBinding> candidates = new LinkedHashMap<>();
+        managedWorkspaceRepository.findGlobalPreference(userId)
+                .flatMap(preference -> localWorkspaceRepository.findByWorkspaceId(preference.workspaceId()))
+                .filter(binding -> binding.userId().equals(userId))
+                .ifPresent(binding -> candidates.put(binding.workspaceId(), binding));
+        instanceRepository.findByUserIdIncludingReplaced(userId).stream()
+                .map(LocalClientInstance::clientInstanceId)
+                .flatMap(instanceId -> localWorkspaceRepository.findByClientInstanceId(instanceId).stream())
+                .filter(binding -> binding.userId().equals(userId))
+                .sorted((left, right) -> right.updatedAt().compareTo(left.updatedAt()))
+                .forEach(binding -> candidates.putIfAbsent(binding.workspaceId(), binding));
+
+        int restored = 0;
+        int unavailable = 0;
+        for (LocalClientWorkspaceBinding binding : candidates.values()) {
+            try {
+                reconnectTransaction.execute(status -> {
+                    LocalClientConnectionRoute currentRoute = requireOwnedOnlineRoute(userId, clientInstanceId);
+                    if (currentRoute.connectionGeneration() != connectionGeneration) {
+                        throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
+                    }
+                    requireCurrentConnection(currentRoute);
+                    return activateWorkspace(userId, binding.workspaceId(), currentRoute, traceId);
+                });
+                restored++;
+            } catch (RuntimeException exception) {
+                unavailable++;
+                // 单项失败不能在新客户端留下无权访问的临时根映射。
+                bestEffortUnregister(
+                        clientInstanceId, connectionGeneration, binding.workspaceId(), traceId);
+                LOGGER.warn(
+                        "event=local_workspace_reconnect_restore_skipped clientInstanceId={} workspaceId={} "
+                                + "generation={} errorType={} traceId={}",
+                        clientInstanceId.value(),
+                        binding.workspaceId().value(),
+                        connectionGeneration,
+                        exception.getClass().getSimpleName(),
+                        traceId);
+            }
+        }
+        return new ReconnectRestoreResult(candidates.size(), restored, unavailable);
     }
 
     private LocalWorkspaceView activateWorkspace(
@@ -576,5 +647,8 @@ public class LocalWorkspaceApplicationService {
     }
 
     public record LocalWorkspaceDeleted(String workspaceId, boolean localDirectoryDeleted) {
+    }
+
+    public record ReconnectRestoreResult(int candidates, int restored, int unavailable) {
     }
 }

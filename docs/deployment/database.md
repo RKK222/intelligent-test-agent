@@ -2138,7 +2138,7 @@ SHA-256 一致。
 - `application_workspace_git_access_checks` 以 `(user_id, application_workspace_id)` 为主键，保存服务器测试工作空间的最近巡检结果；
 - `local_workspace_git_access_checks` 以 `(user_id, workspace_id)` 为主键，保存本地客户端工作空间的最近巡检结果。
 
-状态只允许 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`。`INACCESSIBLE` 保存已执行 Git 远端探测失败（含认证、仓库、网络、SSL/TLS 和超时）的固定原因码与脱敏中文说明，`UNKNOWN` 只保存未形成有效探测结论的原因；可访问行不保存原因和说明；
+状态只允许 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`。`INACCESSIBLE` 保存已执行 Git 远端探测失败（含认证、仓库、网络、SSL/TLS 和超时）的固定原因码与脱敏中文说明，`UNKNOWN` 保存 Git 能力不适用（本地非 Git 目录使用 `NOT_GIT_REPOSITORY`）或未形成有效探测结论的原因；可访问行不保存原因和说明；
 两表都不保存 Git URL、本地路径、命令、SSH key 或 stderr，并分别随用户和工作空间级联删除。候选分页、查询和 upsert
 全部位于 `WorkspaceGitAccessCheckMapper.xml`，未新增 JDBC SQL。原始 SHA-256 为
 `12cfe3bbaa4b0d562f2dca2a69290180c81d42aca79b1ff4aaf6ad5cf32419e2`。该 migration 已由 `test` profile

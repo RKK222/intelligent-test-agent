@@ -32,7 +32,8 @@ final class LocalGitAccessChecker {
         try (GitCommandExecutor.LogRedaction ignored =
                 GitCommandExecutor.redactSensitiveArguments(List.of(root.toString()))) {
             if (!workspaceGit.isGitRepository(root)) {
-                return GitAccessResult.inaccessible("NOT_GIT_REPOSITORY", "目录不是可用的 Git 工作区");
+                return GitAccessResult.unknown(
+                        "NOT_GIT_REPOSITORY", "目录不是 Git 仓库，仍可作为普通本地工作区使用");
             }
             String origin;
             try {

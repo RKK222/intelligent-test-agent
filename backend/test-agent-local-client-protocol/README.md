@@ -35,4 +35,5 @@ clientInstanceId 和 generation，不接受载荷伪造身份；平台完成客�
 声明 `WORKSPACE_GIT_ACCESS_V1` 的客户端额外接受 `FILE_REQUEST.operation=workspace.git-access.check`。请求继续绑定
 已注册的 `workspaceId + rootDigest`，不携带任意路径；客户端在对应真实根目录执行只读 Git 远端检查并通过
 `FILE_RESPONSE` 返回固定 `{status,reason,message}`。状态为 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`，成功时 reason/message
-为空，其余状态为固定脱敏值。旧客户端未声明能力时服务端不得发送该操作。
+为空，其余状态为固定脱敏值；非 Git 目录使用 `UNKNOWN + NOT_GIT_REPOSITORY` 表示 Git 能力不适用但目录仍可作为工作区。
+旧客户端未声明能力时服务端不得发送该操作。

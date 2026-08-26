@@ -41,7 +41,7 @@ public record WorkspaceGitAccessCheck(
         LOCAL_WORKSPACE
     }
 
-    /** UNKNOWN 表示基础设施或旧客户端暂时无法得出权限结论，前端不得据此禁用。 */
+    /** UNKNOWN 表示 Git 能力不适用或暂时无法得出权限结论，前端不得据此禁用工作区。 */
     public enum Status {
         ACCESSIBLE,
         INACCESSIBLE,

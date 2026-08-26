@@ -20,6 +20,16 @@ class LocalGitAccessCheckerTest {
     Path temporaryDirectory;
 
     @Test
+    void shouldKeepNonGitDirectoryUsable() {
+        LocalGitAccessChecker.GitAccessResult result =
+                new LocalGitAccessChecker(nonGitExecutor()).check(temporaryDirectory.toString());
+
+        assertThat(result.status()).isEqualTo("UNKNOWN");
+        assertThat(result.reason()).isEqualTo("NOT_GIT_REPOSITORY");
+        assertThat(result.message()).contains("仍可作为普通本地工作区使用");
+    }
+
+    @Test
     void shouldReportAccessibleWhenOriginCanBeRead() {
         LocalGitAccessChecker.GitAccessResult result =
                 new LocalGitAccessChecker(executor(null)).check(temporaryDirectory.toString());
@@ -72,6 +82,10 @@ class LocalGitAccessCheckerTest {
             }
             return result("abc123\trefs/heads/main\n");
         };
+    }
+
+    private static GitCommandExecutor nonGitExecutor() {
+        return (List<String> command, String privateKey, Duration timeout) -> result("false\n");
     }
 
     private static GitCommandResult result(String stdout) {

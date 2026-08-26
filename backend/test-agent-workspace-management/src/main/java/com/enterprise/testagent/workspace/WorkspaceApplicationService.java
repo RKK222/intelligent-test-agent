@@ -311,6 +311,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                                             binding.userId(),
                                             WorkspaceGitAccessCheck.TargetKind.LOCAL_WORKSPACE,
                                             workspace.workspaceId().value())
+                                    .map(WorkspaceApplicationService::nonBlockingLocalDirectoryAccess)
                                     .orElse(null);
                     return new WorkspaceRuntimeMetadata(
                             RuntimeKind.LOCAL_CLIENT,
@@ -323,6 +324,22 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                             gitAccess);
                 })
                 .orElseGet(WorkspaceRuntimeMetadata::server);
+    }
+
+    /** 兼容旧客户端已经写入的非 Git 结果：目录可用性不能被 Git 远端巡检状态误伤。 */
+    private static WorkspaceGitAccessCheck nonBlockingLocalDirectoryAccess(WorkspaceGitAccessCheck check) {
+        if (check.status() != WorkspaceGitAccessCheck.Status.INACCESSIBLE
+                || !"NOT_GIT_REPOSITORY".equals(check.reason())) {
+            return check;
+        }
+        return new WorkspaceGitAccessCheck(
+                check.userId(),
+                check.targetKind(),
+                check.targetId(),
+                WorkspaceGitAccessCheck.Status.UNKNOWN,
+                check.reason(),
+                "目录不是 Git 仓库，仍可作为普通本地工作区使用",
+                check.checkedAt());
     }
 
     private static Map<String, Boolean> localCapabilities() {

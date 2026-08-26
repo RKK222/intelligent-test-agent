@@ -2054,9 +2054,19 @@ if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
 fi
 
 if [[ "${PACKAGE_LOCAL_CLIENT}" -eq 1 && "${PACKAGE_MODE}" != zip-only ]]; then
-  "${SCRIPT_DIR}/package-local-opencode-client.sh" \
-    --output-dir "${OUTPUT_DIR}/local-opencode-client" \
+  LOCAL_CLIENT_PREVIOUS_VERSION="${LOCAL_CLIENT_VERSION}"
+  if [[ -z "${LOCAL_CLIENT_PREVIOUS_VERSION}" ]]; then
+    LOCAL_CLIENT_PREVIOUS_VERSION="$(state_value "${COMPONENT_STATE_FILE}" \
+      TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION)"
+  fi
+  LOCAL_CLIENT_PACKAGE_ARGS=(
+    --output-dir "${OUTPUT_DIR}/local-opencode-client"
     --allow-insecure-control "${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}"
+  )
+  if [[ -n "${LOCAL_CLIENT_PREVIOUS_VERSION}" ]]; then
+    LOCAL_CLIENT_PACKAGE_ARGS+=(--minimum-version "${LOCAL_CLIENT_PREVIOUS_VERSION}")
+  fi
+  "${SCRIPT_DIR}/package-local-opencode-client.sh" "${LOCAL_CLIENT_PACKAGE_ARGS[@]}"
 fi
 
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then

@@ -8,6 +8,7 @@ source "${SCRIPT_DIR}/archive-common.sh"
 
 OUTPUT_DIR="${SCRIPT_DIR}/dist/local-opencode-client"
 VERSION="${TEST_AGENT_LOCAL_CLIENT_VERSION:-}"
+MINIMUM_VERSION="${TEST_AGENT_LOCAL_CLIENT_MINIMUM_VERSION:-}"
 SIGNING_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_KEY:-}"
 PUBLIC_KEY="${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-}"
 CLIENT_JAR="${TEST_AGENT_LOCAL_CLIENT_JAR:-}"
@@ -35,6 +36,8 @@ and a user-level package that ordinary users can extract and double-click.
 Options:
   --output-dir <path>        Distribution root ending in local-opencode-client.
   --version <yyyyMMddHHmmss> Immutable Beijing-time release version; generated when omitted.
+  --minimum-version <yyyyMMddHHmmss>
+                             Previously deployed version; the new release must be greater.
   --download-base-url <url>  Nginx HTTP root embedded in the launcher.
   --server-url <url>         Platform HTTP(S) root embedded in client.properties.
   --allow-insecure-control <true|false>
@@ -53,6 +56,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
+    --minimum-version) MINIMUM_VERSION="$2"; shift 2 ;;
     --download-base-url) DOWNLOAD_BASE_URL="$2"; shift 2 ;;
     --server-url) SERVER_URL="$2"; shift 2 ;;
     --allow-insecure-control) ALLOW_INSECURE_CONTROL="$2"; shift 2 ;;
@@ -84,6 +88,25 @@ esac
   echo "Refusing output directory without a local-opencode-client leaf: ${OUTPUT_DIR}" >&2
   exit 2
 }
+
+# 版本是升级方向和不可变 release 目录的共同依据；新包必须同时高于现场基线和本地已有分发。
+PREVIOUS_VERSION="${MINIMUM_VERSION}"
+if [[ -n "${PREVIOUS_VERSION}" && ! "${PREVIOUS_VERSION}" =~ ^[0-9]{14}$ ]]; then
+  echo "Local client minimum version must be a 14-digit Beijing timestamp: ${PREVIOUS_VERSION}" >&2
+  exit 2
+fi
+for existing_release in "${OUTPUT_DIR}"/releases/*; do
+  [[ -d "${existing_release}" ]] || continue
+  existing_version="$(basename "${existing_release}")"
+  [[ "${existing_version}" =~ ^[0-9]{14}$ ]] || continue
+  if [[ -z "${PREVIOUS_VERSION}" || "${existing_version}" > "${PREVIOUS_VERSION}" ]]; then
+    PREVIOUS_VERSION="${existing_version}"
+  fi
+done
+if [[ -n "${PREVIOUS_VERSION}" && ! "${VERSION}" > "${PREVIOUS_VERSION}" ]]; then
+  echo "Local client release version must be greater than previously published version: current=${VERSION} previous=${PREVIOUS_VERSION}" >&2
+  exit 2
+fi
 DOWNLOAD_BASE_URL="${DOWNLOAD_BASE_URL%/}/"
 [[ "${DOWNLOAD_BASE_URL}" =~ ^http://[A-Za-z0-9._:-]+(/[A-Za-z0-9._/-]*)?/$ ]] || {
   echo "Local client download base URL must be a canonical internal HTTP root" >&2

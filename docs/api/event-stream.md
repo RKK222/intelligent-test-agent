@@ -1091,8 +1091,9 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 `operation=workspace.git-access.check`，`workspaceId/rootDigest` 必须匹配客户端已经注册的根目录。请求不携带本地绝对
 路径；客户端只读检查 Git 工作区、origin 和远端 heads，并以 `FILE_RESPONSE` 返回固定
 `{status:"ACCESSIBLE|INACCESSIBLE|UNKNOWN",reason?,message?}`。`ACCESSIBLE` 的 reason/message 必须为空；其余值只能是
-客户端归一后的原因码和安全中文说明，不得包含本地路径、Git URL、命令、凭据或 stderr。未声明能力的旧客户端不接收该操作，
-服务器把其状态保守记录为 `UNKNOWN`。
+客户端归一后的原因码和安全中文说明，不得包含本地路径、Git URL、命令、凭据或 stderr。非 Git 目录返回
+`UNKNOWN + NOT_GIT_REPOSITORY`，表示 Git 能力不适用但工作区本身可用；未声明能力的旧客户端不接收该操作，服务器也把其状态
+保守记录为 `UNKNOWN`。
 
 ## `PUBLIC_CAPABILITY_SYNC_V1` 公共能力扩展
 

@@ -1199,7 +1199,7 @@ manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超�
 }
 ```
 
-Git 巡检四字段为向后兼容的可空增量字段。当前只在 `runtimeKind=LOCAL_CLIENT` 的普通 Workspace 列表/详情中投影本地客户端巡检结果；服务器测试工作空间从下述模板接口取得同名字段。`ACCESSIBLE` 表示最近一次只读远端校验成功；`INACCESSIBLE` 表示已执行的远端探测失败，包括缺少 SSH key、认证失败、仓库不可访问、网络/DNS、SSL/TLS、超时、非 Git 工作区或缺少 origin；`UNKNOWN` 只表示旧客户端、断线、路由变化、畸形回包或其它未形成有效探测结论的故障。前端只对 `INACCESSIBLE` 禁用选择；原因和说明均为固定脱敏值，不返回路径、Git URL、命令或 stderr。
+Git 巡检四字段为向后兼容的可空增量字段。当前只在 `runtimeKind=LOCAL_CLIENT` 的普通 Workspace 列表/详情中投影本地客户端巡检结果；服务器测试工作空间从下述模板接口取得同名字段。`ACCESSIBLE` 表示最近一次只读远端校验成功；`INACCESSIBLE` 表示已执行的远端探测失败，包括缺少 SSH key、认证失败、仓库不可访问、网络/DNS、SSL/TLS、超时或 Git 工作区缺少 origin；`UNKNOWN` 表示 Git 能力不适用或未形成有效探测结论。非 Git 本地目录固定返回 `UNKNOWN + NOT_GIT_REPOSITORY` 并保持可选；旧数据库中同原因的 `INACCESSIBLE` 也会在响应时兼容规范化。前端只对其余明确 `INACCESSIBLE` 禁用选择；原因和说明均为固定脱敏值，不返回路径、Git URL、命令或 stderr。
 
 #### 平台体验工作区
 
@@ -4356,6 +4356,10 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 | `POST` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}/recent` | 本地 Workspace | 激活并保存最近工作区。原绑定在线时先在原客户端重新校验历史路径并恢复根映射；原绑定离线时只允许当前用户唯一在线实例在 `rootDigest + fileSystemIdentity` 完全一致后接管，并同步迁移 Session 与未投递夜间任务目标。请求按连接持有 Java 精确转发并在 `boundedElastic` 执行；目录缺失、身份变化、没有在线实例或出现多个在线实例均失败关闭，失败时不更新最近偏好。后续选择服务器工作区会覆盖此偏好。 |
 | `DELETE` | `/api/internal/platform/workspace-management/local-workspaces/{workspaceId}` | `{workspaceId,localDirectoryDeleted:false}` | 只注销/归档平台记录，永不删除本地目录。 |
 | `GET` | `/api/internal/agent/{agentId}/opencode-endpoints/me` | 可见服务端实例加灰度可见且当前在线的本地实例 | 当前只允许 `agentId=opencode`；服务端 binding 为 INACTIVE 时只省略服务端实例，本地实例独立保留。离线本地历史不返回；在线但 OpenCode 不健康的实例仍返回。实例返回 capability map；`localClientDownload` 保留为 additive 兼容字段，网页客户端功能以独立 `download-access/me` 为权威结果。 |
+
+客户端收到 `REGISTERED` 后，后台异步优先恢复全局最近本地工作区，并扫描该用户包含已替换实例在内的全部历史绑定；
+每个目录都必须由当前 generation 重新校验 `rootDigest + fileSystemIdentity`，旧实例离线时才保留 workspaceId 接管。
+单个目录缺失或身份变化只跳过该项，不中断连接或其它目录恢复；该自动流程不新增 HTTP 请求。
 
 `revealAvailable` 为 `true` 时才可消费明文；历史凭据升级后已写入展示时间，视为已经展示，必须 rotate 后才能再次
 获得一次 copy 机会。任何客户端或浏览器都不得缓存、记录或转发 `clientKey`。

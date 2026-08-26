@@ -14653,3 +14653,30 @@
 
 - 管理员无需理解内部版本键即可定位具体应用、工作空间和版本；页面默认保持紧凑，需要排障时再逐层展开服务器和用户进程。
 - 本次仅修改前端展示、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、Flyway、部署节点、依赖、安全协议、环境配置、generated SDK 或只读 OpenCode 源码。整栈进程未切换到新构建，运行态验证由现有前后端进程与真实浏览器页面完成，Docker ClickHouse 卡住仍是本机启动风险。
+
+## 2026-08-26 - 修复非 Git 本地目录与全部历史工作区重连恢复
+
+### Why
+
+- 企业新版客户端仍把普通非 Git 目录巡检为 `INACCESSIBLE`，工作台因此禁用目录；旧版本或重装产生不同实例 ID 后，自动重连又只恢复全局最近一个工作区，其余真实存在的历史目录继续显示离线。
+
+### What
+
+- 客户端把非 Git 目录改为 `UNKNOWN + NOT_GIT_REPOSITORY`，服务端列表同时兼容归一化旧客户端已经保存的错误 `INACCESSIBLE` 投影，不要求现场修数据。
+- 新客户端完成 `REGISTERED` 后按“最近项优先、其余历史绑定按更新时间”扫描该用户全部实例，每个目录独立校验真实路径摘要与文件系统身份；有效目录保留 workspaceId 并转绑到当前唯一在线实例，单项失败在独立事务回滚后跳过，不阻塞其它目录。
+- 工作台检测到在线本地端点但仍持有离线或旧版非 Git 投影时，随既有 5 秒端点探测短时刷新工作区列表，恢复后停止，单次连接最多尝试两分钟。
+- 客户端签名打包入口新增版本下界：新 release 必须严格高于整包组件状态中的已部署版本及输出目录中的全部已有版本；平台重封且客户端组件未变化时继续复用原版本，不制造空升级。
+
+### How
+
+- JDK 21 定向 Maven reactor 覆盖 local-client、workspace-management、opencode-runtime、API 四类测试共 20 项，23 个依赖模块构建成功；更大范围测试已先通过 common 至 memory 等 20 个模块，后在无关 XXL Testcontainers 启动 Ryuk 时被本机 Docker 卡住并人工中止。
+- 前端重连刷新 Vitest 3 项通过；agent-web typecheck 只报另一个 agent 在途的 `custom-menu-settings-panel.test.ts` 两处类型错误，本次客户端文件没有新增诊断。
+- 本地客户端 fat JAR 跳过测试重新打包成功，并以 JDK 21 实际执行 `java -jar ... --version`，返回 `test-agent-local-client 0.1.0-dev`；未重启整栈，避免覆盖同工作树另一个 agent 正在进行的前端改动。
+- 麒麟客户端完整分发 Shell 测试覆盖已有目录版本倒退、组件状态相同版本复用拒绝、签名 catalog、安装和升级链路并通过；三个相关发布脚本也通过 `bash -n`。
+- 已回顾全部 `.agents/session-log*.md` 近期条目并执行 `git diff --check`；本次提交仅暂存客户端修复、对应测试/文档及本日志，隔离自定义菜单、Playwright 产物、`.reasonix/`、Vite cache 和 `node_modules/`。
+
+### Result
+
+- release 分支不新增部署节点；非 Git 本地目录可作为普通工作区使用，历史版本留下的多个真实目录会在当前唯一在线客户端上自动验真恢复，缺失或身份变化目录保持不可用且不会拖累其它目录。
+- 下一次实际包含客户端变化的企业包必须使用高于现网 `20260825204745` 的新 14 位版本；本次只落实代码与发布门禁，尚未生成或部署新的组织密钥签名企业制品。
+- 未新增 HTTP API、RunEvent/SSE、数据库、SQL、Flyway 或依赖，不修改环境配置、generated SDK 或只读 OpenCode 源码；真实麒麟企业包部署后的旧实例批量接管仍需现场验收。

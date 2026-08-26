@@ -176,6 +176,7 @@ import {
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
 import { restartOwnProcessWithConfirmation } from "./process-restart";
 import { requestLocalClientNotificationUpdate } from "./local-client-notification-update";
+import { createLocalWorkspaceReconnectRefreshGate } from "./local-workspace-reconnect-refresh";
 import {
   assertCompleteWorkspaceViewDownload,
   concatWorkspaceDownloadChunks,
@@ -2726,6 +2727,15 @@ const opencodeEndpointQuery = useQuery({
   refetchIntervalInBackground: false
 });
 const opencodeEndpoints = computed<OpencodeEndpoint[]>(() => opencodeEndpointQuery.data.value ?? []);
+const localWorkspaceReconnectRefreshGate = createLocalWorkspaceReconnectRefreshGate();
+watch(
+  [() => opencodeEndpointQuery.dataUpdatedAt.value, () => workspacesQuery.isSuccess.value],
+  () => {
+    if (localWorkspaceReconnectRefreshGate.shouldRefresh(opencodeEndpoints.value, workspaces.value)) {
+      void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+    }
+  }
+);
 const showServerOpencodeStatus = computed(() =>
   !opencodeEndpointQuery.isSuccess.value
   || opencodeEndpoints.value.some(endpoint => endpoint.runtimeKind === "SERVER_PROCESS")

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,6 +35,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
 
 class LocalWorkspaceApplicationServiceTest {
 
@@ -51,7 +53,7 @@ class LocalWorkspaceApplicationServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
                 workspaces, recentWorkspaces, bindings, instances, connections, files,
-                sessionTargets, nightTasks, routes, objectMapper);
+                sessionTargets, nightTasks, routes, objectMapper, mock(PlatformTransactionManager.class));
 
         Instant now = Instant.parse("2026-08-22T07:00:00Z");
         UserId userId = new UserId("usr_test_dev");
@@ -161,7 +163,7 @@ class LocalWorkspaceApplicationServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
                 workspaces, recentWorkspaces, bindings, instances, connections, files,
-                sessionTargets, nightTasks, routes, objectMapper);
+                sessionTargets, nightTasks, routes, objectMapper, mock(PlatformTransactionManager.class));
 
         Instant now = Instant.parse("2026-08-25T01:00:00Z");
         UserId userId = new UserId("usr_reinstalled_client");
@@ -236,7 +238,7 @@ class LocalWorkspaceApplicationServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
                 workspaces, recentWorkspaces, bindings, instances, connections, files,
-                sessionTargets, nightTasks, routes, objectMapper);
+                sessionTargets, nightTasks, routes, objectMapper, mock(PlatformTransactionManager.class));
 
         Instant now = Instant.parse("2026-08-25T08:30:00Z");
         UserId userId = new UserId("001177621");
@@ -316,7 +318,7 @@ class LocalWorkspaceApplicationServiceTest {
         ObjectMapper objectMapper = new ObjectMapper();
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
                 workspaces, recentWorkspaces, bindings, instances, connections, files,
-                sessionTargets, nightTasks, routes, objectMapper);
+                sessionTargets, nightTasks, routes, objectMapper, mock(PlatformTransactionManager.class));
 
         Instant now = Instant.parse("2026-08-25T12:00:00Z");
         UserId userId = new UserId("usr_reconnect_recent");
@@ -368,5 +370,93 @@ class LocalWorkspaceApplicationServiceTest {
                 eq(clientId.value()), eq(31L), eq(workspaceId.value()), eq(null),
                 eq("workspace.registerRoot"), any(), eq("trace_reconnect"));
         verify(recentWorkspaces, never()).savePreference(any(UserWorkspacePreference.class));
+    }
+
+    @Test
+    void reconnectRestoresEveryAvailableHistoricalWorkspaceAndSkipsMissingDirectory() {
+        WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
+        ManagedWorkspaceRepository recentWorkspaces = mock(ManagedWorkspaceRepository.class);
+        LocalClientWorkspaceRepository bindings = mock(LocalClientWorkspaceRepository.class);
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        LocalClientWorkspaceFileGateway files = mock(LocalClientWorkspaceFileGateway.class);
+        SessionRuntimeTargetRepository sessionTargets = mock(SessionRuntimeTargetRepository.class);
+        NightExecutionTaskRepository nightTasks = mock(NightExecutionTaskRepository.class);
+        BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
+                workspaces, recentWorkspaces, bindings, instances, connections, files,
+                sessionTargets, nightTasks, routes, objectMapper, transactionManager);
+
+        Instant now = Instant.parse("2026-08-26T02:00:00Z");
+        UserId userId = new UserId("001177621");
+        LocalClientInstanceId currentClientId = new LocalClientInstanceId("lci_current_client");
+        LocalClientInstanceId historicalClientId = new LocalClientInstanceId("lci_previous_version");
+        WorkspaceId availableWorkspaceId = new WorkspaceId("wrk_available_history");
+        WorkspaceId missingWorkspaceId = new WorkspaceId("wrk_missing_history");
+        BackendProcessId backendProcessId = new BackendProcessId("bjp_current_client");
+        LocalClientInstance currentInstance = mock(LocalClientInstance.class);
+        LocalClientInstance historicalInstance = mock(LocalClientInstance.class);
+        LocalClientConnectionRoute currentRoute = mock(LocalClientConnectionRoute.class);
+        LocalClientWorkspaceBinding availableBinding = new LocalClientWorkspaceBinding(
+                availableWorkspaceId, userId, historicalClientId, "/home/user/available",
+                "available-digest", "available-file-system", now.minusSeconds(3600), now.minusSeconds(3600));
+        LocalClientWorkspaceBinding missingBinding = new LocalClientWorkspaceBinding(
+                missingWorkspaceId, userId, historicalClientId, "/home/user/missing",
+                "missing-digest", "missing-file-system", now.minusSeconds(3500), now.minusSeconds(3500));
+        Workspace availableWorkspace = new Workspace(
+                availableWorkspaceId, "available", "/home/user/available", WorkspaceStatus.ACTIVE,
+                now.minusSeconds(3600), now.minusSeconds(3600), null, "trace_old");
+        ObjectNode registration = objectMapper.createObjectNode()
+                .put("normalizedRootPath", "/home/user/available")
+                .put("rootDigest", "available-digest")
+                .put("fileSystemIdentity", "available-file-system");
+
+        when(instances.findById(currentClientId)).thenReturn(Optional.of(currentInstance));
+        when(currentInstance.userId()).thenReturn(userId);
+        when(currentInstance.clientInstanceId()).thenReturn(currentClientId);
+        when(historicalInstance.clientInstanceId()).thenReturn(historicalClientId);
+        when(instances.findByUserIdIncludingReplaced(userId))
+                .thenReturn(List.of(currentInstance, historicalInstance));
+        when(bindings.findByClientInstanceId(currentClientId)).thenReturn(List.of());
+        when(bindings.findByClientInstanceId(historicalClientId))
+                .thenReturn(List.of(availableBinding, missingBinding), List.of(missingBinding));
+        when(bindings.findByWorkspaceId(availableWorkspaceId)).thenReturn(Optional.of(availableBinding));
+        when(bindings.findByWorkspaceId(missingWorkspaceId)).thenReturn(Optional.of(missingBinding));
+        when(connections.find(currentClientId)).thenReturn(Optional.of(currentRoute));
+        when(connections.find(historicalClientId)).thenReturn(Optional.empty());
+        when(currentRoute.userId()).thenReturn(userId);
+        when(currentRoute.clientInstanceId()).thenReturn(currentClientId);
+        when(currentRoute.connectionGeneration()).thenReturn(41L);
+        when(currentRoute.backendProcessId()).thenReturn(backendProcessId);
+        when(routes.isCurrent(backendProcessId)).thenReturn(true);
+        when(workspaces.findById(availableWorkspaceId)).thenReturn(Optional.of(availableWorkspace));
+        when(files.invoke(
+                eq(currentClientId.value()), eq(41L), eq(null), eq(null),
+                eq("workspace.validateRoot"), argThat(node ->
+                        "/home/user/available".equals(node.path("absolutePath").asText())), eq("trace_restore_all")))
+                .thenReturn(registration);
+        when(files.invoke(
+                eq(currentClientId.value()), eq(41L), eq(availableWorkspaceId.value()), eq(null),
+                eq("workspace.registerRoot"), any(), eq("trace_restore_all")))
+                .thenReturn(registration);
+        when(files.invoke(
+                eq(currentClientId.value()), eq(41L), eq(null), eq(null),
+                eq("workspace.validateRoot"), argThat(node ->
+                        "/home/user/missing".equals(node.path("absolutePath").asText())), eq("trace_restore_all")))
+                .thenThrow(new IllegalStateException("directory missing"));
+        when(bindings.rebind(any(LocalClientWorkspaceBinding.class), eq(historicalClientId))).thenReturn(true);
+        LocalWorkspaceApplicationService.ReconnectRestoreResult result = service.restoreAvailableOnReconnect(
+                userId, currentClientId, 41L, "trace_restore_all");
+
+        assertThat(result).isEqualTo(new LocalWorkspaceApplicationService.ReconnectRestoreResult(2, 1, 1));
+        verify(bindings).rebind(argThat(binding ->
+                binding.workspaceId().equals(availableWorkspaceId)
+                        && binding.clientInstanceId().equals(currentClientId)), eq(historicalClientId));
+        verify(bindings, never()).rebind(argThat(binding ->
+                binding.workspaceId().equals(missingWorkspaceId)), eq(historicalClientId));
+        verify(transactionManager).commit(isNull());
+        verify(transactionManager).rollback(isNull());
     }
 }

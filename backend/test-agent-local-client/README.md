@@ -33,7 +33,7 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 - 新客户端声明 `WORKSPACE_GIT_ACCESS_V1`，通过既有受认证文件 RPC 接收 `workspace.git-access.check`；工作区 ID 与根摘要仍由注册表校验，服务端不能传入任意本地路径。
 - 客户端只读执行本地 Git 仓库识别、`remote.origin.url` 读取和 `git ls-remote --heads`，直接复用当前用户自己的 Git/SSH 凭据环境，不 clone、fetch 或修改工作树。
-- 回包只包含固定 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`、原因码和中文安全说明。只要已执行的远端只读探测失败，包括认证/仓库拒绝、网络、SSL/TLS 或超时，以及非 Git 目录或缺少 origin，均返回 `INACCESSIBLE`；只有未形成有效探测结论时才返回 `UNKNOWN`。路径、远端 URL、命令和 stderr 均不送回平台。
+- 回包只包含固定 `ACCESSIBLE/INACCESSIBLE/UNKNOWN`、原因码和中文安全说明。认证/仓库拒绝、网络、SSL/TLS、超时或 Git 工作区缺少 origin 等已执行远端探测失败返回 `INACCESSIBLE`；非 Git 目录返回 `UNKNOWN + NOT_GIT_REPOSITORY`，表示 Git 能力不适用但普通本地工作区仍可使用。旧客户端、断线等未形成有效结论的情况也返回 `UNKNOWN`。路径、远端 URL、命令和 stderr 均不送回平台。
 
 ## 公共能力包
 
@@ -68,6 +68,7 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 ## 版本策略兼容
 
+- 客户端 release 版本使用固定宽度北京时间时间戳。签名打包入口要求新版本严格高于整包发布传入的已部署版本及当前分发目录中的所有版本；相同版本或更低版本失败关闭。客户端组件未变化时继续复用原 release，不仅为版本递增而重复发布。
 - 平台尚未设置全局或个人客户端目标版本时，客户端保持当前版本并继续在线。新版服务端不会下发无目标的
   `VERSION_POLICY`；为兼容已发布的旧服务端，客户端只接受严格的
   `targetVersion=null/direction=SAME/policyRevision=0/force=false` 空策略，不放宽任何真实更新命令的正 revision fencing。

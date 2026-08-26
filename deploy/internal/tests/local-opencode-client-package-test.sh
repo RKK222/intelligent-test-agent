@@ -25,6 +25,7 @@ sha256_file() {
 VERSION=20260820153045
 RELATIVE_OUTPUT_VERSION=20260820153046
 UPGRADE_VERSION=20260820153047
+OLDER_VERSION=20260820153044
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
@@ -204,6 +205,62 @@ package_upgrade_release() {
 }
 
 package_release
+
+# 新 release 必须严格高于已有分发和整包发布传入的已部署版本，禁止升级后版本倒退或原地复用。
+if TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jdk-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+      "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+        --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
+        --version "${OLDER_VERSION}" \
+        --download-base-url "${DOWNLOAD_ROOT}" \
+        --server-url "${SERVER_ROOT}" \
+        --allow-insecure-control true \
+        --signing-key "${TEST_ROOT}/signing-private.pem" \
+        --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+        --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+        --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
+        --skip-build >"${TEST_ROOT}/older-version.log" 2>&1; then
+  echo "Older local client release was unexpectedly accepted" >&2
+  exit 1
+fi
+grep -q 'must be greater than previously published version' "${TEST_ROOT}/older-version.log"
+
+if "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
+    --output-dir "${TEST_ROOT}/minimum-version/local-opencode-client" \
+    --version "${VERSION}" \
+    --minimum-version "${VERSION}" \
+    --download-base-url "${DOWNLOAD_ROOT}" \
+    --server-url "${SERVER_ROOT}" \
+    --allow-insecure-control true \
+    --signing-key "${TEST_ROOT}/signing-private.pem" \
+    --client-jar "${TEST_ROOT}/test-agent-local-client.jar" \
+    --public-config-commit "${PUBLIC_CONFIG_COMMIT}" \
+    --public-capability-bundle "${TEST_ROOT}/public-capabilities.tar.gz" \
+    --skip-build >"${TEST_ROOT}/minimum-version.log" 2>&1; then
+  echo "Previously deployed local client version was unexpectedly reusable" >&2
+  exit 1
+fi
+grep -q 'must be greater than previously published version' "${TEST_ROOT}/minimum-version.log"
+
+cat >"${TEST_ROOT}/release-component-state.env" <<STATE
+TEST_AGENT_RELEASE_COMPONENT_STATE_VERSION=1
+TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT_VERSION=${VERSION}
+STATE
+if TEST_AGENT_LOCAL_CLIENT_VERSION="${VERSION}" \
+    "${ROOT_DIR}/deploy/internal/package-release.sh" \
+      --env-file /dev/null \
+      --local-client-only \
+      --output-dir "${TEST_ROOT}/release-package" \
+      --component-state-file "${TEST_ROOT}/release-component-state.env" \
+      >"${TEST_ROOT}/release-minimum-version.log" 2>&1; then
+  echo "Release package unexpectedly reused the deployed local client version" >&2
+  exit 1
+fi
+grep -q 'must be greater than previously published version' \
+  "${TEST_ROOT}/release-minimum-version.log"
+
 package_relative_output_release
 test -f "${TEST_ROOT}/relative-dist/local-opencode-client/releases/${RELATIVE_OUTPUT_VERSION}/jdk.tar.gz"
 test -f "${TEST_ROOT}/relative-dist/local-opencode-client/releases/${RELATIVE_OUTPUT_VERSION}/opencode.tar.gz"

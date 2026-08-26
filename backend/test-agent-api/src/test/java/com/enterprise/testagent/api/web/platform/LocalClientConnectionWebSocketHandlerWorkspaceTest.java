@@ -22,7 +22,6 @@ import com.enterprise.testagent.opencode.runtime.process.OpencodeProcessStartupS
 import com.enterprise.testagent.system.management.localclient.LocalClientCredentialApplicationService;
 import java.time.Duration;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -34,16 +33,16 @@ import reactor.test.StepVerifier;
 class LocalClientConnectionWebSocketHandlerWorkspaceTest {
 
     @Test
-    void restoresRecentWorkspaceAsynchronouslyAfterReconnect() throws Exception {
+    void restoresAvailableWorkspacesAsynchronouslyAfterReconnect() throws Exception {
         UserId userId = new UserId("usr_recent_reconnect");
         LocalClientInstanceId instanceId = new LocalClientInstanceId("lci_recent_reconnect");
         LocalWorkspaceApplicationService workspaceService = mock(LocalWorkspaceApplicationService.class);
         CountDownLatch restored = new CountDownLatch(1);
-        when(workspaceService.restoreRecentOnReconnect(
+        when(workspaceService.restoreAvailableOnReconnect(
                 userId, instanceId, 13L, "trace-reconnect"))
                 .thenAnswer(ignored -> {
                     restored.countDown();
-                    return Optional.empty();
+                    return new LocalWorkspaceApplicationService.ReconnectRestoreResult(0, 0, 0);
                 });
         LocalClientConnectionWebSocketHandler handler = handler(workspaceService);
         LocalClientConnectionWebSocketHandler.ConnectionState state =
@@ -51,7 +50,7 @@ class LocalClientConnectionWebSocketHandlerWorkspaceTest {
                         userId, instanceId, 13, "grant-fingerprint", "trace-reconnect", true,
                         ConcurrentHashMap.newKeySet());
 
-        handler.autoRestoreRecentWorkspace(state);
+        handler.autoRestoreAvailableWorkspaces(state);
 
         assertThat(restored.await(2, TimeUnit.SECONDS)).isTrue();
     }

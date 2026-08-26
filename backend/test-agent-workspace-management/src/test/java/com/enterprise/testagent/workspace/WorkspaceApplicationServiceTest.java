@@ -8,11 +8,17 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.workspace.Workspace;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheck;
+import com.enterprise.testagent.domain.workspace.WorkspaceGitAccessCheckRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
+import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
+import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.run.ConversationContextStore;
@@ -186,7 +192,44 @@ class WorkspaceApplicationServiceTest {
 
         assertThatThrownBy(() -> service.requireWorkspaceWriteAccess(workspaceId, userId, true))
                 .isInstanceOfSatisfying(PlatformException.class,
-                        exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+                exception -> assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+    }
+
+    @Test
+    void localNonGitWorkspaceIsNotBlockedByHistoricalInspectionProjection() {
+        WorkspaceApplicationService service = new WorkspaceApplicationService(
+                new FakeWorkspaceRepository(), new WorkspaceFileService());
+        LocalClientWorkspaceRepository bindings = Mockito.mock(LocalClientWorkspaceRepository.class);
+        LocalClientConnectionStore connections = Mockito.mock(LocalClientConnectionStore.class);
+        WorkspaceGitAccessCheckRepository checks = Mockito.mock(WorkspaceGitAccessCheckRepository.class);
+        UserId userId = new UserId("usr_non_git_workspace");
+        WorkspaceId workspaceId = new WorkspaceId("wrk_non_git_workspace");
+        LocalClientInstanceId clientInstanceId = new LocalClientInstanceId("lci_non_git_workspace");
+        java.time.Instant now = java.time.Instant.parse("2026-08-26T01:00:00Z");
+        Workspace workspace = new Workspace(
+                workspaceId, "普通目录", root.toString(), WorkspaceStatus.ACTIVE,
+                now, now, null, "trace_non_git");
+        Mockito.when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(
+                new LocalClientWorkspaceBinding(
+                        workspaceId, userId, clientInstanceId, root.toString(),
+                        "root-digest", "file-system", now, now)));
+        Mockito.when(checks.find(
+                userId, WorkspaceGitAccessCheck.TargetKind.LOCAL_WORKSPACE, workspaceId.value()))
+                .thenReturn(Optional.of(new WorkspaceGitAccessCheck(
+                        userId,
+                        WorkspaceGitAccessCheck.TargetKind.LOCAL_WORKSPACE,
+                        workspaceId.value(),
+                        WorkspaceGitAccessCheck.Status.INACCESSIBLE,
+                        "NOT_GIT_REPOSITORY",
+                        "目录不是可用的 Git 工作区",
+                        now)));
+        service.configureLocalClientWorkspace(bindings, connections);
+        service.configureWorkspaceGitAccessChecks(checks);
+
+        WorkspaceApplicationService.WorkspaceRuntimeMetadata metadata = service.runtimeMetadata(workspace);
+
+        assertThat(metadata.gitAccess().status()).isEqualTo(WorkspaceGitAccessCheck.Status.UNKNOWN);
+        assertThat(metadata.gitAccess().reason()).isEqualTo("NOT_GIT_REPOSITORY");
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {

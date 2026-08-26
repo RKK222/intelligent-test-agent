@@ -2,7 +2,7 @@
 
 ## 范围、版本与停止条件
 
-本交付仅支持麒麟 Linux aarch64/arm64 + glibc 的已登录用户，不支持 macOS、Windows、非 glibc 系统、开机未登录即运行或稳定 Shell 自更新。OpenCode 固定为 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。
+本交付仅支持麒麟 Linux aarch64/arm64 + glibc 的已登录用户，不支持 macOS、Windows、非 glibc 系统、开机未登录即运行或稳定 Shell 自更新。OpenCode 固定为 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。每次确有客户端内容变化并生成升级 release 时，新版本必须严格大于最后已部署版本和当前分发目录中的所有版本；客户端组件未变化的整包重封继续复用原版本，不制造空升级。
 
 当前企业入口固定为 `http://mimo.sdc.cs.icbc:9996`，因此客户端控制连接为同域 `ws://`，必须在客户端包和两台 Java 的 `backend.env` 中同时显式开启明文控制例外。该例外只适用于已批准的可信内网；入口升级 HTTPS 后，客户端 URL 改为 `https://...`，并把前后台明文开关同时恢复为 `false`。
 
@@ -23,10 +23,11 @@ test -z "$(git diff --name-only --diff-filter=U)"
 
 成功条件：输出 HEAD 和工作树状态，最后一条无输出且退出码为 0。失败即停止构建。
 
-**机器：外网 Mac（同一终端）**。固定本次版本、下载根、控制服务根、私钥和已审核的 ARM64 输入文件。package-release.sh 没有 --version 参数，版本只能通过 TEST_AGENT_LOCAL_CLIENT_VERSION 固定；不要把 --version 追加给该脚本。
+**机器：外网 Mac（同一终端）**。固定本次版本、下载根、控制服务根、私钥和已审核的 ARM64 输入文件。`<RELEASE_VERSION>` 必须大于最后已部署客户端版本，不能复用或回填旧版本。package-release.sh 没有 --version 参数，版本只能通过 TEST_AGENT_LOCAL_CLIENT_VERSION 固定；不要把 --version 追加给该脚本。
 
 ~~~bash
 export TEST_AGENT_LOCAL_CLIENT_VERSION=<RELEASE_VERSION>
+export TEST_AGENT_LOCAL_CLIENT_MINIMUM_VERSION=<LAST_DEPLOYED_RELEASE_VERSION>
 export TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL=http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/
 export TEST_AGENT_LOCAL_CLIENT_SERVER_URL=http://mimo.sdc.cs.icbc:9996
 export TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL=true
@@ -43,6 +44,8 @@ test -r "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}"
 
 成功条件：四个 `test -r` 均返回 0，公共 commit 是已经审核发布的 40-64 位十六进制固定提交，能力包 manifest 中的
 `sourceCommit` 与它完全一致。私钥只可留在该外网 Mac 的受控目录，绝不放入仓库、交付包、U 盘、日志或聊天。
+首次发布可不设置 `TEST_AGENT_LOCAL_CLIENT_MINIMUM_VERSION`；使用独立空输出目录制作升级包时必须把它设为最后已部署版本，
+不能把“目录里没有旧 release”当作允许复用旧版本号。标准完整发布会再从组件状态传入同一下界。
 平台首次升级且该 commit 尚无能力制品时，后端会从当前已检出的公共 Git HEAD 自动补建；超级管理员再通过
 `GET /api/internal/platform/workspace-management/agent-config/public/client-capabilities/{bundleDigest}/artifact`
 导出此处的完整包。禁止用空能力包或只写一个 commit 字符串代替实际基线。
@@ -64,7 +67,7 @@ test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist
 test -f /Users/huang/workspace/intelligent-test-agent-gitee/deploy/internal/dist-local-client-<RELEASE_VERSION>/local-opencode-client/releases/<RELEASE_VERSION>/manifest.json
 ~~~
 
-成功条件：脚本退出 0，五个文件均存在，且不带版本号的麒麟 ARM64 下载别名与本次版本化用户包逐字节相同。脚本会对输入 JDK/OpenCode 摘要、release 签名及 catalog 发布顺序失败关闭。
+成功条件：脚本退出 0，五个文件均存在，且不带版本号的麒麟 ARM64 下载别名与本次版本化用户包逐字节相同。脚本会把组件状态中的已部署版本传给客户端打包入口，并同时扫描输出目录中的历史 release；本次版本不严格升高时会在下载和签名前停止。输入 JDK/OpenCode 摘要、release 签名及 catalog 发布顺序仍全部失败关闭。
 
 **机器：外网 Mac（同一终端）**。把生成目录封装为 U 盘只转运的一个压缩包和一个摘要文件；包内顶层必须是 local-opencode-client/。
 
@@ -286,9 +289,10 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
 短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
-客户端完成重连认证后，平台会自动把全局最近使用的本地工作区交给当前连接，核验真实路径摘要与文件系统身份并恢复
-客户端根映射，不要求用户在页面重复选择。若历史版本已经生成了新实例 ID，同一自动恢复流程会在当前唯一在线客户端上
-保留原 workspaceId 接管绑定；非最近工作区仍可在工作台直接选择并按同一规则恢复。目录已经移动时再从客户端托盘重新选择原目录。
+客户端完成重连认证后，平台会优先恢复全局最近项，再扫描该用户包含已替换实例在内的全部历史本地工作区，逐个核验真实
+路径摘要与文件系统身份并恢复客户端根映射，不要求用户在页面重复选择。若历史版本已经生成了新实例 ID，同一自动恢复流程会在
+当前唯一在线客户端上保留原 workspaceId 接管每个有效绑定；某个目录已删除或身份变化时只跳过该项，不影响其它目录恢复。
+目录已经移动时再从客户端托盘重新选择原目录。
 旧实例在线、身份不一致、同目录存在多个历史 Workspace 或该用户出现多个在线 route 时必须先停止并人工消除歧义。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认有且只有一个实例，且

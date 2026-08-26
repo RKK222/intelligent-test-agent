@@ -297,7 +297,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                             state.generation(),
                             routeResolver.currentBackendProcessIdValue(),
                             frame.traceId());
-                    autoRestoreRecentWorkspace(state);
+                    autoRestoreAvailableWorkspaces(state);
                     autoStart(state);
                     return state;
                 })
@@ -305,18 +305,19 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                 .then();
     }
 
-    /** REGISTERED 入队后恢复最近本地工作区；失败只保留为可观察告警，不中断已建立的客户端连接。 */
-    void autoRestoreRecentWorkspace(ConnectionState state) {
-        Mono.fromCallable(() -> workspaceService.restoreRecentOnReconnect(
+    /** REGISTERED 入队后恢复可用历史工作区；失败只保留为可观察告警，不中断已建立的客户端连接。 */
+    void autoRestoreAvailableWorkspaces(ConnectionState state) {
+        Mono.fromCallable(() -> workspaceService.restoreAvailableOnReconnect(
                         state.userId(), state.clientInstanceId(), state.generation(), state.traceId()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
-                        restored -> restored.ifPresent(workspace -> LOGGER.info(
-                                "local_client_recent_workspace_restored clientInstanceId={} workspaceId={} generation={} traceId={}",
-                                state.clientInstanceId().value(), workspace.workspaceId(),
-                                state.generation(), state.traceId())),
+                        result -> LOGGER.info(
+                                "local_client_workspaces_restored clientInstanceId={} candidates={} restored={} "
+                                        + "unavailable={} generation={} traceId={}",
+                                state.clientInstanceId().value(), result.candidates(), result.restored(),
+                                result.unavailable(), state.generation(), state.traceId()),
                         error -> LOGGER.warn(
-                                "local_client_recent_workspace_restore_failed clientInstanceId={} generation={} traceId={}",
+                                "local_client_workspaces_restore_failed clientInstanceId={} generation={} traceId={}",
                                 state.clientInstanceId().value(), state.generation(), state.traceId(), error));
     }
 
