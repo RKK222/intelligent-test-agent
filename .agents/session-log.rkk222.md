@@ -15013,3 +15013,28 @@
 
 - 代码、文档、自动化测试和生产构建均完成；真实整栈切换仍受本机 Docker/ClickHouse 启动阻塞，因此运行验收为部分验证。
 - 本次使用 `release`，不新增部署节点；API 仅增加可选查询参数，旧客户端兼容。未新增事件、数据库结构、Flyway、环境配置、generated SDK 或 OpenCode 源码；关系型查询继续只落 MyBatis XML。应用管理减少一次常规全量应用请求，权限与敏感信息边界不变。
+
+## 2026-08-26 - 修复工作区 Markdown 本地图片上传与预览
+
+### Why
+
+- 浏览器只选择一个本机 Markdown 时不能自动扫描其同目录图片，现有预览又会把 `./图片.png` 请求到前端站点，导致工作区文档中的本地图片无法展示。
+- 用户需要一次多选 Markdown 与图片，且文档引用 4 张但实际只上传 3 张时仍正常上传和预览已有图片，缺失图片不能阻断。
+
+### What
+
+- 工作区新建/上传面板保留多文件选择，并新增目录选择器；目录文件按 `webkitRelativePath` 保留内部层级，普通多选可按 Markdown 唯一图片 basename 对齐引用子目录。
+- 新增 Markdown token 图片引用扫描和上传计划；缺失图片只进入非阻断提示，已选择文件继续通过既有文件 WebSocket 分片 RPC 上传。
+- Markdown 相对图片不再请求前端静态站点，由工作台通过普通/引用视图二进制分片 RPC 读取为可回收 object URL；读取失败显示“图片未上传”占位，正文和其它图片保持可用。
+- 同步 editor、file-explorer、agent-web、前端规范和用户手册；补充“4 张引用只选 3 张”、目录层级、中文相对路径、外链与缺图占位回归。
+
+### How
+
+- 定向 Vitest 4 个文件共 54 项全部通过；editor、file-explorer、agent-web 三个包的 `vue-tsc` 类型检查通过；agent-web production build（含 VitePress）通过，`git diff --check` 通过。
+- 启动当前代码的 agent-web，因既有 3000 端口被占用自动运行在 `http://127.0.0.1:3001/`，页面入口返回完整 HTML。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，确认本次前端文件上传与预览改动不覆盖已提交的应用管理、运行态或企业包成果。
+
+### Result
+
+- 用户可一次多选 `.md` 和现有图片，或选择整个目录；少传图片不会失败，已上传图片正常显示，缺失项可稍后补传。
+- 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；文件读取与上传继续遵守既有 WebSocket route/ticket/RPC 边界。

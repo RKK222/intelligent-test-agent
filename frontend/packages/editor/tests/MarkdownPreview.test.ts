@@ -68,6 +68,48 @@ vi.mock("../src/mind-map/simple-mind-map-runtime", () => ({
 const waitRender = () => new Promise((r) => setTimeout(r, 350));
 
 describe("MarkdownPreview", () => {
+  it("通过宿主解析工作区相对图片并释放临时 URL", async () => {
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:workspace-image");
+    const revokeObjectURL = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const resolveImage = vi.fn().mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    const view = render(MarkdownPreview, {
+      props: { content: "![流程](./图片/流程图.png)", resolveImage, imageContextKey: "docs/方案.md" }
+    });
+    await waitRender();
+
+    await vi.waitFor(() => expect(resolveImage).toHaveBeenCalledTimes(1));
+    expect(resolveImage).toHaveBeenCalledWith("./%E5%9B%BE%E7%89%87/%E6%B5%81%E7%A8%8B%E5%9B%BE.png");
+    await vi.waitFor(() => expect(view.container.querySelector("img")?.getAttribute("src")).toBe("blob:workspace-image"));
+    view.unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:workspace-image");
+    createObjectURL.mockRestore();
+    revokeObjectURL.mockRestore();
+  });
+
+  it("本地图片读取失败时显示未上传占位，但不影响文档预览", async () => {
+    const resolveImage = vi.fn().mockRejectedValue(new Error("不存在"));
+    const { container } = render(MarkdownPreview, {
+      props: { content: "正文\n\n![缺图](./missing.png)", resolveImage }
+    });
+    await waitRender();
+
+    expect(container.querySelector(".markdown-body")?.textContent).toContain("正文");
+    await vi.waitFor(() => {
+      expect(container.querySelector(".ta-markdown-image-error")?.textContent).toContain("图片未上传：./missing.png");
+    });
+  });
+
+  it("外部图片保持浏览器地址且不调用工作区解析器", async () => {
+    const resolveImage = vi.fn();
+    const { container } = render(MarkdownPreview, {
+      props: { content: "![外链](https://example.com/a.png)", resolveImage }
+    });
+    await waitRender();
+
+    expect(resolveImage).not.toHaveBeenCalled();
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://example.com/a.png");
+  });
+
   it("渲染标题与行内强调", async () => {
     const { container } = render(MarkdownPreview, {
       props: { content: "# 标题\n\n这是 **粗体** 文本" }

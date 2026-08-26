@@ -32,6 +32,8 @@ export type DirectoryRowsProps = {
   clipboardEntry?: WorkspaceClipboardEntry;
   /** 当前正在下载的节点稳定 ID；下载期间禁用同一行的重复请求。 */
   downloadingEntryId?: string;
+  /** 工作区文件树允许从本机选择整个目录；Agent 配置树等调用方默认关闭。 */
+  allowDirectoryUpload?: boolean;
 };
 
 export type WorkspaceClipboardEntry = {
@@ -80,7 +82,7 @@ const emit = defineEmits<{
   moveEntry: [sourcePath: string, targetDirectory: string];
   moveEntries: [sourcePaths: string[], targetDirectory: string];
   uploadFiles: [directory: string, files: File[]];
-  requestUpload: [directory: string];
+  requestUpload: [directory: string, mode: "files" | "directory"];
   cacheAndNavigate: [path: string, type: "file" | "directory"];
   downloadEntry: [entry: FileTreeEntry];
   dragSourceChange: [paths: string[] | undefined];
@@ -696,6 +698,7 @@ function submitRename() {
           :selected-entries="selectedEntries"
           :selection-anchor-path="selectionAnchorPath"
           :downloading-entry-id="downloadingEntryId"
+          :allow-directory-upload="allowDirectoryUpload"
           :clipboard-entry="clipboardEntry"
           :depth="depth + 1"
           @toggle-directory="emit('toggleDirectory', $event)"
@@ -715,7 +718,7 @@ function submitRename() {
           @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
           @move-entries="(sourcePaths, targetDirectory) => emit('moveEntries', sourcePaths, targetDirectory)"
           @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
-          @request-upload="emit('requestUpload', $event)"
+          @request-upload="(directory, mode) => emit('requestUpload', directory, mode)"
           @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
           @download-entry="emit('downloadEntry', $event)"
           @drag-source-change="emit('dragSourceChange', $event)"
@@ -800,8 +803,9 @@ function submitRename() {
     </FileEntryContextMenu>
     <FileEntryCreateDialog
       ref="createDialog"
+      :allow-directory-upload="allowDirectoryUpload"
       @create-entry="(directory, name, type) => emit('createEntry', directory, name, type)"
-      @request-upload="emit('requestUpload', $event)"
+      @request-upload="(directory, mode) => emit('requestUpload', directory, mode)"
     />
     <FileEntryDeleteDialog
       ref="deleteDialog"

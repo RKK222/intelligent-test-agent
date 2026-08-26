@@ -7,6 +7,8 @@ const props = withDefaults(defineProps<{
   rootLabel?: string;
   /** 是否展示本机文件上传入口。 */
   allowUpload?: boolean;
+  /** 是否允许选择整个本机文件夹并保留内部相对路径。 */
+  allowDirectoryUpload?: boolean;
   /** Agent 配置根目录可额外创建 OpenCode Agent/Skill 标准模板。 */
   allowAgentTemplates?: boolean;
   /** 复用统一面板时允许调用方提供具体业务标题。 */
@@ -15,6 +17,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   rootLabel: "工作区根目录",
   allowUpload: true,
+  allowDirectoryUpload: false,
   allowAgentTemplates: false,
   title: "",
   dialogLabel: ""
@@ -23,12 +26,12 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   createEntry: [directory: string, name: string, type: "file" | "directory"];
   createAgentTemplate: [directory: string, name: string, type: "agent" | "skill", englishName?: string];
-  requestUpload: [directory: string];
+  requestUpload: [directory: string, mode: "files" | "directory"];
 }>();
 
 const visible = ref(false);
 const targetDirectory = ref("");
-const entryType = ref<"file" | "directory" | "upload" | "agent" | "skill">("file");
+const entryType = ref<"file" | "directory" | "upload" | "upload-directory" | "agent" | "skill">("file");
 const entryName = ref("");
 const englishName = ref("");
 const errorMessage = ref("");
@@ -51,9 +54,10 @@ function close() {
 }
 
 function submit() {
-  if (entryType.value === "upload") {
+  if (entryType.value === "upload" || entryType.value === "upload-directory") {
     if (!props.allowUpload) return;
-    emit("requestUpload", targetDirectory.value);
+    if (entryType.value === "upload-directory" && !props.allowDirectoryUpload) return;
+    emit("requestUpload", targetDirectory.value, entryType.value === "upload-directory" ? "directory" : "files");
     close();
     return;
   }
@@ -144,7 +148,11 @@ defineExpose({ open });
               role="radiogroup"
               aria-label="操作类型"
               class="ta-file-dialog-segments"
-              :class="{ 'has-upload': allowUpload, 'has-agent-templates': allowAgentTemplates }"
+              :class="{
+                'has-upload': allowUpload,
+                'has-directory-upload': allowUpload && allowDirectoryUpload,
+                'has-agent-templates': allowAgentTemplates
+              }"
             >
               <button type="button" role="radio" :aria-checked="entryType === 'file'" :class="{ 'is-active': entryType === 'file' }" @click="entryType = 'file'">
                 文件
@@ -161,6 +169,16 @@ defineExpose({ open });
                 @click="entryType = 'upload'"
               >
                 上传
+              </button>
+              <button
+                v-if="allowUpload && allowDirectoryUpload"
+                type="button"
+                role="radio"
+                :aria-checked="entryType === 'upload-directory'"
+                :class="{ 'is-active': entryType === 'upload-directory' }"
+                @click="entryType = 'upload-directory'"
+              >
+                上传目录
               </button>
               <button
                 v-if="allowAgentTemplates"
@@ -184,7 +202,7 @@ defineExpose({ open });
               </button>
             </div>
           </div>
-          <div v-if="entryType !== 'upload'" class="ta-file-dialog-field">
+          <div v-if="entryType !== 'upload' && entryType !== 'upload-directory'" class="ta-file-dialog-field">
             <label :for="`new-entry-${entryType}`">{{ entryLabel() }}</label>
             <input
               :id="`new-entry-${entryType}`"
@@ -212,8 +230,9 @@ defineExpose({ open });
           <div v-else class="ta-file-dialog-upload-note">
             <Upload :size="17" :stroke-width="1.6" />
             <div>
-              <strong>从本机选择文件</strong>
-              <span>支持一次选择多个文件，上传时不会覆盖同名内容。</span>
+              <strong>{{ entryType === 'upload-directory' ? '从本机选择文件夹' : '从本机选择文件' }}</strong>
+              <span v-if="entryType === 'upload-directory'">保留文件夹内部层级，适合一起上传 Markdown 和图片。</span>
+              <span v-else>支持一次选择多个文件；Markdown 缺少部分图片时仍可上传。</span>
             </div>
           </div>
         </div>
@@ -222,10 +241,10 @@ defineExpose({ open });
           <button
             type="button"
             class="ta-file-dialog-button is-primary"
-            :disabled="entryType !== 'upload' && !entryName.trim()"
+            :disabled="entryType !== 'upload' && entryType !== 'upload-directory' && !entryName.trim()"
             @click="submit"
           >
-            {{ entryType === 'upload' ? '选择文件' : '创建' }}
+            {{ entryType === 'upload-directory' ? '选择文件夹' : entryType === 'upload' ? '选择文件' : '创建' }}
           </button>
         </footer>
       </section>
@@ -365,6 +384,10 @@ defineExpose({ open });
 
 .ta-file-dialog-segments.has-upload {
   grid-template-columns: repeat(3, 1fr);
+}
+
+.ta-file-dialog-segments.has-directory-upload {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .ta-file-dialog-segments.has-agent-templates {

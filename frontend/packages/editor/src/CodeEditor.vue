@@ -30,6 +30,8 @@ export type CodeEditorProps = {
   previewMode?: PreviewMode;
   /** 独立 .mind 文件是否处于可视化编辑态，由工作台 tab 草稿受控。 */
   mindMapEditing?: boolean;
+  /** 通过工作区文件通道读取 Markdown 中的本地图片。 */
+  resolveMarkdownImage?: (source: string) => Promise<Blob>;
   /** 可恢复的纯文本草稿；禁止传入 SimpleMindMap 实例或节点对象。 */
   mindMapDraft?: MindMapVisualDraft;
 };
@@ -648,6 +650,8 @@ defineExpose({
         v-if="effectivePreviewMode !== 'off'"
         ref="previewRef"
         :content="content"
+        :image-context-key="path"
+        :resolve-image="resolveMarkdownImage"
         class="min-h-0 flex-1"
         @scroll="onPreviewScroll"
         @ready="syncFromEditor"

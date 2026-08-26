@@ -2,6 +2,10 @@
 export type MarkdownPreviewProps = {
   // 待渲染的 Markdown 源码
   content?: string;
+  /** 工作区图片由宿主通过受控文件通道读取，预览组件不直接拼接 HTTP 地址。 */
+  resolveImage?: (source: string) => Promise<Blob>;
+  /** 文件切换时强制释放上一份 Markdown 生成的临时图片 URL。 */
+  imageContextKey?: string;
 };
 
 // Module-level cached references to avoid per-instance initialization & dynamic imports
@@ -14,7 +18,7 @@ let mermaidLoadPromise: Promise<void> | null = null;
 </script>
 
 <script setup lang="ts">
-import { computed, createApp, defineAsyncComponent, onBeforeUnmount, ref, watch, type App } from "vue";
+import { computed, createApp, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch, type App } from "vue";
 import type { MermaidEditableDiagram } from "./mermaid/diagram";
 import { ensureMermaid } from "./mermaid/init";
 import { parseMindMapMarkdown } from "./mind-map/markdown";
@@ -69,6 +73,74 @@ let readyEmitted = false;
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let syncRaf = 0;
+let imageRenderGeneration = 0;
+const markdownImageUrls = new Set<string>();
+
+const URI_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+
+/** 外链和 data URL 保持浏览器原生行为，只有相对/工作区绝对路径交给宿主解析。 */
+function isWorkspaceImageSource(source: string): boolean {
+  const value = source.trim();
+  return Boolean(value)
+    && !value.startsWith("#")
+    && !value.startsWith("//")
+    && !URI_SCHEME.test(value);
+}
+
+function revokeMarkdownImageUrls() {
+  for (const url of markdownImageUrls) URL.revokeObjectURL(url);
+  markdownImageUrls.clear();
+}
+
+/** 在消毒后的 DOM 上移除相对 src，避免浏览器先向前端站点发出错误请求。 */
+function prepareWorkspaceImages(sanitizedHtml: string): string {
+  if (!props.resolveImage) return sanitizedHtml;
+  const template = document.createElement("template");
+  template.innerHTML = sanitizedHtml;
+  template.content.querySelectorAll<HTMLImageElement>("img[src]").forEach((image) => {
+    const source = image.getAttribute("src") ?? "";
+    if (!isWorkspaceImageSource(source)) return;
+    image.removeAttribute("src");
+    image.setAttribute("data-ta-workspace-image", source);
+    image.classList.add("ta-markdown-workspace-image", "is-loading");
+  });
+  return template.innerHTML;
+}
+
+function replaceMissingWorkspaceImage(image: HTMLImageElement, source: string) {
+  const placeholder = document.createElement("span");
+  placeholder.className = "ta-markdown-image-error";
+  placeholder.setAttribute("role", "status");
+  placeholder.textContent = `图片未上传：${source}`;
+  image.replaceWith(placeholder);
+}
+
+/** v-html 落入真实 DOM 后再异步读取二进制，并用可回收的 object URL 展示。 */
+async function hydrateWorkspaceImages(generation: number) {
+  if (!props.resolveImage || generation !== imageRenderGeneration) return;
+  const images = Array.from(
+    scrollEl.value?.querySelectorAll<HTMLImageElement>("img[data-ta-workspace-image]") ?? []
+  );
+  await Promise.all(images.map(async (image) => {
+    const source = image.getAttribute("data-ta-workspace-image") ?? "";
+    try {
+      const blob = await props.resolveImage!(source);
+      const url = URL.createObjectURL(blob);
+      if (generation !== imageRenderGeneration || !image.isConnected) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      markdownImageUrls.add(url);
+      image.src = url;
+      image.classList.remove("is-loading");
+      image.removeAttribute("data-ta-workspace-image");
+    } catch {
+      if (generation === imageRenderGeneration && image.isConnected) {
+        replaceMissingWorkspaceImage(image, source);
+      }
+    }
+  }));
+}
 
 // 懒加载 markdown-it + highlight.js + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
 async function ensureLibs(needMermaid = false) {
@@ -435,21 +507,30 @@ async function applyVisualEditor(diagram: MermaidEditableDiagram) {
 
 // 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地 file 中的脚本/恶意链接
 async function render() {
+  const generation = ++imageRenderGeneration;
+  revokeMarkdownImageUrls();
   try {
     await ensureLibs();
+    if (generation !== imageRenderGeneration) return;
     unmountMindMapPreviews();
     const raw = mdInstance?.render(displayContent.value, {
       mindMapBlocks: findMindMapBlocks(displayContent.value)
     }) ?? "";
-    html.value = purifyInstance?.sanitize(raw) ?? "";
+    const sanitized = purifyInstance?.sanitize(raw) ?? "";
+    html.value = prepareWorkspaceImages(sanitized);
     renderError.value = null;
+    loading.value = false;
+    await nextTick();
+    // 图片读取不阻塞 Markdown ready；迟到结果由 generation 与 DOM 连接状态共同丢弃。
+    void hydrateWorkspaceImages(generation);
   } catch (error) {
+    if (generation !== imageRenderGeneration) return;
     // 依赖懒加载或单段 Markdown 解析失败时仍展示原文，避免后端已有内容在预览区变成白板。
     html.value = "";
     renderError.value = error instanceof Error ? error.message : String(error);
-  } finally {
     loading.value = false;
-    if (!readyEmitted) {
+  } finally {
+    if (generation === imageRenderGeneration && !readyEmitted) {
       readyEmitted = true;
       emit("ready");
     }
@@ -520,12 +601,14 @@ function onScroll() {
 }
 
 watch(
-  () => props.content,
+  () => [props.content, props.imageContextKey],
   () => scheduleRender(),
   { immediate: true }
 );
 
 onBeforeUnmount(() => {
+  imageRenderGeneration += 1;
+  revokeMarkdownImageUrls();
   if (renderTimer) {
     clearTimeout(renderTimer);
   }
@@ -612,6 +695,33 @@ defineExpose({ scrollToSourceLine });
 
 .markdown-body :deep(a) {
   color: var(--primary, var(--ta-ink));
+}
+
+.markdown-body :deep(.ta-markdown-workspace-image) {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-body :deep(.ta-markdown-workspace-image.is-loading) {
+  display: inline-block;
+  min-width: 160px;
+  min-height: 72px;
+  border: 1px dashed var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-control);
+}
+
+.markdown-body :deep(.ta-markdown-image-error) {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px dashed color-mix(in srgb, var(--ta-border) 70%, #b91c1c);
+  border-radius: 6px;
+  color: var(--ta-muted);
+  background: var(--ta-control);
+  overflow-wrap: anywhere;
 }
 
 .markdown-body :deep(blockquote) {

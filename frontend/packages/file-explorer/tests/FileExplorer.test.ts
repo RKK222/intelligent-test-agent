@@ -123,6 +123,26 @@ describe("FileExplorer", () => {
     expect(view.emitted("uploadFiles")).toEqual([["", [file]]]);
   });
 
+  it("supports selecting a folder and forwards files with browser relative paths", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+    const markdown = new File(["![图](./images/a.png)"], "方案.md", { type: "text/markdown" });
+    const image = new File(["png"], "a.png", { type: "image/png" });
+    Object.defineProperty(markdown, "webkitRelativePath", { value: "方案/方案.md" });
+    Object.defineProperty(image, "webkitRelativePath", { value: "方案/images/a.png" });
+
+    await fireEvent.change(view.getByLabelText("选择要上传到工作区的文件夹"), {
+      target: { files: [markdown, image] }
+    });
+
+    expect(view.emitted("uploadFiles")).toEqual([["", [markdown, image]]]);
+  });
+
   it("uploads operating-system files dropped on the workspace root", async () => {
     const view = render(FileExplorer, {
       props: {

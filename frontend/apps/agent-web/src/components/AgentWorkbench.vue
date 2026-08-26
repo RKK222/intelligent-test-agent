@@ -174,6 +174,11 @@ import {
   type FileUploadOverlayState
 } from "./fileUploadOverlayState";
 import { formatPreviewBytes, progressivePreviewRequired } from "./fileProgressivePreview";
+import {
+  markdownImageMimeType,
+  planWorkspaceUpload,
+  resolveMarkdownWorkspaceImagePath
+} from "./markdown-workspace-images";
 import { restartOwnProcessWithConfirmation } from "./process-restart";
 import { requestLocalClientNotificationUpdate } from "./local-client-notification-update";
 import { createLocalWorkspaceReconnectRefreshGate } from "./local-workspace-reconnect-refresh";
@@ -8440,7 +8445,8 @@ function relativeDownloadPath(path: string, rootPath: string): string {
 
 async function readWorkspaceFileForDownload(
   workspaceId: string,
-  path: string
+  path: string,
+  maxBytes?: number
 ): Promise<Uint8Array<ArrayBuffer>> {
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
@@ -8452,6 +8458,9 @@ async function readWorkspaceFileForDownload(
       expectedSize,
       expectedLastModifiedMillis
     });
+    if (maxBytes !== undefined && chunk.size > maxBytes) {
+      throw new Error(`图片大小不能超过 ${formatPreviewBytes(maxBytes)}`);
+    }
     chunks.push(decodeWorkspaceBinaryChunk(chunk, offset));
     expectedSize = chunk.size;
     expectedLastModifiedMillis = chunk.lastModifiedMillis;
@@ -8463,7 +8472,8 @@ async function readWorkspaceFileForDownload(
 
 async function readWorkspaceViewFileForDownload(
   workspaceId: string,
-  locator: WorkspaceViewEntry["locator"]
+  locator: WorkspaceViewEntry["locator"],
+  maxBytes?: number
 ): Promise<Uint8Array<ArrayBuffer>> {
   const chunks: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;
@@ -8475,6 +8485,9 @@ async function readWorkspaceViewFileForDownload(
       expectedSize,
       expectedLastModifiedMillis
     });
+    if (maxBytes !== undefined && chunk.size > maxBytes) {
+      throw new Error(`图片大小不能超过 ${formatPreviewBytes(maxBytes)}`);
+    }
     chunks.push(decodeWorkspaceBinaryChunk(chunk, offset));
     expectedSize = chunk.size;
     expectedLastModifiedMillis = chunk.lastModifiedMillis;
@@ -9097,12 +9110,33 @@ async function handleUploadFiles(directory: string, files: File[]) {
   }
   if (files.length === 0) return;
   try {
-    const result = await uploadWorkspaceFiles(directory, files);
+    const workspaceId = selectedWorkspace.value.workspaceId;
+    const plan = await planWorkspaceUpload(directory, files);
+    // 文件夹选择器会保留内部层级；父目录继续复用平台文件 WebSocket mkdir RPC 创建。
+    const parentDirectories = [...new Set(plan.items
+      .map((item) => workspaceParentDirectory(item.targetPath))
+      .filter((path) => path && path !== directory))]
+      .sort((left, right) => left.split(/[\\/]/).length - right.split(/[\\/]/).length);
+    for (const path of parentDirectories) await api.createDirectory(workspaceId, path);
+    const result = await uploadWorkspaceFiles(directory, plan.items.map((item) => item.file), {
+      resolveTargetPath: (_file, index) => plan.items[index]!.targetPath
+    });
+    const missingDescription = plan.missingMarkdownImages.length > 0
+      ? `未随文档上传：${plan.missingMarkdownImages.slice(0, 4).map((item) => item.source).join("、")}${plan.missingMarkdownImages.length > 4 ? " 等" : ""}；可稍后补传。`
+      : "";
     if (result.failures.length > 0) {
       feedback.value = {
         kind: "error",
         title: result.uploaded > 0 ? "部分文件上传失败" : "上传文件失败",
-        description: result.failures.join("；")
+        description: [result.failures.join("；"), missingDescription].filter(Boolean).join("；")
+      };
+      return;
+    }
+    if (plan.missingMarkdownImages.length > 0) {
+      feedback.value = {
+        kind: "info",
+        title: `已上传 ${result.uploaded} 个文件，缺少 ${plan.missingMarkdownImages.length} 张图片`,
+        description: missingDescription
       };
       return;
     }
@@ -9110,6 +9144,35 @@ async function handleUploadFiles(directory: string, files: File[]) {
   } catch (error) {
     feedback.value = errorFeedback("上传文件失败", error);
   }
+}
+
+const MARKDOWN_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+/** Markdown 本地图片沿用工作区二进制分片 RPC，避免相对地址错误请求前端站点。 */
+async function resolveActiveMarkdownImage(source: string): Promise<Blob> {
+  const tab = activeTab.value;
+  if (!tab) throw new Error("当前没有打开的 Markdown 文件");
+  if (isAgentFilePath(tab.path)) throw new Error("Agent 配置预览暂不支持相对图片");
+
+  if (isReferenceFilePath(tab.path)) {
+    const info = referenceFileInfo(tab.path);
+    const targetPath = resolveMarkdownWorkspaceImagePath(info.referencePath, source);
+    const mimeType = targetPath ? markdownImageMimeType(targetPath) : undefined;
+    if (!targetPath || !mimeType) throw new Error("图片路径或格式不受支持");
+    const content = await readWorkspaceViewFileForDownload(
+      info.workspaceId,
+      referenceLocatorFromTab({ ...info, referencePath: targetPath }),
+      MARKDOWN_IMAGE_MAX_BYTES
+    );
+    return new Blob([content], { type: mimeType });
+  }
+
+  const workspaceId = selectedWorkspaceIdRef.value;
+  const targetPath = resolveMarkdownWorkspaceImagePath(tab.path, source);
+  const mimeType = targetPath ? markdownImageMimeType(targetPath) : undefined;
+  if (!workspaceId || !targetPath || !mimeType) throw new Error("图片路径或格式不受支持");
+  const content = await readWorkspaceFileForDownload(workspaceId, targetPath, MARKDOWN_IMAGE_MAX_BYTES);
+  return new Blob([content], { type: mimeType });
 }
 
 /** 聊天附件落到专用工作区目录，Run 只携带唯一物理路径和原始展示名。 */
@@ -13003,6 +13066,7 @@ async function handleLogout() {
               :preview-mode="markdownPreviewMode"
               :mind-map-editing="Boolean(activeTab?.visualDraft)"
               :mind-map-draft="activeTab?.visualDraft"
+              :resolve-markdown-image="resolveActiveMarkdownImage"
               @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
               @save="() => activeTab && requestSaveTab(activeTab)"
               @update:mind-map-draft="(draft: MindMapVisualDraft | undefined) => activeTab && updateMindMapDraft(activeTab.path, draft)"

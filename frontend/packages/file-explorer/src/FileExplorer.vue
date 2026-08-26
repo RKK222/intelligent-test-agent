@@ -80,6 +80,7 @@ const tab = ref<ExplorerTab>("explorer");
 const keyword = ref("");
 const clipboardEntry = ref<WorkspaceClipboardEntry>();
 const uploadInput = ref<HTMLInputElement | null>(null);
+const uploadDirectoryInput = ref<HTMLInputElement | null>(null);
 const uploadDirectory = ref("");
 const rootDropActive = ref(false);
 const dragResetToken = ref(0);
@@ -171,10 +172,10 @@ function pasteEntry(directory: string) {
   selectionAnchorPath.value = undefined;
 }
 
-function requestUpload(directory: string) {
+function requestUpload(directory: string, mode: "files" | "directory" = "files") {
   if (!props.canWrite) return;
   uploadDirectory.value = directory;
-  uploadInput.value?.click();
+  (mode === "directory" ? uploadDirectoryInput.value : uploadInput.value)?.click();
 }
 
 function onUploadInput(event: Event) {
@@ -391,6 +392,7 @@ defineExpose({ openRootActions });
         :selected-entries="selectedEntries"
         :selection-anchor-path="selectionAnchorPath"
         :downloading-entry-id="downloadingEntryId"
+        allow-directory-upload
         :clipboard-entry="clipboardEntry"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
@@ -423,6 +425,15 @@ defineExpose({ openRootActions });
         class="sr-only"
         multiple
         aria-label="选择要上传到工作区的文件"
+        @change="onUploadInput"
+      />
+      <input
+        ref="uploadDirectoryInput"
+        type="file"
+        class="sr-only"
+        multiple
+        webkitdirectory=""
+        aria-label="选择要上传到工作区的文件夹"
         @change="onUploadInput"
       />
     </div>
