@@ -9980,7 +9980,12 @@ async function openAgentFile(payload: AgentFileLoadRequest) {
 
 /** Git 回退成功后按 tab 固化的 Agent 路由重读；未跟踪文件被删除时关闭对应 tab。 */
 async function refreshDiscardedAgentFiles(payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }) {
-  const paths = new Set(payload.paths);
+  // 公共 Diff 相对 Git 根包含 opencode/，编辑器 tab 固化的是 Agent 目录内相对路径。
+  const paths = new Set(payload.paths.map((path) => (
+    payload.scope === "PUBLIC" && path.startsWith("opencode/")
+      ? path.slice("opencode/".length)
+      : path
+  )));
   const tabs = workbench.tabs.filter((tab: EditorTab) => {
     if (!isAgentFilePath(tab.path)) return false;
     const file = agentFileInfo(tab.path);

@@ -1990,6 +1990,53 @@ test("deleting a newly created untracked public Agent file does not open quick c
   expect(publicAgentGitRequests.some((request) => request.endsWith("/public/stage"))).toBe(false);
 });
 
+test("canceling a tracked public Agent deletion restores the file and clears its staged Diff", async ({ page }) => {
+  const trackedPath = "codex-e2e-tracked-delete-20260826.md";
+  const publicAgentGitRequests: string[] = [];
+  const publicAgentDiffFiles: Array<Record<string, unknown>> = [{
+    path: `opencode/${trackedPath}`,
+    status: "D",
+    rawStatus: " D",
+    staged: false,
+    patch: "@@ -1 +0,0 @@\n-# tracked public Agent"
+  }];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN"],
+    publicAgentWorktreesByServer: {
+      "server-a": [publicAgentWorktree("server-a")]
+    },
+    agentFileContents: {
+      [`PUBLIC:${trackedPath}`]: "# tracked public Agent"
+    },
+    publicAgentGitRequests,
+    publicAgentDiffFiles
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await openAgentsPanel(page);
+  const trackedRow = page.getByRole("button", { name: trackedPath, exact: true });
+  await expect(trackedRow).toBeVisible();
+  await trackedRow.hover();
+  await page.getByRole("button", { name: `删除 ${trackedPath}` }).click();
+  await page.getByRole("dialog", { name: "删除文件" }).getByRole("button", { name: "确认删除" }).click();
+
+  const quickDialog = page.getByRole("dialog", { name: "提交并推送 Agent 文档" });
+  await expect(quickDialog).toBeVisible();
+  await expect(quickDialog.getByText("已自动暂存 1 个目标文件。", { exact: true })).toBeVisible();
+  await expect(quickDialog.getByRole("button", { name: "取消删除" })).toBeVisible();
+  await quickDialog.getByRole("button", { name: "取消删除" }).click();
+
+  await expect(quickDialog).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "文件树" })).toHaveClass(/is-active/);
+  await expect(trackedRow).toBeVisible();
+  await trackedRow.click();
+  await expect(page.locator(".monaco-editor")).toContainText("tracked public Agent", { timeout: 10_000 });
+  await expect.poll(() => publicAgentDiffFiles).toEqual([]);
+  expect(publicAgentGitRequests).toContain("POST /api/internal/platform/workspace-management/agent-config/public/stage");
+  expect(publicAgentGitRequests).toContain("POST /api/internal/platform/workspace-management/agent-config/public/discard");
+});
+
 test("application Agent update merges the feature commit even when the runtime is not ready", async ({ page }) => {
   const runtimeReloadRequests: string[] = [];
   await mockBackendApi(page, {
@@ -11317,6 +11364,7 @@ async function mockBackendApi(
     };
     const readAttempts: Record<string, number> = {};
     const agentReadAttempts: Record<string, number> = {};
+    const deletedAgentFileSnapshots = new Map<string, Record<string, string>>();
     let workspaceMoveAttempt = 0;
     (window as Window & { __taClosedAppSourceTickets?: string[] }).__taClosedAppSourceTickets = [];
     type ViewLocator = { kind?: string; path?: string; referenceAlias?: string };
@@ -11388,6 +11436,17 @@ async function mockBackendApi(
         });
       }
       return [...children.values()];
+    };
+    (window as Window & {
+      __taRestoreAgentFiles?: (scope: string, paths: string[]) => void;
+    }).__taRestoreAgentFiles = (scope, paths) => {
+      const contents = agentFileContents as Record<string, string>;
+      for (const path of paths) {
+        const treePath = scope === "PUBLIC" && path.startsWith("opencode/")
+          ? path.slice("opencode/".length)
+          : path;
+        Object.assign(contents, deletedAgentFileSnapshots.get(`${scope}:${treePath}`) ?? {});
+      }
     };
     class MockWorkspaceFileWebSocket {
       static CONNECTING = 0;
@@ -11647,9 +11706,13 @@ async function mockBackendApi(
           });
           const contents = agentFileContents as Record<string, string>;
           const key = `${scope}:${path}`;
+          const snapshot: Record<string, string> = {};
           for (const fileKey of Object.keys(contents)) {
-            if (fileKey === key || fileKey.startsWith(`${key}/`)) delete contents[fileKey];
+            if (fileKey !== key && !fileKey.startsWith(`${key}/`)) continue;
+            snapshot[fileKey] = contents[fileKey] ?? "";
+            delete contents[fileKey];
           }
+          deletedAgentFileSnapshots.set(key, snapshot);
         } else if (request.op === "workspace.status") {
           const path = params.path ?? "";
           // 聊天附件使用内容指纹路径；默认 mock 工作区不存在该路径，避免把占位文件状态误判为可复用。
@@ -12170,6 +12233,32 @@ async function mockBackendApi(
       }
       if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/stage") {
         capture.publicAgentGitRequests?.push(`${method} ${url.pathname}`);
+        const body = JSON.parse(route.request().postData() ?? "{}") as { files?: string[] };
+        const stagedPaths = new Set(body.files ?? []);
+        for (const file of capture.publicAgentDiffFiles ?? []) {
+          if (!stagedPaths.has(String(file.path ?? ""))) continue;
+          file.staged = true;
+          file.rawStatus = "D ";
+        }
+        await route.fulfill(json(null));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/discard") {
+        capture.publicAgentGitRequests?.push(`${method} ${url.pathname}`);
+        const body = JSON.parse(route.request().postData() ?? "{}") as { files?: string[] };
+        const discardedPaths = new Set(body.files ?? []);
+        if (capture.publicAgentDiffFiles) {
+          capture.publicAgentDiffFiles.splice(
+            0,
+            capture.publicAgentDiffFiles.length,
+            ...capture.publicAgentDiffFiles.filter((file) => !discardedPaths.has(String(file.path ?? "")))
+          );
+        }
+        await page.evaluate((paths) => {
+          (window as Window & {
+            __taRestoreAgentFiles?: (scope: string, paths: string[]) => void;
+          }).__taRestoreAgentFiles?.("PUBLIC", paths);
+        }, body.files ?? []);
         await route.fulfill(json(null));
         return;
       }

@@ -14842,3 +14842,27 @@
 
 - 临时未跟踪 Agent 文件删除现在静默收敛；已跟踪文件和 Skill 的真实删除仍会自动暂存并进入原快捷提交，成功留在工作区、真实失败才跳 Diff。
 - 本次仅修改前端交互、测试和稳定文档，不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、性能、安全策略、部署节点、环境配置、generated SDK 或只读 OpenCode 源码。Docker Desktop 仍存在长期挂起的环境问题，未把整套重启报告为成功。
+
+## 2026-08-26 - Agent 跟踪删除支持弹框内取消
+
+### Why
+
+- 已提交过的 Agent 文件或一级 Skill 删除后会被快捷提交自动暂存；原弹框只有“取消”，只能关闭弹框并保留删除，用户需要再进入 Diff 手工回退，和删除场景的即时反悔预期不一致。
+
+### What
+
+- 删除来源的快捷提交弹框新增“取消删除”，直接复用 `GitChangesPanel.discardAgentFiles` 的 staged/unstaged 共用回退，一次恢复 Git index 与工作树；普通“取消”继续只关闭弹框并保留暂存。
+- 回退期间锁定关闭、提交和重复回退；成功后关闭弹框、清空 Diff，`FigmaFileExplorer` 复用 `AgentConfigPanel.refreshAll` 恢复目录树，`AgentWorkbench` 归一化公共 Diff 的 `opencode/` 路径后重读已打开标签；失败保留弹框并显示原因。
+- 同步前端根/应用/包说明、用户手册、前端规范和模块图；组件测试覆盖公共 staged 删除回退，Playwright 覆盖真实点击删除、取消删除、文件树/正文恢复和 Diff 清空，并保留临时未跟踪删除不弹框的回归。
+
+### How
+
+- GitChangesPanel 定向测试 58/58；前端全量 Vitest 157/157 个文件、2251 passed / 1 skipped；agent-web typecheck、用户手册 VitePress build 和生产 Vite build 均通过。
+- Playwright 两条删除端到端用例 2/2 通过：临时未跟踪文件删除无弹框，跟踪文件删除后“取消删除”恢复文件并保持文件树活动态。
+- 根 `corepack pnpm --filter` 验收入口会被任务外忽略目录 `temp/opencode-config/tools/package.json` 的非法 JSON 扫描失败阻断；未修改该文件，改用 `frontend/node_modules/.bin` 中同版本 Vitest、Vue TSC、Playwright 和 Vite 直接完成全部验证。
+- 当前 `.env.test` 服务继续运行：后端 health/readiness 为 UP，前端 `127.0.0.1:3000` 返回 200，登录 CORS 正常；清理了先前测试遗留的 15174 辅助 Vite，标准 3000/8080 服务未中断。提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 已跟踪 Agent 文件和一级 Skill 删除可在快捷提交弹框内直接反悔；临时未跟踪文件仍静默删除，多文件批量删除仍由 Diff 统一处理。
+- 本次只修改前端交互、测试和稳定文档；不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、性能、安全、部署节点、环境配置、generated SDK 或只读 OpenCode 源码。

@@ -349,6 +349,15 @@ function handleAgentQuickCommitFailed() {
   tab.value = "changes";
 }
 
+/** 回退 Agent 删除后先复用目录全量刷新恢复树节点，再让工作台重读对应已打开标签。 */
+async function handleAgentFilesDiscarded(payload: { scope: "PUBLIC" | "WORKSPACE"; paths: string[] }) {
+  try {
+    await agentConfigPanelRef.value?.refreshAll(false);
+  } finally {
+    emit("agent-files-discarded", payload);
+  }
+}
+
 const DIFF_AUTO_REFRESH_INTERVAL_MS = 5000;
 let diffAutoRefreshTimer: number | undefined;
 
@@ -481,7 +490,7 @@ defineExpose({
         :can-manage-public-config="managedWorkspaceMode && (canManagePublicConfig ?? !!canWrite)"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="handleChangesRefreshed"
-        @agent-files-discarded="(payload) => emit('agent-files-discarded', payload)"
+        @agent-files-discarded="handleAgentFilesDiscarded"
         @quick-agent-commit-failed="handleAgentQuickCommitFailed"
       />
       <template v-if="tab !== 'changes'">

@@ -584,6 +584,7 @@ const quickAgentCommitRequest = ref<AgentQuickCommitRequest | null>(null);
 const quickAgentCommitMessage = ref("");
 const quickAgentCommitError = ref("");
 const quickAgentCommitPreparing = ref(false);
+const quickAgentDeleteDiscarding = ref(false);
 const quickAgentCommitTargetCount = ref(0);
 const quickAgentCommitMessageInput = ref<HTMLTextAreaElement | null>(null);
 let quickAgentCommitGeneration = 0;
@@ -1602,7 +1603,7 @@ function quickAgentCommitScopeLabel(request: AgentQuickCommitRequest): string {
 }
 
 function closeQuickAgentCommit() {
-  if (quickAgentCommitPreparing.value || committing.value) return;
+  if (quickAgentCommitPreparing.value || quickAgentDeleteDiscarding.value || committing.value) return;
   quickAgentCommitGeneration += 1;
   quickAgentCommitRequest.value = null;
   quickAgentCommitError.value = "";
@@ -1717,7 +1718,14 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
 async function submitQuickAgentCommit() {
   const request = quickAgentCommitRequest.value;
   const message = quickAgentCommitMessage.value.trim();
-  if (!request || !message || quickAgentCommitPreparing.value || committing.value || quickAgentCommitError.value) return;
+  if (
+    !request
+    || !message
+    || quickAgentCommitPreparing.value
+    || quickAgentDeleteDiscarding.value
+    || committing.value
+    || quickAgentCommitError.value
+  ) return;
   const generation = quickAgentCommitGeneration;
   quickAgentCommitPreparing.value = true;
   await refreshChanges();
@@ -1794,21 +1802,21 @@ async function unstageAgentFile(file: AgentPanelDiffFile) {
 /**
  * 两类 Agent 文件共用同一回退交互；后端分别落到应用版本个人 worktree 与公共个人 worktree。
  */
-async function discardAgentFiles(files: AgentPanelDiffFile[]) {
+async function discardAgentFiles(files: AgentPanelDiffFile[]): Promise<boolean> {
   const scope = activeDiffScope.value === "PUBLIC" ? "PUBLIC" : "WORKSPACE";
   if (
     !canWriteAgentScope(scope)
     || files.length === 0
     || activeAgentConflicts.value.length > 0
     || (scope === "WORKSPACE" && !effectiveAgentConfigWorkspaceId.value)
-  ) return;
+  ) return false;
   if (files.some((file) => file.pendingPublish)) {
     errorMessage.value = "待推送文件已完成本地提交，不能按工作树改动回退；请先重新推送。";
-    return;
+    return false;
   }
   const paths = [...new Set(files.filter((file) => file.scope === scope).map((file) => file.path))];
   const pendingPaths = paths.filter((path) => !discardingAgentPaths.value.has(agentMutationKey(scope, path)));
-  if (pendingPaths.length === 0) return;
+  if (pendingPaths.length === 0) return false;
   errorMessage.value = "";
   discardingAgentPaths.value = new Set([
     ...discardingAgentPaths.value,
@@ -1829,13 +1837,49 @@ async function discardAgentFiles(files: AgentPanelDiffFile[]) {
       await refreshChanges();
     }
     emit("agent-files-discarded", { scope, paths: pendingPaths });
+    return true;
   } catch (error) {
     errorMessage.value = errorMessageFor(error, `回退${scope === "PUBLIC" ? "公共" : "应用"} Agent 文件失败`);
+    return false;
   } finally {
     const next = new Set(discardingAgentPaths.value);
     pendingPaths.forEach((path) => next.delete(agentMutationKey(scope, path)));
     discardingAgentPaths.value = next;
   }
+}
+
+/**
+ * 删除快捷提交已经自动 stage；取消删除直接复用 staged/unstaged 共用的回退程序，
+ * 一次恢复工作树和 index，避免先 unstage 再 discard 形成中间态。
+ */
+async function cancelQuickAgentDeletion() {
+  const request = quickAgentCommitRequest.value;
+  if (
+    request?.trigger !== "DELETE"
+    || quickAgentCommitPreparing.value
+    || quickAgentDeleteDiscarding.value
+    || committing.value
+  ) return;
+
+  const targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
+  if (targetFiles.length === 0) {
+    closeQuickAgentCommit();
+    return;
+  }
+
+  quickAgentDeleteDiscarding.value = true;
+  quickAgentCommitError.value = "";
+  let discarded = false;
+  try {
+    discarded = await discardAgentFiles(targetFiles);
+  } finally {
+    quickAgentDeleteDiscarding.value = false;
+  }
+  if (!discarded) {
+    quickAgentCommitError.value = errorMessage.value || "取消删除失败，请保留当前弹框并重试。";
+    return;
+  }
+  closeQuickAgentCommit();
 }
 
 async function discardAgentFile(file: AgentPanelDiffFile) {
@@ -3043,7 +3087,7 @@ defineExpose({
             type="button"
             class="ta-process-startup-close"
             aria-label="关闭快捷提交"
-            :disabled="quickAgentCommitPreparing || committing"
+            :disabled="quickAgentCommitPreparing || quickAgentDeleteDiscarding || committing"
             @click="closeQuickAgentCommit"
           >
             <X :size="16" />
@@ -3051,7 +3095,11 @@ defineExpose({
         </header>
 
         <div class="quick-agent-commit-body">
-          <div v-if="quickAgentCommitPreparing" class="quick-agent-commit-status is-loading" role="status">
+          <div v-if="quickAgentDeleteDiscarding" class="quick-agent-commit-status is-loading" role="status">
+            <Loader2 class="h-4 w-4 animate-spin" :stroke-width="1.5" />
+            <span>正在恢复已删除文件...</span>
+          </div>
+          <div v-else-if="quickAgentCommitPreparing" class="quick-agent-commit-status is-loading" role="status">
             <Loader2 class="h-4 w-4 animate-spin" :stroke-width="1.5" />
             <span>正在刷新并暂存目标变更...</span>
           </div>
@@ -3072,20 +3120,39 @@ defineExpose({
               aria-label="快捷提交信息"
               placeholder="输入本次修改说明"
               rows="3"
-              :disabled="quickAgentCommitPreparing || Boolean(quickAgentCommitError) || committing"
+              :disabled="quickAgentCommitPreparing || quickAgentDeleteDiscarding || Boolean(quickAgentCommitError) || committing"
               @keydown.ctrl.enter.prevent="submitQuickAgentCommit"
               @keydown.meta.enter.prevent="submitQuickAgentCommit"
             ></textarea>
           </label>
-          <p class="quick-agent-commit-hint">取消只关闭弹框，不撤销已完成的暂存。</p>
+          <p v-if="quickAgentCommitRequest.trigger === 'DELETE'" class="quick-agent-commit-hint">
+            “取消”只关闭弹框并保留暂存；“取消删除”会恢复文件并移除对应 Git 变更。
+          </p>
+          <p v-else class="quick-agent-commit-hint">取消只关闭弹框，不撤销已完成的暂存。</p>
         </div>
 
         <footer class="ta-process-startup-footer quick-agent-commit-footer">
-          <button type="button" :disabled="quickAgentCommitPreparing || committing" @click="closeQuickAgentCommit">取消</button>
+          <button
+            type="button"
+            :disabled="quickAgentCommitPreparing || quickAgentDeleteDiscarding || committing"
+            @click="closeQuickAgentCommit"
+          >
+            取消
+          </button>
+          <button
+            v-if="quickAgentCommitRequest.trigger === 'DELETE'"
+            type="button"
+            class="quick-agent-commit-restore"
+            :disabled="quickAgentCommitPreparing || quickAgentDeleteDiscarding || committing"
+            @click="cancelQuickAgentDeletion"
+          >
+            <Undo2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+            取消删除
+          </button>
           <button
             type="button"
             class="quick-agent-commit-submit"
-            :disabled="quickAgentCommitPreparing || committing || Boolean(quickAgentCommitError) || !quickAgentCommitMessage.trim()"
+            :disabled="quickAgentCommitPreparing || quickAgentDeleteDiscarding || committing || Boolean(quickAgentCommitError) || !quickAgentCommitMessage.trim()"
             @click="submitQuickAgentCommit"
           >
             <Upload class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -3942,6 +4009,10 @@ defineExpose({
 
 .quick-agent-commit-footer {
   justify-content: flex-end;
+}
+
+.quick-agent-commit-footer .quick-agent-commit-restore {
+  gap: 6px;
 }
 
 .quick-agent-commit-footer .quick-agent-commit-submit {

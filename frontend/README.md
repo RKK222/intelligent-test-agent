@@ -175,6 +175,8 @@ tools/dev-frontend-check.sh
 
 Agents 配置树的公共级、应用级根统一复用工作空间 `FileEntryCreateDialog` 的新建/上传样式：根入口合并普通文件、文件夹、上传、Agent 模板和 Skill 模板，目录入口提供普通文件、文件夹和上传；面板会解释普通条目不会生成 OpenCode 模板，而 Agent/Skill 会落到标准路径。模板要求中文名称，英文名称选填；英文留空时按完整中文无声调拼音生成英文技术 ID，磁盘上的 Agent 文件名、Skill 目录名及 OpenCode 顶层 `name` 始终保持英文。文件与目录行复用 `FileEntryDeleteDialog` 确认递归删除，新建文件夹写入 `.gitkeep` 让 Git Changes 感知空目录。应用级创建、上传、改名、复制、移动和删除允许整个安全的 `.opencode/**` 相对路径，根目录和越界路径仍由文件服务拒绝；成功后沿用 Agent 配置修订号刷新现有 Diff 查询，并在删除时关闭受影响的已打开标签。具备对应写权限的用户通过右键菜单对公共级或应用级文件行内改名，双击不再触发改名；Agent 文件支持 Ctrl/Cmd+单击多选、右键批量删除/复制/剪切/粘贴和整体拖动。操作继续复用目标后端文件 WebSocket 服务；公共级要求 `SUPER_ADMIN`，应用级要求 `APP_ADMIN`（`SUPER_ADMIN` 继承），无权限用户保持只读。
 
+普通文件和一级 Skill 的快捷提交在删除后先核验真实 Diff；跟踪文件弹框提供“取消删除”，直接复用 staged/unstaged 回退恢复 index、工作树、Agent 目录树和已打开标签。普通“取消”仍只关闭弹框并保留暂存，临时未跟踪文件删除不弹框。
+
 文件页进入时默认展开工作空间并把收起的 `Agents` 固定在面板底部，减少文件树被上下分屏压缩；用户展开 `Agents` 后仍可拖拽分隔线调整两区高度。
 
 ```bash
