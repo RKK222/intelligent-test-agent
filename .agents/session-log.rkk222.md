@@ -14772,3 +14772,27 @@
 ### Result
 
 - 未新增或变更 API、RunEvent/SSE、数据库、Flyway、性能、安全策略、环境配置、generated SDK 或 OpenCode 只读源码。所有稳定章节仍有现有脱敏操作截图并由测试校验引用；新流程尚缺自定义菜单、快捷提交和 Shift 选择的真实截图，需由人工补拍后补入。
+
+## 2026-08-26 - 调整存量案例与测试设计合流
+
+### Why
+
+- 用户进一步明确目标链路：输入“生成 S 子条目测试案例，存量案例参考目录：aa/bb/cc”后，目录原样作为 TCDS 入参，完整存量案例先写入工作区 `docs`，再与当前详细设计和既有资产共同参与正常案例设计。
+- 前一版把存量案例作为 `STOCK_CASES` 独立短路，并让子 Agent 读取设计、评分和输出推荐文件，会绕过 Phase A/Review，也把案例来源与设计方法耦合成两套判断。
+
+### What
+
+- 独立公共 config 仓库保留技术 ID `stock-case-recommendation`，但职责收敛为 TCDS 材料准备：每个 I/S 只查一次，参考目录整体传入，完整七列结果写入 `workspace/docs/存量案例-<S>-<timestamp>.md`，不读详细设计、不评分、不写 `041-测试设计`。
+- 删除 `STOCK_CASES` 交付路由；存量目录成为 `FULL` 的可选输入。Generation 先按当前需求、详细设计和适用的 `docs` 资产完成并冻结 Phase A，之后再按新增 `stock-case-reuse.md` 做 `REUSE_AS_IS / ADAPT / REJECT / NEW`，最终继续独立 Review。
+- 增加材料 SHA-256、I/S/manifest/摘要校验、当前设计优先、跨方法语义去重和内部来源追溯；`isUpdate`、`aiAiCase` 仅保留原值，不推断新旧或质量。同步公共 README、AGENTS、Generation/Review 契约、质量门禁和 22 条 eval。
+
+### How
+
+- OpenCode 1.15.10 使用仓库 `opencode/` 作为 `OPENCODE_CONFIG_DIR`，`debug config`、`debug agent stock-case-recommendation` 和 `debug agent test-design-orchestrator` 均成功；Skill 实际加载为 4.8.0。
+- Bun 构建工具成功；本地模拟 TCDS 验证路径 `aa/bb/cc` 原样传递、正常结果带 SHA-256、空列表继续、部分结果返回 `PARTIAL_RESULT`；normalize/重复编号/HTTP 输出解析/时间戳辅助逻辑通过。
+- 22 条 eval JSON、25 个 Agent/Skill frontmatter、test-design 规则/模板引用、Markdown fence、过期 `STOCK_CASES` 扫描和 `git diff --check` 均通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 公共 config `master` 已提交 `7a29ca4`（`调整存量案例与测试设计合流`），工作树干净，未推送远端；上一提交 `9d0abe0` 仍保留历史，本提交修正其短路设计。
+- 主项目仍在不新增部署节点的 `release`；本次只记录独立配置仓库交付，不修改应用 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。真实企业 TCDS 与完整模型链路仍需配置发布后做现场端到端验收。
