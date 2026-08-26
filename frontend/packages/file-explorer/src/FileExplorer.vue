@@ -85,6 +85,7 @@ const rootDropActive = ref(false);
 const dragResetToken = ref(0);
 const dragSourcePaths = ref<string[]>([]);
 const selectedEntries = ref<WorkspaceSelectionEntry[]>([]);
+const selectionAnchorPath = ref<string>();
 const directoryRowsRef = ref<InstanceType<typeof DirectoryRows> | null>(null);
 // 本地过滤结果（备用，当 searchResults prop 未提供时使用），统一映射为 FileSearchResult 形态
 const localSearchResults = computed<FileSearchResult[]>(() =>
@@ -167,6 +168,7 @@ function pasteEntry(directory: string) {
     clipboardEntry.value = undefined;
   }
   selectedEntries.value = [];
+  selectionAnchorPath.value = undefined;
 }
 
 function requestUpload(directory: string) {
@@ -258,12 +260,19 @@ function onRootDrop(event: DragEvent) {
     if (sourcePaths.length > 1) emit("moveEntries", sourcePaths, "");
     else emit("moveEntry", sourcePaths[0]!, "");
     selectedEntries.value = [];
+    selectionAnchorPath.value = undefined;
   }
 }
 
 function emitDeleteEntries(entries: WorkspaceSelectionEntry[]) {
   emit("deleteEntries", entries);
   selectedEntries.value = [];
+  selectionAnchorPath.value = undefined;
+}
+
+function updateSelection(entries: WorkspaceSelectionEntry[]) {
+  selectedEntries.value = entries;
+  emit("selectionChange", entries);
 }
 
 function resetDragState() {
@@ -380,6 +389,7 @@ defineExpose({ openRootActions });
         :drag-reset-token="dragResetToken"
         :drag-source-paths="dragSourcePaths"
         :selected-entries="selectedEntries"
+        :selection-anchor-path="selectionAnchorPath"
         :downloading-entry-id="downloadingEntryId"
         :clipboard-entry="clipboardEntry"
         :depth="0"
@@ -398,13 +408,14 @@ defineExpose({ openRootActions });
         @paste-entry="pasteEntry"
         @undo-entry="emit('undoEntry')"
         @move-entry="(sourcePath, targetDirectory) => emit('moveEntry', sourcePath, targetDirectory)"
-        @move-entries="(sourcePaths, targetDirectory) => { emit('moveEntries', sourcePaths, targetDirectory); selectedEntries = []; }"
+        @move-entries="(sourcePaths, targetDirectory) => { emit('moveEntries', sourcePaths, targetDirectory); selectedEntries = []; selectionAnchorPath = undefined; }"
         @upload-files="(directory, files) => emit('uploadFiles', directory, files)"
         @request-upload="requestUpload"
         @cache-and-navigate="(path, type) => emit('cacheAndNavigate', path, type)"
         @download-entry="emit('downloadEntry', $event)"
         @drag-source-change="setDragSources"
-        @selection-change="(entries) => { selectedEntries = entries; emit('selectionChange', entries); }"
+        @selection-change="updateSelection"
+        @selection-anchor-change="selectionAnchorPath = $event"
       />
       <input
         ref="uploadInput"

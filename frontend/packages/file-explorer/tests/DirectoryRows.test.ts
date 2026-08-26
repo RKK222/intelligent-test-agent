@@ -475,6 +475,79 @@ describe("DirectoryRows", () => {
     expect(view.emitted("deleteEntries")).toEqual([[selectedEntries]]);
   });
 
+  it("selects a visible Shift range across files and expanded directories", async () => {
+    const entriesByDirectory = {
+      "": [
+        { type: "directory" as const, path: "docs", name: "docs" },
+        { type: "file" as const, path: "README.md", name: "README.md" }
+      ],
+      docs: [
+        { type: "directory" as const, path: "docs/images", name: "images" },
+        { type: "file" as const, path: "docs/guide.md", name: "guide.md" }
+      ],
+      "docs/images": [
+        { type: "file" as const, path: "docs/images/hidden.png", name: "hidden.png" }
+      ]
+    };
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory,
+        expandedDirectories: new Set(["docs"]),
+        selectionAnchorPath: "docs"
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "README.md" }), { shiftKey: true });
+
+    expect(view.emitted("selectionChange")).toEqual([[[
+      { path: "docs", type: "directory" },
+      { path: "docs/images", type: "directory" },
+      { path: "docs/guide.md", type: "file" },
+      { path: "README.md", type: "file" }
+    ]]]);
+    expect(view.queryByRole("button", { name: "hidden.png" })).toBeNull();
+    expect(view.emitted("toggleDirectory")).toBeUndefined();
+    expect(view.emitted("openFile")).toBeUndefined();
+  });
+
+  it("skips readonly entries in a Shift range and keeps right-click actions on the selection", async () => {
+    const selectedEntries = [
+      { path: "src", type: "directory" as const },
+      { path: "README.md", type: "file" as const }
+    ];
+    const entries = [
+      { type: "directory" as const, path: "src", name: "src" },
+      {
+        id: "reference:docs",
+        type: "directory" as const,
+        path: "docs",
+        name: "docs",
+        locator: { kind: "REFERENCE" as const, path: "", referenceAlias: "docs" },
+        source: "REFERENCE" as const,
+        readonly: true
+      },
+      { type: "file" as const, path: "README.md", name: "README.md" }
+    ];
+    const view = render(DirectoryRows, {
+      props: {
+        directory: "",
+        entriesByDirectory: { "": entries },
+        expandedDirectories: new Set<string>(),
+        selectedEntries,
+        selectionAnchorPath: "src"
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "README.md" }), { shiftKey: true });
+    expect(view.emitted("selectionChange")?.[0]).toEqual([selectedEntries]);
+
+    await fireEvent.contextMenu(view.getByRole("button", { name: "README.md" }));
+    expect(view.getByRole("menuitem", { name: "删除 2 个条目" })).toBeTruthy();
+    expect(view.getByRole("menuitem", { name: /^剪切/ })).toBeTruthy();
+    expect(view.queryByRole("menuitem", { name: /^复制/ })).toBeNull();
+  });
+
   it("moves all selected files when one selected row is dragged", async () => {
     const selectedEntries = [
       { path: "a.md", type: "file" as const },

@@ -170,6 +170,34 @@ describe("FileExplorer", () => {
     expect(view.emitted("moveEntry")).toEqual([["README.md", "docs"]]);
   });
 
+  it("uses a normal click as the anchor for the next Shift range selection", async () => {
+    const view = render(FileExplorer, {
+      props: {
+        entriesByDirectory: {
+          "": [
+            { type: "directory", path: "docs", name: "docs" },
+            { type: "file", path: "README.md", name: "README.md" }
+          ],
+          docs: [{ type: "file", path: "docs/guide.md", name: "guide.md" }]
+        },
+        expandedDirectories: new Set(["docs"]),
+        changedFiles: []
+      }
+    });
+
+    await fireEvent.click(view.getByRole("button", { name: "docs" }));
+    await fireEvent.click(view.getByRole("button", { name: "README.md" }), { shiftKey: true });
+
+    expect(view.emitted("selectionChange")?.at(-1)).toEqual([[
+      { path: "docs", type: "directory" },
+      { path: "docs/guide.md", type: "file" },
+      { path: "README.md", type: "file" }
+    ]]);
+    expect(view.getByRole("button", { name: "docs" }).classList.contains("is-selected")).toBe(true);
+    expect(view.getByRole("button", { name: "guide.md" }).classList.contains("is-selected")).toBe(true);
+    expect(view.getByRole("button", { name: "README.md" }).classList.contains("is-selected")).toBe(true);
+  });
+
   it("opens root upload from the plus menu and forwards undo", async () => {
     const view = render(FileExplorer, {
       props: {

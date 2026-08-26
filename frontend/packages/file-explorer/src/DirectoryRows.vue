@@ -22,8 +22,10 @@ export type DirectoryRowsProps = {
   dragSourcePaths?: string[];
   /** 兼容旧调用方的单项拖源；新交互统一使用 dragSourcePaths。 */
   dragSourcePath?: string;
-  /** Ctrl/Cmd 多选的可写工作区条目，由文件树根组件统一持有。 */
+  /** Ctrl/Cmd 多选或 Shift 连续选择的可写工作区条目，由文件树根组件统一持有。 */
   selectedEntries?: WorkspaceSelectionEntry[];
+  /** 最近一次选择锚点；递归目录共享该路径，供 Shift 按当前可见顺序连续选择。 */
+  selectionAnchorPath?: string;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
   /** 文件树内部剪贴板，仅保存当前工作区的普通文件引用。 */
@@ -83,14 +85,19 @@ const emit = defineEmits<{
   downloadEntry: [entry: FileTreeEntry];
   dragSourceChange: [paths: string[] | undefined];
   selectionChange: [entries: WorkspaceSelectionEntry[]];
+  selectionAnchorChange: [path: string | undefined];
 }>();
 
-const entries = computed(() => {
-  const list = props.entriesByDirectory[props.directory] ?? [];
+function sortedDirectoryEntries(directory: string): FileTreeEntry[] {
+  const list = props.entriesByDirectory[directory] ?? [];
   return [...list].sort((a, b) => {
     if (a.type === b.type) return 0;
     return a.type === "directory" ? -1 : 1;
   });
+}
+
+const entries = computed(() => {
+  return sortedDirectoryEntries(props.directory);
 });
 
 type MaybeWorkspaceViewEntry = FileTreeEntry & Partial<WorkspaceViewEntry>;
@@ -183,7 +190,10 @@ function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
     closeFileContextMenu();
     return;
   }
-  if (!isSelected(entry)) emit("selectionChange", selection);
+  if (!isSelected(entry)) {
+    emit("selectionChange", selection);
+    emit("selectionAnchorChange", selection[0]?.path);
+  }
   entryContextMenu.value = { entry, selection, x: event.clientX, y: event.clientY };
 }
 
@@ -227,6 +237,54 @@ function topLevelSelection(items: WorkspaceSelectionEntry[]): WorkspaceSelection
   return normalized.filter((item) => !normalized.some((parent) =>
     parent.type === "directory" && parent.path !== item.path && isDescendantPath(parent.path, item.path)
   ));
+}
+
+/**
+ * 按页面从上到下的真实可见顺序展开树；折叠目录不读取后代，只读引用不进入可写选择。
+ * 每层仍复用当前目录“目录优先、同类型保持服务端顺序”的渲染规则，避免选择顺序与画面不一致。
+ */
+function visibleMutableEntries(): WorkspaceSelectionEntry[] {
+  const result: WorkspaceSelectionEntry[] = [];
+  const visitedDirectories = new Set<string>();
+  const visit = (directory: string) => {
+    if (visitedDirectories.has(directory)) return;
+    visitedDirectories.add(directory);
+    for (const entry of sortedDirectoryEntries(directory)) {
+      if (canMutateEntry(entry)) result.push(selectionEntry(entry));
+      const id = nodeId(entry);
+      if (entry.type === "directory" && props.expandedDirectories.has(id)) visit(id);
+    }
+  };
+  visit("");
+  return result;
+}
+
+function mergeSelection(
+  current: WorkspaceSelectionEntry[],
+  addition: WorkspaceSelectionEntry[]
+): WorkspaceSelectionEntry[] {
+  const result = [...current];
+  const paths = new Set(current.map((item) => normalizePath(item.path)));
+  for (const item of addition) {
+    const path = normalizePath(item.path);
+    if (paths.has(path)) continue;
+    paths.add(path);
+    result.push(item);
+  }
+  return result;
+}
+
+/** Shift 首次点击退化为单选；锚点可见时选择锚点和目标之间的全部可写文件与目录。 */
+function rangeSelection(entry: FileTreeEntry): WorkspaceSelectionEntry[] {
+  const target = selectionEntry(entry);
+  const visible = visibleMutableEntries();
+  const anchorPath = normalizePath(props.selectionAnchorPath ?? "");
+  const anchorIndex = visible.findIndex((item) => normalizePath(item.path) === anchorPath);
+  const targetIndex = visible.findIndex((item) => normalizePath(item.path) === target.path);
+  if (anchorIndex < 0 || targetIndex < 0) return [target];
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  return visible.slice(start, end + 1);
 }
 
 function selectedForEntry(entry: FileTreeEntry): WorkspaceSelectionEntry[] {
@@ -338,7 +396,10 @@ function onDragStart(event: DragEvent, entry: FileTreeEntry) {
   const selected = selectedForEntry(entry);
   const sourcePaths = selected.map((item) => item.path);
   const sourcePath = sourcePaths[0]!;
-  if (!isSelected(entry)) emit("selectionChange", selected);
+  if (!isSelected(entry)) {
+    emit("selectionChange", selected);
+    emit("selectionAnchorChange", selected[0]?.path);
+  }
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("application/x-test-agent-workspace-files", JSON.stringify(sourcePaths));
   event.dataTransfer.setData("application/x-test-agent-workspace-file", sourcePath);
@@ -394,6 +455,15 @@ function isKnownEmptyDirectory(entry: FileTreeEntry): boolean {
 }
 
 function onRowClick(event: MouseEvent, entry: FileTreeEntry) {
+  if (event.shiftKey && canMutateEntry(entry)) {
+    const range = rangeSelection(entry);
+    const next = event.ctrlKey || event.metaKey
+      ? mergeSelection(props.selectedEntries ?? [], range)
+      : range;
+    emit("selectionChange", next);
+    if (!props.selectionAnchorPath) emit("selectionAnchorChange", selectionEntry(entry).path);
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && canMutateEntry(entry)) {
     const current = props.selectedEntries ?? [];
     const path = normalizePath(workspaceEntryPath(entry));
@@ -401,8 +471,10 @@ function onRowClick(event: MouseEvent, entry: FileTreeEntry) {
       ? current.filter((item) => normalizePath(item.path) !== path)
       : [...current, selectionEntry(entry)];
     emit("selectionChange", next);
+    emit("selectionAnchorChange", path);
     return;
   }
+  emit("selectionAnchorChange", canMutateEntry(entry) ? selectionEntry(entry).path : undefined);
   if (props.selectedEntries?.length) emit("selectionChange", []);
   if (entry.type === "directory") {
     if (isKnownEmptyDirectory(entry)) {
@@ -622,6 +694,7 @@ function submitRename() {
           :drag-reset-token="dragResetToken"
           :drag-source-paths="dragSourcePaths"
           :selected-entries="selectedEntries"
+          :selection-anchor-path="selectionAnchorPath"
           :downloading-entry-id="downloadingEntryId"
           :clipboard-entry="clipboardEntry"
           :depth="depth + 1"
@@ -647,6 +720,7 @@ function submitRename() {
           @download-entry="emit('downloadEntry', $event)"
           @drag-source-change="emit('dragSourceChange', $event)"
           @selection-change="emit('selectionChange', $event)"
+          @selection-anchor-change="emit('selectionAnchorChange', $event)"
         />
       </Transition>
     </div>
