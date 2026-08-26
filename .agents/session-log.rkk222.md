@@ -15087,3 +15087,32 @@
 - 版本库检索、当前应用默认选择、进入时避免全量加载、展开后仍可全量选择及相邻设置操作均通过真实端到端验证，目标修改未发现功能回归。
 - Docker Desktop 的 ClickHouse start API 仍卡住且容器保持 `Created`；为完成目标业务 E2E，仅在本次运行进程中临时关闭分析模块，backend health/readiness 为 `UP`。因此目标功能已验证，包含 ClickHouse 分析能力的完整整栈启动仍属于未验证限制。
 - 本轮只新增验证记录，不修改业务代码、API、事件、数据库、Flyway、环境文件、generated SDK 或只读 OpenCode 源码。
+
+## 2026-08-26 - 基于当前 release 重建企业平台增量包
+
+### Why
+
+- 用户要求基于当前本地代码重新打包；上一份 148 MiB 纯平台包只完成构建、尚未确认为新的现场部署基线，因此本轮继续以最后成功部署的 `release@7152a4340` 为更新点和 Flyway 比较基线。
+- 当前 `release` 已新增版本库检索、应用管理按当前应用加载、应用运行态独立页签和工作区 Markdown 本地图片上传/预览，必须正式重建前后端，不能只重封历史二进制。
+
+### What
+
+- 以干净工作树 `release@9d46ac7a60f68e4793b1cf9a11978ffc31b0deb7` 为源码输入，不拉取、合并或切换分支；重建后端、用户手册、前端、内层发布 ZIP 和固定名双后台外层包。
+- 客户端 `20260826095116`、worker runtime、toolbox 的输入均未变化，组件指纹分别继续为 `1bc1bb3bd8ef72691292a7c9f5931e003b4b67196aa78702ca4d39e63f24d4c6`、`877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`、`35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`，全部按 `reuse` 交付；LobeHub/memory 保持 `disabled`。
+- `.4/.114` 的 models、manager/worker、CK、Mem0、BGE、pgvector、独立案例配置包和 trace 运行时载荷均不在本轮更新范围。
+
+### How
+
+- JDK 25 正式发布入口完成 Spring Bean 构造器门禁、后端 Maven 封装、VitePress、`vue-tsc`、前端生产 Vite 构建和全部持久化/XXL/ClickHouse migration 资源校验；当前功能提交此前已完成全量 Vitest、定向 Maven 与真实浏览器端到端验证。
+- 最终内层 ZIP SHA-256 为 `e8fd3d1b22f20df03574c3a3e62a2cc74f5cff00b0f280190e090dadce91bd64`；外层固定包 SHA-256 为 `1a3e0ed14d2ab79229d045db93920fe418d00a68b2707113c07765a8a378fe12`，外层内嵌内层与独立内层逐字节一致。
+- `.4`、`.114`、`.2` 节点归档 SHA-256 依次为 `8c5f18848f4e7549b755cca0f48101454c677c78946fdf3ddb2f832b03adf6a2`、`7fa88d9936e1bbdeb66bdde8bcd6059c2482d8d85e373521cdfca0f507e5f873`、`bd6615f64089260aa973724f0efa2b3e2d3b7169d414a7e9a6d42d691cf6547b`；所有 checksum 和 ZIP CRC 均通过。
+- 后端应用 JAR、persistence JAR、XXL integration JAR 和前端归档 SHA-256 分别为 `8598c25a43adafa991085f717f9e0baedaaa3edbbea426eff83a1e713ff59d76`、`3e5817160f4b0482c4e1ddce5b5d9af3c58534dbd6547b2ef186a3ff6ca11089`、`b4a6fc090b026a439b42d4eb41aed3717e1c6883ce3acd027302cb376c9c6a14`、`dad06ad0e6d741e8c990e883e3be97e121da632d77cb0bd1216427bdbb6435e7`。
+- 内层清单确认不含 `dist/local-opencode-client/`、worker programs、toolbox 镜像、LobeHub、memory 或 trace 运行时归档；节点配置的 TCDS 为 `http://tcds-prod.sdc.icbc:9080`、AAM 为 `http://zfw.sdc.cs.icbc`，两个后台的 SkillHub access key 均非空且未回显。
+- 客户端既有分发重新通过版本、manifest、签名、安装脚本和用户包校验；组织私钥有效且与固定公钥 DER SHA-256 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62` 匹配，私钥仍只在 Git 忽略目录中。
+- 相对成功部署基线没有新增、删除或修改任何 PostgreSQL、XXL 或 ClickHouse migration。`V20260825091459__local_client_instance_replacements_create.sql` 源码和最终 persistence JAR 内资源 SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；现场只验证已有 `checksum=749555545/success=true` 记录和 history 总数不变。
+- 提交前再次回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突、残留合并标记或会覆盖的并行成果。
+
+### Result
+
+- 固定交付件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 和同名 `.sha256`，回读校验为 `OK`，体积约 148 MiB。
+- 本机构建和归档验证完成，企业 `.4 → .114 → .2` 尚未执行本轮部署。包不新增部署节点，不新增数据库/Flyway，不修改环境文件、generated SDK 或只读 OpenCode 源码；本条追溯记录提交本身不再进入上述 ZIP。
