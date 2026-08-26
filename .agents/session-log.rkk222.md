@@ -15061,3 +15061,29 @@
 
 - 多文件选择、缺图非阻断、工作区二进制读取、object URL 预览、缺图占位和 UI 清理链路均通过真实端到端验证；截图保留在 `/tmp/test-agent/markdown-image-e2e/artifacts/03-markdown-preview.png`。
 - 本轮只补充验证记录，不修改业务代码、API、事件、数据库结构、Flyway、环境配置、generated SDK 或 OpenCode 源码；Docker Desktop 的 ClickHouse 启动卡顿仍是本机可选分析服务风险，不影响本次工作区文件链路。
+
+## 2026-08-26 - 版本库检索与应用管理端到端验证
+
+### Why
+
+- 用户要求对 `aa7b3562b` 的版本库检索和应用管理加载优化执行真实端到端验证，并确认应用选择器仍可按需读取全量应用且没有影响其它功能。
+
+### What
+
+- 在 detached 临时 worktree 中固定构建并运行 `aa7b3562b`，避免 `release` 后续 Markdown 图片提交和主工作区状态影响验证结论；后端使用该提交构建的不可变 JAR、JDK 25、`.env.test` 与 `test` profile。
+- 真实 Chromium 中确认工作台当前应用为 F-COSS：首次打开和再次打开应用管理都默认显示 F-COSS、只读取该应用 3 类上下文且全量应用请求均为 0；主动展开选择器时只发起 1 次全量请求，并展示 F-COSS、F-WRAPP 两项。
+- 版本库管理从 11 条完整列表检索“自动”得到 4 条、用大小写转换后的英文关键字 `WRHEMER` 得到 1 条，清空后恢复 11 条；同时验证编辑弹窗开关和应用人员、关联、工作空间三个页签。
+- 实际 API 另覆盖版本库 ID、中文名、英文名大小写、Git 地址和空关键字，过滤总数与全量数据本地复算一致。
+
+### How
+
+- 精确提交的 agent-web production build 成功；全量 Vitest 157 个文件通过，2255 passed / 1 skipped。
+- Java 25 Maven reactor `BUILD SUCCESS`：配置应用服务 33 项、Controller 18 项、MyBatis 集成 6 项全部通过。
+- 真实浏览器目标链路的 page error、console error、request failure 和 HTTP 4xx/5xx 均为 0；截图保存在 `.tmp/e2e-validation-aa7b3562b/`。
+- 设置 Mock E2E 5 项中 4 项通过；“无角色用户看不到应用管理”这一旧断言在目标提交及其父提交 `e0d8d474c` 上均同样失败，且两版本 `SettingsMenu` 一致，因此判定为存量测试与现有产品行为失配，不是本次回归。
+
+### Result
+
+- 版本库检索、当前应用默认选择、进入时避免全量加载、展开后仍可全量选择及相邻设置操作均通过真实端到端验证，目标修改未发现功能回归。
+- Docker Desktop 的 ClickHouse start API 仍卡住且容器保持 `Created`；为完成目标业务 E2E，仅在本次运行进程中临时关闭分析模块，backend health/readiness 为 `UP`。因此目标功能已验证，包含 ClickHouse 分析能力的完整整栈启动仍属于未验证限制。
+- 本轮只新增验证记录，不修改业务代码、API、事件、数据库、Flyway、环境文件、generated SDK 或只读 OpenCode 源码。
