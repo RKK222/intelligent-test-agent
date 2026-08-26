@@ -500,12 +500,14 @@ describe("GitChangesPanel", () => {
           path: string;
           kind: "FILE";
           displayName: string;
+          trigger: "DELETE";
         }) => Promise<void>;
       }).openQuickAgentCommit({
         scope: "PUBLIC",
         path: "agents/deleted.md",
         kind: "FILE",
-        displayName: "deleted.md"
+        displayName: "deleted.md",
+        trigger: "DELETE"
       });
       const revisionRefresh = wrapper.setProps({ agentConfigRevision: 1 });
       await waitFor(() => expect(pendingDiffResolvers).toHaveLength(2));
@@ -519,6 +521,60 @@ describe("GitChangesPanel", () => {
       );
       const dialog = within(document.body).getByRole("dialog", { name: "提交并推送 Agent 文档" });
       expect(dialog.textContent).toContain("已自动暂存 1 个目标文件");
+      expect(wrapper.emitted("quick-agent-commit-failed")).toBeUndefined();
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it("silently closes when deleting a temporary untracked public file leaves no Git change", async () => {
+    const pinia = createPinia();
+    const workbench = useWorkbenchStore(pinia);
+    workbench.publicWorktree = {
+      worktreeId: "agw_public",
+      scope: "PUBLIC",
+      workspaceId: null,
+      linuxServerId: "linux-1",
+      worktreeName: "public-usr_admin",
+      branch: "public-usr_admin",
+      rootPath: "/data/public-usr_admin",
+      agentDirectory: "/data/public-usr_admin/opencode",
+      status: "ACTIVE",
+      createdAt: "2026-08-26T00:00:00Z",
+      updatedAt: "2026-08-26T00:00:00Z"
+    };
+    const wrapper = mount(GitChangesPanel, {
+      props: {
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManagePublicConfig: true
+      },
+      global: { plugins: [pinia] }
+    });
+
+    try {
+      await waitFor(() => expect(apiClientMock.getPublicAgentDiff).toHaveBeenCalled());
+      const quickCommit = (wrapper.vm as unknown as {
+        openQuickAgentCommit: (request: {
+          scope: "PUBLIC";
+          path: string;
+          kind: "FILE";
+          displayName: string;
+          trigger: "DELETE";
+        }) => Promise<void>;
+      }).openQuickAgentCommit({
+        scope: "PUBLIC",
+        path: "agents/temporary.md",
+        kind: "FILE",
+        displayName: "temporary.md",
+        trigger: "DELETE"
+      });
+      await wrapper.vm.$nextTick();
+      expect(within(document.body).queryByRole("dialog", { name: "提交并推送 Agent 文档" })).toBeNull();
+      await quickCommit;
+
+      expect(apiClientMock.stagePublicAgentFiles).not.toHaveBeenCalled();
+      expect(within(document.body).queryByRole("dialog", { name: "提交并推送 Agent 文档" })).toBeNull();
       expect(wrapper.emitted("quick-agent-commit-failed")).toBeUndefined();
     } finally {
       wrapper.unmount();

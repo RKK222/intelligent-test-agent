@@ -1622,25 +1622,30 @@ function failQuickAgentCommit(message: string) {
  */
 async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
   const generation = ++quickAgentCommitGeneration;
-  quickAgentCommitRequest.value = request;
+  // 删除来源先在后台确认 Git 确有 D 记录，避免临时未跟踪文件删除后闪出无意义弹框。
+  quickAgentCommitRequest.value = request.trigger === "DELETE" ? null : request;
   quickAgentCommitMessage.value = "";
   quickAgentCommitError.value = "";
   quickAgentCommitTargetCount.value = 0;
   quickAgentCommitPreparing.value = true;
   hasSelectedDiffScope.value = true;
   activeDiffScope.value = request.scope === "PUBLIC" ? "PUBLIC" : "AGENT_WORKSPACE";
+  const failRequest = (message: string) => {
+    quickAgentCommitRequest.value = request;
+    failQuickAgentCommit(message);
+  };
 
   try {
     if (!canWriteAgentScope(request.scope)) {
-      failQuickAgentCommit(`当前账号无权提交${quickAgentCommitScopeLabel(request)}配置。`);
+      failRequest(`当前账号无权提交${quickAgentCommitScopeLabel(request)}配置。`);
       return;
     }
     if (request.scope === "PUBLIC" && !workbench.publicWorktree?.worktreeId) {
-      failQuickAgentCommit("公共个人 worktree 尚未就绪，请刷新 Agent 区域后重试。");
+      failRequest("公共个人 worktree 尚未就绪，请刷新 Agent 区域后重试。");
       return;
     }
     if (request.scope === "WORKSPACE" && (!effectiveAgentConfigWorkspaceId.value || !props.personalWorkspaceId)) {
-      failQuickAgentCommit("当前应用个人 worktree 尚未就绪，不能提交并推送。");
+      failRequest("当前应用个人 worktree 尚未就绪，不能提交并推送。");
       return;
     }
 
@@ -1650,11 +1655,11 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
     await refreshChanges();
     if (generation !== quickAgentCommitGeneration) return;
     if (activeAgentPublishPending.value) {
-      failQuickAgentCommit("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
+      failRequest("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
       return;
     }
     if (activeAgentConflicts.value.length > 0) {
-      failQuickAgentCommit("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
+      failRequest("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
       return;
     }
 
@@ -1665,36 +1670,38 @@ async function openQuickAgentCommit(request: AgentQuickCommitRequest) {
       await refreshChanges();
       if (generation !== quickAgentCommitGeneration) return;
       if (activeAgentPublishPending.value) {
-        failQuickAgentCommit("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
+        failRequest("当前作用域已有本地提交等待重新推送，请先在变更面板完成该发布。");
         return;
       }
       if (activeAgentConflicts.value.length > 0) {
-        failQuickAgentCommit("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
+        failRequest("当前作用域存在未解决的 Git 冲突，请先在变更面板处理。");
         return;
       }
       targetFiles = quickAgentFiles().filter((file) => isQuickAgentTarget(file, request));
     }
     if (targetFiles.length === 0) {
-      failQuickAgentCommit(request.kind === "SKILL"
+      if (request.trigger === "DELETE") return;
+      failRequest(request.kind === "SKILL"
         ? "该 Skill 文件夹当前没有可提交的 Git 变更。"
         : "该文件当前没有可提交的 Git 变更。");
       return;
     }
+    quickAgentCommitRequest.value = request;
     const unrelatedStaged = activeAgentStaged.value.filter((file) => !isQuickAgentTarget(file, request));
     if (unrelatedStaged.length > 0) {
-      failQuickAgentCommit(`当前作用域另有 ${unrelatedStaged.length} 个已暂存文件。为避免误提交，请先在变更面板提交或取消暂存。`);
+      failRequest(`当前作用域另有 ${unrelatedStaged.length} 个已暂存文件。为避免误提交，请先在变更面板提交或取消暂存。`);
       return;
     }
 
     const unstagedTargets = activeAgentUnstaged.value.filter((file) => isQuickAgentTarget(file, request));
     if (unstagedTargets.length > 0 && !await stageAgentFiles(unstagedTargets)) {
-      failQuickAgentCommit(errorMessage.value || "自动暂存失败，请在变更面板重试。");
+      failRequest(errorMessage.value || "自动暂存失败，请在变更面板重试。");
       return;
     }
     if (generation !== quickAgentCommitGeneration) return;
     const stagedTargets = activeAgentStaged.value.filter((file) => isQuickAgentTarget(file, request));
     if (stagedTargets.length === 0) {
-      failQuickAgentCommit("目标变更未进入暂存区，请刷新后重试。");
+      failRequest("目标变更未进入暂存区，请刷新后重试。");
       return;
     }
     quickAgentCommitTargetCount.value = stagedTargets.length;

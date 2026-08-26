@@ -1241,7 +1241,7 @@ describe("AgentConfigPanel", () => {
       }
     ]]));
     expect(view.emitted("request-git-commit")).toEqual([[
-      { scope: "PUBLIC", path: "agents/review.md", kind: "FILE", displayName: "review.md" }
+      { scope: "PUBLIC", path: "agents/review.md", kind: "FILE", displayName: "review.md", trigger: "DELETE" }
     ]]);
   });
 
@@ -1271,7 +1271,7 @@ describe("AgentConfigPanel", () => {
       }
     ]]));
     expect(view.emitted("request-git-commit")).toEqual([[
-      { scope: "WORKSPACE", path: "skills/obsolete", kind: "SKILL", displayName: "obsolete" }
+      { scope: "WORKSPACE", path: "skills/obsolete", kind: "SKILL", displayName: "obsolete", trigger: "DELETE" }
     ]]);
   });
 

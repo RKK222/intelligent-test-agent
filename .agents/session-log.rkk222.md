@@ -14819,3 +14819,26 @@
 
 - 本次交付是独立公共配置 7z，不是平台前后台完整发布 ZIP；不涉及 Java、worker、前端、`backend.env`、`docker.env`、数据库、Flyway、API、RunEvent/SSE、环境文件、generated SDK 或只读 OpenCode 源码。
 - 包已在 Mac 生成并校验，尚未推送公共远端、导入企业中转机或执行平台公共配置发布；企业导入后仍需用真实 TCDS 完成一次“目录查询 → docs 材料 → Phase A/B → Review”端到端验收。
+
+## 2026-08-26 - 临时 Agent 文件删除不触发快捷提交
+
+### Why
+
+- 公共或应用 Agent 区中新建但从未提交过的临时文件被删除后，Git 不会留下删除记录；原快捷提交流程仍立即展示弹框，随后提示“没有可提交的 Git 变更”，与真实 Git 状态不一致。
+
+### What
+
+- Agent 单文件和一级 Skill 删除请求增加 `DELETE` 来源标记；常驻 `GitChangesPanel` 对该来源先在后台复用既有真实 Diff 刷新和目标匹配，确认存在 `D` 记录后才展示弹框并继续原 stage/提交/推送链路。
+- 连续两次真实 Diff 刷新后仍无目标时静默结束，不弹框、不 stage、不触发失败跳转；真实删除的权限、冲突、待推送提交、无关 staged 文件和 stage 失败仍沿用既有错误弹框与 Diff 处理。
+- 同步 agent-web README、包级说明、组件回归，并新增工作台 Playwright E2E：浏览器真实点击新建公共临时文件、删除和确认，校验至少两次公共 Diff 均为空、没有 stage、没有提交弹框且中心区不跳到空 Diff。
+
+### How
+
+- Agent 配置与 Git Changes 定向 Vitest 2 个文件 97/97；前端全量 Vitest 157/157 个文件、2250 passed / 1 skipped；agent-web typecheck 和 production build 通过。
+- Playwright 工作台端到端用例 `deleting a newly created untracked public Agent file does not open quick commit or Diff` 1/1 通过，临时文件仅存在于测试 mock 内并在删除确认后清理。
+- 按 `.env.test` + Java 25 执行标准整套重启：后端 26 模块打包和 opencode-manager 构建通过，但 Docker Desktop 在启动托管 ClickHouse 的 `docker run` 长时间无响应；脚本尚未停旧服务即被终止。随后只重启本次变更的 `test-agent-frontend`，前端 `3000`、既有后端 health/readiness、登录 CORS 均验证通过。
+
+### Result
+
+- 临时未跟踪 Agent 文件删除现在静默收敛；已跟踪文件和 Skill 的真实删除仍会自动暂存并进入原快捷提交，成功留在工作区、真实失败才跳 Diff。
+- 本次仅修改前端交互、测试和稳定文档，不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、性能、安全策略、部署节点、环境配置、generated SDK 或只读 OpenCode 源码。Docker Desktop 仍存在长期挂起的环境问题，未把整套重启报告为成功。

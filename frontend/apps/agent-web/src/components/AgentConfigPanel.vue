@@ -454,14 +454,19 @@ function canQuickCommitEntry(entry: FileTreeEntry): boolean {
   return quickCommitKind(entry) !== null;
 }
 
-function quickGitCommitRequest(scope: Scope, entry: QuickCommitEntry): AgentQuickCommitRequest | null {
+function quickGitCommitRequest(
+  scope: Scope,
+  entry: QuickCommitEntry,
+  trigger?: AgentQuickCommitRequest["trigger"]
+): AgentQuickCommitRequest | null {
   const kind = quickCommitKind(entry);
   if (!kind || !canWriteScope(scope)) return null;
   return {
     scope,
     path: entry.path,
     kind,
-    displayName: entry.displayName?.trim() || entry.name?.trim() || fileName(entry.path)
+    displayName: entry.displayName?.trim() || entry.name?.trim() || fileName(entry.path),
+    ...(trigger ? { trigger } : {})
   };
 }
 
@@ -748,7 +753,7 @@ async function deleteAgentEntry(path: string, type: "file" | "directory") {
     emitFilesMutated(scope, { paths: [path], deleted: { path, type } });
     notifySuccess(type === "file" ? "Agent 文件已删除" : "Agent 文件夹已删除", path);
     // 删除落盘并刷新树后再触发快捷提交；Git Changes 会从真实 Diff 中 stage 删除记录。
-    quickCommitRequest = quickGitCommitRequest(scope, { path, type });
+    quickCommitRequest = quickGitCommitRequest(scope, { path, type }, "DELETE");
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, `删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`);
     notifyError(`删除 Agent ${type === "file" ? "文件" : "文件夹"}失败`, errorMessage.value);

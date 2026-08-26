@@ -39,6 +39,8 @@ export type AgentQuickCommitRequest = {
   path: string;
   kind: "FILE" | "SKILL";
   displayName: string;
+  /** 删除触发时先确认 Git 中确有删除记录；临时未跟踪文件删除后不应展示提交框。 */
+  trigger?: "DELETE";
 };
 
 /** 初始化进程成功后，把后端已经准备好的公共个人 worktree 精确交给配置树重新挂载。 */

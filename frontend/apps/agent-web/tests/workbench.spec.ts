@@ -1935,6 +1935,61 @@ test("Agent files open through the parent loader for public and workspace scopes
   });
 });
 
+test("deleting a newly created untracked public Agent file does not open quick commit or Diff", async ({ page }) => {
+  const temporaryPath = "codex-e2e-temp-delete-20260826.md";
+  const agentFileFrames: Array<{
+    op: string;
+    scope: string;
+    path: string;
+    workspaceId?: string;
+    worktreeId?: string;
+    content?: string;
+  }> = [];
+  const publicAgentGitRequests: string[] = [];
+  await mockBackendApi(page, {
+    ...agentWorkspaceSetup(),
+    authRoles: ["SUPER_ADMIN"],
+    publicAgentWorktreesByServer: {
+      "server-a": [publicAgentWorktree("server-a")]
+    },
+    agentFileFrames,
+    publicAgentGitRequests
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  await openAgentsPanel(page);
+  const createButton = page.getByRole("button", { name: "新建或上传公共配置" });
+  await expect(createButton).toBeEnabled();
+  await createButton.click();
+  const createDialog = page.getByRole("dialog", { name: "新建或上传公共配置" });
+  await createDialog.getByLabel("文件名").fill(temporaryPath);
+  await createDialog.getByRole("button", { name: "创建", exact: true }).click();
+
+  const temporaryRow = page.getByRole("button", { name: temporaryPath, exact: true });
+  await expect(temporaryRow).toBeVisible();
+  await expect.poll(() => agentFileFrames).toContainEqual(expect.objectContaining({
+    op: "agent-config.write",
+    scope: "PUBLIC",
+    path: temporaryPath
+  }));
+
+  await temporaryRow.hover();
+  await page.getByRole("button", { name: `删除 ${temporaryPath}` }).click();
+  await page.getByRole("dialog", { name: "删除文件" }).getByRole("button", { name: "确认删除" }).click();
+  await expect(temporaryRow).toHaveCount(0);
+  await expect.poll(() => agentFileFrames).toContainEqual(expect.objectContaining({
+    op: "agent-config.delete",
+    scope: "PUBLIC",
+    path: temporaryPath
+  }));
+  await expect.poll(() => publicAgentGitRequests.filter((request) => request.endsWith("/public/diff")).length)
+    .toBeGreaterThanOrEqual(2);
+
+  await expect(page.getByRole("dialog", { name: "提交并推送 Agent 文档" })).toHaveCount(0);
+  await expect(page.getByText("暂无 Diff", { exact: true })).toHaveCount(0);
+  expect(publicAgentGitRequests.some((request) => request.endsWith("/public/stage"))).toBe(false);
+});
+
 test("application Agent update merges the feature commit even when the runtime is not ready", async ({ page }) => {
   const runtimeReloadRequests: string[] = [];
   await mockBackendApi(page, {
@@ -10980,6 +11035,10 @@ async function mockBackendApi(
     agentFileReadNotFoundAttempts?: Record<string, number[]>;
     agentFileReadResponses?: Record<string, string[]>;
     gitDiffRequests?: string[];
+    /** 公共 Agent 快捷提交的真实 Diff/stage 请求记录。 */
+    publicAgentGitRequests?: string[];
+    /** 公共 Agent Diff mock；临时文件删除场景保持为空。 */
+    publicAgentDiffFiles?: Array<Record<string, unknown>>;
     workspaces?: Array<ReturnType<typeof workspace> & Record<string, unknown>>;
     workspaceRequests?: string[];
     workspaceRequestGates?: Record<string, Promise<void>>;
@@ -11576,6 +11635,21 @@ async function mockBackendApi(
             content
           });
           (agentFileContents as Record<string, string>)[`${scope}:${path}`] = content;
+        } else if (request.op === "agent-config.delete") {
+          const scope = params.scope ?? "PUBLIC";
+          const path = params.path ?? "";
+          recordAgentFileFrame({
+            op: request.op,
+            scope,
+            path,
+            workspaceId: params.workspaceId,
+            worktreeId: params.worktreeId
+          });
+          const contents = agentFileContents as Record<string, string>;
+          const key = `${scope}:${path}`;
+          for (const fileKey of Object.keys(contents)) {
+            if (fileKey === key || fileKey.startsWith(`${key}/`)) delete contents[fileKey];
+          }
         } else if (request.op === "workspace.status") {
           const path = params.path ?? "";
           // 聊天附件使用内容指纹路径；默认 mock 工作区不存在该路径，避免把占位文件状态误判为可复用。
@@ -12087,6 +12161,16 @@ async function mockBackendApi(
           commitHash: "public_commit",
           message: null
         }]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/diff") {
+        capture.publicAgentGitRequests?.push(`${method} ${url.pathname}`);
+        await route.fulfill(json({ files: capture.publicAgentDiffFiles ?? [] }));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/stage") {
+        capture.publicAgentGitRequests?.push(`${method} ${url.pathname}`);
+        await route.fulfill(json(null));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/agent-config/public/worktrees") {
