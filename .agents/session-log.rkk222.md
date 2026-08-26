@@ -14917,3 +14917,30 @@
 ### Result
 
 - 现场部署基线已更正；正在生成不含客户端、worker 和 toolbox 大制品的纯平台增量包，最终哈希和体积将在封包校验后补记。
+
+## 2026-08-26 - 完成纯平台增量企业包
+
+### Why
+
+- 上一轮企业包已在 `.4/.114/.2` 部署并验证，本轮只需交付成功基线之后变化的前后台代码；客户端、worker runtime、toolbox、manager 和独立中间件不得重复打包或重启。
+- 先前因部署基线判断错误生成的 423 MiB 候选 `b627e617...` 已明确作废，不能再用于现场部署。
+
+### What
+
+- 以本地 `release@e279035d1` 为封包输入，业务代码基线仍为 `eabbc26cb`；正式重建后端、前端和双后端三节点外层包。
+- 组件清单保持 worker runtime `reuse`（`877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`）、toolbox `reuse`（`35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`）、local client `reuse`（`1bc1bb3bd8ef72691292a7c9f5931e003b4b67196aa78702ca4d39e63f24d4c6`）；客户端版本继续为 `20260826095116`，仅在清单中保留摘要，不含客户端文件。
+- LobeHub 和 memory 保持 `disabled`；`.4/.114` 的 models、worker/manager、CK、Mem0、BGE、pgvector 及独立 `testagent-updated.7z` 配置包均不在本轮平台包更新范围。
+
+### How
+
+- JDK 25 后端正式构建、持久化/XXL/ClickHouse migration 资源校验、VitePress 用户手册构建、`vue-tsc` 和前端生产 Vite 构建均通过；封包完成后再次校验外层、内层和三节点归档 checksum 及压缩完整性。
+- 最终内层发布 ZIP SHA-256 为 `68dcd49397b77213a02e95dc30d08aecd59acf15bed5ab847b51f4ce34c1ba68`；外层完整包 SHA-256 为 `7cb038210e46d33a92b3e20c98c5591b930a7d9f6d980a127464fae26ca64618`。
+- `.4`、`.114`、`.2` 节点归档 SHA-256 依次为 `91f17102e6d65830e8c23a659dab3386715ca311e17722774ecfaee0ccf9ed9c`、`3c8d0cdbc81a39f89e270a1d6b2c1c3495090be0314b2cf97c0496483e61f8e1`、`d4c6288c831286e3e4353692179181cc627ff43477c6b235830d28ccd1c90772`；三个节点包只含配置和部署脚本。
+- 内层 ZIP 只含本轮前端归档、后端 JAR/lib 和部署资料，已确认不存在 `dist/local-opencode-client/`、worker programs、LobeHub、memory 或 trace 运行时载荷；节点配置中的 TCDS 为 `http://tcds-prod.sdc.icbc:9080`、AAM 为 `http://zfw.sdc.cs.icbc`，两个后端 SkillHub access key 均非空且未输出密钥值。
+- 本轮没有新增或修改 Flyway migration。已部署的 `V20260825091459__local_client_instance_replacements_create.sql` 源码与最终持久化 JAR 内字节 SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；现场只核验已有成功历史记录和 checksum `749555545`，不得 `repair`、重跑或改历史表。
+- 交付文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`，同目录 SHA 文件回读和 `unzip -tq` 均通过，体积约 148 MiB。提交前再次回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或会覆盖的并行成果。
+
+### Result
+
+- 纯平台增量包已生成并完成本机运行构建与归档校验；目标企业服务器尚未执行本轮部署。
+- 本次不新增部署节点，不修改 API、RunEvent/SSE、数据库结构、Flyway 文件、环境配置、generated SDK 或只读 OpenCode 源码；本条记录提交本身不再触发重新封包，因此记录提交不会出现在上述 ZIP 内。
