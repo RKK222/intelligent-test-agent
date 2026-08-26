@@ -14745,10 +14745,10 @@
 ### How
 
 - 文件树定向 Vitest 2 个文件 40/40；前端全量 Vitest 157/157 个文件、2249 passed / 1 skipped；全 workspace typecheck 和 agent-web production build 通过，`git diff --check` 无异常。
-- 独立 Vite 实例启动于 `127.0.0.1:15174`，真实 Chrome 访问返回 200、标题为 `TestAgent IDE`、控制台无错误；临时浏览器未使用账号凭据，只验证到登录页，登录后工作树交互由组件 DOM 测试覆盖。
+- 独立 Vite 实例启动于 `127.0.0.1:15174`；新增 Playwright 工作台端到端用例，以浏览器事件展开目录、Shift 连选 5 个可见文件/目录并右键删除，确认菜单按 4 个顶层条目收敛、目录参与时不显示复制，并记录到 4 次 `workspace.delete`，用例 1/1 通过。
 - 提交前回顾全部 `.agents/session-log*.md` 近期条目，确认本次只暂存 Shift 选择实现、测试、稳定文档和本日志，不纳入同工作树已有用户手册修改、`.reasonix/`、Vite cache 或根 `node_modules/`。
 
 ### Result
 
-- 用户可先普通点击一个可写文件或目录，再按住 Shift 点击另一项，连续选中两点之间当前可见的可写条目并直接右键批量操作；原 Ctrl/Cmd 多选保持兼容。
+- 用户可先普通点击一个可写文件或目录，再按住 Shift 点击另一项，连续选中两点之间当前可见的可写条目并直接右键批量操作；原 Ctrl/Cmd 多选保持兼容，连续选择到批量删除的浏览器链路已完成端到端验证。
 - 本次仅修改前端交互、测试和稳定文档，不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、依赖、部署节点、安全边界、环境配置、generated SDK 或只读 OpenCode 源码。

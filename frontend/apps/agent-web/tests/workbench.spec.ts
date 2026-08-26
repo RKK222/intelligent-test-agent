@@ -3028,6 +3028,55 @@ test("deleting an open workspace file or directory closes every affected tab", a
   await expect(nestedTab).toHaveCount(0);
 });
 
+test("Shift selects the visible workspace range and applies the right-click batch action", async ({ page }) => {
+  const fileOperations: string[] = [];
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    fileOperations,
+    fileContents: {
+      "docs/nested.md": "nested document",
+      "files/delete-me.md": "delete this file"
+    }
+  });
+
+  await gotoWorkbench(page, { selectConversation: false });
+  const testsRow = page.getByRole("button", { name: "tests", exact: true });
+  await testsRow.click();
+  const nestedTestRow = page.getByRole("button", { name: "checkout.spec.ts", exact: true });
+  await expect(nestedTestRow).toBeVisible();
+
+  const packageRow = page.getByRole("button", { name: "package.json", exact: true });
+  await packageRow.click({ modifiers: ["Shift"] });
+
+  for (const row of [
+    testsRow,
+    nestedTestRow,
+    page.getByRole("button", { name: "docs", exact: true }),
+    page.getByRole("button", { name: "files", exact: true }),
+    packageRow
+  ]) {
+    await expect(row).toHaveClass(/is-selected/);
+  }
+  await expect(page.locator(".ta-file-tree-row.is-selected")).toHaveCount(5);
+
+  await packageRow.click({ button: "right" });
+  await expect(page.getByRole("menuitem", { name: "删除 4 个条目" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^剪切/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /^复制/ })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "删除 4 个条目" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "删除多个条目" });
+  await expect(dialog).toContainText("4 个条目");
+  await expect(dialog).toContainText("tests");
+  await expect(dialog).toContainText("docs");
+  await expect(dialog).toContainText("files");
+  await expect(dialog).toContainText("package.json");
+  await dialog.getByRole("button", { name: "确认删除" }).click();
+
+  await expect.poll(() => fileOperations.filter((operation) => operation === "workspace.delete")).toHaveLength(4);
+  await expect(page.getByRole("alert").filter({ hasText: "已删除 4 个工作区条目" })).toBeVisible();
+});
+
 test("workbench home opens the embedded user manual", async ({ page }) => {
   await mockBackendApi(page, {
     personalWorkspaces: {
