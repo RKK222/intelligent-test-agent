@@ -14894,3 +14894,25 @@
 
 - 最终包已复制到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`，同目录 SHA 文件回读校验为 `OK`；固定文件约 423 MiB。
 - 本次不新增部署节点，不修改 API、RunEvent/SSE、数据库结构、Flyway 文件、环境配置、generated SDK 或只读 OpenCode 源码；尚未在企业目标机部署。
+
+## 2026-08-26 - 确认上一企业包已部署并切换为纯平台增量
+
+### Why
+
+- 用户补充确认上一轮外层包已在 `.4/.114/.2` 全部部署并完成验证；因此上一条记录中“尚未在企业目标机部署”的判断已被现场事实替代，上一轮 `b627e617...` 外层包成为当前成功部署基线。
+- 客户端 `20260826095116`、worker runtime 和 toolbox 已随上一轮完成安装与门禁登记，本轮不能再次携带其大文件或触发重装、重启。
+
+### What
+
+- 保持当前本地 `release` 业务代码不变，不拉取远端；重新按现场成功基线计算组件计划。
+- 组件计划确认 worker runtime `reuse`（`877cea18...be33`）、toolbox `reuse`（`35447da0...5040`）、local client `reuse`（`1bc1bb3b...d4c6`）；客户端版本和四项摘要只保留在发布清单中用于目标机校验，不再进入内层 ZIP。
+- `.4` Qwen 优先灰度、`.114` 既有模型快照、manager、CK、Mem0、BGE、pgvector、Workflow/LobeHub 关闭状态均保持不动。
+
+### How
+
+- 使用与上一轮一致的客户端版本、域名、组织公钥、JDK/OpenCode 摘要和公共能力 commit 执行 `--component-plan-only`，三个大组件均稳定判定为 `reuse`。
+- 已回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或需要纳入的其它未提交成果；后续将正式重建前后台基本发布单元并重建内外层 ZIP。
+
+### Result
+
+- 现场部署基线已更正；正在生成不含客户端、worker 和 toolbox 大制品的纯平台增量包，最终哈希和体积将在封包校验后补记。
