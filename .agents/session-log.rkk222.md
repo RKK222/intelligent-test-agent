@@ -14884,9 +14884,13 @@
 
 - 在 `frontend` 执行全量 Vitest：157/157 个测试文件通过，2251 passed / 1 skipped；全 workspace `typecheck` 通过，生产 Vite 构建通过。
 - `package-release.sh --backend-only` 生成后端 JAR，SHA-256 为 `ac0528e7338e051303f87ee807696ce6a2a6c69b5a0ae9785c07b02dce5006c0`；`package-release.sh --frontend-only` 生成前端归档，SHA-256 为 `517c8acf48397df002d3b2e7fc846b5e6cc685d13af2d1b52f94c600f0e688d5`。
-- 已回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或会覆盖的并行成果；最终内外层 ZIP、三节点包、客户端签名和 Flyway 独立校验结果在封包完成后补记。
+- 内层发布 ZIP SHA-256 为 `39879e539928f209aa7b4303c5f77bdd0187d65ebfd9c7aaed155dfe3bf72730`；外层三节点完整包 SHA-256 为 `b627e6172e860f13068f0764f6bc2e5d03d0f1f60c9b383c66d88c474ab459c2`。`.4`、`.114`、`.2` 节点包 SHA-256 依次为 `b5ab6236054b3b900ccf50fa48207296f5cc3075dc976eb8da986701aea76aed`、`4d8b8ad561d79272f6840b2644378017abb37768014e151429b139c97d074c01`、`22e632e312943047b1b145129d451f4d2864e9d08d4ec4b100ed83e9dd740291`。
+- ZIP 完整性、内外层和三节点 checksum 均通过；组件清单确认 worker/toolbox 为 `reuse`、LobeHub/memory 为 `disabled`、客户端为 `included`。节点包只含部署脚本和节点配置，不含 worker、manager、models 或 trace 制品；TCDS/AAM 地址正确，两个后端节点的 SkillHub access key 均非空且未输出密钥值。
+- 客户端离线发行版完整性门禁和 RSA SHA-256 签名验证通过；组织公钥 DER SHA-256 为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。前端产物包含正确 AAM 地址且不含三台服务器硬编码 API 地址。
+- `V20260825091459__local_client_instance_replacements_create.sql` 源码与最终持久化 JAR 内字节 SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；没有新增或修改 migration。Nginx 单/多后端模板、reload 和错误门禁通过，本机缺少预置 `nginx:1.27.2-alpine3.20` 镜像，因此真实 `nginx -t` 按脚本设计跳过，需由目标机部署脚本执行。
+- 已再次回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突或会覆盖的并行成果。
 
 ### Result
 
-- 前后台正式构建已通过，正在生成最终企业离线包；本条先随制品收录，最终哈希将在后续同日发布记录提交中补齐。
+- 最终包已复制到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`，同目录 SHA 文件回读校验为 `OK`；固定文件约 423 MiB。
 - 本次不新增部署节点，不修改 API、RunEvent/SSE、数据库结构、Flyway 文件、环境配置、generated SDK 或只读 OpenCode 源码；尚未在企业目标机部署。
