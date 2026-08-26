@@ -15038,3 +15038,26 @@
 
 - 用户可一次多选 `.md` 和现有图片，或选择整个目录；少传图片不会失败，已上传图片正常显示，缺失项可稍后补传。
 - 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；文件读取与上传继续遵守既有 WebSocket route/ticket/RPC 边界。
+
+## 2026-08-26 - 工作区 Markdown 本地图片端到端验证
+
+### Why
+
+- 用户要求对 Markdown 本地图片修复进行真实端到端验证，重点覆盖一次多选 `.md` 与图片、文档引用 4 张但只上传 3 张时不阻断的行为。
+
+### What
+
+- 在 `.env.test` / `test` profile 环境中使用账号 `usr_test_dev` 已绑定的本机个人 worktree，通过真实 Chromium 页面一次选择 1 个 Markdown 和 3 个 SVG；测试 Markdown 声明 4 张相对图片，第四张故意不提供。
+- 打开上传后的 Markdown 并切到整体预览，核对三张已上传图片和一项缺失占位；随后从文件树执行“撤销上一步”，清理本次上传的全部文件。
+- 对照用户提供的 `SLB策略发布重构总体方案.md`，确认其包含 4 个相对 PNG 引用，而附件所在目录当前没有同级或三级内图片文件。
+
+### How
+
+- 后端 health/readiness、前端 3000 页面和 CORS 预检均返回 200；重启脚本完成 26 模块后端 package、用户手册和 agent-web production build，但可选 ClickHouse 的 Docker CLI 仍卡住，本轮仅终止精确的 CLI/脚本进程，已启动后端继续以 JDK 25 和 `test` profile 运行。
+- Playwright 使用本机 Chrome 执行真实 UI：提示精确为“已上传 4 个文件，缺少 1 张图片”；三张图片均以 `blob:http://localhost:3000/...` 加载完成，尺寸为 320×120；第四张显示“图片未上传：./e2e-four.svg”。
+- 图片文件未产生相对 HTTP 请求，浏览器 request failure、console error 和 page error 均为 0；最终通过 UI 撤销确认个人 worktree 中测试文件为 0，临时 session/workspace 数据库记录为 0，仓库原有工作区未残留测试改动。
+
+### Result
+
+- 多文件选择、缺图非阻断、工作区二进制读取、object URL 预览、缺图占位和 UI 清理链路均通过真实端到端验证；截图保留在 `/tmp/test-agent/markdown-image-e2e/artifacts/03-markdown-preview.png`。
+- 本轮只补充验证记录，不修改业务代码、API、事件、数据库结构、Flyway、环境配置、generated SDK 或 OpenCode 源码；Docker Desktop 的 ClickHouse 启动卡顿仍是本机可选分析服务风险，不影响本次工作区文件链路。
