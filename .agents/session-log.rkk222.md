@@ -14705,3 +14705,26 @@
 
 - 登录用户可通过活动栏末尾 `+` 配置、编辑、排序和删除自定义入口，并在同一应用内的多 Tab 工作区打开页面；刷新后只恢复仍有对应配置的自定义 Tab。
 - 本次仅修改前端交互、本地浏览器持久化、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署节点、强制配置、generated SDK 或只读 OpenCode 源码。整栈进程未切换到新构建，Docker ClickHouse 卡住仍是本机启动风险；当前 Vite 服务加载工作树源码并保持可访问。
+
+## 2026-08-26 - 基于 release HEAD 重打企业增量包
+
+### Why
+
+- 上一候选企业包尚未作为本轮现场基线，`release` 又新增了本地工作区恢复和自定义左侧菜单提交，需要按当前 `64ca87e80c607589314bae90c96d0e892643e255` 重新构建，而不是只改外层 ZIP。
+
+### What
+
+- 重新构建 Java、前端静态资源和组织密钥签名的麒麟 ARM64 客户端；客户端使用严格递增不可变版本 `20260826095116`，继续固定企业入口 `http://mimo.sdc.cs.icbc:9996` 和已审核公共能力提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+- 组件指纹判定 worker runtime 与 toolbox 均为 `reuse`，客户端为 `included`；不重新打入或重启 manager/worker、CK、Mem0、BGE、pgvector、LobeHub、Workflow 和 trace 专项制品，也不覆盖 `.4` 的 Qwen 优先模型灰度配置。
+- PostgreSQL 与 XXL migration 相对上一候选包均无新增；相对 2026-08-24 企业基线仍只有 `V20260825091459__local_client_instance_replacements_create.sql` 待执行，源码和最终 persistence JAR 资源 SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。
+
+### How
+
+- 后端 `LocalClientConnectionWebSocketHandlerWorkspaceTest`、`LocalGitAccessCheckerTest`、`LocalWorkspaceApplicationServiceTest`、`WorkspaceApplicationServiceTest` 定向 Maven reactor 通过；前端 7 个相关 Vitest 文件 30/30、全 workspace typecheck 通过。
+- `local-opencode-client-package-test.sh` 与 `local-opencode-client-update-test.sh` 通过；正式发布脚本完成 Spring Bean 构造器门禁、后端打包、前端 production build、客户端签名/catalog/用户包校验，以及最终 JAR 内全部 PostgreSQL、XXL 和 ClickHouse migration 字节校验。
+- 构建前回顾全部 `.agents/session-log*.md` 近期条目；保留并排除 `.reasonix/`、Vite cache 和根 `node_modules/`，未拉取、合并或推送远程。
+
+### Result
+
+- 当前正式内包已生成，后续只执行包含本日志的 `zip-only` 重封、双后台外层封装和最终摘要/配置验收；企业现场仍须按 `.4 → .114 → .2` 灰度执行并核对 Flyway history，未把本机构建等同于现场部署成功。
+- 本次打包不修改业务代码、API、事件、SQL、migration、环境文件、generated SDK 或 OpenCode 只读源码；目标分支仍为不新增部署节点的 `release`。
