@@ -14796,3 +14796,26 @@
 
 - 公共 config `master` 已提交 `7a29ca4`（`调整存量案例与测试设计合流`），工作树干净，未推送远端；上一提交 `9d0abe0` 仍保留历史，本提交修正其短路设计。
 - 主项目仍在不新增部署节点的 `release`；本次只记录独立配置仓库交付，不修改应用 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。真实企业 TCDS 与完整模型链路仍需配置发布后做现场端到端验收。
+
+## 2026-08-26 - 基于企业压缩包重打存量案例配置
+
+### Why
+
+- 用户要求以昨日提供的 `/Users/kaka/Downloads/光学文件接收/testagent.7z` 为唯一基线重新打包已更新文件，不能用公共远程仓库整树替换，因为远端还含企业当前不使用的内容。
+
+### What
+
+- 原包 SHA-256 为 `c9f9ebbe20d3eee96eb696dacdf51f07190d02db117fb78ca143510078ec3b0a`，内嵌配置仓库为干净的 `feature_config@988b4b4`。逐文件确认 11 个既有目标与公共配置功能改造前 `81605f2` 完全一致，因此只覆盖 11 个修改文件并新增 3 个存量案例文件；原包未包含的远程根 `README.md` 和其它远程内容均未加入。
+- 在内嵌企业仓库提交 `5e589ce8f5af0a2fed4e9d5ea742fb3b920705ea`（`【feature_config】新增存量案例与测试设计合流`，带 Change-Id），保持工作树干净。Mac 上仅临时修正企业 commit-msg hook 的 Perl 路径以执行原逻辑，提交后恢复，hook SHA-256 仍为 `0e03afe18aff5511474349853c48a8370ec9b80d64e9cce735a9ae957f29ec16`。
+- 生成 `/Users/kaka/Downloads/光学文件接收/testagent-updated.7z` 和同目录 SHA 文件；保留原 `testagent.7z` 未覆盖。
+
+### How
+
+- 新包使用原包相同的 7z solid LZMA2:20 参数；`7zz t` 和重新解压通过，共 315 个目录、959 个文件，内嵌 Git `fsck` 通过且工作树干净。
+- 重新解压后核对 14 个覆盖文件与公共配置 `7a29ca4` 对应文件逐字节一致；22 条 eval JSON、25 个 Agent/Skill frontmatter、规则/模板引用、过期 `STOCK_CASES` 扫描、Bun Tool 构建和 OpenCode `debug config` 均通过。
+- 新包 SHA-256 为 `b83e755abdb1753172c97224db486a48a014e0fc829b35a11425c2f0652717fb`，配套 `.sha256` 执行校验为 `OK`。
+
+### Result
+
+- 本次交付是独立公共配置 7z，不是平台前后台完整发布 ZIP；不涉及 Java、worker、前端、`backend.env`、`docker.env`、数据库、Flyway、API、RunEvent/SSE、环境文件、generated SDK 或只读 OpenCode 源码。
+- 包已在 Mac 生成并校验，尚未推送公共远端、导入企业中转机或执行平台公共配置发布；企业导入后仍需用真实 TCDS 完成一次“目录查询 → docs 材料 → Phase A/B → Review”端到端验收。
