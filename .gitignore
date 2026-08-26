@@ -63,11 +63,14 @@ temp/
 *.key
 
 # ===== 前端工具缓存 / 产物 =====
+/node_modules/
 .vite/
+frontend/apps/user-manual/docs/.vitepress/cache/
 frontend/apps/agent-web/public/help/
 .playwright-mcp/
 output/playwright/
 output/e2e-tool-rollout/
+/.reasonix/
 .claude/
 .superpowers/
 
