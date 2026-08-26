@@ -14752,3 +14752,23 @@
 
 - 用户可先普通点击一个可写文件或目录，再按住 Shift 点击另一项，连续选中两点之间当前可见的可写条目并直接右键批量操作；原 Ctrl/Cmd 多选保持兼容，连续选择到批量删除的浏览器链路已完成端到端验证。
 - 本次仅修改前端交互、测试和稳定文档，不新增或变更 HTTP API、WebSocket 文件协议、RunEvent/SSE、数据库、Flyway、依赖、部署节点、安全边界、环境配置、generated SDK 或只读 OpenCode 源码。
+
+## 2026-08-26 - 同步 release 内置用户手册
+
+### Why
+
+- `release` 自上次手册同步后已交付自定义左侧菜单、Agent/Skill 行内快捷提交、客户端重连恢复历史工作区和工作区文件树 Shift 连续选择；用户手册需要给出真实入口、权限与数据边界。
+
+### What
+
+- 更新设置、Agent/Skill、工作区、功能总览、每周新功能和 FAQ；补充自定义菜单仅存当前账号当前浏览器、快捷提交的冲突/暂存门禁、客户端恢复的真实目录校验，以及 Shift 连续选择的可见范围和只读跳过规则。
+- 更新帮助中心回归，继续校验灰度、完整周更正文、图片存在性及游戏内容排除。
+
+### How
+
+- 在 `release` HEAD `b650381d95cb18706e2f12c46f72a06351633d29` 执行 `corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts`（17/17）、`corepack pnpm --filter @test-agent/user-manual build`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `git diff --check`，均通过。
+- 已回顾全部 `.agents/session-log*.md` 近期记录；仅暂存手册、帮助中心测试和本日志，排除 `.reasonix/`、VitePress cache 与根 `node_modules/`。
+
+### Result
+
+- 未新增或变更 API、RunEvent/SSE、数据库、Flyway、性能、安全策略、环境配置、generated SDK 或 OpenCode 只读源码。所有稳定章节仍有现有脱敏操作截图并由测试校验引用；新流程尚缺自定义菜单、快捷提交和 Shift 选择的真实截图，需由人工补拍后补入。

@@ -115,16 +115,19 @@ describe("help center", () => {
 
   it("grounds weekly feature questions in user scenarios and branch-safe boundaries", () => {
     const prompt = buildManualQuestionPrompt("weekly-updates", "这周自动化代码库怎么用？");
+    const weekly = helpTopicById("weekly-updates").content;
 
     expect(prompt).toContain("【当前章节】每周新功能");
     expect(prompt).toContain("适用场景");
     expect(prompt).toContain("使用前配置");
-    expect(prompt).toContain("自动化代码库改为工作区内只读参考");
-    expect(prompt).toContain("组合文件树根部会出现虚拟目录“自动化代码库”");
-    expect(prompt).toContain("选择应用并进入一个测试工作空间");
-    expect(prompt).toContain("主工作空间菜单不再列出自动化仓库");
-    expect(prompt).toContain("本地提交，但不提供远程推送或发布");
-    expect(prompt).toContain("VITE_CACHE_DATA_URL");
+    expect(weekly).toContain("自动化代码库改为工作区内只读参考");
+    expect(weekly).toContain("组合文件树根部会出现虚拟目录“自动化代码库”");
+    expect(weekly).toContain("选择应用并进入一个测试工作空间");
+    expect(weekly).toContain("主工作空间菜单不再列出自动化仓库");
+    expect(weekly).toContain("本地提交，但不提供远程推送或发布");
+    expect(weekly).toContain("VITE_CACHE_DATA_URL");
+    expect(weekly).toContain("在文件树中连续选择相邻条目");
+    expect(weekly).toContain("Shift 连续选择");
     expect(prompt).not.toMatch(forbiddenGameContentPatterns[0]!);
     expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
     expect(prompt).toContain("本地 OpenCode 客户端（按账号灰度开放）");
@@ -135,6 +138,9 @@ describe("help center", () => {
     expect(prompt).toContain("TestAgent-Local-Client");
     expect(prompt).toContain("选择并注册工作区…");
     expect(prompt).toContain("工作空间 → 本地工作区");
+    expect(prompt).toContain("客户端重连后恢复历史本地工作区");
+    expect(prompt).toContain("在左侧活动栏添加常用内网页面");
+    expect(prompt).toContain("从 Agent 或 Skill 配置树快捷提交");
     expect(prompt.length).toBeLessThan(8_100);
   });
 
@@ -163,12 +169,18 @@ describe("help center", () => {
     expect(overview).toContain("平台全局记忆配置可用");
     expect(overview).toContain("本地 OpenCode 客户端");
     expect(overview).toContain("来自 SkillHub 的 Skill 卡片和详情会显示“创建人”");
+    expect(overview).toContain("自定义菜单");
+    expect(overview).toContain("客户端重新连接后会自动核验并恢复");
+    expect(overview).toContain("先普通点击一个文件或目录建立锚点");
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
     expect(faq).toContain("客户端注册了本地目录后，怎样在工作台打开？");
     expect(faq).toContain("为什么“新增版本”不可用或创建失败？");
     expect(faq).toContain("为什么看不到“上传 Skill”，或上传后目录还没有出现？");
+    expect(faq).toContain("怎样把常用内网页面加到左侧活动栏？");
+    expect(faq).toContain("Agent 或 Skill 行尾的“提交并推送”为什么不可用或失败？");
+    expect(faq).toContain("怎样连续选择一段工作区文件？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
