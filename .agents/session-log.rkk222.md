@@ -14726,5 +14726,6 @@
 
 ### Result
 
-- 当前正式内包已生成，后续只执行包含本日志的 `zip-only` 重封、双后台外层封装和最终摘要/配置验收；企业现场仍须按 `.4 → .114 → .2` 灰度执行并核对 Flyway history，未把本机构建等同于现场部署成功。
+- 最终内包 SHA-256 为 `8bf9e87214a64989fc64244eafee5767d906eb4d3548404e4855dad783f57f34`，固定外层包 SHA-256 为 `6d39d994432a15411c127ce8d3488766bd4ff80d6d0c5323ee4b8d1b1ec062f9`；外层嵌入内包摘要逐字一致，三台节点包 checksum、ZIP CRC、客户端 RSA 签名、AAM/TCDS/路由配置和 Nginx 双后台渲染均已通过。
+- 正式外层包与摘要已写入 `/Users/kaka/Desktop/mimoagent/0709/` 并再次执行 `sha256sum -c` 通过；企业现场仍须按 `.4 → .114 → .2` 灰度执行并核对 Flyway history，未把本机构建等同于现场部署成功。
 - 本次打包不修改业务代码、API、事件、SQL、migration、环境文件、generated SDK 或 OpenCode 只读源码；目标分支仍为不新增部署节点的 `release`。
