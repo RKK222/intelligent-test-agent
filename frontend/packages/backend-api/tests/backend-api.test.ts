@@ -2443,6 +2443,21 @@ describe("backend-api", () => {
     );
   });
 
+  it("encodes repository search keyword with pagination", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: { items: [], page: 1, size: 100, total: 0 }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.listRepositories(1, 100, "MIMO 示例");
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/configuration-management/repositories?keyword=MIMO+%E7%A4%BA%E4%BE%8B&page=1&size=100"
+    );
+  });
+
   it("maps repository english names and workspace create progress through configuration APIs", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({

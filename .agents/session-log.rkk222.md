@@ -14988,3 +14988,28 @@
 
 - 公共 Agent 页只加载和展示公共配置发布；应用运行态页只在进入时加载应用范围与 rollout，并仅在该视图存在活动任务时轮询。管理员可在独立页面查看发布历史并 dispose / 重启全员，不再挤占公共配置区域。
 - 本次不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；相关前端已实际重启验证，整栈切换仍受本机 Docker ClickHouse 启动卡住影响。
+
+## 2026-08-26 - 增加版本库检索并优化应用管理加载
+
+### Why
+
+- 版本库管理原先只读取前 100 条后在页面展示，缺少面向完整结果集的检索能力；应用管理每次进入都会先请求全量应用定义，即使工作台已经明确选中当前应用。
+
+### What
+
+- 配置管理版本库分页 API 增加可选 `keyword`，通过既有领域仓储、应用服务和 MyBatis XML 按版本库 ID、中文名、英文名、Git 地址做大小写不敏感 LIKE，并返回过滤后的总数；空关键字保持旧分页语义。
+- 版本库管理增加服务端检索输入、回车/清空/按钮操作、结果计数和空状态；检索只刷新列表，不重复读取类型字典和部署选项。
+- 设置链路把工作台当前应用定义透传到应用管理，首次进入直接选择并加载该应用上下文；仅在没有当前应用或用户展开选择器时读取全量应用，另用独立加载锁覆盖快速展开竞态。
+- 同步 HTTP API、模块图、后端三个模块 README、前端两个包说明、agent-web README 和内置用户手册。
+
+### How
+
+- Java 25 定向 Maven 测试通过：配置应用服务 33 项、Controller 18 项、MyBatis 集成 6 项；增强后的集成测试分别覆盖四个检索字段、大小写与过滤总数。
+- 前端三个定向文件 160/160 通过；全量 Vitest 157/157 文件通过，2255 passed / 1 skipped；`backend-api` 与 `agent-web` 类型检查通过。
+- `./restart-dev-services.sh --profile test --env-file .env.test` 完成后端 26 模块 package、VitePress 和 agent-web production build；依赖启动阶段仍被本机 Docker Desktop 的 ClickHouse start API 卡住，容器保持 `Created`，脚本在停止旧服务前中止并清理本轮 CLI 进程。原 8080 health/readiness 与 3000 页面仍返回 200，但属于重启前进程，不能作为新代码运行验收。
+- `git diff --check`、改动文件冲突标记扫描和 `tools/verify-ai-docs.sh` 通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录，未发现覆盖并行成果的冲突。
+
+### Result
+
+- 代码、文档、自动化测试和生产构建均完成；真实整栈切换仍受本机 Docker/ClickHouse 启动阻塞，因此运行验收为部分验证。
+- 本次使用 `release`，不新增部署节点；API 仅增加可选查询参数，旧客户端兼容。未新增事件、数据库结构、Flyway、环境配置、generated SDK 或 OpenCode 源码；关系型查询继续只落 MyBatis XML。应用管理减少一次常规全量应用请求，权限与敏感信息边界不变。

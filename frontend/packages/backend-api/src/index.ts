@@ -3449,8 +3449,9 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     restartIdentity: (table: string, targetValue: number) =>
       request<IdentityStatus>(`${systemManagementBase}/identity/restart`, { method: "POST", body: JSON.stringify({ table, targetValue }) }),
 
-    listRepositories: (page = 1, size = 50) =>
-      request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
+    /** 按名称、英文名、地址或版本库 ID 分页检索；空关键字保持原列表语义。 */
+    listRepositories: (page = 1, size = 50, keyword?: string) =>
+      request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ keyword, page, size })}`),
     listRepositoryTypes: () =>
       request<RepositoryTypeOption[]>(`${configurationBase}/repository-types`),
     getRepositoryDeploymentOptions: () =>

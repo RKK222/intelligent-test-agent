@@ -155,7 +155,7 @@ const ElRadioButtonStub = defineComponent({
 
 const ElSelectStub = defineComponent({
   props: ["modelValue", "placeholder", "ariaLabel"],
-  emits: ["update:modelValue", "change"],
+  emits: ["update:modelValue", "change", "visible-change"],
   setup(props, { emit, slots }) {
     return () =>
       h(
@@ -163,6 +163,7 @@ const ElSelectStub = defineComponent({
         {
           "aria-label": props.ariaLabel || props.placeholder,
           value: props.modelValue,
+          onClick: () => emit("visible-change", true),
           onChange: (event: Event) => {
             const value = (event.target as HTMLSelectElement).value;
             emit("update:modelValue", value);
@@ -279,17 +280,20 @@ function renderPanel(
   api = createApi(),
   roles = ["APP_ADMIN"],
   initialAppTab?: "members" | "repositories" | "workspaces",
-  onWorkspaceCatalogChanged?: () => void
+  onWorkspaceCatalogChanged?: () => void,
+  extraProps: Record<string, unknown> = {}
 ) {
   return render(SettingsAppWorkspacePanel, {
     props: {
       initialAppTab,
+      pageActive: true,
       currentUser: {
         userId: "usr_admin",
         username: "admin",
         unifiedAuthId: "AUTH_ADMIN",
         roles
-      }
+      },
+      ...extraProps
     },
     attrs: {
       "onWorkspace-catalog-changed": onWorkspaceCatalogChanged
@@ -360,6 +364,28 @@ it("lets only a super admin create an enabled application from settings", async 
   await fireEvent.click(view.getByTestId("create-application-submit"));
 
   await waitFor(() => expect(api.createApplication).toHaveBeenCalledWith({ appId: "F-NEW", appName: "新应用" }));
+});
+
+it("uses the current workbench application first and lazily loads all options only when expanded", async () => {
+  const api = createApi();
+  vi.mocked(api.listApplications!).mockResolvedValue([
+    { appId: "F-COSS", appName: "F-COSS", enabled: true },
+    { appId: "F-OTHER", appName: "其他应用", enabled: true }
+  ]);
+  const view = renderPanel(api, ["APP_ADMIN"], undefined, undefined, {
+    initialAppId: "F-COSS",
+    initialApplication: { appId: "F-COSS", appName: "当前 F-COSS", enabled: true },
+    pageActive: true
+  });
+
+  expect(await view.findByText("当前 F-COSS")).toBeTruthy();
+  await waitFor(() => expect(api.listApplicationMembers).toHaveBeenCalledWith("F-COSS"));
+  expect(api.listApplications).not.toHaveBeenCalled();
+
+  await fireEvent.click(view.getByLabelText("应用选择"));
+
+  await waitFor(() => expect(api.listApplications).toHaveBeenCalledTimes(1));
+  expect(await view.findByText("其他应用")).toBeTruthy();
 });
 
 describe("SettingsAppWorkspacePanel repository settings", () => {

@@ -120,11 +120,12 @@ public class ConfigurationManagementController {
 
     @GetMapping("/repositories")
     public ApiResponse<Object> listRepositories(
+            @RequestParam(name = "keyword", required = false) String keyword,
             @RequestParam(name = "page", required = false) Integer page,
             @RequestParam(name = "size", required = false) Integer size,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.listRepositories(RuntimeApiSupport.pageRequest(page, size)));
+        return ok(exchange, service.listRepositories(keyword, RuntimeApiSupport.pageRequest(page, size)));
     }
 
     @GetMapping("/repository-types")

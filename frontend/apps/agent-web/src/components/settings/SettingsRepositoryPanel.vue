@@ -50,6 +50,7 @@ const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
 const repositoryTotal = ref(0);
+const repositoryKeyword = ref("");
 const repositoryTypes = ref<RepositoryTypeOption[]>(DEFAULT_REPOSITORY_TYPES);
 const repositoryDeploymentOptions = ref<RepositoryDeploymentOptions>(DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS);
 const repoGitUrl = ref("");
@@ -92,11 +93,16 @@ async function run(action: () => Promise<void>) {
   }
 }
 
-// 版本库管理
-async function loadRepositories() {
+const repositoryCountLabel = computed(() => repositoryKeyword.value.trim()
+  ? `检索到 ${repositoryTotal.value} 个版本库`
+  : `共 ${repositoryTotal.value} 个版本库`
+);
+
+// 初次进入时同时加载列表与稳定下拉元数据；后续检索只刷新列表，避免重复读取字典和部署选项。
+async function loadRepositoryManagement() {
   await run(async () => {
     const [all, types, deploymentOptions] = await Promise.all([
-      api.listRepositories(1, 100),
+      api.listRepositories(1, 100, repositoryKeyword.value.trim() || undefined),
       api.listRepositoryTypes(),
       api.getRepositoryDeploymentOptions()
     ]);
@@ -105,6 +111,15 @@ async function loadRepositories() {
     repositoryTypes.value = prioritizeTestWorkRepository(types.length ? types : DEFAULT_REPOSITORY_TYPES);
     repositoryDeploymentOptions.value = deploymentOptions;
     repoDeploymentMode.value = deploymentOptions.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE;
+  });
+}
+
+// 检索、刷新和保存后的列表更新都保留当前关键字，并由服务端在完整结果集上分页匹配。
+async function loadRepositories() {
+  await run(async () => {
+    const page = await api.listRepositories(1, 100, repositoryKeyword.value.trim() || undefined);
+    repositories.value = page.items;
+    repositoryTotal.value = page.total;
   });
 }
 
@@ -284,7 +299,7 @@ async function saveRepository() {
 // 初始加载
 watch(() => props.currentUser, async (user) => {
   if (user && hasAppSettingsPermission.value) {
-    await loadRepositories();
+    await loadRepositoryManagement();
   } else {
     repositories.value = [];
     repositoryTotal.value = 0;
@@ -329,10 +344,21 @@ function focusEditNameInput() {
           <div class="ta-section-header">
             <h4 class="ta-section-title">已有版本库</h4>
             <div class="ta-section-actions">
-              <span class="ta-count-badge">共 {{ repositoryTotal }} 个版本库</span>
+              <span class="ta-count-badge">{{ repositoryCountLabel }}</span>
               <el-button :disabled="loading" @click="loadRepositories">刷新</el-button>
               <el-button type="primary" @click="openCreateRepositoryDialog">新增</el-button>
             </div>
+          </div>
+          <div class="ta-repository-search">
+            <el-input
+              v-model="repositoryKeyword"
+              aria-label="版本库检索关键字"
+              placeholder="输入名称、英文名、地址或版本库 ID"
+              clearable
+              @clear="loadRepositories"
+              @keyup.enter="loadRepositories"
+            />
+            <el-button :disabled="loading" @click="loadRepositories">检索</el-button>
           </div>
           <div v-for="repo in repositories" :key="repo.repositoryId" class="ta-item-row ta-edit-item">
             <div>
@@ -341,6 +367,9 @@ function focusEditNameInput() {
               <div class="ta-item-subtitle">{{ repo.englishName || "未配置英文名" }} · {{ repo.gitUrl }}</div>
             </div>
             <el-button size="small" @click="startEditRepository(repo)">编辑</el-button>
+          </div>
+          <div v-if="!loading && repositories.length === 0" class="ta-empty-hint">
+            {{ repositoryKeyword.trim() ? "未检索到匹配版本库" : "暂无版本库" }}
           </div>
           <!-- 编辑版本库弹窗已在下方定义 -->
         </div>
@@ -487,6 +516,14 @@ function focusEditNameInput() {
   font-size: 12px;
   color: #606266;
 }
+.ta-repository-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ta-repository-search :deep(.el-input) {
+  max-width: 420px;
+}
 .ta-inline-form {
   display: flex;
   align-items: center;
@@ -589,5 +626,11 @@ function focusEditNameInput() {
 }
 .ta-permission-placeholder {
   padding: 40px 0;
+}
+.ta-empty-hint {
+  padding: 24px 0;
+  color: #909399;
+  font-size: 13px;
+  text-align: center;
 }
 </style>

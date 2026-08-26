@@ -94,10 +94,26 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
 
     @Override
     public PageResponse<CodeRepository> findRepositories(PageRequest pageRequest) {
-        List<CodeRepository> items = mapper.findRepositories(pageRequest.size(), pageRequest.offset()).stream()
+        return findRepositories(null, pageRequest);
+    }
+
+    /**
+     * 通过 MyBatis XML 对版本库名称、英文名、地址和 ID 做服务端分页检索。
+     */
+    @Override
+    public PageResponse<CodeRepository> findRepositories(String keyword, PageRequest pageRequest) {
+        String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        List<CodeRepository> items = mapper.findRepositories(
+                        normalizedKeyword,
+                        pageRequest.size(),
+                        pageRequest.offset()).stream()
                 .map(this::toRepository)
                 .toList();
-        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), mapper.countRepositories());
+        return new PageResponse<>(
+                items,
+                pageRequest.page(),
+                pageRequest.size(),
+                mapper.countRepositories(normalizedKeyword));
     }
 
     @Override

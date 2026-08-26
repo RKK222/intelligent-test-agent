@@ -13444,6 +13444,7 @@ async function handleLogout() {
     :current-user="authStore.currentUser"
     :route-linux-server-id="routeLinuxServerId"
     :initial-app-id="selectedAppId"
+    :initial-application="selectedManagedApplication"
     :initial-menu-key="firstLoginGuideActive ? firstLoginGuideSettingsMenu : undefined"
     :initial-app-tab="firstLoginGuideActive ? firstLoginGuideSettingsTab : undefined"
     :local-client-visible="localClientVisible"

@@ -38,6 +38,16 @@ public interface ConfigurationManagementRepository {
 
     PageResponse<CodeRepository> findRepositories(PageRequest pageRequest);
 
+    /**
+     * 按关键字分页检索版本库；默认实现保持旧仓储兼容，新的关系型查询由 MyBatis XML 实现。
+     */
+    default PageResponse<CodeRepository> findRepositories(String keyword, PageRequest pageRequest) {
+        if (keyword == null || keyword.isBlank()) {
+            return findRepositories(pageRequest);
+        }
+        throw new UnsupportedOperationException("repository keyword search is not implemented");
+    }
+
     Optional<CodeRepository> findRepository(CodeRepositoryId repositoryId);
 
     Optional<CodeRepository> findRepositoryByGitUrl(String gitUrl);

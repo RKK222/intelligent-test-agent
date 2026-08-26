@@ -43,6 +43,7 @@
 ## 主要接口
 
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
+- `listRepositories(keyword, pageRequest)`：规范化可选关键字并委托领域仓储分页检索版本库；空关键字保持原有全量分页，非空关键字由生产 MyBatis 实现匹配版本库 ID、中文名、英文名和 Git 地址。
 - SSH Key 保存成功后由单线程、有界 256 项的异步队列按统一认证邮箱扫描本机应用仓库的 `origin` 跟踪历史，不延长接口响应；队列过载或单仓库失败由每日 04:10 的 XXL `configuration-management.scm-git-name-sync` 全量任务补偿。
 - 全量 SCM 姓名补偿对每个应用仓库只执行一次不联网的本地 `git log`（最多 50,000 条匹配提交），再按 500 个 SSH Key 用户一页游标查询和批量写库，避免用户数乘仓库数的 Git 命令放大；已有姓名也会复核，但已由右控拒绝确认的姓名不会被历史提交覆盖。
 - 工作空间更新接口支持按字段修改 `workspaceName` 和 `enabled`；停用只记录配置状态，模板切换入口的过滤由 workspace-management 负责。

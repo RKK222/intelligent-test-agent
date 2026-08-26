@@ -176,6 +176,23 @@ describe("SettingsRepositoryPanel settings", () => {
     expect(getByText("MIMO 示例库")).toBeTruthy();
   });
 
+  it("searches the complete repository catalog by keyword", async () => {
+    const api = createApi();
+    vi.mocked(api.listRepositories!)
+      .mockResolvedValueOnce({ items: repositories, page: 1, size: 100, total: repositories.length })
+      .mockResolvedValueOnce({ items: [repositories[1]], page: 1, size: 100, total: 1 });
+    const view = renderPanel(api);
+
+    expect(await view.findByText("共 2 个版本库")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入名称、英文名、地址或版本库 ID"), "mimo");
+    await fireEvent.click(view.getByText("检索"));
+
+    await waitFor(() => expect(api.listRepositories).toHaveBeenLastCalledWith(1, 100, "mimo"));
+    expect(await view.findByText("检索到 1 个版本库")).toBeTruthy();
+    expect(view.queryByText("F-WRTESTAPP 本地测试库")).toBeNull();
+    expect(view.getByText("MIMO 示例库")).toBeTruthy();
+  });
+
   it("creates automation repositories with legacy standard disabled", async () => {
     const api = createApi();
     const { findByText, getByLabelText, getByPlaceholderText, getByText, container } = renderPanel(api);

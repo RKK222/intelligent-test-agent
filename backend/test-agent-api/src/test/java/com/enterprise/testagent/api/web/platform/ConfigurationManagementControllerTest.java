@@ -10,6 +10,8 @@ import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
+import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementResponses.ApplicationMemberResponse;
 import com.enterprise.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
@@ -224,6 +226,36 @@ class ConfigurationManagementControllerTest {
                 .jsonPath("$.data[0].typeLabel").isEqualTo("测试工作库")
                 .jsonPath("$.data[1].typeCode").isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value())
                 .jsonPath("$.data[1].typeLabel").isEqualTo("自动化代码库");
+    }
+
+    @Test
+    void appAdminCanSearchRepositoriesByKeyword() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        PageRequest pageRequest = new PageRequest(2, 20);
+        when(service.listRepositories("mimo", pageRequest)).thenReturn(new PageResponse<>(List.of(
+                new CodeRepositoryResponse(
+                        "repo_mimo",
+                        "https://gitee.com/mimo/demo.git",
+                        "MIMO 示例库",
+                        "mimo",
+                        CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                        CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                        "应用代码库",
+                        false,
+                        Instant.parse("2026-07-02T08:00:00Z"),
+                        Instant.parse("2026-07-02T08:00:00Z"))), 2, 20, 1));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/repositories?keyword=mimo&page=2&size=20")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items[0].repositoryId").isEqualTo("repo_mimo")
+                .jsonPath("$.data.total").isEqualTo(1);
+
+        verify(service).listRepositories("mimo", pageRequest);
     }
 
     @Test

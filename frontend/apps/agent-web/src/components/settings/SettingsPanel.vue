@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import type { CurrentUser } from "@test-agent/shared-types";
+import type { ApplicationDefinition, CurrentUser } from "@test-agent/shared-types";
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
 import SettingsRepositoryPanel from "./SettingsRepositoryPanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
@@ -12,6 +12,7 @@ const props = defineProps<{
   currentUser: CurrentUser | null;
   autoOpenCreate?: boolean;
   initialAppId?: string;
+  initialApplication?: ApplicationDefinition | null;
   initialAppTab?: "members" | "repositories" | "workspaces";
   refreshKey?: number;
   pageActive: boolean;
@@ -40,11 +41,15 @@ const effectiveKey = computed(() => {
 });
 
 const current = computed<PanelDef>(() => panels[effectiveKey.value] ?? panels.personal);
-const currentPageActivityProps = computed(() =>
-  effectiveKey.value === "personal"
-    ? { pageActive: props.pageActive, localClientVisible: props.localClientVisible === true }
-    : {}
-);
+const currentPageActivityProps = computed(() => {
+  if (effectiveKey.value === "personal") {
+    return { pageActive: props.pageActive, localClientVisible: props.localClientVisible === true };
+  }
+  if (effectiveKey.value === "appWorkspace") {
+    return { pageActive: props.pageActive };
+  }
+  return {};
+});
 </script>
 
 <template>
@@ -58,6 +63,7 @@ const currentPageActivityProps = computed(() =>
         :current-user="currentUser"
         :auto-open-create="autoOpenCreate"
         :initial-app-id="props.initialAppId"
+        :initial-application="props.initialApplication"
         :initial-app-tab="props.initialAppTab"
         :refresh-key="props.refreshKey"
         v-bind="currentPageActivityProps"

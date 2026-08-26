@@ -44,8 +44,10 @@ type AppTab = "members" | "repositories" | "workspaces";
 const props = defineProps<{
   currentUser: CurrentUser | null;
   initialAppId?: string;
+  initialApplication?: ApplicationDefinition | null;
   initialAppTab?: AppTab;
   refreshKey?: number;
+  pageActive?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -63,6 +65,8 @@ const pendingDangerAction = ref<PendingDangerAction | null>(null);
 // 应用选择
 const applications = ref<ApplicationDefinition[]>([]);
 const selectedAppId = ref("");
+const applicationOptionsLoaded = ref(false);
+const applicationOptionsLoading = ref(false);
 
 // 权限
 const currentRoles = computed(() => props.currentUser?.roles ?? []);
@@ -290,21 +294,60 @@ async function run(action: () => Promise<void>) {
   }
 }
 
-// 加载应用列表
-async function loadApplications() {
-  await run(async () => {
-    applications.value = await api.listApplications(true);
-    // 如果传入了 initialAppId 且存在于列表中，优先使用它（来自右上角的选择）
-    const initialId = props.initialAppId;
-    if (initialId && applications.value.some((item) => item.appId === initialId)) {
-      selectedAppId.value = initialId;
-    } else if (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value)) {
-      selectedAppId.value = applications.value[0]?.appId ?? "";
-    }
-    if (selectedAppId.value) {
-      await loadAppContext();
-    }
-  });
+/**
+ * 把工作台当前应用直接放入选择器，首次进入只加载该应用上下文，不请求全量应用定义。
+ */
+function seedInitialApplication() {
+  const initialId = props.initialAppId?.trim();
+  if (!initialId) return "";
+  const initial = props.initialApplication?.appId === initialId
+    ? props.initialApplication
+    : applications.value.find((item) => item.appId === initialId) ?? {
+      appId: initialId,
+      appName: initialId,
+      enabled: true
+    };
+  applications.value = [initial, ...applications.value.filter((item) => item.appId !== initialId)];
+  return initialId;
+}
+
+// 只有用户主动展开应用选择器、或页面没有当前应用时才拉取全量选项。
+async function loadApplicationOptions(selectFallback = false) {
+  if (applicationOptionsLoading.value) return;
+  applicationOptionsLoading.value = true;
+  try {
+    await run(async () => {
+      const loaded = await api.listApplications(true);
+      const selected = applications.value.find((item) => item.appId === selectedAppId.value);
+      applications.value = selected && !loaded.some((item) => item.appId === selected.appId)
+        ? [selected, ...loaded]
+        : loaded;
+      applicationOptionsLoaded.value = true;
+      if (selectFallback && (!selectedAppId.value || !applications.value.some((item) => item.appId === selectedAppId.value))) {
+        selectedAppId.value = applications.value[0]?.appId ?? "";
+        if (selectedAppId.value) await loadAppContext();
+      }
+    });
+  } finally {
+    applicationOptionsLoading.value = false;
+  }
+}
+
+async function initializeApplicationManagement() {
+  const initialId = seedInitialApplication();
+  if (!initialId) {
+    await loadApplicationOptions(true);
+    return;
+  }
+  if (selectedAppId.value !== initialId) {
+    selectedAppId.value = initialId;
+  }
+  await run(loadAppContext);
+}
+
+async function handleApplicationSelectorVisibleChange(visible: boolean) {
+  if (!visible || applicationOptionsLoaded.value || applicationOptionsLoading.value) return;
+  await loadApplicationOptions();
 }
 
 function openCreateApplication() {
@@ -321,14 +364,16 @@ async function createApplication() {
       appName: newApplicationName.value.trim()
     });
     createApplicationOpen.value = false;
-    applications.value = await api.listApplications(true);
+    applications.value = [created, ...applications.value.filter((item) => item.appId !== created.appId)];
     selectedAppId.value = created.appId;
+    await loadAppContext();
   });
 }
 
 function clearAppContext() {
   applications.value = [];
   selectedAppId.value = "";
+  applicationOptionsLoaded.value = false;
   pendingDangerAction.value = null;
   members.value = [];
   selectedUser.value = null;
@@ -713,42 +758,31 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
   }
 }
 
-// 初始加载
-watch(() => props.currentUser, async (user) => {
-  if (user && hasAppSettingsPermission.value) {
-    await loadApplications();
+// 设置页激活时才加载；弹窗关闭期间不预取应用管理数据。
+watch([() => props.currentUser, () => props.refreshKey], async ([user]) => {
+  if (user && hasAppSettingsPermission.value && props.pageActive !== false) {
+    await initializeApplicationManagement();
   } else if (user) {
-    clearAppContext();
+    if (!hasAppSettingsPermission.value) clearAppContext();
   } else {
     clearAppContext();
   }
 }, { immediate: true });
 
-// 每次对话框打开时刷新应用列表，确保选中右上角当前应用
-watch(() => props.refreshKey, () => {
-  if (props.currentUser && hasAppSettingsPermission.value) {
-    loadApplications();
-  }
-});
-
 // 右上角切换应用时同步更新设置弹窗中的选中
 watch(() => props.initialAppId, (newAppId) => {
-  if (!hasAppSettingsPermission.value) {
-    return;
-  }
+  if (!hasAppSettingsPermission.value || props.pageActive === false) return;
   if (!newAppId) return;
-  if (applications.value.some((item) => item.appId === newAppId)) {
-    selectedAppId.value = newAppId;
-  }
+  void initializeApplicationManagement();
 });
 
-watch(selectedAppId, async (appId) => {
+async function handleApplicationChange(appId: string) {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
   linkRepositoryId.value = "";
   lastLinkRepositoryId.value = "";
-  await loadAppContext();
-});
+  await run(loadAppContext);
+}
 
 watch(workspaceBranch, () => {
   repositoryTree.value = [];
@@ -822,7 +856,15 @@ onBeforeUnmount(() => {
     <template v-else>
       <!-- 应用选择 -->
       <div class="ta-app-selector">
-        <el-select v-model="selectedAppId" placeholder="选择应用" aria-label="应用选择" style="width: 320px" filterable>
+        <el-select
+          v-model="selectedAppId"
+          placeholder="选择应用"
+          aria-label="应用选择"
+          style="width: 320px"
+          filterable
+          @visible-change="handleApplicationSelectorVisibleChange"
+          @change="handleApplicationChange"
+        >
           <el-option v-for="app in applications" :key="app.appId" :label="app.appName" :value="app.appId" />
         </el-select>
         <el-button v-if="hasSuperAdmin" type="primary" data-testid="create-application-open" @click="openCreateApplication">

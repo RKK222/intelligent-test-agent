@@ -152,13 +152,28 @@
     <select id="findRepositories" resultMap="CodeRepositoryMap">
         select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         from code_repositories
+        <include refid="RepositoryKeywordFilter"/>
         order by updated_at desc, repository_id
         limit #{limit} offset #{offset}
     </select>
 
     <select id="countRepositories" resultType="long">
-        select count(*) from code_repositories
+        select count(*)
+        from code_repositories
+        <include refid="RepositoryKeywordFilter"/>
     </select>
+
+    <!-- 名称、英文名、地址和稳定 ID 共用同一大小写不敏感检索条件，列表与总数必须完全一致。 -->
+    <sql id="RepositoryKeywordFilter">
+        <where>
+            <if test="keyword != null and keyword != ''">
+                lower(repository_id) like concat('%', lower(#{keyword}), '%')
+                or lower(name) like concat('%', lower(#{keyword}), '%')
+                or lower(coalesce(english_name, '')) like concat('%', lower(#{keyword}), '%')
+                or lower(git_url) like concat('%', lower(#{keyword}), '%')
+            </if>
+        </where>
+    </sql>
 
     <select id="findRepository" resultMap="CodeRepositoryMap">
         select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at

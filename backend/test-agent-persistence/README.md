@@ -129,7 +129,7 @@
 - `JdbcRunEventRepository`：RunEvent 存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试和迁移窗口。
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
-- `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、版本库是否已有应用工作空间历史、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
+- `MyBatisConfigurationManagementRepository`：通过 `ConfigurationManagementMapper.xml` 实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、版本库类型、版本库部署模式、版本库 ID/中英文名/Git 地址的大小写不敏感分页检索、版本库是否已有应用工作空间历史、工作空间和个人 SSH key 元数据持久化，是当前生产 Spring Bean。
 - `MyBatisAgentConfigRepository`：通过 `AgentConfigMapper.xml` 持久化 Agent 配置操作与 worktree，并按服务器有界联查 ACTIVE 用户、`SUPER_ADMIN` 角色、ACTIVE OpenCode binding 和缺失的 ACTIVE 公共个人 worktree，为后台补偿只返回内部 userId；查询不读取统一认证号或 SSH key。
 - `MyBatisAppSourceRepository`：通过 `AppSourceMapper.xml` 实现 slot `SELECT FOR UPDATE`/乐观 CAS、snapshot JSONB、replica 只在不存在时建档并以 generation+owner+lease+合法状态流转 fencing、活租约行锁下的步骤推进和整条稳定 attempt 重置、operation 类型感知的 stranded 扫描、延迟 cleanup 认领和 recent selection；DOWNLOAD/UPDATE 兼容按全副本终态恢复历史脏状态，RETRY 必须存在 SERVER steps 且全部终态、不得残留 `PENDING/RUNNING` 目标后才成为候选。旧 `RETRY_QUEUED` 可领取并在新 attempt 回填稳定步骤，终态步骤防回退。`hasRepositoryHistory` 同时检查 slot/snapshot/operation/cleanup，供配置管理冻结源码仓库磁盘身份。
 - AppSource `claimReplica` 在单条 MyBatis UPDATE 中匹配 exact repository/generation/operation/server、operation `PENDING/RUNNING` 和 SERVER timeline。普通 `PENDING/FAILED/STALE` 副本只有存在任一 `PENDING/RUNNING` 步骤才可领取；step code 故意不限，使过期 lease 可从任一中途步骤接管。仅过期 `RUNNING` 副本允许以已有任意状态 SERVER step 作为旧 attempt 恢复锚点，领取后仍由统一 attempt reset 清理终态时间线；终态 operation 的迟到 worker 不能重新制造 `RUNNING` 副本。
@@ -213,7 +213,7 @@
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取、结构化 scope 列和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。
-- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、自动化代码库字典排序与 `repository_type` 往返、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。应用自动化引用集成测试覆盖真实旧历史迁移为 `(appId, repositoryId)` 唯一状态、应用间隔离、可编辑别名回填与往返、generation 乐观锁与幂等、逐服务器租约 fencing、离线恢复、标签租约绑定和旧 generation 安全退役；旧 `automation_workspace_active_versions` 仅作为 migration 输入保留。
+- ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、版本库多字段关键字分页检索与过滤后总数、自动化代码库字典排序与 `repository_type` 往返、版本库部署模式 `deployment_mode` 默认值和 MyBatis XML 保存/读取、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。应用自动化引用集成测试覆盖真实旧历史迁移为 `(appId, repositoryId)` 唯一状态、应用间隔离、可编辑别名回填与往返、generation 乐观锁与幂等、逐服务器租约 fencing、离线恢复、标签租约绑定和旧 generation 安全退役；旧 `automation_workspace_active_versions` 仅作为 migration 输入保留。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
 - OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、历史用户进程与后端 Java 进程时间戳归一化、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - `MyBatisOpencodeProcessReservationLockPostgresqlIntegrationTest` 使用真实 PostgreSQL 覆盖用户/服务器 `FOR UPDATE` 锁顺序、首次 process/binding 原子预留、同用户并发单胜者、不同用户同服务器端口互斥，以及迁移双表 CAS 成功与冲突整笔回滚。

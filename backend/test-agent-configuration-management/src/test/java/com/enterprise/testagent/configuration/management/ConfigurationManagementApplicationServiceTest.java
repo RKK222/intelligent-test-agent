@@ -12,6 +12,8 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitRemoteService;
 import com.enterprise.testagent.common.git.SshKeyEncryptionService;
+import com.enterprise.testagent.common.pagination.PageRequest;
+import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
 import com.enterprise.testagent.domain.configuration.ApplicationWorkspace;
@@ -50,6 +52,40 @@ class ConfigurationManagementApplicationServiceTest {
     private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
 
     private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
+
+    @Test
+    void listRepositoriesNormalizesKeywordAndDelegatesPagedSearch() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                noReferenceRepositoryState());
+        PageRequest pageRequest = new PageRequest(1, 20);
+        CodeRepository codeRepository = new CodeRepository(
+                new CodeRepositoryId("repo_mimo"),
+                "https://gitee.com/mimo/demo.git",
+                "MIMO 示例库",
+                "mimo",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                NOW,
+                NOW);
+        when(repository.findRepositories("mimo", pageRequest))
+                .thenReturn(new PageResponse<>(List.of(codeRepository), 1, 20, 1));
+
+        PageResponse<ConfigurationManagementResponses.CodeRepositoryResponse> result =
+                service.listRepositories("  mimo  ", pageRequest);
+
+        assertThat(result.total()).isEqualTo(1);
+        assertThat(result.items()).extracting(ConfigurationManagementResponses.CodeRepositoryResponse::repositoryId)
+                .containsExactly("repo_mimo");
+        verify(repository).findRepositories("mimo", pageRequest);
+    }
 
     @Test
     void createApplicationNormalizesAndPersistsEnabledDefinition() {

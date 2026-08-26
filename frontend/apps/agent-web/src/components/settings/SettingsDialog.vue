@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, provide, ref, watch } from "vue";
 import { createBackendApiClient } from "@test-agent/backend-api";
-import type { CurrentUser } from "@test-agent/shared-types";
+import type { ApplicationDefinition, CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 
@@ -13,6 +13,7 @@ const props = defineProps<{
   /** 当前页面内存中的用户绑定服务器；只有本地工作区 API 会使用。 */
   routeLinuxServerId?: string;
   initialAppId?: string;
+  initialApplication?: ApplicationDefinition | null;
   initialMenuKey?: MenuKey;
   initialAppTab?: "members" | "repositories" | "workspaces";
   localClientVisible?: boolean;
@@ -115,6 +116,7 @@ function selectMenu(key: MenuKey) {
           :current-user="currentUser"
           :auto-open-create="autoOpenCreate"
           :initial-app-id="props.initialAppId"
+          :initial-application="props.initialApplication"
           :initial-app-tab="props.initialAppTab"
           :refresh-key="refreshKey"
           :page-active="props.open"

@@ -2,6 +2,7 @@ package com.enterprise.testagent.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.enterprise.testagent.common.pagination.PageRequest;
 import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.ApplicationDefinition;
 import com.enterprise.testagent.domain.configuration.ApplicationId;
@@ -138,6 +139,35 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                     assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.AUTOMATION_CODE_REPOSITORY.value());
                     assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
                     assertThat(saved.standard()).isFalse();
+                });
+    }
+
+    @Test
+    void repositorySearchMatchesNameEnglishNameGitUrlAndIdWithFilteredTotal() {
+        repository.saveRepository(new CodeRepository(
+                new CodeRepositoryId("repo_search_identity"),
+                "git@gitee.com:search/git-marker.git",
+                "中文检索名称",
+                "english-marker",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.EXTERNAL.value(),
+                false,
+                NOW.plusSeconds(10),
+                NOW.plusSeconds(10)));
+
+        assertSingleSearchResult("REPO_SEARCH_IDENTITY", "repo_search_identity");
+        assertSingleSearchResult("中文检索", "repo_search_identity");
+        assertSingleSearchResult("ENGLISH-MARKER", "repo_search_identity");
+        assertSingleSearchResult("git-marker.git", "repo_search_identity");
+        assertThat(repository.findRepositories("missing", new PageRequest(1, 20)).total()).isZero();
+    }
+
+    private void assertSingleSearchResult(String keyword, String repositoryId) {
+        assertThat(repository.findRepositories(keyword, new PageRequest(1, 20)))
+                .satisfies(page -> {
+                    assertThat(page.total()).isEqualTo(1);
+                    assertThat(page.items()).extracting(item -> item.repositoryId().value())
+                            .containsExactly(repositoryId);
                 });
     }
 

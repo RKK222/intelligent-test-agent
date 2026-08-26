@@ -269,7 +269,15 @@ public class ConfigurationManagementApplicationService implements RepositoryRemo
     }
 
     public PageResponse<CodeRepositoryResponse> listRepositories(PageRequest pageRequest) {
-        PageResponse<CodeRepository> page = configurationRepository.findRepositories(pageRequest);
+        return listRepositories(null, pageRequest);
+    }
+
+    /**
+     * 按名称、英文名、地址或版本库 ID 检索配置，空关键字保持原分页列表语义。
+     */
+    public PageResponse<CodeRepositoryResponse> listRepositories(String keyword, PageRequest pageRequest) {
+        String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        PageResponse<CodeRepository> page = configurationRepository.findRepositories(normalizedKeyword, pageRequest);
         return new PageResponse<>(
                 page.items().stream().map(this::repositoryResponse).toList(),
                 page.page(),

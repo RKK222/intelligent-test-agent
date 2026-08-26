@@ -696,7 +696,7 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/repositories?page=&size=` | 分页查询代码库配置。 |
+| `GET` | `/repositories?keyword=&page=&size=` | 分页查询代码库配置；`keyword` 可按版本库 ID、中文名称、英文名称或 Git 地址做大小写不敏感的模糊检索，空值保持全量分页。 |
 | `GET` | `/repository-types` | 查询版本库类型下拉选项，来源 `dictionaries(REPOSITORY_TYPE)`；顺序为测试工作库、自动化代码库、应用代码库、应用资产库。 |
 | `GET` | `/repository-deployment-options` | 查询版本库部署模式选项、默认模式和当前用户内部 SSH 前缀。 |
 | `POST` | `/repositories` | 新增代码库配置。 |
@@ -710,6 +710,8 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 | `GET` | `/repositories/{repoId}/branches` | 使用 Git 远端命令列分支。 |
 | `GET` | `/repositories/{repoId}/directories?branch=main` | 使用服务端浅层 fetch 缓存和 `git ls-tree` 解析指定分支目录。 |
 | `GET` | `/applications/{appId}/repositories/{repoId}/tree?branch=main` | 每次请求重新浅层 fetch 指定远程分支，再用 `git ls-tree` 返回最新目录/文件树；标准测试工作库只返回目录节点。 |
+
+版本库检索在数据库分页前执行，响应 `total` 是过滤后的总数；`keyword` 是可选参数，旧客户端继续使用原有全量分页语义。
 
 `POST /repositories` 请求体：
 

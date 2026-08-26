@@ -41,9 +41,12 @@ public interface ConfigurationManagementMapper {
 
     int deleteMember(@Param("appId") String appId, @Param("userId") String userId);
 
-    List<CodeRepositoryRow> findRepositories(@Param("limit") int limit, @Param("offset") long offset);
+    List<CodeRepositoryRow> findRepositories(
+            @Param("keyword") String keyword,
+            @Param("limit") int limit,
+            @Param("offset") long offset);
 
-    long countRepositories();
+    long countRepositories(@Param("keyword") String keyword);
 
     CodeRepositoryRow findRepository(@Param("repositoryId") String repositoryId);
 
