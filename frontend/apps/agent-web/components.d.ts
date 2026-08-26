@@ -28,6 +28,8 @@ declare module 'vue' {
     ChatContextPreviewDrawer: typeof import('./src/components/ChatContextPreviewDrawer.vue')['default']
     ConfigurationManagementPanel: typeof import('./src/components/system/ConfigurationManagementPanel.vue')['default']
     CreateWorkspaceVersionDialog: typeof import('./src/components/CreateWorkspaceVersionDialog.vue')['default']
+    CustomMenuPage: typeof import('./src/components/CustomMenuPage.vue')['default']
+    CustomMenuSettingsPanel: typeof import('./src/components/settings/CustomMenuSettingsPanel.vue')['default']
     EditorPane: typeof import('./src/components/EditorPane.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']

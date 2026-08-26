@@ -7,6 +7,7 @@ import {
   parseWorkspacePageRoute,
   restoreWorkspacePageTabs,
   serializeWorkspacePageTabs,
+  workspacePageTab,
   workspacePageRoute,
   type WorkspacePageTabsState
 } from "../src/components/workspace-page-tabs";
@@ -183,5 +184,34 @@ describe("workspace page tabs", () => {
       query: { section: "traces" }
     });
     expect(workspacePageRoute("memories", ["USER"])).toEqual({ name: "memories" });
+  });
+
+  it("restores configured custom pages and maps them to stable routes", () => {
+    const menuId = "menu-quality-01";
+    const pageId = `custom:${menuId}` as const;
+    const serialized = serializeWorkspacePageTabs({
+      openIds: ["toolbox", pageId],
+      activeId: pageId,
+      lastSystemId: null
+    });
+
+    expect(restoreWorkspacePageTabs(serialized, ["USER"], [menuId])).toEqual({
+      openIds: ["toolbox", pageId],
+      activeId: pageId,
+      lastSystemId: null
+    });
+    expect(restoreWorkspacePageTabs(serialized, ["USER"], [])).toEqual({
+      openIds: ["toolbox"],
+      activeId: "toolbox",
+      lastSystemId: null
+    });
+    expect(parseWorkspacePageRoute("custom-menu", undefined, ["USER"], false, menuId, [menuId]))
+      .toEqual({ id: pageId, canonicalize: false });
+    expect(workspacePageRoute(pageId, ["USER"])).toEqual({
+      name: "custom-menu",
+      params: { menuId }
+    });
+    expect(workspacePageTab(pageId, [{ id: menuId, name: "质量看板", icon: "chart", url: "/quality" }]))
+      .toMatchObject({ id: pageId, title: "质量看板", icon: "chart", persistent: true });
   });
 });

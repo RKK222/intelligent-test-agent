@@ -19,6 +19,7 @@ describe("login redirect", () => {
     expect(resolveLoginRedirect("/hub?kind=skill")).toBe("/hub?kind=skill");
     expect(resolveLoginRedirect("/settings?menu=personal")).toBe("/settings?menu=personal");
     expect(resolveLoginRedirect("/traces?traceId=trc_01")).toBe("/traces?traceId=trc_01");
+    expect(resolveLoginRedirect("/custom/menu-quality-01?source=activity")).toBe("/custom/menu-quality-01?source=activity");
   });
 
   it("rejects disabled release feature routes by default", () => {

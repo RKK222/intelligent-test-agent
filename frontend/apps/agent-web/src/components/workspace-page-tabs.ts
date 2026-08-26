@@ -1,3 +1,9 @@
+import {
+  isCustomMenuId,
+  type CustomMenuIconKey,
+  type CustomMenuItem
+} from "./custom-menus";
+
 export type SystemMenuKey =
   | "scheduler"
   | "runtime"
@@ -13,7 +19,8 @@ export type SystemMenuKey =
   | "traces"
   | "support";
 
-export type WorkspacePageId = "toolbox" | "memories" | "hub" | `system:${SystemMenuKey}`;
+export type CustomWorkspacePageId = `custom:${string}`;
+export type WorkspacePageId = "toolbox" | "memories" | "hub" | `system:${SystemMenuKey}` | CustomWorkspacePageId;
 
 export type WorkspacePageTabsState = {
   openIds: WorkspacePageId[];
@@ -26,6 +33,7 @@ export type WorkspacePageCloseMode = "current" | "others" | "left" | "right" | "
 export type WorkspacePageTab = {
   id: WorkspacePageId;
   title: string;
+  icon?: CustomMenuIconKey;
   systemMenuKey?: SystemMenuKey;
   persistent: boolean;
 };
@@ -66,7 +74,7 @@ const SYSTEM_KEY_BY_SECTION = Object.fromEntries(
   Object.entries(SYSTEM_SECTION_BY_KEY).map(([key, section]) => [section, key])
 ) as Record<string, SystemMenuKey>;
 
-const PAGE_TITLES: Record<WorkspacePageId, string> = {
+const PAGE_TITLES: Record<Exclude<WorkspacePageId, CustomWorkspacePageId>, string> = {
   toolbox: "工具箱",
   memories: "记忆",
   hub: "能力库",
@@ -86,7 +94,17 @@ const PAGE_TITLES: Record<WorkspacePageId, string> = {
 };
 
 /** 页面注册表只描述稳定身份与标题，组件和图标仍由应用壳层按需装配。 */
-export function workspacePageTab(id: WorkspacePageId): WorkspacePageTab {
+export function workspacePageTab(id: WorkspacePageId, customMenus: readonly CustomMenuItem[] = []): WorkspacePageTab {
+  if (isCustomWorkspacePageId(id)) {
+    const menuId = customMenuIdFromPageId(id);
+    const menu = customMenus.find((item) => item.id === menuId);
+    return {
+      id,
+      title: menu?.name ?? "已删除的自定义菜单",
+      icon: menu?.icon ?? "globe",
+      persistent: Boolean(menu)
+    };
+  }
   return {
     id,
     title: PAGE_TITLES[id],
@@ -97,8 +115,23 @@ export function workspacePageTab(id: WorkspacePageId): WorkspacePageTab {
 
 export function isWorkspacePageId(value: unknown): value is WorkspacePageId {
   if (value === "toolbox" || value === "memories" || value === "hub") return true;
+  if (typeof value === "string" && value.startsWith("custom:")) {
+    return isCustomMenuId(value.slice("custom:".length));
+  }
   if (typeof value !== "string" || !value.startsWith("system:")) return false;
   return SYSTEM_MENU_KEYS.includes(value.slice("system:".length) as SystemMenuKey);
+}
+
+export function customMenuPageId(menuId: string): CustomWorkspacePageId {
+  return `custom:${menuId}`;
+}
+
+export function customMenuIdFromPageId(id: CustomWorkspacePageId): string {
+  return id.slice("custom:".length);
+}
+
+export function isCustomWorkspacePageId(id: WorkspacePageId): id is CustomWorkspacePageId {
+  return id.startsWith("custom:");
 }
 
 export function isSystemWorkspacePageId(id: WorkspacePageId): id is `system:${SystemMenuKey}` {
@@ -114,7 +147,13 @@ export function canOpenSystemMenu(key: SystemMenuKey, roles: string[], supportRe
   return roles.includes("APP_ADMIN") && key === "config";
 }
 
-export function canOpenWorkspacePage(id: WorkspacePageId, roles: string[], supportRevealed = false): boolean {
+export function canOpenWorkspacePage(
+  id: WorkspacePageId,
+  roles: string[],
+  supportRevealed = false,
+  customMenuIds: readonly string[] = []
+): boolean {
+  if (isCustomWorkspacePageId(id)) return customMenuIds.includes(customMenuIdFromPageId(id));
   const systemKey = systemMenuKeyFromPageId(id);
   return systemKey === null || canOpenSystemMenu(systemKey, roles, supportRevealed);
 }
@@ -188,18 +227,23 @@ export function closeWorkspacePageTabs(
 }
 
 export function serializeWorkspacePageTabs(state: WorkspacePageTabsState): string {
-  const openIds = state.openIds.filter((id) => workspacePageTab(id).persistent);
+  // 自定义页面能否恢复由当前菜单目录决定；这里只排除明确的一次性问题排查页。
+  const openIds = state.openIds.filter((id) => id !== "system:support");
   return JSON.stringify({
     version: 1,
     openIds,
-    activeId: state.activeId && openIds.includes(state.activeId) ? state.activeId : null,
-    lastSystemId: state.lastSystemId && workspacePageTab(state.lastSystemId).persistent
+    activeId: state.activeId && openIds.some((id) => id === state.activeId) ? state.activeId : null,
+    lastSystemId: state.lastSystemId && state.lastSystemId !== "system:support"
       ? state.lastSystemId
       : null
   });
 }
 
-export function restoreWorkspacePageTabs(raw: string | null, roles: string[]): WorkspacePageTabsState {
+export function restoreWorkspacePageTabs(
+  raw: string | null,
+  roles: string[],
+  customMenuIds: readonly string[] = []
+): WorkspacePageTabsState {
   if (!raw) return { openIds: [], activeId: null, lastSystemId: null };
   try {
     const stored = JSON.parse(raw) as {
@@ -213,13 +257,13 @@ export function restoreWorkspacePageTabs(raw: string | null, roles: string[]): W
     }
     const openIds = Array.from(new Set(stored.openIds))
       .filter(isWorkspacePageId)
-      .filter((id) => workspacePageTab(id).persistent && canOpenWorkspacePage(id, roles));
+      .filter((id) => id !== "system:support" && canOpenWorkspacePage(id, roles, false, customMenuIds));
     const activeId = isWorkspacePageId(stored.activeId) && openIds.includes(stored.activeId)
       ? stored.activeId
       : openIds[0] ?? null;
     const storedLastSystemId = isWorkspacePageId(stored.lastSystemId)
       && isSystemWorkspacePageId(stored.lastSystemId)
-      && workspacePageTab(stored.lastSystemId).persistent
+      && stored.lastSystemId !== "system:support"
       && canOpenWorkspacePage(stored.lastSystemId, roles)
       ? stored.lastSystemId
       : null;
@@ -250,10 +294,16 @@ export function parseWorkspacePageRoute(
   routeName: unknown,
   rawSection: unknown,
   roles: string[],
-  supportRevealed = false
+  supportRevealed = false,
+  rawCustomMenuId?: unknown,
+  customMenuIds: readonly string[] = []
 ): { id: WorkspacePageId; canonicalize: boolean } | null {
   if (routeName === "toolbox" || routeName === "memories" || routeName === "hub") {
     return { id: routeName, canonicalize: false };
+  }
+  if (routeName === "custom-menu") {
+    if (!isCustomMenuId(rawCustomMenuId) || !customMenuIds.includes(rawCustomMenuId)) return null;
+    return { id: customMenuPageId(rawCustomMenuId), canonicalize: false };
   }
   if (routeName !== "system") return null;
   if (!roles.includes("SUPER_ADMIN") && !roles.includes("APP_ADMIN")) return null;
@@ -271,7 +321,10 @@ export function parseWorkspacePageRoute(
 export function workspacePageRoute(
   id: WorkspacePageId,
   roles: string[]
-): { name: string; query?: { section: string } } {
+): { name: string; query?: { section: string }; params?: { menuId: string } } {
+  if (isCustomWorkspacePageId(id)) {
+    return { name: "custom-menu", params: { menuId: customMenuIdFromPageId(id) } };
+  }
   if (!isSystemWorkspacePageId(id)) return { name: id };
   const key = systemMenuKeyFromPageId(id)!;
   if (key === defaultSystemMenuKey(roles)) return { name: "system" };

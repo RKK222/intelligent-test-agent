@@ -1,14 +1,19 @@
-export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox" | "memories";
-export type RoutedCenterMode = Extract<WorkbenchCenterMode, "system" | "hub" | "toolbox" | "memories">;
+export type WorkbenchCenterMode = "editor" | "diff" | "system" | "hub" | "toolbox" | "memories" | "custom";
+export type RoutedCenterMode = Extract<WorkbenchCenterMode, "system" | "hub" | "toolbox" | "memories" | "custom">;
 export type NonRoutedCenterMode = Exclude<WorkbenchCenterMode, RoutedCenterMode>;
 
-const ROUTED_CENTER_MODES: readonly RoutedCenterMode[] = ["system", "hub", "toolbox", "memories"];
+const ROUTE_CENTER_MODE: Readonly<Record<string, RoutedCenterMode>> = {
+  system: "system",
+  hub: "hub",
+  toolbox: "toolbox",
+  memories: "memories",
+  "custom-menu": "custom"
+};
+const ROUTED_CENTER_MODES: readonly RoutedCenterMode[] = ["system", "hub", "toolbox", "memories", "custom"];
 
 /** 活动栏沉浸式页面使用同名路由，集中校验避免组件内散落字符串分支。 */
 export function routedCenterModeFromRouteName(routeName: unknown): RoutedCenterMode | null {
-  return typeof routeName === "string" && ROUTED_CENTER_MODES.includes(routeName as RoutedCenterMode)
-    ? routeName as RoutedCenterMode
-    : null;
+  return typeof routeName === "string" ? ROUTE_CENTER_MODE[routeName] ?? null : null;
 }
 
 export function isRoutedCenterMode(mode: WorkbenchCenterMode): mode is RoutedCenterMode {
@@ -25,7 +30,7 @@ export type ImmersivePanelSnapshot = {
 };
 
 export function isImmersiveCenterMode(mode: WorkbenchCenterMode): boolean {
-  return mode === "system" || mode === "hub" || mode === "toolbox" || mode === "memories";
+  return ROUTED_CENTER_MODES.includes(mode as RoutedCenterMode);
 }
 
 /** 深链接首屏没有 editor -> immersive 的 watch 过渡，需要按当前路由主动建立同一份面板快照。 */

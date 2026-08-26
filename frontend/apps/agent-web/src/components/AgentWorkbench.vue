@@ -39,7 +39,7 @@ import {
   subscribeUserNotifications,
   type RunEventRawMessage
 } from "@test-agent/event-stream-client";
-import { BookOpenText, Boxes, BrainCircuit, FileWarning, LayoutDashboard, MessageSquare, Monitor, Wrench } from "lucide-vue-next";
+import { BookOpenText, Boxes, BrainCircuit, FileWarning, LayoutDashboard, MessageSquare, Monitor, Plus, Wrench } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -249,7 +249,15 @@ import {
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import { reconcileAutomationReferenceWorkspace } from "./automation-reference-config-reconciliation";
+import CustomMenuSettingsPanel from "./settings/CustomMenuSettingsPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
+import CustomMenuPage from "./CustomMenuPage.vue";
+import { customMenuIconComponent } from "./custom-menu-icons";
+import {
+  loadCustomMenus,
+  saveCustomMenus,
+  type CustomMenuItem
+} from "./custom-menus";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import { readServerWorkspacePickerTabState } from "./server-workspace-picker-tab";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
@@ -271,7 +279,10 @@ import {
 import {
   canOpenWorkspacePage,
   closeWorkspacePageTabs,
+  customMenuIdFromPageId,
+  customMenuPageId,
   defaultSystemMenuKey,
+  isCustomWorkspacePageId,
   isSystemWorkspacePageId,
   moveWorkspacePageTab,
   openWorkspacePageTab,
@@ -656,9 +667,12 @@ const centerMode = ref<WorkbenchCenterMode>(routedCenterModeFromRouteName(route.
 const supportAccessShortcut = createSupportAccessShortcut();
 const workspacePageTabsState = ref<WorkspacePageTabsState>({ openIds: [], activeId: null, lastSystemId: null });
 const mountedWorkspacePageIds = ref<Set<WorkspacePageId>>(new Set());
+const customMenus = ref<CustomMenuItem[]>([]);
+const customMenuSettingsOpen = ref(false);
 const supportAccessRevealed = ref(false);
 const supportAccessActivationSequence = ref(0);
 let hydratedWorkspacePageTabsUserId: string | null = null;
+let hydratedCustomMenusUserId: string | null = null;
 const centerModeBeforeRoute = ref<NonRoutedCenterMode>("editor");
 const hubUpdateCount = ref(0);
 let hubUpdateTimer: ReturnType<typeof setInterval> | null = null;
@@ -792,7 +806,10 @@ watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), 
 
 const workspacePageRoles = computed(() => authStore.currentUser?.roles ?? []);
 const workspacePageMode = computed(() => isRoutedCenterMode(centerMode.value));
-const workspacePageTabs = computed(() => workspacePageTabsState.value.openIds.map(workspacePageTab));
+const customMenuIds = computed(() => customMenus.value.map((item) => item.id));
+const workspacePageTabs = computed(() => workspacePageTabsState.value.openIds.map(
+  (id) => workspacePageTab(id, customMenus.value)
+));
 const mountedWorkspacePageTabs = computed(() => workspacePageTabs.value.filter(
   (tab) => mountedWorkspacePageIds.value.has(tab.id)
 ));
@@ -825,15 +842,23 @@ function mountWorkspacePage(id: WorkspacePageId) {
   mountedWorkspacePageIds.value = new Set([...mountedWorkspacePageIds.value, id]);
 }
 
+function customMenuForPage(id: WorkspacePageId): CustomMenuItem | undefined {
+  if (!isCustomWorkspacePageId(id)) return undefined;
+  const menuId = customMenuIdFromPageId(id);
+  return customMenus.value.find((item) => item.id === menuId);
+}
+
 async function syncWorkspacePageFromRoute() {
   if (!routedCenterModeFromRouteName(route.name)) return;
   // 控制台权限依赖异步 current-user；资料尚未返回时保持路由，不抢先误判为无权限。
-  if (route.name === "system" && !authStore.currentUser) return;
+  if ((route.name === "system" || route.name === "custom-menu") && !authStore.currentUser) return;
   const parsed = parseWorkspacePageRoute(
     route.name,
     route.query.section,
     workspacePageRoles.value,
-    supportAccessRevealed.value
+    supportAccessRevealed.value,
+    route.params.menuId,
+    customMenuIds.value
   );
   if (!parsed) {
     await router.replace({ name: "workbench" });
@@ -866,6 +891,14 @@ watch(
   ([userId]) => {
     if (!userId || !authStore.currentUser) return;
     const roles = authStore.currentUser.roles ?? [];
+    if (hydratedCustomMenusUserId !== userId) {
+      customMenus.value = loadCustomMenus(
+        typeof window === "undefined" ? undefined : window.localStorage,
+        userId,
+        typeof window === "undefined" ? "http://test-agent.local" : window.location.origin
+      );
+      hydratedCustomMenusUserId = userId;
+    }
     let restored: WorkspacePageTabsState;
     if (hydratedWorkspacePageTabsUserId !== userId) {
       let raw: string | null = null;
@@ -874,11 +907,15 @@ watch(
       } catch {
         // 禁用存储时从空 Tab 集合开始。
       }
-      restored = restoreWorkspacePageTabs(raw, roles);
+      restored = restoreWorkspacePageTabs(raw, roles, customMenuIds.value);
       hydratedWorkspacePageTabsUserId = userId;
       mountedWorkspacePageIds.value = new Set();
     } else {
-      restored = restoreWorkspacePageTabs(serializeWorkspacePageTabs(workspacePageTabsState.value), roles);
+      restored = restoreWorkspacePageTabs(
+        serializeWorkspacePageTabs(workspacePageTabsState.value),
+        roles,
+        customMenuIds.value
+      );
     }
     applyWorkspacePageTabsState(restored);
     void syncWorkspacePageFromRoute();
@@ -887,19 +924,19 @@ watch(
 );
 
 watch(
-  [() => route.name, () => route.query.section],
+  [() => route.name, () => route.query.section, () => route.params.menuId],
   () => void syncWorkspacePageFromRoute(),
   { immediate: true }
 );
 
 async function openWorkspacePage(id: WorkspacePageId, replace = false) {
-  if (!canOpenWorkspacePage(id, workspacePageRoles.value, supportAccessRevealed.value)) return;
+  if (!canOpenWorkspacePage(id, workspacePageRoles.value, supportAccessRevealed.value, customMenuIds.value)) return;
   applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, id));
   mountWorkspacePage(id);
   const target = workspacePageRoute(id, workspacePageRoles.value);
   const targetFullPath = router.resolve(target).fullPath;
   if (route.fullPath === targetFullPath) {
-    const mode = systemMenuKeyFromPageId(id) ? "system" : id;
+    const mode = isCustomWorkspacePageId(id) ? "custom" : systemMenuKeyFromPageId(id) ? "system" : id;
     centerMode.value = mode as RoutedCenterMode;
     return;
   }
@@ -961,6 +998,38 @@ async function toggleToolbox() {
 
 async function toggleAgentSkillHub() {
   await openWorkspacePage("hub");
+}
+
+async function openCustomMenu(item: CustomMenuItem) {
+  await openWorkspacePage(customMenuPageId(item.id));
+}
+
+/** 自定义菜单配置变更后同步清理已删除页面；编辑名称、图标或 URL 时保留同一 Tab 身份。 */
+function handleCustomMenusChange(items: CustomMenuItem[]) {
+  const nextIds = new Set(items.map((item) => item.id));
+  const activeId = workspacePageTabsState.value.activeId;
+  const activeMenuDeleted = Boolean(
+    activeId && isCustomWorkspacePageId(activeId) && !nextIds.has(customMenuIdFromPageId(activeId))
+  );
+  let nextState = workspacePageTabsState.value;
+  for (const id of workspacePageTabsState.value.openIds) {
+    if (isCustomWorkspacePageId(id) && !nextIds.has(customMenuIdFromPageId(id))) {
+      nextState = closeWorkspacePageTabs(nextState, id, "current").state;
+    }
+  }
+  customMenus.value = items;
+  const userId = authStore.currentUser?.userId?.trim() ?? "";
+  saveCustomMenus(typeof window === "undefined" ? undefined : window.localStorage, userId, items);
+  applyWorkspacePageTabsState(nextState);
+  mountedWorkspacePageIds.value = new Set(
+    [...mountedWorkspacePageIds.value].filter((id) => !isCustomWorkspacePageId(id) || nextIds.has(customMenuIdFromPageId(id)))
+  );
+  if (activeMenuDeleted) {
+    const target = nextState.activeId
+      ? workspacePageRoute(nextState.activeId, workspacePageRoles.value)
+      : { name: "workbench" as const };
+    void router.replace(target);
+  }
 }
 
 function handleHubChanged(paths: string[]) {
@@ -10972,7 +11041,7 @@ function applyRunEventWorkbenchProjection(
       selectedWorkspacePhysicalRootPath.value
     );
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories" && centerMode.value !== "custom") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "run";
@@ -10991,7 +11060,7 @@ function applyRunEventWorkbenchProjection(
       selectedWorkspacePhysicalRootPath.value
     );
     if (files.length) {
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories" && centerMode.value !== "custom") {
         centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       }
       diffSource.value = "session";
@@ -11654,7 +11723,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
-      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories") {
+      if (centerMode.value !== "hub" && centerMode.value !== "toolbox" && centerMode.value !== "memories" && centerMode.value !== "custom") {
         centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       }
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
@@ -12613,6 +12682,32 @@ async function handleLogout() {
               {{ hubUpdateCount > 99 ? '99+' : hubUpdateCount }}
             </span>
           </button>
+          <button
+            v-for="item in customMenus"
+            :key="item.id"
+            type="button"
+            :class="[
+              'figma-activity-btn figma-activity-btn--custom',
+              workspacePageTabsState.activeId === customMenuPageId(item.id) && centerMode === 'custom' && 'figma-activity-btn--active'
+            ]"
+            :aria-label="`打开 ${item.name}`"
+            :title="item.name"
+            :data-testid="`custom-menu-activity-${item.id}`"
+            @click="openCustomMenu(item)"
+          >
+            <component :is="customMenuIconComponent(item.icon)" class="figma-activity-icon" :stroke-width="1.5" />
+            <span class="figma-activity-text">{{ item.name }}</span>
+          </button>
+          <button
+            type="button"
+            class="figma-activity-btn figma-activity-btn--custom-add"
+            aria-label="添加自定义菜单"
+            title="添加自定义菜单"
+            data-testid="custom-menu-add-button"
+            @click="customMenuSettingsOpen = true"
+          >
+            <Plus class="figma-activity-icon" :stroke-width="1.5" />
+          </button>
         </div>
         <div class="figma-activity-bottom">
           <button
@@ -12769,6 +12864,11 @@ async function handleLogout() {
                 @update-count="hubUpdateCount = $event"
                 @changed="handleHubChanged"
                 @refresh-runtime="refreshRuntimeHubCatalog"
+              />
+              <CustomMenuPage
+                v-else-if="isCustomWorkspacePageId(pageTab.id) && customMenuForPage(pageTab.id)"
+                :menu="customMenuForPage(pageTab.id)!"
+                :page-active="workspacePageMode && workspacePageTabsState.activeId === pageTab.id"
               />
               <template v-else-if="isSystemWorkspacePageId(pageTab.id) && pageTab.systemMenuKey">
                 <div class="managed-runtime-container">
@@ -13345,6 +13445,21 @@ async function handleLogout() {
     @close="closeSettings"
     @workspace-catalog-changed="refreshManagedWorkspaceCatalog"
   />
+
+  <el-dialog
+    v-if="!shareMode"
+    :model-value="customMenuSettingsOpen"
+    title="自定义菜单"
+    width="720px"
+    align-center
+    :close-on-click-modal="false"
+    @update:model-value="(open: boolean) => customMenuSettingsOpen = open"
+  >
+    <CustomMenuSettingsPanel
+      :custom-menus="customMenus"
+      @custom-menus-change="handleCustomMenusChange"
+    />
+  </el-dialog>
 
   <HelpCenterDialog
     :open="helpCenterOpen"

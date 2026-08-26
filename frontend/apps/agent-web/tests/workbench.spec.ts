@@ -5027,6 +5027,44 @@ test("activity pages stay open in an in-app tab workspace while workbench remain
   await expect(page).toHaveURL(/\/workbench$/);
 });
 
+test("users configure a custom activity menu and open it as a persistent in-app tab", async ({ page }) => {
+  await page.route("https://custom.example.test/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<!doctype html><html><body><main>custom quality dashboard</main></body></html>"
+    });
+  });
+  await mockBackendApi(page, { authRoles: ["USER"] });
+  await gotoWorkbench(page, { selectConversation: false });
+
+  await page.getByRole("button", { name: "添加自定义菜单" }).click();
+  const settings = page.getByRole("dialog", { name: "自定义菜单" });
+  await settings.getByPlaceholder("例如：质量看板").fill("质量看板");
+  await settings.getByPlaceholder("https://example.com 或 /internal-page").fill("https://custom.example.test/dashboard");
+  await settings.getByRole("button", { name: "添加菜单" }).click();
+  await expect(settings.getByText("https://custom.example.test/dashboard")).toBeVisible();
+  await settings.getByRole("button", { name: "关闭此对话框" }).click();
+  await expect(page.locator(".figma-activity-top > button").last()).toHaveAttribute("data-testid", "custom-menu-add-button");
+
+  await page.getByRole("button", { name: "打开 质量看板" }).click();
+  await expect(page).toHaveURL(/\/custom\/menu-[a-z0-9-]+$/);
+  await expect(page.getByRole("tab", { name: "质量看板" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.frameLocator('iframe[title="质量看板"]').getByText("custom quality dashboard")).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("tab", { name: "质量看板" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("button", { name: "打开 质量看板", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "添加自定义菜单" }).click();
+  const reopenedSettings = page.getByRole("dialog", { name: "自定义菜单" });
+  await reopenedSettings.getByRole("button", { name: "删除 质量看板" }).click();
+  await reopenedSettings.getByRole("button", { name: "删除", exact: true }).click();
+  await reopenedSettings.getByRole("button", { name: "关闭此对话框" }).click();
+  await expect(page).toHaveURL(/\/workbench$/);
+  await expect(page.getByRole("button", { name: "打开 质量看板", exact: true })).toHaveCount(0);
+});
+
 test("closing the temporary support page returns to its neighbour without opening a default system tab", async ({ page }) => {
   await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
   await gotoWorkbench(page, { selectConversation: false });

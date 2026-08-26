@@ -20,6 +20,7 @@ import {
   X
 } from "lucide-vue-next";
 import { workspacePageTab } from "./workspace-page-tabs";
+import { customMenuIconComponent } from "./custom-menu-icons";
 import type {
   WorkspacePageCloseMode,
   WorkspacePageId,
@@ -70,7 +71,13 @@ watch(() => props.activeId, async (activeId) => {
 });
 
 function pageIcon(id: WorkspacePageId): Component {
+  const customIcon = props.tabs.find((tab) => tab.id === id)?.icon;
+  if (customIcon) return customMenuIconComponent(customIcon);
   return PAGE_ICONS[id] ?? Boxes;
+}
+
+function pageTitle(id: WorkspacePageId): string {
+  return props.tabs.find((tab) => tab.id === id)?.title ?? workspacePageTab(id).title;
 }
 
 function focusTab(index: number) {
@@ -262,7 +269,7 @@ function closeAll() {
       <div
         class="workspace-page-tabbar__context"
         role="menu"
-        :aria-label="`${workspacePageTab(contextMenu.id).title} Tab 操作`"
+        :aria-label="`${pageTitle(contextMenu.id)} Tab 操作`"
         :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }"
       >
         <button type="button" role="menuitem" @click="closeFromMenu('current')">关闭当前</button>

@@ -14680,3 +14680,28 @@
 - release 分支不新增部署节点；非 Git 本地目录可作为普通工作区使用，历史版本留下的多个真实目录会在当前唯一在线客户端上自动验真恢复，缺失或身份变化目录保持不可用且不会拖累其它目录。
 - 下一次实际包含客户端变化的企业包必须使用高于现网 `20260825204745` 的新 14 位版本；本次只落实代码与发布门禁，尚未生成或部署新的组织密钥签名企业制品。
 - 未新增 HTTP API、RunEvent/SSE、数据库、SQL、Flyway 或依赖，不修改环境配置、generated SDK 或只读 OpenCode 源码；真实麒麟企业包部署后的旧实例批量接管仍需现场验收。
+
+## 2026-08-26 - 支持用户自定义左侧菜单与功能页 Tab
+
+### Why
+
+- 用户需要在左侧活动栏维护常用页面入口：填写菜单名、选择内置图标和 URL，点击后像能力库、控制台一样在应用内打开独立 Tab。
+- 最终交互要求配置入口直接使用 `+`，并始终位于能力库和全部已配置自定义菜单之后。
+
+### What
+
+- 新增用户级自定义菜单模型、8 个受控图标、配置弹窗和受限 iframe 页面；最多 10 项，名称最长 12 个字符，URL 仅允许无凭据的 HTTP(S) 地址或同源根路径，并提供刷新和新窗口兜底。
+- 能力库之后按配置顺序渲染自定义入口，`+` 固定为菜单区最后一项；配置按 `userId` 写入版本化 `localStorage`。自定义页面使用 `/custom/:menuId`，复用既有功能页 Tab 的去重、排序、关闭、浏览器历史和 `sessionStorage` 恢复；配置删除后同步关闭对应 Tab，删除活动项时回到相邻页或工作台。
+- 自定义 iframe 在 Tab 失活时卸载、重新激活时重载，避免后台页面持续轮询或动画；活动栏自定义项增加可滚动布局。同步前端总览、agent-web README/PACKAGE、前端规范和模块地图。
+
+### How
+
+- agent-web typecheck 通过；相关 Vitest 8 个文件 54/54，通过后全量 Vitest 157/157 个文件、2246 passed / 1 skipped；新增 Playwright 自定义菜单流程 1/1 通过，并断言 `+` 位于自定义菜单之后。
+- agent-web production build 通过；真实登录页面完成配置弹窗、活动栏、自定义 Tab、同源 iframe 与新窗口工具栏视觉检查，控制台无新增错误，检查后清除了本次创建的浏览器菜单偏好。
+- 按 JDK 25、`.env.test`、`profile=test` 执行整栈重启，26 模块后端 package 和前端 production build 成功，但 Docker Desktop 的 ClickHouse `docker run` 持续不返回；在脚本停止旧服务前精确终止本次重启进程。原后端 health/readiness 为 `UP`、前端 `127.0.0.1:3000` 返回 200、登录 CORS 预检 200，未留下重启进程。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目并执行差异检查，隔离 `.playwright-cli/`、`.reasonix/`、Vite cache 和根 `node_modules/` 等未跟踪内容。
+
+### Result
+
+- 登录用户可通过活动栏末尾 `+` 配置、编辑、排序和删除自定义入口，并在同一应用内的多 Tab 工作区打开页面；刷新后只恢复仍有对应配置的自定义 Tab。
+- 本次仅修改前端交互、本地浏览器持久化、测试与稳定文档，不新增或变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、依赖、部署节点、强制配置、generated SDK 或只读 OpenCode 源码。整栈进程未切换到新构建，Docker ClickHouse 卡住仍是本机启动风险；当前 Vite 服务加载工作树源码并保持可访问。

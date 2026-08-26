@@ -40,6 +40,7 @@ describe("toolbox navigation", () => {
     expect(routedCenterModeFromRouteName("memories")).toBe("memories");
     expect(routedCenterModeFromRouteName("system")).toBe("system");
     expect(routedCenterModeFromRouteName("hub")).toBe("hub");
+    expect(routedCenterModeFromRouteName("custom-menu")).toBe("custom");
     expect(routedCenterModeFromRouteName("workbench")).toBeNull();
     expect(routedCenterModeFromRouteName("settings")).toBeNull();
   });

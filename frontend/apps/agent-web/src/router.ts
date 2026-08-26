@@ -85,6 +85,11 @@ export const router = createRouter({
       component: () => import("./views/WorkbenchView.vue"),
     },
     {
+      path: "/custom/:menuId",
+      name: "custom-menu",
+      component: () => import("./views/WorkbenchView.vue"),
+    },
+    {
       path: "/traces",
       name: "traces",
       redirect: (to) => ({ name: "system", query: { ...to.query, section: "traces" } }),
@@ -165,6 +170,7 @@ function isKnownLoginRedirectPath(pathname: string, features: ReleaseFeatureFlag
     || /^\/system\/?$/.test(pathname)
     || /^\/hub\/?$/.test(pathname)
     || /^\/settings\/?$/.test(pathname)
+    || /^\/custom\/[a-z0-9][a-z0-9-]{5,63}\/?$/.test(pathname)
     || /^\/traces\/?$/.test(pathname)
     || pathname === "/workspace-requirement-import"
     || (pathname === "/lobehub/launch" && features.lobehub)
