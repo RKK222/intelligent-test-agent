@@ -15181,11 +15181,13 @@
 - `mvn -pl test-agent-local-client -am test` 通过：依赖链 224 项测试通过，1 项需要显式真实 OpenCode 可执行文件的既有测试跳过。
 - `mvn -pl test-agent-local-client -am -DskipTests package`、正式 shaded JAR `--version` 和字节码调用检查通过。
 - `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖麒麟 ARM64 用户包、不可变签名 release、catalog、安装和制品缓存契约；`git diff --check` 通过。
+- 复用已验证的 JDK/OpenCode 1.18.4/提交 `81605f...` 完整能力包离线输入，生成签名 release `20260827142656`；逐项 RSA 验签、分发校验和 JAR 版本/字节码检查通过。U 盘转运包写入 `/Users/kaka/Desktop/mimoagent/0709/`，SHA-256 为 `06b341c908fd3ec743a90f0d287dc0dbfeac15564aef89b2c3a57ad7f9ad658a`。
 
 ### Result
 
 - 受管 OpenCode 的后台依赖检查只能使用本机缓存或签名能力包，非受管目录依赖缺失会快速失败，不再因公网连接超时阻塞 Tool/插件目录。
-- 本次使用 `release`，不新增部署节点，不修改 API、事件、数据库、Flyway、环境文件、generated SDK 或只读 OpenCode 源码。新的签名客户端 release 和真实麒麟 ARM64 企业现场重装、托盘/WSS/网页在线验证仍是发布闸门。
+- 新的完整签名客户端 release 和两个 U 盘转运文件已生成；企业 `.2` 发布、真实麒麟 ARM64 用户覆盖安装及托盘/WSS/网页在线验证仍是现场发布闸门。
+- 本次使用 `release`，不新增部署节点，不修改 API、事件、数据库、Flyway、环境文件、generated SDK 或只读 OpenCode 源码。
 
 ## 2026-08-27 - 修复小地球应用检索选中失效
 
