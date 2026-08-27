@@ -15407,3 +15407,25 @@
 
 - 已在本机生成可移交 Win10 x64 测试的候选 ZIP，但因当前 macOS 环境不能执行 Windows PE，尚未完成 Win10 1809+ 真机安装、首次注册、升级、回滚和卸载验收，也尚未做 Authenticode 签名；因此未发布正式下载别名，不能表述为正式交付包。
 - 本次使用 `release`，不新增部署节点，不变更 HTTP API 结构、RunEvent 类型、数据库、SQL 或 Flyway；只扩展既有注册/发布协议的平台取值与安全校验，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-27 - 新增并修复大数据公共测试案例规约
+
+### Why
+
+- 需要把“大数据测试指引”的测试原则、投产前 checklist 和第一章公共测试案例接入现有公共 Test Design 规约；初稿把所有大数据卡统一加载，并新增了“纯注册变更不强制消费/日终”的推断，既不能明确区分 BDP、BDSP、出湖，也与原材料的 Hudi 完整链路要求不一致。
+
+### What
+
+- 在个人公共配置 worktree `.testagent/agent-opencode/.configdev/public-usr_test_dev` 新增 `big-data-common-cases.md`，保留 21 张规则卡，并为每卡增加 `COMMON`、`BDP`、`BDSP`、`OUTBOUND` 适用域和显式平台标题。
+- Hudi 表结构、视图、移行或修数变更统一要求“注册/启动 → 实时消费 → 日终作业”完整验证；执行条件不足时记为 `MISSING_EVIDENCE`，不得直接排除消费或日终。
+- Test Design Skill 升级到 `4.8.0`；生成和 Review Agent、对象目录、规约索引、质量门禁及 manifest 同步增加 `domainScopes`、逐领域 `loadEvidence`、`expectedRuleIds` 和 `domainScopeVerdict`，只评估命中领域的规则集合。新增 BDP、BDSP、普通 CSV 和 Hudi 回归评估样例。
+
+### How
+
+- 用本机 Ruby 断言 21 个编号连续、每卡六字段完整，且 BDP、BDSP、出湖分域集合与索引一致；JSON 校验 19 条 eval ID 唯一，并锁定 Hudi 不得降级为静态/启动验证。
+- 使用 OpenCode `1.18.18` 的 `debug skill`、`debug agent test-design-generation` 和 `debug agent test-design-review` 在个人公共配置目录完成原生加载，提交后复跑通过；共享运行副本 `.config` 保持 clean。
+
+### Result
+
+- 公共配置个人分支 `public-usr_test_dev` 包含初始提交 `8a97231` 和修复提交 `a089368`；修复后工作树 clean，未推送 Gitee、未执行平台发布，因此共享运行配置尚未生效。
+- 本次不新增部署节点，不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、性能实现、安全协议、环境配置、generated SDK 或只读 OpenCode 源码；根仓库其它本地客户端改动未纳入本次提交。
