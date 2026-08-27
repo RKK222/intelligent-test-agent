@@ -15451,3 +15451,28 @@
 
 - 代码、跨平台构建和离线打包链路已验证；最终 Win10 候选 ZIP 可移交真机测试。当前 macOS 不能执行 Windows PE，仍未完成企业 Authenticode 签名和 Win10 1809+ 真机安装/接入/升级/回退/卸载验收；本次也未在真实麒麟 ARM 用户机部署验证。
 - 本次使用 `release`，不新增部署节点，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；未修改 `.env*`，未发布企业正式下载别名。
+
+## 2026-08-27 - 基于当前 release 工作树重打企业增量包
+
+### Why
+
+- 用户要求基于当前代码重新打企业包；上一轮候选包未部署，企业已部署基线仍为 `release@7152a4340`，因此不能把未部署候选错误登记成现场基线。
+- 当前工作树还包含 4 份用户手册诊断说明改动，需要参与前端/VitePress 构建，但不应由打包任务擅自提交或清理。
+
+### What
+
+- 以 `release@363e1b6babe291018800e76e0cb2c1034cfc230f` 和当前工作树为输入重编后台、前端、用户手册及固定组织密钥签名的麒麟 ARM64 客户端，客户端版本为 `20260827222702`；企业公共能力继续固定已发布提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+- 组件计划只包含本轮变化的本地客户端；worker runtime 指纹 `877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33` 与 toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均复用，LobeHub、memory、独立 ClickHouse/CK、BGE、pgvector、trace 和 Windows 候选二进制不进入正式平台包。
+- 最终固定名外层包 SHA-256 为 `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`，内层包为 `62d2db9bce215f239c3c79d0385159e1c091448b4e38c2d30ad878e7ec0788b6`；已复制到 `/Users/kaka/Desktop/mimoagent/0709`。
+
+### How
+
+- 固定组织私钥自检通过，私钥推导公钥与仓库外固定公钥 DER 指纹均为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。
+- 受影响的 16 模块 Maven reactor 测试通过，麒麟与 Windows 客户端打包回归通过；正式构建中的 VitePress、`vue-tsc` 和 Vite production build 通过。
+- 使用全新临时目录独立验证外层/内层 ZIP CRC、嵌套内层逐字节一致、三节点归档及 SHA、麒麟客户端 catalog/manifest/制品 RSA 签名、内置应用 RSA 私钥和组件排除门禁。最终 App、persistence、XXL、前端 SHA-256 分别为 `24426de896e845c572109b549a029cd66f4352812dda428737b358e1ea488eaa`、`b303d4fe03e18d6f4d0e246a3948c74aedc5dd1c9ca98389e0831ef45060cafb`、`91a52d56f1b3891d5fa1c3f8305345e96da4a8eb92901b7a34817b17fabbc26b`、`8b74d567ce99a94b25b6395cf6f9338f35d27a817f5998eec56c561ddae2dd40`。
+- Flyway 相对企业已部署 `V20260825091459` 仍只有待执行的 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`；最终 persistence JAR 内两条 SQL 均与源码字节一致，新 migration SHA-256 为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。
+
+### Result
+
+- 企业增量包已完成本机构建与独立验收，可移交企业中转机；尚未在 `.4/.114/.2` 部署，Flyway 只能由 `.4` 首节点执行，`.114` 必须在前者成功后以 validate-only 接入。
+- Windows 仍为 `CANDIDATE_ONLY`，未完成 Authenticode 和 Win10 真机验证，不随正式客户端目录发布。4 份用户手册改动已进入本次前端产物，但继续保留为用户未提交改动；本日志提交不纳入这些文件，也未推送远程。
