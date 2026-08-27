@@ -19,7 +19,7 @@ public final class AgentSkillHubRows {
                            String sourceKind, boolean sourceAvailable, String externalIdentityKey,
                            Long externalSkillId, String externalVersion, String externalSource,
                            String externalTag, String externalPhase, String externalPhaseName,
-                           String externalContributor, Long externalDownloadCount,
+                           String externalContributor, Instant externalCreatedAt, Long externalDownloadCount,
                            String catalogDisplayName, String catalogDescription,
                            String forkedFromAssetId, String forkedFromRevisionId) {
     }

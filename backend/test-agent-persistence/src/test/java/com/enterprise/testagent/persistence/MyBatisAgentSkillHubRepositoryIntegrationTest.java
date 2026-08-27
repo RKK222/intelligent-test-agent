@@ -43,6 +43,7 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-07-25T00:00:00Z");
 
     private SingleConnectionDataSource dataSource;
+    private JdbcClient jdbc;
     private AgentSkillHubRepository repository;
 
     @BeforeEach
@@ -68,7 +69,11 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
                 "db/migration/V20260806190500__classify_public_skill_hub_snapshots.sql")).execute(dataSource);
         new ResourceDatabasePopulator(new ClassPathResource(
                 "db/migration/V20260820153926__agent_skill_hub_assets_add_skillhub_source.sql")).execute(dataSource);
-        seedRequiredParents(JdbcClient.create(dataSource));
+        new ResourceDatabasePopulator(new ClassPathResource(
+                "db/migration/V20260827183737__agent_skill_hub_assets_add_external_created_at.sql"))
+                .execute(dataSource);
+        jdbc = JdbcClient.create(dataSource);
+        seedRequiredParents(jdbc);
         SqlSessionFactoryBean factory = new SqlSessionFactoryBean();
         factory.setDataSource(dataSource);
         factory.setMapperLocations(new PathMatchingResourcePatternResolver()
@@ -283,8 +288,33 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
         assertThat(summary.externalContributorName()).isEqualTo("Skill 创建人");
         assertThat(summary.pushedRevision()).isNull();
         assertThat(summary.asset().sourceAvailable()).isTrue();
+        assertThat(jdbc.sql("""
+                select external_created_at
+                from agent_skill_hub_assets
+                where asset_id = :assetId
+                """).param("assetId", summary.asset().assetId()).query(Instant.class).single())
+                .isEqualTo(external.createdAt());
+        assertThat(jdbc.sql("""
+                select created_at
+                from agent_skill_hub_assets
+                where asset_id = :assetId
+                """).param("assetId", summary.asset().assetId()).query(Instant.class).single())
+                .isEqualTo(NOW);
         assertThat(repository.countAssets(
                 AssetType.SKILL, null, null, SourceKind.PLATFORM, null, null, false)).isZero();
+
+        // 上游偶发省略 createTime 时，不能把已经同步到的用户提交时间清空。
+        ExternalSkill withoutCreatedAt = new ExternalSkill(
+                external.id(), external.name(), external.version(), external.displayName(), external.description(),
+                external.source(), external.tag(), external.phase(), external.phaseName(), external.contributor(),
+                null, external.downloadCount());
+        repository.replaceExternalCatalog(List.of(withoutCreatedAt), NOW.plusSeconds(30));
+        assertThat(jdbc.sql("""
+                select external_created_at
+                from agent_skill_hub_assets
+                where asset_id = :assetId
+                """).param("assetId", summary.asset().assetId()).query(Instant.class).single())
+                .isEqualTo(external.createdAt());
 
         Revision externalRevision = materializeExternal(summary.asset().assetId(), external);
         repository.saveReference(new Reference(
@@ -380,7 +410,7 @@ class MyBatisAgentSkillHubRepositoryIntegrationTest {
     private ExternalSkill externalSkill() {
         return new ExternalSkill(
                 42, "case-design", "1.2.0", "测试设计", "生成结构化测试案例",
-                "official", "test", "stable", "稳定", "team", NOW, 7);
+                "official", "test", "stable", "稳定", "team", NOW.minusSeconds(86_400), 7);
     }
 
     private Revision materializeExternal(String assetId, ExternalSkill external) {

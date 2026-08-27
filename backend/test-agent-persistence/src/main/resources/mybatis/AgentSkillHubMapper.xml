@@ -35,6 +35,7 @@
             <arg column="external_version" javaType="java.lang.String"/><arg column="external_source" javaType="java.lang.String"/>
             <arg column="external_tag" javaType="java.lang.String"/><arg column="external_phase" javaType="java.lang.String"/>
             <arg column="external_phase_name" javaType="java.lang.String"/><arg column="external_contributor" javaType="java.lang.String"/>
+            <arg column="external_created_at" javaType="java.time.Instant"/>
             <arg column="external_download_count" javaType="java.lang.Long"/><arg column="catalog_display_name" javaType="java.lang.String"/>
             <arg column="catalog_description" javaType="java.lang.String"/><arg column="forked_from_asset_id" javaType="java.lang.String"/>
             <arg column="forked_from_revision_id" javaType="java.lang.String"/>
@@ -229,17 +230,19 @@
           skill_category, skill_subcategory, latest_pushed_revision_id, latest_published_revision_id,
           created_at, updated_at, source_kind, source_available, external_identity_key, external_skill_id,
           external_version, external_source, external_tag, external_phase, external_phase_name,
-          external_contributor, external_download_count, catalog_display_name, catalog_description)
+          external_contributor, external_created_at, external_download_count,
+          catalog_display_name, catalog_description)
         values (#{assetId}, null, null, 'SKILL', #{technicalId}, #{skillCategory}, #{skillSubcategory},
           #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt}, 'SKILLHUB', true,
           #{externalIdentityKey}, #{externalSkillId}, #{externalVersion}, #{externalSource}, #{externalTag},
-          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalDownloadCount},
+          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalCreatedAt}, #{externalDownloadCount},
           #{catalogDisplayName}, #{catalogDescription})
         on conflict (external_identity_key) do update set
           external_skill_id = excluded.external_skill_id, external_version = excluded.external_version,
           external_source = excluded.external_source, external_tag = excluded.external_tag,
           external_phase = excluded.external_phase, external_phase_name = excluded.external_phase_name,
           external_contributor = excluded.external_contributor,
+          external_created_at = excluded.external_created_at,
           external_download_count = excluded.external_download_count,
           catalog_display_name = excluded.catalog_display_name,
           catalog_description = excluded.catalog_description,
@@ -251,12 +254,13 @@
           skill_category, skill_subcategory, latest_pushed_revision_id, latest_published_revision_id,
           created_at, updated_at, source_kind, source_available, external_identity_key, external_skill_id,
           external_version, external_source, external_tag, external_phase, external_phase_name,
-          external_contributor, external_download_count, catalog_display_name, catalog_description)
+          external_contributor, external_created_at, external_download_count,
+          catalog_display_name, catalog_description)
         key(external_identity_key)
         values (#{assetId}, null, null, 'SKILL', #{technicalId}, #{skillCategory}, #{skillSubcategory},
           #{latestPushedRevisionId}, #{latestPublishedRevisionId}, #{createdAt}, #{updatedAt}, 'SKILLHUB', true,
           #{externalIdentityKey}, #{externalSkillId}, #{externalVersion}, #{externalSource}, #{externalTag},
-          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalDownloadCount},
+          #{externalPhase}, #{externalPhaseName}, #{externalContributor}, #{externalCreatedAt}, #{externalDownloadCount},
           #{catalogDisplayName}, #{catalogDescription})
     </insert>
     <select id="findAssetsBySource" resultMap="AssetMap">

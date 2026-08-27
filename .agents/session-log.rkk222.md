@@ -15285,3 +15285,27 @@
 - 新的 U 盘转运包已写入 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260827165255_arm64.tar.gz` 及同名 `.sha256`，回读校验通过，外层 SHA-256 为 `2eb0c3b3d919716245bcdb40e0ade49256ff2a43548d7bd1a5986d9adbcf2e46`。
 - 代码和候选包已验证，但企业 `.2` 尚未发布该 catalog，真实麒麟用户也尚未用新版复测；现有 16:21/16:24 故障的具体类别仍需从两台企业后端同一时间窗日志确认，不能将可观测性修复表述为已修复现场认证或网络根因。
 - 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。
+
+## 2026-08-27 - 持久化 SkillMarket 用户提交时间
+
+### Why
+
+- SkillMarket `/list` 已返回 `createTime`，语义是用户提交申请时间；integration 网关也已解析到领域模型，但外部目录全量同步写入 `agent_skill_hub_assets` 时丢弃了该值，统计明细只能错误地使用平台首次同步时间。
+- 当前上游和平台表没有独立审批完成时间，不能用 `updateTime`、发布或同步时间伪造。
+
+### What
+
+- 为 `agent_skill_hub_assets` 新增可空 `external_created_at`，MyBatis 全量目录 upsert 写入 `/list.createTime/createdAt`；上游本轮省略字段时保留已同步值，原 `created_at` 继续表示平台首次发现时间。
+- 增加 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`，不回填历史值、不新增审批字段；同步 persistence、integration、workspace-management README、HTTP API 和数据库部署文档。
+- H2 Hub 集成测试同时锁定外部提交时间、本地首次同步时间和缺字段保留行为；既有网关测试继续锁定现场 `createTime` UTC 解析。
+
+### How
+
+- JDK 25 定向运行 `MyBatisAgentSkillHubRepositoryIntegrationTest` 与 `SkillHubHttpGatewayTest`，两组 Maven reactor 均通过；后端 26 模块 `mvn clean package -Dmaven.test.skip=true` 全部构建成功。
+- 新 migration 源码、persistence JAR 与最终应用嵌套 persistence JAR 的 SHA-256 均为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。
+- 按本地启动规范使用 `.env.test` 启动，后端因该文件当前配置的 PostgreSQL `127.0.0.1:15432` 拒绝连接而退出；未切换数据库、未修改 dotenv，真实 PostgreSQL migration 和 health 未验证。
+
+### Result
+
+- 下一轮 10 分钟 SkillMarket 全量对账可将用户提交时间写入独立列，报表审批完成时间继续明确留空；旧 Java 忽略新增可空列，回滚可保留结构。
+- 本次使用 `release`，不新增部署节点，不改变 HTTP DTO、RunEvent/SSE、性能或安全协议，不修改环境文件、generated SDK 或只读 OpenCode 源码。企业 `postgres` 上线前仍需检查完整 `flyway_schema_history` 并完成存量升级和最终包字节校验。

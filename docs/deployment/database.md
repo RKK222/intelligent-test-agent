@@ -2154,3 +2154,18 @@ SHA-256 一致。
 `V20260824100444__user_notifications_add_opencode_capacity_warning.sql` 只前向重建 `user_notifications.type` 的既有 CHECK 约束，加入 `OPENCODE_CAPACITY_WARNING`，并同步字段注释；不新增表、索引或业务数据。新 Java 使用既有 `NONE` 动作、稳定去重键和带前缀的内部容器目标键创建超级管理员预警。旧 Java 的通知枚举不能解析新行，因此本版本禁止新旧 Java 混跑：进入维护窗口后先停止 `.4`、`.114` 两台旧 Java，再替换为同一版本并依次启动；第一台新 Java 完成 migration 前不得恢复旧 Java。
 
 原始 SHA-256 为 `c53ce7ecdd506219337b5f3af5251dbfebbb38486c3fb311d688a28febafaf4a`。真实 PostgreSQL 验证必须覆盖空库到 HEAD、已部署基线到 HEAD、约束接受新类型以及通知 MyBatis 读写；企业发布前仍须收集每套目标库完整 `flyway_schema_history` 并核对最终 JAR 内 migration 字节。未知 checksum、未知更高版本或顺序分叉必须停止发布，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+## PostgreSQL V20260827183737 SkillMarket 用户提交时间
+
+`V20260827183737__agent_skill_hub_assets_add_external_created_at.sql` 为 `agent_skill_hub_assets` 增加可空
+`external_created_at timestamp`。该列只保存 SkillMarket `/list` 返回的 `createTime`（兼容 `createdAt`），语义是用户提交
+申请时间；原 `created_at` 继续保存平台首次同步到该逻辑资产的时间。迁移不使用本地首次同步时间回填历史行，避免伪造上游
+事实；上线后的下一轮 10 分钟全量对账会在上游仍返回该字段时补齐存量目录。上游本轮偶发省略字段时，MyBatis upsert
+保留已同步的外部时间。
+
+当前 SkillMarket 列表和平台资产表均没有独立审批完成时间，本次不新增审批字段，也不把 `updateTime`、修订
+`published_at` 或同步时间当作审批时间；统计 SQL 应使用 `null::timestamp as approval_completed_at` 明确留空。旧版本不会
+读取或写入新列，代码回滚可保留该可空列。原始 SHA-256 为
+`d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。发布前必须收集企业 `postgres` 数据库的完整
+`flyway_schema_history`，从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中该 migration 字节一致；
+未知 checksum、未知更高版本或历史分叉必须停止，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。

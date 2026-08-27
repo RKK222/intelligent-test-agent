@@ -83,7 +83,7 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                         pushed.assetType().name(), pushed.technicalId(), SkillCategory.OTHER.name(), null,
                         null, null,
                         snapshot.pushedAt(), snapshot.pushedAt(), SourceKind.PLATFORM.name(), true,
-                        null, null, null, null, null, null, null, null, null, null, null, null, null));
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null));
                 asset = mapper.findAssetByIdentity(
                         snapshot.sourceAppId(), snapshot.sourceApplicationWorkspaceId(),
                         pushed.assetType().name(), pushed.technicalId());
@@ -156,6 +156,10 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
         mapper.markExternalAssetsUnavailable(synchronizedAt);
         for (ExternalSkill skill : skills) {
             AssetRow existing = mapper.findAssetByExternalIdentity(skill.name());
+            // list 的 createTime/createdAt 是用户提交申请时间；本轮缺失时保留此前已同步的权威值。
+            Instant externalCreatedAt = skill.createdAt() != null
+                    ? skill.createdAt()
+                    : existing == null ? null : existing.externalCreatedAt();
             mapper.upsertExternalAsset(new AssetRow(
                     existing == null ? id("hub_asset_") : existing.assetId(), null, null,
                     AssetType.SKILL.name(), skill.name(),
@@ -166,7 +170,7 @@ public class MyBatisAgentSkillHubRepository implements AgentSkillHubRepository {
                     existing == null ? synchronizedAt : existing.createdAt(), synchronizedAt,
                     SourceKind.SKILLHUB.name(), true, skill.name(), skill.id(), skill.version(),
                     skill.source(), skill.tag(), skill.phase(), skill.phaseName(), skill.contributor(),
-                    skill.downloadCount(), skill.displayName(), skill.description(), null, null));
+                    externalCreatedAt, skill.downloadCount(), skill.displayName(), skill.description(), null, null));
         }
     }
 
