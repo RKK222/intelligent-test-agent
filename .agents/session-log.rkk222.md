@@ -15309,3 +15309,31 @@
 
 - 下一轮 10 分钟 SkillMarket 全量对账可将用户提交时间写入独立列，报表审批完成时间继续明确留空；旧 Java 忽略新增可空列，回滚可保留结构。
 - 本次使用 `release`，不新增部署节点，不改变 HTTP DTO、RunEvent/SSE、性能或安全协议，不修改环境文件、generated SDK 或只读 OpenCode 源码。企业 `postgres` 上线前仍需检查完整 `flyway_schema_history` 并完成存量升级和最终包字节校验。
+
+## 2026-08-27 - 记录客户端诊断与 SkillMarket 时间增量企业包
+
+### Why
+
+- 用户要求基于当前本地 `release` 重新打包；相对上一平台包输入 `c3118d6d...`，新增企业客户端首次接入失败诊断和 SkillMarket 用户提交时间持久化，上一轮已部署的 worker、toolbox、ClickHouse、Mem0、BGE、pgvector、manager、模型灰度及 trace 制品不应重复交付。
+- 企业 PostgreSQL 当前已部署基线为 `V20260825091459`、Flyway checksum `749555545`，本轮新增 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`，必须覆盖真实基线升级、空库迁移和最终 JAR 字节一致性，不能只测 H2 或空库。
+
+### What
+
+- 以产品代码提交 `07b9d451aab5473a4c4886feec5dda6dc3e88991` 为输入生成三节点增量包；后端、前端和客户端纳入，worker/toolbox 固定 `reuse`，LobeHub/memory 固定 `disabled`，CK/Mem0/BGE/pgvector/trace 不纳入，manager Docker 和 `.4` 的 Qwen 模型灰度配置不变。
+- `.4/.114` 节点配置继续固定 TCDS `http://tcds-prod.sdc.icbc:9080`、AAM `http://zfw.sdc.cs.icbc`，SkillHub key 使用 `__PRESERVE_FROM_INSTALLED_BACKEND_ENV__` 从已安装配置继承。
+- 客户端使用固定组织 RSA 密钥生成不可变版本 `20260827185946`，分发域名保持 `http://mimo.sdc.cs.icbc:9996`；公共能力包仍来自提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+
+### How
+
+- `mvn -pl test-agent-local-client -am test` 通过：common 110、protocol 11、local client 107，共 228 项通过、1 项真实 OpenCode 条件跳过；SkillMarket 网关 6 项、MyBatis repository 8 项定向测试通过。正式打包完成后端 26 模块、VitePress、`vue-tsc` 和 Vite production build。
+- 根目录 `.env.test` 当前 PostgreSQL 不可达，未修改 dotenv 或切库；改用一次性 `postgres:16-alpine` 真实 PostgreSQL，先以已部署 persistence JAR 从空库迁移到 121 条/`V20260825091459`，再以当前 JAR 只新增 1 条到 122 条/`V20260827183737`，同时验证当前 JAR 从空库直接执行 122 条。新版本 Flyway checksum 为 `-976579670`，迁移列为可空 `timestamp without time zone`。
+- 新 migration 源码与最终 persistence JAR 内字节 `cmp` 一致，SHA-256 均为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`；旧基线源码/JAR SHA-256 继续为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。
+- 首次完整打包沿用了已单独生成但未部署的客户端版本 `20260827165255`，发现它与此前同版本候选具有不同 JAR SHA，违反不可变版本门禁，故该完整包未交付；重新分配 `20260827185946` 后构建并逐项验证 catalog、manifest、client JAR、JDK、OpenCode、公共能力包六份 RSA 签名。
+- 在全新临时目录独立解开最终外层和内层 ZIP，验证 ZIP CRC、内层 `cmp`、三节点 SHA、组件 manifest、配置域名/密钥继承标记及禁带清单；worker、programs、toolbox、ClickHouse、memory 和 trace 运行归档命中数为 0。固定交付目录回读 SHA 和 ZIP CRC 均通过。
+
+### Result
+
+- 最终外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 大小约 423 MiB，SHA-256 `47648844bf05673d11b6817b8af0a7e7a71167664f859521f0fa39768745f4b4`；内层 SHA-256 `bdfbb6b78b73d7f78fd8139c512b543bda20f2c3994c8cf99b3285ece913e926`。
+- `.4`、`.114`、`.2` 节点包 SHA-256 分别为 `514dfbf73cab9003b630c3e7e3fddbc9081b4bfb273366c87b2e2d0df747ec77`、`e7e6dc117e3ce48db9b45257df3f1b3ade250083c4317c01b0413d50a6a1fe67`、`4caaf9275de2c0cabc0eae676364cdd081e12ca8ef09461c218dfa142651fd8d`。
+- 应用 JAR、persistence JAR、XXL JAR、前端归档 SHA-256 分别为 `bec7a3107a5641783750ad63fa4fe571b6a02e1d0499bdd361cf2b18f1f57323`、`c0ec4e509804e403499ac71a38444b7285ed64b7bf06b7803ffa9b58d7c963cf`、`007baa8d23b808eec5aed6294ecb113361287df4bf3a6c2c3ca46aeedc80d8c3`、`3f750b66c03c2252292cc626b00470280329f81a113e3e7ef58615ae3fb34a66`。
+- 本地构建和离线包校验已完成；企业 `.4 → .114 → .2` 尚未执行本轮部署和业务验收。本条发布追溯提交晚于产品打包输入，不进入上述 ZIP。
