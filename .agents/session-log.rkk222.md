@@ -15116,3 +15116,27 @@
 
 - 固定交付件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 和同名 `.sha256`，回读校验为 `OK`，体积约 148 MiB。
 - 本机构建和归档验证完成，企业 `.4 → .114 → .2` 尚未执行本轮部署。包不新增部署节点，不新增数据库/Flyway，不修改环境文件、generated SDK 或只读 OpenCode 源码；本条追溯记录提交本身不再进入上述 ZIP。
+
+## 2026-08-27 - 同步 release 用户手册并修复上传事件测试
+
+### Why
+
+- 上次用户手册同步后，`release` 已交付版本库关键字检索与当前应用优先加载、工作区 Markdown 图片上传/预览，以及超级管理员独立“应用运行态更新”页签，周更、总览和 FAQ 尚未完整对齐。
+- `DirectoryRows` 上传测试仍按旧的单参数 `requestUpload(directory)` 断言，实际组件契约已扩展为 `requestUpload(directory, mode)`，导致自动化门禁失败。
+
+### What
+
+- 更新内置用户手册的功能总览、设置专题、每周新功能和 FAQ，补齐适用角色、前置条件、准确入口、操作边界与人工补拍截图清单；未生成或伪造截图。
+- 增加帮助中心回归断言，并压缩周更新增说明，确保 7,000 字符的宠物问答上下文继续包含既有客户端、记忆等关键内容。
+- 复用现有上传事件契约，只把 `DirectoryRows` 测试期望更新为 `['docs', 'files']`，不修改组件实现或新增并行上传路径。
+
+### How
+
+- 定向 Vitest：`DirectoryRows.test.ts` 27/27、`help-center.test.ts` 17/17 通过；全量前端 Vitest 158 个文件通过，2264 passed / 1 skipped。
+- user-manual VitePress build、agent-web typecheck、图片引用与替代文字检查、手册正文娱乐内容门禁、工作区与暂存区 `git diff --check` 均通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，确认只暂存本次手册、帮助中心/文件树测试和本日志，不夹带其它成果。
+
+### Result
+
+- 用户手册已覆盖三项最新 release 能力，帮助中心上下文保持有界且可回答既有周更问题；上传测试与当前双参数事件契约一致。
+- 本次不新增部署节点，不修改产品代码、API、事件、数据库、Flyway、性能、安全、环境配置、generated SDK 或只读 OpenCode 源码；缺少的三类新流程真实截图已明确留作人工补拍。

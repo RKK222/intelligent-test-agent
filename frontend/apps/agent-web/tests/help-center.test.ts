@@ -142,6 +142,9 @@ describe("help center", () => {
     expect(prompt).toContain("在左侧活动栏添加常用内网页面");
     expect(prompt).toContain("从 Agent 或 Skill 配置树快捷提交");
     expect(weekly).toContain("在快捷提交弹框中“取消删除”恢复文件");
+    expect(weekly).toContain("服务端版本库检索与当前应用优先加载");
+    expect(weekly).toContain("多选/目录上传和工作区图片预览");
+    expect(weekly).toContain("超级管理员独立“应用运行态更新”页签");
     expect(weekly).toContain("删除已提交的 Agent 或 Skill 后改变主意");
     expect(prompt.length).toBeLessThan(8_100);
   });
@@ -184,6 +187,8 @@ describe("help center", () => {
     expect(faq).toContain("怎样把常用内网页面加到左侧活动栏？");
     expect(faq).toContain("Agent 或 Skill 行尾的“提交并推送”为什么不可用或失败？");
     expect(faq).toContain("怎样连续选择一段工作区文件？");
+    expect(faq).toContain("为什么 Markdown 中显示“图片未上传”？");
+    expect(faq).toContain("为什么看不到“应用运行态更新”？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
@@ -316,6 +321,8 @@ describe("help center", () => {
     expect(settings).toContain("应用人员管理");
     expect(settings).toContain("应用与版本库关联");
     expect(settings).toContain("工作空间管理");
+    expect(settings).toContain("超级管理员：查看应用运行态更新");
+    expect(settings).toContain("系统管理 → 配置管理 → 应用运行态更新");
     expect(settings).toContain("08“版本库管理”、09“应用人员管理”、10“应用与版本库关联”、11“工作空间管理”");
     expect(settings).toContain("页面不会把超级管理员专属的用户管理");
   });

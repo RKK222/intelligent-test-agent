@@ -860,7 +860,7 @@ describe("DirectoryRows", () => {
     await fireEvent.click(within(dialog).getByRole("radio", { name: "上传" }));
     await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件" }));
 
-    expect(view.emitted("requestUpload")).toEqual([["docs"]]);
+    expect(view.emitted("requestUpload")).toEqual([["docs", "files"]]);
   });
 
   it("emits undo for Ctrl/Cmd+Z when the current personal worktree has history", async () => {
