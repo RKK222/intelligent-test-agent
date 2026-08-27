@@ -15253,7 +15253,7 @@
 - 首次客户端构建仅配置了规范化 JDK SHA，脚本因未指定本地归档而校验了上游原始包并失败；改为显式传入上一已验签 release 的本地 `jdk.tar.gz` 和 `opencode.tar.gz`，分别复核 SHA-256 `9c03294370119d0703e6c3b4fcbcfb42b147f997aaba769ad5839c6a5c8441a2`、`4d33b499b4b78971d1ea86c24624500379b1d1ed8308647087f820bdb38e13da` 后正式构建，没有放宽校验或修改代码。
 - `package-release.sh` 完成后端 26 模块、VitePress、`vue-tsc`、Vite production build、客户端用户包和内层 ZIP 构建；客户端分发脚本验证通过，catalog、manifest、client JAR、JDK、OpenCode 和公共能力包六项 RSA 签名逐项为 `Verified OK`。
 - 新建独立临时目录解压外层和内层 ZIP，逐项验证 ZIP CRC、内层 `cmp`、三个节点归档 SHA、组件 manifest、节点域名和密钥保留标记；禁带清单未发现 worker、programs、toolbox、ClickHouse、memory 或 trace 运行归档。
-- persistence JAR 内 `V20260825091459...` 与源码 `cmp` 一致，SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；应用 JAR 包含 `BOOT-INF/classes/rsa-private.key`。XXL 非容器定向测试 7/7 通过；依赖 Docker/Testcontainers 的完整套件仍停在 Ryuk `Created`，本轮没有把它误报为通过。
+- persistence JAR 内 `V20260825091459...` 与源码 `cmp` 一致，SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；应用 JAR 包含 `BOOT-INF/classes/rsa-private.key`。XXL 非容器定向测试中 scheduler 3 项、XXL integration 10 项全部通过；依赖 Docker/Testcontainers 的完整套件仍停在 Ryuk `Created`，本轮没有把它误报为通过。
 
 ### Result
 
