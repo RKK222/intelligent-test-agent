@@ -1171,7 +1171,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 repoRoot,
                 branch,
                 privateKey);
-        synchronizePersonalRepoBeforeOpening(version, repoRoot, privateKey, userId);
+        synchronizePersonalRepoBeforeOpening(version, repoRoot, privateKey, userId, traceId);
         requirePersonalWorkspaceDirectory(version, template, repoRoot, workspaceRoot);
         Workspace runtimeWorkspace = createRuntimeWorkspace(normalizedName, workspaceRoot, workspaceRootValue, traceId);
         Instant now = Instant.now();
@@ -1387,7 +1387,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 expectedBranch,
                 privateKey);
         if (!Files.isDirectory(expectedWorkspaceRoot)) {
-            synchronizePersonalRepoBeforeOpening(version, expectedRepoRoot, privateKey, userId);
+            synchronizePersonalRepoBeforeOpening(version, expectedRepoRoot, privateKey, userId, traceId);
         }
         requirePersonalWorkspaceDirectory(version, template, expectedRepoRoot, expectedWorkspaceRoot);
         String expectedRepoValue = personalRepoValue(version, userId, expectedBranch);
@@ -1452,27 +1452,73 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    /** 创建或修复目录视图前先把个人仓库追到应用仓库组的固定 target。 */
+    /**
+     * 创建或修复目录视图前把个人仓库追到应用仓库组的固定 target。
+     * 非重叠的 staged、unstaged 和 untracked 改动由 Git 原生 merge 保留；只有真实覆盖风险才阻塞进入。
+     */
     private void synchronizePersonalRepoBeforeOpening(
             ApplicationWorkspaceVersion version,
             Path repoRoot,
             String privateKey,
-            UserId userId) {
+            UserId userId,
+            String traceId) {
         String targetCommit = version.targetCommitHash();
         if (targetCommit == null || targetCommit.isBlank()
                 || gitWorkspaceService.isAncestor(repoRoot, targetCommit, "HEAD")) {
             return;
         }
-        List<String> blockingFiles = repositoryStatusPaths(repoRoot);
-        if (gitWorkspaceService.isMergeInProgress(repoRoot) || !blockingFiles.isEmpty()) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "个人仓库存在本地变更或未完成合并，暂时无法同步应用更新",
-                    Map.of(
-                            "targetCommit", targetCommit,
-                            "blockingFiles", blockingFiles));
+        if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
+            LOGGER.info(
+                    "event=personal_workspace_open_target_merge traceId={} versionId={} targetCommit={} result=MERGE_IN_PROGRESS blockerCount={}",
+                    traceId,
+                    version.versionId().value(),
+                    targetCommit,
+                    gitWorkspaceService.conflictPaths(repoRoot).size());
+            return;
         }
-        gitWorkspaceService.mergeCommit(repoRoot, targetCommit, privateKey, gitCommitIdentity(userId));
+        try {
+            gitWorkspaceService.mergeCommit(repoRoot, targetCommit, privateKey, gitCommitIdentity(userId));
+            LOGGER.info(
+                    "event=personal_workspace_open_target_merge traceId={} versionId={} targetCommit={} result=MERGED blockerCount=0",
+                    traceId,
+                    version.versionId().value(),
+                    targetCommit);
+        } catch (PlatformException exception) {
+            // 原生 merge 已形成冲突索引时必须保留现场，让用户进入工作区后走现有三方解决链路。
+            if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
+                LOGGER.warn(
+                        "event=personal_workspace_open_target_merge traceId={} versionId={} targetCommit={} result=MERGE_CONFLICT blockerCount={}",
+                        traceId,
+                        version.versionId().value(),
+                        targetCommit,
+                        gitWorkspaceService.conflictPaths(repoRoot).size());
+                return;
+            }
+            if ("LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))) {
+                List<String> blockingFiles = mergeBlockingFiles(exception, repositoryStatusEntries(repoRoot));
+                LOGGER.warn(
+                        "event=personal_workspace_open_target_merge traceId={} versionId={} targetCommit={} result=LOCAL_CHANGES blockerCount={}",
+                        traceId,
+                        version.versionId().value(),
+                        targetCommit,
+                        blockingFiles.size());
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "应用更新会覆盖个人仓库中的本地文件，请先提交或回退下列文件",
+                        Map.of(
+                                "reason", "LOCAL_CHANGES",
+                                "targetCommit", targetCommit,
+                                "files", blockingFiles,
+                                "blockingFiles", blockingFiles),
+                        exception);
+            }
+            LOGGER.warn(
+                    "event=personal_workspace_open_target_merge traceId={} versionId={} targetCommit={} result=FAILED blockerCount=0",
+                    traceId,
+                    version.versionId().value(),
+                    targetCommit);
+            throw exception;
+        }
     }
 
     /** 严格保留应用工作空间的目录边界，禁止缺目录时静默回退到整个仓库。 */

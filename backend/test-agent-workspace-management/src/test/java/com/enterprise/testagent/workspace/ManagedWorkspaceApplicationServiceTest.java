@@ -1332,6 +1332,114 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void ensureDefaultPersonalWorkspaceKeepsNonOverlappingRepositoryChangesWhileMergingTarget() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_dirty");
+        git.targetContainedInHead = false;
+        git.nextHeadCommit = "commit_personal";
+        git.nextRepoStatusPorcelain = " M F-GCMS-SUBLFA/spec/local.md\n"
+                + "D  F-GCMS-SUBLFA/spec/old.md\n"
+                + "?? F-GCMS-SUBECFA/.opencode/opencode.jsonc\n";
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default_dirty");
+
+        assertThat(personal.personalWorkspaceName()).isEqualTo("default");
+        assertThat(git.mergedCommit).isEqualTo("commit_base");
+        assertThat(git.nextRepoStatusPorcelain).contains("F-GCMS-SUBLFA/spec/local.md");
+        assertThat(git.restoredFiles).isEmpty();
+        assertThat(git.cleanedFiles).isEmpty();
+        assertThat(git.resetHardRepoRoot).isNotEqualTo(git.mergedCommitRepoRoot);
+        assertThat(managed.personals).hasSize(1);
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspaceReportsOnlyNativeMergeBlockingFiles() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_overlap");
+        String blockingFile = "F-GCMS/workspace/.opencode/opencode.jsonc";
+        git.targetContainedInHead = false;
+        git.nextHeadCommit = "commit_personal";
+        git.nextRepoStatusPorcelain = " M F-GCMS-SUBLFA/spec/local.md\n M " + blockingFile + "\n";
+        git.mergeFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "本地改动会被应用更新覆盖",
+                Map.of(
+                        "gitFailureType", "LOCAL_CHANGES",
+                        "gitBlockingFiles", List.of(blockingFile)));
+
+        assertThatThrownBy(() -> service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default_overlap"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details())
+                            .containsEntry("reason", "LOCAL_CHANGES")
+                            .containsEntry("targetCommit", "commit_base")
+                            .containsEntry("files", List.of(blockingFile))
+                            .containsEntry("blockingFiles", List.of(blockingFile));
+                });
+        assertThat(git.nextHeadCommit).isEqualTo("commit_personal");
+        assertThat(git.resetHardRepoRoot).isNotEqualTo(git.mergedCommitRepoRoot);
+        assertThat(managed.personals).isEmpty();
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspacePreservesNativeMergeConflictForDiffResolution() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_conflict");
+        git.targetContainedInHead = false;
+        git.nextHeadCommit = "commit_personal";
+        git.failMergeWithConflict = true;
+        git.nextConflictPaths = List.of("F-GCMS/workspace/docs/conflict.md");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default_conflict");
+
+        assertThat(personal.personalWorkspaceName()).isEqualTo("default");
+        assertThat(git.mergeInProgress).isTrue();
+        assertThat(git.mergedCommit).isEqualTo("commit_base");
+        assertThat(git.abortedMergeRepoRoot).isNull();
+        assertThat(managed.personals).hasSize(1);
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspaceDoesNotStartSecondMergeWhenOneIsInProgress() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version_pending");
+        git.targetContainedInHead = false;
+        git.nextHeadCommit = "commit_personal";
+        git.mergeInProgress = true;
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default_pending");
+
+        assertThat(personal.personalWorkspaceName()).isEqualTo("default");
+        assertThat(git.mergedCommit).isNull();
+        assertThat(git.mergeInProgress).isTrue();
+        assertThat(managed.personals).hasSize(1);
+    }
+
+    @Test
     void ensureDefaultPersonalWorkspaceEnsuresLocalReplicaInsteadOfUsingLegacyVersionPath() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1666,6 +1774,8 @@ class ManagedWorkspaceApplicationServiceTest {
                 null,
                 new UserId("usr_1"),
                 "trace_version");
+        git.targetContainedInHead = false;
+        git.nextHeadCommit = "commit_personal";
         ApplicationWorkspaceVersion savedVersion = managed.versions.get(0);
         String branch = "feature_testagent_20260707_usr_1_default";
         Path repoRoot = root.resolve("personalworktree/20260707/usr_1/gcms/" + branch);
@@ -1706,6 +1816,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 .hasMessageContaining("应用工作空间目录在个人仓库中不存在")
                 .satisfies(error -> assertThat(((PlatformException) error).details())
                         .containsEntry("directoryPath", "F-GCMS/workspace"));
+        assertThat(git.mergedCommit).isEqualTo("commit_base");
         assertThat(managed.personals.get(0).workspaceRootPath()).isEqualTo(missingWorkspaceRoot.toString());
         assertThat(workspaces.findById(runtimeId)).get()
                 .satisfies(workspace -> assertThat(workspace.rootPath()).isEqualTo(missingWorkspaceRoot.toString()));
@@ -4180,6 +4291,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private String nextRemoteCommit;
         private String fetchedBranch;
         private String resetCommit;
+        private Path resetHardRepoRoot;
         private int nextCommitCount;
         private String nextNameStatus = "";
         private boolean worktreeClean = true;
@@ -4544,6 +4656,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public void resetHardToCommit(Path repoRoot, String commitHash) {
+            this.resetHardRepoRoot = repoRoot;
             this.resetCommit = commitHash;
         }
 

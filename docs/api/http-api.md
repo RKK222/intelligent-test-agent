@@ -1863,6 +1863,8 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 2. 存在：先校验记录里的运行态 `linuxServerId` 与当前 Java 稳定服务器身份一致，再校验运行态目录、仓库根和分支是否仍是可用 Git worktree；全部通过才复用并返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
 3. 不存在或已有记录的物理 worktree 缺失/不可复用：先按 `ENSURE_LOCAL` 确保当前服务器有 READY 应用版本副本，再后台创建或修复个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果当前服务器没有副本，后端会基于 `OPENCODE_APP_WORKSPACE_ROOT` 创建本机副本；禁止再用旧 `application_workspace_versions` 绝对路径伪造成 READY replica。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。已有 default 记录但规范物理目录被删除时，显式 ensure 会重新创建该 worktree 并刷新运行态记录。只有目标目录被其他内容占用时返回 `CONFLICT`。
 
+新建、接管或修复个人 worktree 时，如果复用的个人分支尚未包含该版本固定 `targetCommit`，后端直接执行原生 `git merge --no-edit <targetCommit>`。仓库中其它目录的 staged、unstaged 或 untracked 文件只要不被该提交覆盖，就保持原状并继续进入；Git 明确拒绝覆盖时返回 `CONFLICT`，`details` 包含 `reason=LOCAL_CHANGES`、`targetCommit`，以及内容相同的精确路径列表 `files`、`blockingFiles`。原生 merge 已形成真实冲突或进入前已有未完成 merge 时不执行 reset、stash 或第二次 merge：目标工作区目录存在则继续返回工作区，由既有 Diff/三方流程解决；目录仍不存在则保留上述 Git 现场并继续返回目录缺失冲突，禁止回退到仓库根。
+
 默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，或运行态 `linuxServerId` 不是当前绑定服务器，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces`、关联运行态 `workspaces.root_path` 和 `workspaces.linux_server_id` 更新为当前服务器的可信值；可信 root/server/status 变化继续通过 Workspace mutation gate 失效旧会话上下文。旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
 
 登录和切换应用的默认加载不调用该接口，不会自动创建或修复 default 私人工作区；只有用户显式点击版本、创建新版本或其它明确创建/修复动作才调用该接口。

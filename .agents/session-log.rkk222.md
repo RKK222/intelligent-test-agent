@@ -15364,3 +15364,24 @@
 - 最终包的业务二进制仍来自 `07b9d451aab5473a4c4886feec5dda6dc3e88991`，发布脚本与手册包含到 `ea83e451a`；客户端版本/签名摘要、应用 JAR、persistence JAR、XXL JAR 和前端归档均未因重封改变。企业 `.4 → .114 → .2` 部署与业务验收仍未执行。
 - 本条最终摘要提交晚于固定包生成，不进入该 ZIP；它只在仓库中追溯最终摘要，避免为把自身哈希写回包内而形成循环重封。
 - 本次只修改企业发布脚本、部署手册和会话记录，不改变业务 API、RunEvent/SSE、数据库 SQL 字节、运行时兼容策略、环境配置、generated SDK、OpenCode 只读源码或部署拓扑。
+
+## 2026-08-27 - 修复个人仓库无关变更阻塞版本切换
+
+### Why
+
+- 企业 F-FPA 用户切换应用版本时，个人仓库中兄弟工作区的 `spec/**`、`.opencode/**` 等无关 staged/unstaged/untracked 变更触发统一 `CONFLICT`；版本进入入口在 Git merge 前错误要求整个仓库完全干净，与既有原生合并语义不一致。
+
+### What
+
+- default/custom 个人 worktree 新建、接管或目录修复追赶固定 target 时，直接复用原生 `mergeCommit`；非重叠本地状态原样保留，`LOCAL_CHANGES` 只返回 Git 识别出的精确阻塞文件，真实冲突和已有 merge 保留现场后进入既有 Diff。
+- 增加 traceId 结构化合并结果日志和五类服务回归，目录仍缺失时继续拒绝回退到仓库根；同步 workspace-management README、HTTP API 和用户手册。
+
+### How
+
+- `ManagedWorkspaceApplicationServiceTest` 107 项通过；`GitWorkspaceServiceRealGitTest` 和 workspace-management Maven reactor 全量测试通过；JDK 21 后端 26 模块 `mvn clean package -DskipTests` 成功。
+- JDK 25 按 `.env.test` 执行完整重启；首次发现该文件已配置的本地 PostgreSQL `127.0.0.1:15432/test_agent` 未启动，使用仓库既有 `tools/dev-local-up.sh --redis` 拉起 PostgreSQL、MySQL、Redis 后重试，后端 readiness、前端和 OpenCode manager 均启动成功。未修改 dotenv 或切换数据库。
+
+### Result
+
+- 代码、真实 Git 行为、模块测试、完整打包和本机运行启动均已验证；本地后端 `8080`、前端 `3000` 及配套依赖保持运行，企业 F-FPA Java 节点部署及受影响用户仓库复测尚未执行。
+- 本次使用 `release`，不新增部署节点，不修改路由、DTO、事件、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；并行出现的 local-client 工作树改动未纳入本次提交。
