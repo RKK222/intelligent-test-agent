@@ -5,6 +5,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 本地 OpenCode 客户端入口；client key 永远不接受命令行参数。 */
 public final class LocalClientMain {
@@ -39,80 +41,119 @@ public final class LocalClientMain {
         Path logsDirectory = LocalClientPaths.logsDirectory();
         Files.createDirectories(logsDirectory);
         System.setProperty("testagent.localclient.logDir", logsDirectory.toString());
+        LocalClientDiagnostics.ensureSessionId();
+        Logger logger = LoggerFactory.getLogger(LocalClientMain.class);
+        long commandStartedNanos = System.nanoTime();
+        LocalClientBuildInfo startupBuildInfo = LocalClientBuildInfo.current();
+        LocalClientPlatform startupPlatform = LocalClientPlatform.current();
+        logger.info(
+                "local_client_command_started command={} clientVersion={} platform={} architecture={} managedRelease={}",
+                command.name(), startupBuildInfo.clientVersion(), startupPlatform.platform(),
+                startupPlatform.architecture(), startupBuildInfo.managedRelease());
 
-        // 已配置客户端使用菜单栏模式；首次配置必须保留 Dock 和可见窗口，避免用户安装后找不到入口。
-        if (!LocalClientFirstRunSetup.requiresFirstRunSetup()) {
-            System.setProperty("apple.awt.UIElement", "true");
-        }
-        // 必须在 apple.awt.UIElement 决策之后初始化 Swing，避免 macOS 首次配置窗口被一并隐藏。
-        LocalClientDesktopTheme.install();
-        if (!LocalClientFirstRunSetup.ensureConfigured()) {
-            return;
-        }
-        LocalClientConfiguration configuration = LocalClientConfiguration.load();
-        LocalClientStateStore stateStore = new LocalClientStateStore();
-        if (command == Command.ENROLL) {
-            LocalClientRegistrationProbe probe = new LocalClientRegistrationProbe(
-                    configuration, stateStore, LocalClientBuildInfo.current());
-            LocalClientEnrollment.enroll(
-                    LocalClientPaths.configDirectory(),
-                    LocalClientEnrollment.systemTerminal(),
-                    probe::verify);
-            stateStore.clearReEnrollmentRequirement();
-            System.out.println("本地客户端接入认证成功");
-            return;
-        }
+        try {
+            // 已配置客户端使用菜单栏模式；首次配置必须保留 Dock 和可见窗口，避免用户安装后找不到入口。
+            if (!LocalClientFirstRunSetup.requiresFirstRunSetup()) {
+                System.setProperty("apple.awt.UIElement", "true");
+            }
+            // 必须在 apple.awt.UIElement 决策之后初始化 Swing，避免 macOS 首次配置窗口被一并隐藏。
+            LocalClientDesktopTheme.install();
+            if (!LocalClientFirstRunSetup.ensureConfigured()) {
+                logger.info("local_client_configuration_cancelled command={} durationMs={}",
+                        command.name(), LocalClientDiagnostics.elapsedMillis(commandStartedNanos));
+                return;
+            }
+            LocalClientConfiguration configuration = LocalClientConfiguration.load();
+            LocalClientStateStore stateStore = new LocalClientStateStore();
+            logger.info(
+                    "local_client_configuration_loaded command={} insecureControl={} selfUpdateConfigured={} portRange={}..{}",
+                    command.name(), configuration.allowInsecureControl(), configuration.selfUpdateConfigured(),
+                    configuration.portMin(), configuration.portMax());
+            if (command == Command.ENROLL) {
+                logger.info("local_client_enrollment_started clientVersion={}", startupBuildInfo.clientVersion());
+                LocalClientRegistrationProbe probe = new LocalClientRegistrationProbe(
+                        configuration, stateStore, startupBuildInfo);
+                LocalClientEnrollment.enroll(
+                        LocalClientPaths.configDirectory(),
+                        LocalClientEnrollment.systemTerminal(),
+                        probe::verify);
+                stateStore.clearReEnrollmentRequirement();
+                logger.info("local_client_enrollment_completed clientVersion={} durationMs={}",
+                        startupBuildInfo.clientVersion(), LocalClientDiagnostics.elapsedMillis(commandStartedNanos));
+                System.out.println("本地客户端接入认证成功");
+                return;
+            }
 
-        if (stateStore.reEnrollmentRequired()) {
-            throw new IllegalStateException("本地客户端凭据已失效，请运行 test-agent-local-client enroll 重新接入");
-        }
-        LocalClientCredentialFile.Credentials credentials = LocalClientCredentialFile.read();
-        ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
-        LocalClientBuildInfo buildInfo = LocalClientBuildInfo.current();
-        LocalClientPublicCapabilityStore publicCapabilities =
-                new LocalClientPublicCapabilityStore(stateStore.stateDirectory());
-        publicCapabilities.initializeBaseline(configuration, buildInfo);
-        LocalWorkspaceRegistry workspaceRegistry = new LocalWorkspaceRegistry(stateStore);
-        LocalObservabilitySettings observabilitySettings = LocalObservabilitySettings.load();
-        try (LocalModelRelay modelRelay = new LocalModelRelay(configuration);
-             LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings)) {
-            OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
-                    configuration, stateStore, modelRelay, observabilityRelay, publicCapabilities);
-            if (configuration.selfUpdateConfigured() && buildInfo.managedRelease()) {
-                LocalClientUpdateMarkerStore markerStore =
-                        new LocalClientUpdateMarkerStore(stateStore.stateDirectory());
-                int activationExitCode = LocalClientUpdateActivation.production(
-                                buildInfo.clientVersion(), markerStore, () -> supervisor.start(null))
-                        .activateIfPending();
-                if (activationExitCode != 0) {
-                    supervisor.stop();
-                    System.exit(activationExitCode);
+            if (stateStore.reEnrollmentRequired()) {
+                throw new IllegalStateException("本地客户端凭据已失效，请运行 test-agent-local-client enroll 重新接入");
+            }
+            LocalClientCredentialFile.Credentials credentials = LocalClientCredentialFile.read();
+            ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+            LocalClientBuildInfo buildInfo = startupBuildInfo;
+            LocalClientPublicCapabilityStore publicCapabilities =
+                    new LocalClientPublicCapabilityStore(stateStore.stateDirectory());
+            publicCapabilities.initializeBaseline(configuration, buildInfo);
+            LocalClientPublicCapabilityStore.State capabilityState = publicCapabilities.snapshot();
+            logger.info("local_client_public_capability_ready status={} activeDigestPresent={} pendingDigestPresent={}",
+                    capabilityState.status(), capabilityState.activeDigest() != null, capabilityState.pendingDigest() != null);
+            LocalWorkspaceRegistry workspaceRegistry = new LocalWorkspaceRegistry(stateStore);
+            LocalObservabilitySettings observabilitySettings = LocalObservabilitySettings.load();
+            logger.info("local_client_runtime_initializing observabilityEnabled={} clientInstanceId={}",
+                    observabilitySettings.maxInFlight() > 0, stateStore.read().clientInstanceId());
+            try (LocalModelRelay modelRelay = new LocalModelRelay(configuration);
+                 LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings)) {
+                OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
+                        configuration, stateStore, modelRelay, observabilityRelay, publicCapabilities);
+                if (configuration.selfUpdateConfigured() && buildInfo.managedRelease()) {
+                    LocalClientUpdateMarkerStore markerStore =
+                            new LocalClientUpdateMarkerStore(stateStore.stateDirectory());
+                    logger.info("local_client_pending_activation_check clientVersion={}", buildInfo.clientVersion());
+                    int activationExitCode = LocalClientUpdateActivation.production(
+                                    buildInfo.clientVersion(), markerStore, () -> supervisor.start(null))
+                            .activateIfPending();
+                    if (activationExitCode != 0) {
+                        logger.warn("local_client_pending_activation_failed clientVersion={} exitCode={}",
+                                buildInfo.clientVersion(), activationExitCode);
+                        supervisor.stop();
+                        System.exit(activationExitCode);
+                    }
+                }
+                recoverPublicCapabilityActivation(publicCapabilities, supervisor);
+                LocalClientFileRpcHandler fileRpcHandler = new LocalClientFileRpcHandler(
+                        workspaceRegistry, objectMapper);
+                LocalClientConnection connection = new LocalClientConnection(
+                        configuration,
+                        credentials,
+                        stateStore,
+                        supervisor,
+                        modelRelay,
+                        fileRpcHandler,
+                        observabilityRelay,
+                        observabilitySettings,
+                        publicCapabilities);
+                LocalClientTray tray = LocalClientTray.install(configuration, connection);
+                try (connection; tray) {
+                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                        logger.info("local_client_shutdown_hook_started");
+                        tray.close();
+                        connection.close();
+                    }, "local-client-shutdown"));
+                    logger.info("local_client_runtime_started clientVersion={} startupDurationMs={}",
+                            buildInfo.clientVersion(), LocalClientDiagnostics.elapsedMillis(commandStartedNanos));
+                    int exitCode = connection.runForever();
+                    logger.info("local_client_runtime_stopped clientVersion={} exitCode={} totalDurationMs={}",
+                            buildInfo.clientVersion(), exitCode,
+                            LocalClientDiagnostics.elapsedMillis(commandStartedNanos));
+                    if (exitCode != 0) {
+                        System.exit(exitCode);
+                    }
                 }
             }
-            recoverPublicCapabilityActivation(publicCapabilities, supervisor);
-            LocalClientFileRpcHandler fileRpcHandler = new LocalClientFileRpcHandler(
-                    workspaceRegistry, objectMapper);
-            LocalClientConnection connection = new LocalClientConnection(
-                    configuration,
-                    credentials,
-                    stateStore,
-                    supervisor,
-                    modelRelay,
-                    fileRpcHandler,
-                    observabilityRelay,
-                    observabilitySettings,
-                    publicCapabilities);
-            LocalClientTray tray = LocalClientTray.install(configuration, connection);
-            try (connection; tray) {
-                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                    tray.close();
-                    connection.close();
-                }, "local-client-shutdown"));
-                int exitCode = connection.runForever();
-                if (exitCode != 0) {
-                    System.exit(exitCode);
-                }
-            }
+        } catch (Exception exception) {
+            logger.error("local_client_command_aborted command={} durationMs={} rootFailureType={}",
+                    command.name(), LocalClientDiagnostics.elapsedMillis(commandStartedNanos),
+                    LocalClientDiagnostics.rootFailureType(exception));
+            throw exception;
         }
     }
 
@@ -137,8 +178,8 @@ public final class LocalClientMain {
             return;
         }
         org.slf4j.LoggerFactory.getLogger(LocalClientMain.class).warn(
-                "public_capability_activation_validation_failed processStatus={} healthy={} message={}",
-                health.processStatus(), health.opencodeHealthy(), health.message());
+                "public_capability_activation_validation_failed processStatus={} healthy={}",
+                health.processStatus(), health.opencodeHealthy());
         try {
             store.rollback(state.previousDigest(), "OPENCODE_ACTIVATION_FAILED");
             var restored = supervisor.reloadPublicCapabilities(true);

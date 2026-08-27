@@ -11,10 +11,13 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 客户端公共能力包逐片下载、校验、原子激活、健康验证和失败回滚。 */
 final class LocalClientPublicCapabilityUpdater {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientPublicCapabilityUpdater.class);
     interface ProtocolSink {
         void send(LocalClientFrameType type, String requestId, Object payload);
 
@@ -39,6 +42,8 @@ final class LocalClientPublicCapabilityUpdater {
 
     synchronized void reportVersion() {
         LocalClientPublicCapabilityStore.State state = store.snapshot();
+        LOGGER.info("local_client_public_capability_version_reported generation={} status={} activeDigestPresent={} pendingDigestPresent={}",
+                sink.generation(), state.status(), state.activeDigest() != null, state.pendingDigest() != null);
         sink.send(LocalClientFrameType.PUBLIC_CAPABILITY_VERSION, requestId("lcpv_"),
                 new LocalClientPayloads.PublicCapabilityVersion(
                         sink.clientInstanceId(), sink.generation(), state.activeCommit(), state.activeDigest(),
@@ -50,6 +55,9 @@ final class LocalClientPublicCapabilityUpdater {
         requireCoordinates(available.clientInstanceId(), available.connectionGeneration());
         requireDigest(available.bundleDigest());
         store.recordAvailable(available);
+        LOGGER.info("local_client_public_capability_available generation={} bundleDigest={} sourceCommit={} requiresRestart={}",
+                available.connectionGeneration(), available.bundleDigest(), available.sourceCommit(),
+                available.requiresRestart());
     }
 
     synchronized void handleCommand(LocalClientPayloads.PublicCapabilityUpdateCommand command) {
@@ -63,6 +71,8 @@ final class LocalClientPublicCapabilityUpdater {
             throw new IllegalArgumentException("公共能力更新命令无效");
         }
         if (download != null && download.command().commandId().equals(command.commandId())) {
+            LOGGER.info("local_client_public_capability_download_resumed commandId={} nextSequence={} receivedBytes={}",
+                    command.commandId(), download.nextSequence(), download.receivedBytes());
             requestChunk(download.nextSequence());
             return;
         }
@@ -72,6 +82,9 @@ final class LocalClientPublicCapabilityUpdater {
             Files.createFile(archive);
             download = new Download(command, archive, 0, 0);
             store.recordPendingCommand(command.commandId(), command.sourceCommit(), command.bundleDigest());
+            LOGGER.info("local_client_public_capability_download_started commandId={} generation={} bundleDigest={} artifactSize={} chunkCount={} requiresRestart={}",
+                    command.commandId(), command.connectionGeneration(), command.bundleDigest(),
+                    command.artifactSize(), command.chunkCount(), command.requiresRestart());
             requestChunk(0);
         } catch (IOException exception) {
             throw new IllegalStateException("无法创建公共能力下载文件", exception);
@@ -114,6 +127,15 @@ final class LocalClientPublicCapabilityUpdater {
             Files.write(current.archive(), bytes, StandardOpenOption.APPEND);
             download = current = new Download(
                     current.command(), current.archive(), current.nextSequence() + 1, nextBytes);
+            if (current.nextSequence() == 1
+                    || current.nextSequence() == current.command().chunkCount()
+                    || current.nextSequence() % 32 == 0) {
+                int percent = (int) Math.min(100L,
+                        nextBytes * 100L / Math.max(1L, current.command().artifactSize()));
+                LOGGER.info("local_client_public_capability_download_progress commandId={} receivedChunks={} totalChunks={} receivedBytes={} totalBytes={} percent={}",
+                        current.command().commandId(), current.nextSequence(), current.command().chunkCount(),
+                        nextBytes, current.command().artifactSize(), percent);
+            }
             if (!chunk.endOfStream()) {
                 requestChunk(current.nextSequence());
                 return;
@@ -141,6 +163,8 @@ final class LocalClientPublicCapabilityUpdater {
             } catch (IOException ignored) {
             }
             download = null;
+            LOGGER.info("local_client_public_capability_status_acknowledged commandId={} status={}",
+                    ack.commandId(), ack.status());
         }
     }
 
@@ -149,11 +173,18 @@ final class LocalClientPublicCapabilityUpdater {
     }
 
     private void apply(Download current) throws Exception {
+        long startedNanos = System.nanoTime();
+        LOGGER.info("local_client_public_capability_apply_started commandId={} bundleDigest={} requiresRestart={}",
+                current.command().commandId(), current.command().bundleDigest(),
+                current.command().requiresRestart());
         report(current, "APPLYING", null);
         // 在原子链接真正切换前，本地状态仍是下载/准备阶段；重启时不能误把旧 active 当成已激活目标。
         store.recordStatus("DOWNLOADING", null);
         LocalClientPublicCapabilityStore.Candidate candidate = store.installArchive(
                 current.archive(), current.command().sourceCommit(), current.command().bundleDigest());
+        LOGGER.info("local_client_public_capability_archive_verified commandId={} bundleDigest={} durationMs={}",
+                current.command().commandId(), current.command().bundleDigest(),
+                LocalClientDiagnostics.elapsedMillis(startedNanos));
         String previousDigest = null;
         boolean activated = false;
         try {
@@ -166,10 +197,17 @@ final class LocalClientPublicCapabilityUpdater {
             }
             store.completeActivation();
             report(current, "SUCCEEDED", null);
+            LOGGER.info("local_client_public_capability_apply_completed commandId={} bundleDigest={} durationMs={}",
+                    current.command().commandId(), current.command().bundleDigest(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
         } catch (Exception activationFailure) {
             if (!activated) {
                 throw activationFailure;
             }
+            LOGGER.warn("local_client_public_capability_activation_failed commandId={} bundleDigest={} durationMs={} rootFailureType={}",
+                    current.command().commandId(), current.command().bundleDigest(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos),
+                    LocalClientDiagnostics.rootFailureType(activationFailure));
             store.rollback(previousDigest, "OPENCODE_ACTIVATION_FAILED");
             var restored = supervisor.reloadPublicCapabilities(true);
             if (!restored.success() || !restored.opencodeHealthy()
@@ -178,6 +216,9 @@ final class LocalClientPublicCapabilityUpdater {
             }
             store.recordStatus("ROLLED_BACK", "OPENCODE_ACTIVATION_FAILED");
             report(current, "ROLLED_BACK", "OPENCODE_ACTIVATION_FAILED");
+            LOGGER.info("local_client_public_capability_rolled_back commandId={} bundleDigest={} durationMs={}",
+                    current.command().commandId(), current.command().bundleDigest(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
         }
     }
 
@@ -185,6 +226,9 @@ final class LocalClientPublicCapabilityUpdater {
         // 所有下载/校验失败都必须落盘，避免重连后仍以 PENDING 状态误导托盘和平台。
         store.recordStatus("FAILED", errorCode);
         report(current, "FAILED", errorCode);
+        LOGGER.warn("local_client_public_capability_failed commandId={} bundleDigest={} errorCode={} receivedChunks={} receivedBytes={}",
+                current.command().commandId(), current.command().bundleDigest(), errorCode,
+                current.nextSequence(), current.receivedBytes());
     }
 
     private void requestChunk(long sequence) {

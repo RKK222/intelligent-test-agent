@@ -22,10 +22,13 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** 下载、验签、解包并自检完整 JDK/JAR/OpenCode 发布单元；成功前不触碰 current。 */
 final class LocalClientReleaseDownloader {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientReleaseDownloader.class);
     private static final int MAX_MANIFEST_BYTES = 1024 * 1024;
     private static final int MAX_SIGNATURE_BYTES = 16 * 1024;
     private static final long MAX_ARTIFACT_BYTES = 4L * 1024 * 1024 * 1024;
@@ -83,7 +86,11 @@ final class LocalClientReleaseDownloader {
             PreparationListener listener) throws Exception {
         Objects.requireNonNull(listener, "listener must not be null");
         validateCommand(command, currentVersion);
+        long startedNanos = System.nanoTime();
         String version = LocalClientReleaseVersion.parse(command.targetVersion()).value();
+        LOGGER.info("local_client_release_prepare_started commandId={} currentVersion={} targetVersion={} direction={} platform={} architecture={}",
+                command.commandId(), currentVersion, version, command.direction(), platform.platform(),
+                platform.architecture());
         String releasePrefix = "releases/" + version + "/";
         byte[] manifestBytes = fetcher.fetchBytes(
                 trust.resolve(releasePrefix + "manifest.json"), MAX_MANIFEST_BYTES);
@@ -93,6 +100,9 @@ final class LocalClientReleaseDownloader {
         String releaseDigest = LocalClientDownloadTrust.sha256(manifestBytes);
         ReleaseManifest manifest = parseManifest(manifestBytes);
         Map<String, ManifestArtifact> artifacts = validateManifest(manifest, version, releasePrefix);
+        LOGGER.info("local_client_release_manifest_verified commandId={} targetVersion={} releaseDigest={} artifactCount={} durationMs={}",
+                command.commandId(), version, releaseDigest, artifacts.size(),
+                LocalClientDiagnostics.elapsedMillis(startedNanos));
 
         Path releasesDirectory = installRoot.resolve("releases");
         Path finalDirectory = releasesDirectory.resolve(version).normalize();
@@ -102,6 +112,8 @@ final class LocalClientReleaseDownloader {
         Files.createDirectories(releasesDirectory);
         Path existingManifest = finalDirectory.resolve("manifest.json");
         if (Files.isRegularFile(existingManifest)) {
+            LOGGER.info("local_client_release_reuse_started commandId={} targetVersion={} source=installed_release",
+                    command.commandId(), version);
             LocalClientDownloadTrust.requireSha256(existingManifest, releaseDigest);
             verifyPreparedLayout(finalDirectory, artifacts);
             listener.onPhase(PreparationPhase.SELF_CHECKING);
@@ -110,6 +122,8 @@ final class LocalClientReleaseDownloader {
                     finalDirectory.resolve("test-agent-local-client.jar"),
                     finalDirectory,
                     version);
+            LOGGER.info("local_client_release_prepare_completed commandId={} targetVersion={} source=installed_release durationMs={}",
+                    command.commandId(), version, LocalClientDiagnostics.elapsedMillis(startedNanos));
             return new PreparedRelease(version, releaseDigest, finalDirectory);
         }
 
@@ -125,9 +139,13 @@ final class LocalClientReleaseDownloader {
                 ManifestArtifact artifact = artifacts.get(kind);
                 obtainArtifact(releasesDirectory, staging, kind, artifact);
             }
+            LOGGER.info("local_client_release_extract_started commandId={} targetVersion={} archives=JDK,OPENCODE durationMs={}",
+                    command.commandId(), version, LocalClientDiagnostics.elapsedMillis(startedNanos));
             extractor.extract(staging.resolve("jdk.tar.gz"), staging);
             extractor.extract(staging.resolve("opencode.tar.gz"), staging);
             verifyPreparedLayout(staging, artifacts);
+            LOGGER.info("local_client_release_layout_verified commandId={} targetVersion={} durationMs={}",
+                    command.commandId(), version, LocalClientDiagnostics.elapsedMillis(startedNanos));
             listener.onPhase(PreparationPhase.SELF_CHECKING);
             candidateChecker.check(
                     platform.javaExecutable(staging),
@@ -135,6 +153,9 @@ final class LocalClientReleaseDownloader {
                     staging,
                     version);
             moveAtomically(staging, finalDirectory);
+            LOGGER.info("local_client_release_prepare_completed commandId={} targetVersion={} source=new_release releaseDigest={} durationMs={}",
+                    command.commandId(), version, releaseDigest,
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             return new PreparedRelease(version, releaseDigest, finalDirectory);
         } finally {
             // 候选进程必须看到 basename=版本号；无论成功与否都只清理随机暂存父目录。
@@ -152,13 +173,20 @@ final class LocalClientReleaseDownloader {
             ManifestArtifact artifact) throws Exception {
         Path target = staging.resolve(localFileName(kind));
         if (reuseCachedArtifact(kind, artifact, target)) {
+            LOGGER.info("local_client_release_artifact_ready kind={} source=content_cache size={} sha256={}",
+                    kind, artifact.size(), artifact.sha256());
             return;
         }
         if (reuseExistingReleaseArtifact(releasesDirectory, kind, artifact, target)) {
             cacheVerifiedArtifact(kind, artifact, target, target.resolveSibling(target.getFileName() + ".sig"));
+            LOGGER.info("local_client_release_artifact_ready kind={} source=existing_release size={} sha256={}",
+                    kind, artifact.size(), artifact.sha256());
             return;
         }
 
+        long startedNanos = System.nanoTime();
+        LOGGER.info("local_client_release_artifact_download_started kind={} size={} sha256={}",
+                kind, artifact.size(), artifact.sha256());
         fetcher.fetchFile(trust.resolve(artifact.path()), target, artifact.size());
         if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)
                 || Files.isSymbolicLink(target)
@@ -172,6 +200,9 @@ final class LocalClientReleaseDownloader {
         Path signatureTarget = target.resolveSibling(target.getFileName() + ".sig");
         writePrivate(signatureTarget, signature);
         cacheVerifiedArtifact(kind, artifact, target, signatureTarget);
+        LOGGER.info("local_client_release_artifact_ready kind={} source=download size={} sha256={} durationMs={}",
+                kind, artifact.size(), artifact.sha256(),
+                LocalClientDiagnostics.elapsedMillis(startedNanos));
     }
 
     private boolean reuseCachedArtifact(

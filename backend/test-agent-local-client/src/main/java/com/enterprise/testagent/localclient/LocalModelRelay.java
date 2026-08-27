@@ -20,10 +20,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** OpenCode 只访问此 loopback 中继并持有随机本地 token；平台模型 grant 由中继内存转发。 */
 final class LocalModelRelay implements AutoCloseable {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalModelRelay.class);
     private static final Set<String> HOP_BY_HOP = Set.of(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "transfer-encoding", "upgrade", "host", "cookie");
@@ -35,6 +38,7 @@ final class LocalModelRelay implements AutoCloseable {
     private final AtomicReference<String> modelGrant = new AtomicReference<>();
     private final AtomicInteger activeRequests = new AtomicInteger();
     private final AtomicLong lastActivityNanos = new AtomicLong(System.nanoTime());
+    private final AtomicLong requestSequence = new AtomicLong();
     private final String localToken = generateToken();
 
     LocalModelRelay(LocalClientConfiguration configuration) throws IOException {
@@ -47,6 +51,8 @@ final class LocalModelRelay implements AutoCloseable {
         server.setExecutor(executor);
         server.createContext("/v1", this::handle);
         server.start();
+        LOGGER.info("local_model_relay_started port={} connectTimeoutSeconds={} requestTimeoutHours={}",
+                server.getAddress().getPort(), 10, 24);
     }
 
     String baseUrl() {
@@ -62,10 +68,12 @@ final class LocalModelRelay implements AutoCloseable {
             throw new IllegalArgumentException("model grant is invalid");
         }
         modelGrant.set(rawGrant);
+        LOGGER.info("local_model_relay_grant_updated grantPresent=true");
     }
 
     void clearGrant() {
         modelGrant.set(null);
+        LOGGER.info("local_model_relay_grant_cleared grantPresent=false");
     }
 
     boolean active() {
@@ -77,18 +85,26 @@ final class LocalModelRelay implements AutoCloseable {
     }
 
     private void handle(HttpExchange exchange) throws IOException {
+        long sequence = requestSequence.incrementAndGet();
+        long startedNanos = System.nanoTime();
         activeRequests.incrementAndGet();
         lastActivityNanos.set(System.nanoTime());
         try (exchange) {
             if (!localAuthMatches(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                LOGGER.warn("local_model_relay_request_rejected sequence={} method={} failureCode=LOCAL_TOKEN_INVALID activeRequests={}",
+                        sequence, exchange.getRequestMethod(), activeRequests.get());
                 writeError(exchange, 401, "local model token invalid");
                 return;
             }
             String grant = modelGrant.get();
             if (grant == null) {
+                LOGGER.warn("local_model_relay_request_rejected sequence={} method={} failureCode=MODEL_GRANT_UNAVAILABLE activeRequests={}",
+                        sequence, exchange.getRequestMethod(), activeRequests.get());
                 writeError(exchange, 503, "model grant unavailable while client is disconnected");
                 return;
             }
+            LOGGER.info("local_model_relay_request_started sequence={} method={} activeRequests={}",
+                    sequence, exchange.getRequestMethod(), activeRequests.get());
             String rawPath = exchange.getRequestURI().getRawPath();
             String suffix = rawPath.length() <= 3 ? "/" : rawPath.substring(3);
             if (exchange.getRequestURI().getRawQuery() != null) {
@@ -109,10 +125,18 @@ final class LocalModelRelay implements AutoCloseable {
             try (InputStream input = response.body()) {
                 input.transferTo(exchange.getResponseBody());
             }
+            LOGGER.info("local_model_relay_request_completed sequence={} method={} upstreamStatus={} durationMs={}",
+                    sequence, exchange.getRequestMethod(), response.statusCode(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            LOGGER.warn("local_model_relay_request_failed sequence={} method={} failureCode=INTERRUPTED durationMs={}",
+                    sequence, exchange.getRequestMethod(), LocalClientDiagnostics.elapsedMillis(startedNanos));
             writeErrorIfPossible(exchange, 503, "model relay interrupted");
         } catch (Exception exception) {
+            LOGGER.warn("local_model_relay_request_failed sequence={} method={} failureCode=UPSTREAM_FAILED rootFailureType={} durationMs={}",
+                    sequence, exchange.getRequestMethod(), LocalClientDiagnostics.rootFailureType(exception),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             writeErrorIfPossible(exchange, 502, "model relay upstream failed");
         } finally {
             lastActivityNanos.set(System.nanoTime());
@@ -177,7 +201,10 @@ final class LocalModelRelay implements AutoCloseable {
 
     @Override
     public void close() {
+        LOGGER.info("local_model_relay_stopping activeRequests={} totalRequests={}",
+                activeRequests.get(), requestSequence.get());
         server.stop(0);
         executor.close();
+        LOGGER.info("local_model_relay_stopped totalRequests={}", requestSequence.get());
     }
 }

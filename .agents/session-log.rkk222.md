@@ -15429,3 +15429,25 @@
 
 - 公共配置个人分支 `public-usr_test_dev` 包含初始提交 `8a97231` 和修复提交 `a089368`；修复后工作树 clean，未推送 Gitee、未执行平台发布，因此共享运行配置尚未生效。
 - 本次不新增部署节点，不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、性能实现、安全协议、环境配置、generated SDK 或只读 OpenCode 源码；根仓库其它本地客户端改动未纳入本次提交。
+
+## 2026-08-27 - 完善麒麟与 Windows 本地客户端诊断日志
+
+### Why
+
+- 本地客户端发生安装、接入、连接、自更新或 OpenCode 启动问题时，原日志缺少统一启动会话、阶段、耗时和请求关联字段；麒麟与 Windows 启动器也没有同口径的持久诊断轨迹，现场难以快速定位故障阶段。
+
+### What
+
+- Java 客户端为每次 JVM 生成 `trace_client_*` 会话，在启动配置、接入、WSS、工作区注册、生命周期、自更新、公共能力、模型中继和 OpenCode 监管路径增加受控事件、requestId/traceId、generation、状态、耗时及根异常类型；日志模板对线程和消息做 CRLF 编码。
+- 麒麟 Shell 与 Windows Go 启动器统一写 state `logs/launcher.log`，记录平台检查、签名制品校验、release 准备/切换、运行时自检、接入、自启、进程退出、更新激活和回退，5 MiB 轮转为 `launcher-1.log`；Windows 额外保留不跟随符号链接的安全失败摘要。
+- 托盘日志导出纳入 client/launcher 日志并继续排除 `opencode.log`；统一禁止记录统一认证号、Client key/token、认证头、服务端正文、异常 message、prompt、请求正文或工作区文件内容。同步模块、架构、内部部署和现场排障文档。
+
+### How
+
+- 本地客户端 Maven reactor 231 passed / 1 skipped；Windows launcher 的 Go test、host/Windows go vet、Windows x64 交叉编译通过；麒麟完整打包回归与 Windows 候选打包回归均通过，覆盖日志生成、0600 权限、凭据不落日志、轮转、脱敏和符号链接拒绝。
+- 最终从 ZIP 回读验证 JAR 版本、诊断类、Log4j2 session 模板、Setup/稳定启动器 PE x64 类型、共享 catalog、manifest 和四类制品 RSA 签名。最终候选版本 `20260827212132`，ZIP SHA-256 为 `5288c7b618cab16372314a9ccba2fb867ff6cdd7c24737378aa60e8675973415`，证据状态为 `CANDIDATE_ONLY` 且 `authenticodeSigned=false`。
+
+### Result
+
+- 代码、跨平台构建和离线打包链路已验证；最终 Win10 候选 ZIP 可移交真机测试。当前 macOS 不能执行 Windows PE，仍未完成企业 Authenticode 签名和 Win10 1809+ 真机安装/接入/升级/回退/卸载验收；本次也未在真实麒麟 ARM 用户机部署验证。
+- 本次使用 `release`，不新增部署节点，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；未修改 `.env*`，未发布企业正式下载别名。

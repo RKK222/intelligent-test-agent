@@ -10,8 +10,53 @@ ALLOW_INSECURE_CONTROL="__ALLOW_INSECURE_CONTROL__"
 LAUNCHER_VERSION=1
 APPLY_EXIT_CODE=42
 ACTIVATION_FAILED_EXIT_CODE=43
+LOG_FILE=""
+CURRENT_STAGE="initialization"
+SESSION_ID="trace_launcher_${LAUNCHER_VERSION}_$$"
+
+# 启动器只记录受控阶段与签名制品元数据，不记录统一认证号、Client key、服务端正文或命令输出。
+log_event() {
+  log_level="$1"
+  log_name="$2"
+  shift 2
+  [ -n "${LOG_FILE}" ] || return 0
+  if command -v date >/dev/null 2>&1; then
+    log_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  else
+    log_time="unknown-time"
+  fi
+  # 环境变量或本地 marker 中的异常控制字符不能制造伪造日志行。
+  safe_fields="$(printf '%s' "$*" | tr '\r\n\t' '___')"
+  printf 'time=%s level=%s session=%s launcher=%s platform=linux architecture=arm64 stage=%s event=%s %s\n' \
+    "${log_time}" "${log_level}" "${SESSION_ID}" "${LAUNCHER_VERSION}" \
+    "${CURRENT_STAGE}" "${log_name}" "${safe_fields}" >>"${LOG_FILE}" 2>/dev/null || true
+}
+
+set_stage() {
+  CURRENT_STAGE="$1"
+  log_event INFO launcher_stage_started "stage=${CURRENT_STAGE}"
+}
+
+initialize_logging() {
+  logs_directory="${STATE_DIR}/logs"
+  mkdir -p "${logs_directory}"
+  chmod 0700 "${logs_directory}"
+  launcher_log="${logs_directory}/launcher.log"
+  if [ -L "${launcher_log}" ]; then
+    printf 'test-agent-local-client: 启动器日志不能是符号链接\n' >&2
+    exit 1
+  fi
+  if [ -f "${launcher_log}" ] && [ "$(wc -c <"${launcher_log}" | tr -d '[:space:]')" -ge 5242880 ]; then
+    rm -f "${logs_directory}/launcher-1.log"
+    mv "${launcher_log}" "${logs_directory}/launcher-1.log"
+  fi
+  : >>"${launcher_log}"
+  chmod 0600 "${launcher_log}"
+  LOG_FILE="${launcher_log}"
+}
 
 fail() {
+  log_event ERROR launcher_failed "stage=${CURRENT_STAGE} failureCode=LAUNCHER_STAGE_FAILED"
   printf 'test-agent-local-client: %s\n' "$*" >&2
   exit 1
 }
@@ -322,6 +367,8 @@ download_artifact() {
   local_name="$2"
   destination_root="$3"
   read_artifact_metadata "${kind}"
+  log_event INFO launcher_artifact_download_started \
+    "stage=${CURRENT_STAGE} kind=${kind} size=${ARTIFACT_SIZE} sha256=${ARTIFACT_SHA}"
   download_relative "${ARTIFACT_PATH}" "${destination_root}/${local_name}"
   download_relative "${ARTIFACT_SIGNATURE_PATH}" "${destination_root}/${local_name}.sig"
   [ "$(file_size "${destination_root}/${local_name}")" = "${ARTIFACT_SIZE}" ] \
@@ -332,6 +379,8 @@ download_artifact() {
     -signature "${destination_root}/${local_name}.sig" \
     "${destination_root}/${local_name}" >/dev/null \
     || fail "${kind} 制品签名校验失败"
+  log_event INFO launcher_artifact_ready \
+    "stage=${CURRENT_STAGE} kind=${kind} source=download size=${ARTIFACT_SIZE} sha256=${ARTIFACT_SHA}"
 }
 
 # 内容缓存只按制品类型和 SHA-256 定位；每次命中仍用当前安装器公钥重新验签。
@@ -392,6 +441,8 @@ reuse_cached_artifact() {
     || fail "无法复用 ${cache_kind} 内容缓存"
   chmod 0600 "${cache_destination_root}/${cache_local_name}" \
     "${cache_destination_root}/${cache_local_name}.sig"
+  log_event INFO launcher_artifact_ready \
+    "stage=${CURRENT_STAGE} kind=${cache_kind} source=content_cache size=${ARTIFACT_SIZE} sha256=${ARTIFACT_SHA}"
   printf '复用已校验的 %s 内容缓存。\n' "${cache_kind}"
 }
 
@@ -460,6 +511,8 @@ reuse_signed_artifact() {
     || fail "无法复用 ${reuse_kind} 本机缓存"
   chmod 0600 "${reuse_destination_root}/${reuse_local_name}" \
     "${reuse_destination_root}/${reuse_local_name}.sig"
+  log_event INFO launcher_artifact_ready \
+    "stage=${CURRENT_STAGE} kind=${reuse_kind} source=existing_release size=${ARTIFACT_SIZE} sha256=${ARTIFACT_SHA}"
   printf '从旧 release 迁移已校验的 %s 制品。\n' "${reuse_kind}"
 }
 
@@ -559,6 +612,7 @@ verify_release_directory() {
 }
 
 bootstrap_release() {
+  set_stage catalog_download
   mkdir -p "${RELEASES_DIR}"
   catalog_file="${TEMP_DIR}/catalog.json"
   catalog_signature="${TEMP_DIR}/catalog.json.sig"
@@ -569,12 +623,18 @@ bootstrap_release() {
   openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
     -signature "${catalog_signature}" "${catalog_file}" >/dev/null \
     || fail "版本 catalog 签名校验失败"
+  log_event INFO launcher_catalog_verified "stage=${CURRENT_STAGE} size=$(file_size "${catalog_file}")"
+  set_stage release_selection
   version="$(select_latest_compatible_version)" || fail "版本 catalog 没有兼容的麒麟 ARM64 发布"
+  log_event INFO launcher_release_selected "stage=${CURRENT_STAGE} targetVersion=${version}"
   final_directory="${RELEASES_DIR}/${version}"
   if [ -d "${final_directory}" ]; then
+    set_stage installed_release_verification
     verify_release_directory "${final_directory}" ""
     populate_artifact_cache_from_release "${final_directory}"
+    log_event INFO launcher_release_ready "stage=${CURRENT_STAGE} targetVersion=${version} source=installed_release"
   else
+    set_stage release_preparation
     cached_release_directory=""
     if cached_version="$(current_version 2>/dev/null)" && valid_version "${cached_version}"; then
       cached_candidate="${RELEASES_DIR}/${cached_version}"
@@ -621,11 +681,15 @@ bootstrap_release() {
       "${staging_directory}/test-agent-local-client.jar" \
       self-check "${staging_directory}" "${version}" >/dev/null \
       || fail "候选客户端本机自检失败"
+    log_event INFO launcher_candidate_self_check_completed "stage=${CURRENT_STAGE} targetVersion=${version}"
     verify_release_directory "${staging_directory}" ""
     mv "${staging_directory}" "${final_directory}"
     rmdir "${staging_parent}"
+    log_event INFO launcher_release_ready "stage=${CURRENT_STAGE} targetVersion=${version} source=new_release"
   fi
+  set_stage release_switch
   switch_current "${version}"
+  log_event INFO launcher_release_switched "stage=${CURRENT_STAGE} targetVersion=${version}"
 }
 
 switch_current() {
@@ -665,16 +729,21 @@ ensure_configuration() {
 }
 
 ensure_runtime() {
+  set_stage runtime_verification
   if [ ! -L "${INSTALL_ROOT}/current" ]; then
     bootstrap_release
+    set_stage runtime_verification
   fi
   active_version="$(current_version)" || fail "current 不是受控发布链接"
   verify_release_directory "${RELEASES_DIR}/${active_version}" ""
   ensure_configuration
+  log_event INFO launcher_runtime_ready "stage=${CURRENT_STAGE} activeVersion=${active_version}"
 }
 
 enroll_client() {
   active_version="$(current_version)"
+  set_stage enrollment
+  log_event INFO launcher_enrollment_started "stage=${CURRENT_STAGE} activeVersion=${active_version}"
   TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
   TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
   "${RELEASES_DIR}/${active_version}/jdk/bin/java" -jar \
@@ -682,6 +751,7 @@ enroll_client() {
   [ -f "${CONFIG_DIR}/credentials.properties" ] || fail "接入成功后未生成凭据文件"
   [ "$(file_mode "${CONFIG_DIR}/credentials.properties")" = 600 ] \
     || fail "凭据文件权限必须为 0600"
+  log_event INFO launcher_enrollment_completed "stage=${CURRENT_STAGE} activeVersion=${active_version}"
 }
 
 ensure_enrolled() {
@@ -698,7 +768,11 @@ ensure_enrolled() {
 }
 
 install_user_service() {
-  [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" != true ] || return 0
+  if [ "${TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START:-false}" = true ]; then
+    log_event INFO launcher_service_skipped "stage=service_install reason=test_override"
+    return 0
+  fi
+  set_stage service_install
   unit_dir="${HOME}/.config/systemd/user"
   desktop_dir="${HOME}/.local/share/applications"
   launcher_dir="${HOME}/.local/bin"
@@ -747,6 +821,7 @@ install_user_service() {
   systemctl --user daemon-reload
   systemctl --user enable test-agent-local-opencode-client.service
   systemctl --user restart test-agent-local-opencode-client.service
+  log_event INFO launcher_service_installed "stage=${CURRENT_STAGE} service=test-agent-local-opencode-client.service"
 }
 
 validate_pending() {
@@ -786,25 +861,33 @@ write_update_result() {
 }
 
 prepare_pending_switch() {
+  set_stage update_switch
   validate_pending
   [ "$(current_version)" = "${pending_current}" ] || fail "更新 marker 的当前版本已失效"
   verify_release_directory "${RELEASES_DIR}/${pending_target}" "${pending_digest}"
   rm -f "${STATE_DIR}/update-activation.properties" "${STATE_DIR}/update-result.properties"
   switch_current "${pending_target}"
+  log_event INFO launcher_update_switched \
+    "stage=${CURRENT_STAGE} currentVersion=${pending_current} targetVersion=${pending_target} direction=${pending_direction}"
 }
 
 rollback_pending() {
   rollback_error="$1"
   validate_pending
+  set_stage update_rollback
   verify_release_directory "${RELEASES_DIR}/${pending_current}" ""
   switch_current "${pending_current}"
   write_update_result AUTO_ROLLED_BACK "${rollback_error}" "${pending_current}"
   rm -f "${STATE_DIR}/update-activation.properties"
+  log_event WARN launcher_update_rolled_back \
+    "stage=${CURRENT_STAGE} restoredVersion=${pending_current} errorCode=${rollback_error}"
   printf '目标版本本机启动失败，已自动恢复到 %s。\n' "${pending_current}" >&2
 }
 
 run_activation_process() {
   active_version="$(current_version)"
+  set_stage update_activation
+  log_event INFO launcher_activation_started "stage=${CURRENT_STAGE} targetVersion=${active_version} timeoutSeconds=${TEST_AGENT_LOCAL_CLIENT_ACTIVATION_TIMEOUT_SECONDS:-70}"
   active_release="${RELEASES_DIR}/${active_version}"
   TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
   TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
@@ -826,6 +909,8 @@ run_activation_process() {
           wait "${client_pid}"
           activation_rc="$?"
           set -e
+          log_event INFO launcher_activation_ready \
+            "stage=${CURRENT_STAGE} targetVersion=${pending_target} clientExitCode=${activation_rc} elapsedSeconds=${elapsed}"
           return "${activation_rc}"
           ;;
         FAILED)
@@ -855,6 +940,7 @@ run_activation_process() {
 }
 
 run_client() {
+  set_stage managed_run
   ensure_runtime
   [ -f "${CONFIG_DIR}/credentials.properties" ] \
     || fail "尚未接入，请先在终端运行 test-agent-local-client enroll"
@@ -874,12 +960,14 @@ run_client() {
       fi
     else
       active_release="${RELEASES_DIR}/${active_version}"
+      log_event INFO launcher_client_process_started "stage=managed_run activeVersion=${active_version}"
       set +e
       TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${CONFIG_DIR}" \
       TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${STATE_DIR}" \
       "${active_release}/jdk/bin/java" -jar "${active_release}/test-agent-local-client.jar"
       client_rc="$?"
       set -e
+      log_event INFO launcher_client_process_exited "stage=managed_run activeVersion=${active_version} exitCode=${client_rc}"
     fi
     case "${client_rc}" in
       "${APPLY_EXIT_CODE}") prepare_pending_switch ;;
@@ -889,6 +977,16 @@ run_client() {
   done
 }
 
+INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${HOME}/.local/share/testagent/local-opencode-client}"
+CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${HOME}/.config/testagent/local-opencode-client}"
+STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${HOME}/.local/state/testagent/local-opencode-client}"
+RELEASES_DIR="${INSTALL_ROOT}/releases"
+ARTIFACT_CACHE_DIR="${INSTALL_ROOT}/artifact-cache"
+umask 077
+mkdir -p "${INSTALL_ROOT}" "${CONFIG_DIR}" "${STATE_DIR}"
+chmod 0700 "${CONFIG_DIR}" "${STATE_DIR}"
+initialize_logging
+set_stage prerequisites
 require_command curl
 require_command openssl
 require_command tar
@@ -900,21 +998,18 @@ require_command grep
 require_command find
 require_command cmp
 verify_platform
-
-INSTALL_ROOT="${TEST_AGENT_LOCAL_CLIENT_INSTALL_ROOT:-${HOME}/.local/share/testagent/local-opencode-client}"
-CONFIG_DIR="${TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR:-${HOME}/.config/testagent/local-opencode-client}"
-STATE_DIR="${TEST_AGENT_LOCAL_CLIENT_STATE_DIR:-${HOME}/.local/state/testagent/local-opencode-client}"
-RELEASES_DIR="${INSTALL_ROOT}/releases"
-ARTIFACT_CACHE_DIR="${INSTALL_ROOT}/artifact-cache"
-umask 077
-mkdir -p "${INSTALL_ROOT}" "${CONFIG_DIR}" "${STATE_DIR}"
-chmod 0700 "${CONFIG_DIR}" "${STATE_DIR}"
+log_event INFO launcher_prerequisites_verified "stage=${CURRENT_STAGE}"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-local-client.XXXXXX")"
 trap cleanup INT TERM EXIT
 PUBLIC_KEY_FILE="${TEMP_DIR}/release-public.pem"
 printf '%s' "${PUBLIC_KEY_PEM_BASE64}" | openssl base64 -d -A >"${PUBLIC_KEY_FILE}"
 
 command_name="${1:-setup}"
+case "${command_name}" in
+  setup|enroll|start|run|--version) ;;
+  *) set_stage command_dispatch; fail "不支持的命令: ${command_name}" ;;
+esac
+log_event INFO launcher_command_started "stage=command_dispatch command=${command_name}"
 case "${command_name}" in
   setup)
     [ "$#" -le 1 ] || fail "setup 不接受额外参数"
@@ -953,8 +1048,9 @@ case "${command_name}" in
       printf 'test-agent-local-client launcher=%s release=not-installed\n' "${LAUNCHER_VERSION}"
     fi
     ;;
-  *) fail "不支持的命令: ${command_name}" ;;
 esac
+
+log_event INFO launcher_command_completed "stage=${CURRENT_STAGE} command=${command_name}"
 
 cleanup
 TEMP_DIR=""

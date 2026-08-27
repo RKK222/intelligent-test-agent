@@ -36,6 +36,19 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
   错误码和协议响应异常分别使用固定类别；日志只附根异常类型，不记录统一认证号、Client key、异常消息、服务端错误正文
   或 details，终端会保留可执行的中文提示和日志绝对路径，不再只显示 `exit code=1`。
 
+## 诊断日志
+
+- Java 运行日志固定写入 state 下的 `logs/client.log`，每行包含单次 JVM 的 `session=trace_client_*`。启动配置、接入、
+  WSS 建连/断开、工作区注册、生命周期命令、自更新、公共能力激活、本地模型转发和 OpenCode 监管均记录受控事件名；有平台
+  请求时同时记录 `requestId`、`traceId`、connection generation、状态、耗时和根异常类型，便于与后台同时间窗关联。
+- 麒麟 Shell 启动器和 Windows Go 启动器统一写入同目录的 `launcher.log`，覆盖前置检查、catalog/manifest/制品校验、
+  release 准备与切换、运行时自检、接入、自启安装、进程退出、更新激活和自动回退。启动器日志达到 5 MiB 时轮转为
+  `launcher-1.log`；Windows 还保留 `windows-launcher-error.log` 作为只含阶段、安全错误码和错误类型的短摘要。
+- `client.log` 按日或 10 MiB 滚动，最多保留 10 份。托盘“下载客户端日志”会导出 client/launcher 日志，最多 20 个文件、
+  每个文件末尾最多 10 MiB；继续明确排除 `opencode.log`、配置、密钥与工作区文件。
+- 所有诊断日志都禁止记录统一认证号、Client key/token、Authorization/Cookie、服务端响应正文、异常 message、prompt、
+  请求正文和工作区文件内容。现场排查只传日志里的 session、requestId/traceId、稳定 failureCode 和时间窗，不索取凭据。
+
 ## Git 权限巡检
 
 - 新客户端声明 `WORKSPACE_GIT_ACCESS_V1`，通过既有受认证文件 RPC 接收 `workspace.git-access.check`；工作区 ID 与根摘要仍由注册表校验，服务端不能传入任意本地路径。

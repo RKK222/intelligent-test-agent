@@ -21,12 +21,13 @@ final class LocalClientFailureReporter {
         Path logFile = prepareLogFile();
         FailureDetails details = details(command, failure);
         try {
+            LocalClientDiagnostics.ensureSessionId();
             LoggerFactory.getLogger(LocalClientMain.class).error(
                     "local_client_command_failed command={} failureCategory={} failureCode={} rootFailureType={}",
                     command == null ? "UNKNOWN" : command.name(),
                     details.category(),
                     details.failureCode(),
-                    rootFailureType(failure));
+                    LocalClientDiagnostics.rootFailureType(failure));
         } catch (RuntimeException ignored) {
             // 日志系统自身异常不能覆盖原始故障；终端仍输出安全说明和预期日志位置。
         }
@@ -77,14 +78,6 @@ final class LocalClientFailureReporter {
             // 目录不可写时仍返回预期路径，终端提示不会掩盖原始异常。
         }
         return logsDirectory.resolve("client.log");
-    }
-
-    private static String rootFailureType(Throwable failure) {
-        Throwable current = failure;
-        while (current.getCause() != null && current.getCause() != current) {
-            current = current.getCause();
-        }
-        return current.getClass().getSimpleName();
     }
 
     record FailureDetails(String category, String failureCode, String userMessage) {

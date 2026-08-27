@@ -28,6 +28,9 @@ class LocalClientLogExporterTest {
         Files.createDirectories(logs);
         Files.writeString(logs.resolve("client.log"), "client-line\n");
         Files.writeString(logs.resolve("client-error.log"), "error-line\n");
+        Files.writeString(logs.resolve("launcher.log"), "launcher-stage-line\n");
+        Files.writeString(logs.resolve("launcher-1.log"), "previous-launcher-line\n");
+        Files.writeString(logs.resolve("windows-launcher-error.log"), "windows-error-code\n");
         Files.writeString(logs.resolve("opencode.log"), "workspace prompt must not be exported\n");
         Files.writeString(temporaryDirectory.resolve("client.key"), "tack_v1_secret-value\n");
 
@@ -37,7 +40,9 @@ class LocalClientLogExporterTest {
                 Clock.fixed(Instant.parse("2026-08-15T08:30:00Z"), ZoneOffset.UTC));
 
         Map<String, String> entries = unzip(archive);
-        assertThat(entries).containsOnlyKeys("client.log", "client-error.log");
+        assertThat(entries).containsOnlyKeys(
+                "client.log", "client-error.log", "launcher.log", "launcher-1.log",
+                "windows-launcher-error.log");
         assertThat(entries.values()).allMatch(value -> !value.contains("secret-value"));
         assertThat(entries.values()).allMatch(value -> !value.contains("workspace prompt"));
     }

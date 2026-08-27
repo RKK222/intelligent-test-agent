@@ -381,6 +381,17 @@ test -x "${TEST_ROOT}/install/runtime/current/jdk/bin/javac"
 test -x "${TEST_ROOT}/install/runtime/current/opencode/bin/opencode"
 test ! -L "${TEST_ROOT}/install/runtime/current/jdk"
 grep -qx 'source=system-jdk21' "${TEST_ROOT}/install/runtime/current/jdk.provenance"
+LAUNCHER_LOG="${TEST_ROOT}/install/state/logs/launcher.log"
+test -f "${LAUNCHER_LOG}"
+test "$(stat -f '%Lp' "${LAUNCHER_LOG}" 2>/dev/null || stat -c '%a' "${LAUNCHER_LOG}")" = 600
+grep -Fq 'event=launcher_command_started' "${LAUNCHER_LOG}"
+grep -Fq 'event=launcher_release_selected' "${LAUNCHER_LOG}"
+grep -Fq 'event=launcher_runtime_ready' "${LAUNCHER_LOG}"
+grep -Fq 'event=launcher_command_completed' "${LAUNCHER_LOG}"
+if grep -Eq 'test-user|tack_v1_test-only-value' "${LAUNCHER_LOG}"; then
+  echo "Launcher log unexpectedly contains enrollment credentials" >&2
+  exit 1
+fi
 if grep -q '/jdk.tar.gz' "${TEST_ROOT}/http.log"; then
   echo "完整系统 JDK 21 初装意外请求了 JDK 归档或签名" >&2
   exit 1

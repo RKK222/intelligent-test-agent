@@ -73,6 +73,11 @@ type layout struct {
 
 func main() {
 	if err := run(os.Args); err != nil {
+		launcherEvent("ERROR", "launcher_failed", map[string]any{
+			"stage":       diagnostics.currentStage(),
+			"failureCode": launcherFailureCode(),
+			"errorType":   fmt.Sprintf("%T", err),
+		})
 		writeErrorLog(err)
 		fmt.Fprintf(os.Stderr, "TestAgent 本地客户端失败：%v\n", err)
 		os.Exit(1)
@@ -82,9 +87,6 @@ func main() {
 func run(args []string) error {
 	if runtime.GOOS != "windows" {
 		return errors.New("Win10 安装器只能在 Windows 上运行")
-	}
-	if err := ensureSupportedWindows(); err != nil {
-		return err
 	}
 	command := "setup"
 	if len(args) > 1 {
@@ -97,23 +99,42 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	diagnostics, err = newLauncherDiagnostics(paths)
+	if err != nil {
+		return fmt.Errorf("初始化启动器日志失败: %w", err)
+	}
+	setLauncherStage("platform_check")
+	build, err := ensureSupportedWindows()
+	launcherEvent("INFO", "launcher_platform_checked", map[string]any{
+		"windowsBuild": build,
+		"minimumBuild": minimumWindowsBuild,
+		"supported":    err == nil,
+	})
+	if err != nil {
+		return err
+	}
+	launcherEvent("INFO", "launcher_command_started", map[string]any{"command": command})
+	var commandError error
 	switch command {
 	case "setup":
-		return installFromPackage(paths)
+		commandError = installFromPackage(paths)
 	case "run":
-		return runManagedClient(paths)
+		commandError = runManagedClient(paths)
 	case "start":
-		return startScheduledTask()
+		setLauncherStage("scheduled_task_start")
+		commandError = startScheduledTask()
 	case "--self-check":
 		fmt.Printf("TestAgent Win10 x64 launcher ready: launcher=%d release=%s\n", launcherVersion, releaseVersion)
-		return nil
 	case "--version":
 		current, _ := readCurrentVersion(paths)
 		fmt.Printf("test-agent-local-client launcher=%d release=%s\n", launcherVersion, current)
-		return nil
 	default:
-		return fmt.Errorf("不支持的命令: %s", command)
+		commandError = errors.New("不支持的命令")
 	}
+	if commandError == nil {
+		launcherEvent("INFO", "launcher_command_completed", map[string]any{"command": command})
+	}
+	return commandError
 }
 
 func resolveLayout() (layout, error) {
@@ -137,6 +158,8 @@ func resolveLayout() (layout, error) {
 
 // installFromPackage 只接受与 Setup.exe 同目录的固定 resources，不从临时目录猜测安装来源。
 func installFromPackage(paths layout) error {
+	startedAt := time.Now()
+	setLauncherStage("package_verification")
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("无法定位安装器: %w", err)
@@ -147,6 +170,9 @@ func installFromPackage(paths layout) error {
 	if err := verifyDigest(stableSource, expectedStableSHA256); err != nil {
 		return fmt.Errorf("稳定启动器校验失败: %w", err)
 	}
+	launcherEvent("INFO", "launcher_stable_binary_verified", map[string]any{
+		"sha256": expectedStableSHA256,
+	})
 	manifest, manifestDigest, err := verifyPackagedRelease(resources)
 	if err != nil {
 		return err
@@ -154,6 +180,12 @@ func installFromPackage(paths layout) error {
 	if manifest.Version != releaseVersion {
 		return errors.New("安装器版本与发布清单不一致")
 	}
+	launcherEvent("INFO", "launcher_manifest_verified", map[string]any{
+		"targetVersion":  manifest.Version,
+		"manifestDigest": manifestDigest,
+		"artifactCount":  len(manifest.Artifacts),
+	})
+	setLauncherStage("release_install")
 	if err := os.MkdirAll(paths.releasesDir, 0o700); err != nil {
 		return err
 	}
@@ -161,27 +193,40 @@ func installFromPackage(paths layout) error {
 	if err := installRelease(resources, finalRelease, manifest, manifestDigest); err != nil {
 		return err
 	}
+	launcherEvent("INFO", "launcher_release_ready", map[string]any{"targetVersion": manifest.Version})
+	setLauncherStage("stable_launcher_install")
 	if err := os.MkdirAll(filepath.Dir(paths.launcher), 0o700); err != nil {
 		return err
 	}
 	if err := copyAtomically(stableSource, paths.launcher); err != nil {
 		return fmt.Errorf("安装稳定启动器失败: %w", err)
 	}
+	launcherEvent("INFO", "launcher_stable_binary_installed", map[string]any{"targetVersion": manifest.Version})
+	setLauncherStage("release_switch")
 	if err := switchCurrent(paths, manifest.Version); err != nil {
 		return err
 	}
+	launcherEvent("INFO", "launcher_release_switched", map[string]any{"targetVersion": manifest.Version})
+	setLauncherStage("enrollment")
 	if err := ensureEnrolled(paths, manifest.Version); err != nil {
 		return fmt.Errorf("客户端接入未完成: %w", err)
 	}
+	setLauncherStage("scheduled_task_install")
 	if err := installScheduledTask(paths); err != nil {
 		return err
 	}
+	setLauncherStage("start_menu_install")
 	if err := installStartMenuShortcut(paths); err != nil {
 		return err
 	}
+	setLauncherStage("scheduled_task_start")
 	if err := startScheduledTask(); err != nil {
 		return err
 	}
+	launcherEvent("INFO", "launcher_setup_completed", map[string]any{
+		"targetVersion": manifest.Version,
+		"durationMs":    time.Since(startedAt).Milliseconds(),
+	})
 	fmt.Println("Win10 x64 本地客户端已安装并开始连接平台。")
 	return nil
 }
@@ -236,6 +281,9 @@ func verifyArtifactSet(release string, manifest releaseManifest, publicKey *rsa.
 			return fmt.Errorf("%s 签名无效: %w", artifact.Kind, err)
 		}
 		required[artifact.Kind] = true
+		launcherEvent("INFO", "launcher_artifact_verified", map[string]any{
+			"kind": artifact.Kind, "size": artifact.Size, "sha256": artifact.SHA256,
+		})
 	}
 	for kind, present := range required {
 		if !present {
@@ -247,8 +295,14 @@ func verifyArtifactSet(release string, manifest releaseManifest, publicKey *rsa.
 
 func installRelease(resources, finalRelease string, manifest releaseManifest, manifestDigest string) error {
 	if info, err := os.Stat(finalRelease); err == nil && info.IsDir() {
+		launcherEvent("INFO", "launcher_release_reuse_started", map[string]any{
+			"targetVersion": manifest.Version, "source": "installed_release",
+		})
 		return verifyInstalledRelease(finalRelease, manifest.Version, manifestDigest)
 	}
+	launcherEvent("INFO", "launcher_release_preparation_started", map[string]any{
+		"targetVersion": manifest.Version, "source": "package_resources",
+	})
 	stagingParent, err := os.MkdirTemp(filepath.Dir(finalRelease), ".setup-")
 	if err != nil {
 		return err
@@ -270,15 +324,18 @@ func installRelease(resources, finalRelease string, manifest releaseManifest, ma
 	if err := extractTarGz(filepath.Join(staging, "jdk.tar.gz"), staging, "jdk"); err != nil {
 		return fmt.Errorf("解压 JDK 失败: %w", err)
 	}
+	launcherEvent("INFO", "launcher_archive_extracted", map[string]any{"kind": "JDK"})
 	if err := extractTarGz(filepath.Join(staging, "opencode.tar.gz"), staging, "opencode"); err != nil {
 		return fmt.Errorf("解压 OpenCode 失败: %w", err)
 	}
+	launcherEvent("INFO", "launcher_archive_extracted", map[string]any{"kind": "OPENCODE"})
 	if err := verifyRuntime(staging, manifest.Version); err != nil {
 		return err
 	}
 	if err := os.Rename(staging, finalRelease); err != nil {
 		return fmt.Errorf("发布单元切换失败: %w", err)
 	}
+	launcherEvent("INFO", "launcher_release_published", map[string]any{"targetVersion": manifest.Version})
 	return nil
 }
 
@@ -290,6 +347,8 @@ func verifyInstalledRelease(release, version, manifestDigest string) error {
 }
 
 func verifyRuntime(release, version string) error {
+	startedAt := time.Now()
+	launcherEvent("INFO", "launcher_runtime_verification_started", map[string]any{"targetVersion": version})
 	java := filepath.Join(release, "jdk", "bin", "java.exe")
 	javaw := filepath.Join(release, "jdk", "bin", "javaw.exe")
 	javac := filepath.Join(release, "jdk", "bin", "javac.exe")
@@ -311,8 +370,12 @@ func verifyRuntime(release, version string) error {
 	command := exec.Command(java, "-jar", jar, "self-check", release, version)
 	command.Env = append(os.Environ(), "TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR=", "TEST_AGENT_LOCAL_CLIENT_STATE_DIR=")
 	if output, err = command.CombinedOutput(); err != nil {
-		return fmt.Errorf("候选客户端自检失败: %s", strings.TrimSpace(string(output)))
+		return errors.New("候选客户端自检失败")
 	}
+	launcherEvent("INFO", "launcher_runtime_verification_completed", map[string]any{
+		"targetVersion": version, "javaMajor": 21, "opencodeVersion": "1.18.4",
+		"durationMs": time.Since(startedAt).Milliseconds(),
+	})
 	return nil
 }
 
@@ -369,6 +432,7 @@ func writeConfiguration(paths layout, version string) error {
 }
 
 func runManagedClient(paths layout) error {
+	setLauncherStage("managed_run")
 	for {
 		current, err := readCurrentVersion(paths)
 		if err != nil {
@@ -377,6 +441,9 @@ func runManagedClient(paths layout) error {
 		pending, pendingErr := readProperties(filepath.Join(paths.stateDir, "pending-update.properties"))
 		_, resultErr := os.Stat(filepath.Join(paths.stateDir, "update-result.properties"))
 		if pendingErr == nil && os.IsNotExist(resultErr) && pending["targetVersion"] == current {
+			launcherEvent("INFO", "launcher_pending_activation_detected", map[string]any{
+				"currentVersion": current, "targetVersion": pending["targetVersion"],
+			})
 			exitCode, err := runActivation(paths, pending)
 			if err != nil {
 				return err
@@ -393,6 +460,9 @@ func runManagedClient(paths layout) error {
 		if err != nil {
 			return err
 		}
+		launcherEvent("INFO", "launcher_client_process_exited", map[string]any{
+			"activeVersion": current, "exitCode": exitCode,
+		})
 		switch exitCode {
 		case applyExitCode:
 			if err := preparePendingSwitch(paths); err != nil {
@@ -412,6 +482,7 @@ func runManagedClient(paths layout) error {
 }
 
 func preparePendingSwitch(paths layout) error {
+	setLauncherStage("update_switch")
 	pending, err := validPending(paths)
 	if err != nil {
 		return err
@@ -425,11 +496,23 @@ func preparePendingSwitch(paths layout) error {
 	}
 	_ = os.Remove(filepath.Join(paths.stateDir, "update-activation.properties"))
 	_ = os.Remove(filepath.Join(paths.stateDir, "update-result.properties"))
-	return switchCurrent(paths, pending["targetVersion"])
+	if err := switchCurrent(paths, pending["targetVersion"]); err != nil {
+		return err
+	}
+	launcherEvent("INFO", "launcher_update_switched", map[string]any{
+		"currentVersion": pending["currentVersion"], "targetVersion": pending["targetVersion"],
+		"direction": pending["direction"],
+	})
+	return nil
 }
 
 func runActivation(paths layout, pending map[string]string) (int, error) {
+	setLauncherStage("update_activation")
 	version := pending["targetVersion"]
+	startedAt := time.Now()
+	launcherEvent("INFO", "launcher_activation_started", map[string]any{
+		"targetVersion": version, "timeoutSeconds": 70,
+	})
 	command, err := javaCommand(paths, version, true)
 	if err != nil {
 		return 0, err
@@ -444,6 +527,10 @@ func runActivation(paths layout, pending map[string]string) (int, error) {
 		select {
 		case <-processDone:
 			_ = rollbackPending(paths, "TARGET_ACTIVATION_FAILED")
+			launcherEvent("WARN", "launcher_activation_failed", map[string]any{
+				"targetVersion": version, "failureCode": "TARGET_ACTIVATION_FAILED",
+				"durationMs": time.Since(startedAt).Milliseconds(),
+			})
 			return 99, nil
 		default:
 		}
@@ -460,6 +547,9 @@ func runActivation(paths layout, pending map[string]string) (int, error) {
 					return 0, err
 				}
 				err := <-processDone
+				launcherEvent("INFO", "launcher_activation_ready", map[string]any{
+					"targetVersion": version, "durationMs": time.Since(startedAt).Milliseconds(),
+				})
 				return processExitCode(err), nil
 			case "FAILED":
 				_ = command.Process.Kill()
@@ -476,10 +566,15 @@ func runActivation(paths layout, pending map[string]string) (int, error) {
 	_ = command.Process.Kill()
 	<-processDone
 	_ = rollbackPending(paths, "TARGET_ACTIVATION_TIMEOUT")
+	launcherEvent("WARN", "launcher_activation_failed", map[string]any{
+		"targetVersion": version, "failureCode": "TARGET_ACTIVATION_TIMEOUT",
+		"durationMs": time.Since(startedAt).Milliseconds(),
+	})
 	return 99, nil
 }
 
 func rollbackPending(paths layout, errorCode string) error {
+	setLauncherStage("update_rollback")
 	pending, err := validPending(paths)
 	if err != nil {
 		return err
@@ -494,6 +589,9 @@ func rollbackPending(paths layout, errorCode string) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(paths.stateDir, "update-activation.properties"))
+	launcherEvent("WARN", "launcher_update_rolled_back", map[string]any{
+		"restoredVersion": pending["currentVersion"], "failureCode": errorCode,
+	})
 	return nil
 }
 
@@ -584,8 +682,15 @@ func ensureEnrolled(paths layout, version string) error {
 		return fmt.Errorf("重新接入标记不安全: %w", err)
 	}
 	if credentialsPresent && !markerPresent {
+		launcherEvent("INFO", "launcher_enrollment_reused", map[string]any{
+			"targetVersion": version, "credentialPresent": true,
+		})
 		return nil
 	}
+	launcherEvent("INFO", "launcher_enrollment_started", map[string]any{
+		"targetVersion": version, "credentialPresent": credentialsPresent,
+		"reEnrollmentRequired": markerPresent,
+	})
 	if err := runJava(paths, version, "enroll"); err != nil {
 		return err
 	}
@@ -596,6 +701,7 @@ func ensureEnrolled(paths layout, version string) error {
 	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	launcherEvent("INFO", "launcher_enrollment_completed", map[string]any{"targetVersion": version})
 	return nil
 }
 
@@ -632,6 +738,9 @@ func runJavaExitCode(paths layout, version string) (int, error) {
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
+	launcherEvent("INFO", "launcher_client_process_started", map[string]any{
+		"activeVersion": version, "mode": "background",
+	})
 	err = command.Run()
 	return processExitCode(err), nil
 }
@@ -657,17 +766,19 @@ func javaCommand(paths layout, version string, gui bool, arguments ...string) (*
 func installScheduledTask(paths layout) error {
 	taskCommand := "\"" + paths.launcher + "\" run"
 	command := exec.Command("schtasks.exe", "/Create", "/F", "/SC", "ONLOGON", "/RL", "LIMITED", "/IT", "/TN", scheduledTaskName, "/TR", taskCommand)
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("创建用户级启动任务失败: %s", strings.TrimSpace(string(output)))
+	if _, err := command.CombinedOutput(); err != nil {
+		return errors.New("创建用户级启动任务失败")
 	}
+	launcherEvent("INFO", "launcher_scheduled_task_installed", map[string]any{"task": scheduledTaskName})
 	return nil
 }
 
 func startScheduledTask() error {
 	command := exec.Command("schtasks.exe", "/Run", "/TN", scheduledTaskName)
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("启动用户级任务失败: %s", strings.TrimSpace(string(output)))
+	if _, err := command.CombinedOutput(); err != nil {
+		return errors.New("启动用户级任务失败")
 	}
+	launcherEvent("INFO", "launcher_scheduled_task_started", map[string]any{"task": scheduledTaskName})
 	return nil
 }
 
@@ -680,9 +791,10 @@ func installStartMenuShortcut(paths layout) error {
 	script := `$shell = New-Object -ComObject WScript.Shell; $link = $shell.CreateShortcut($env:TEST_AGENT_SHORTCUT); $link.TargetPath = $env:TEST_AGENT_LAUNCHER; $link.Arguments = 'start'; $link.WorkingDirectory = Split-Path $env:TEST_AGENT_LAUNCHER; $link.IconLocation = $env:TEST_AGENT_LAUNCHER; $link.Save()`
 	command := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	command.Env = append(os.Environ(), "TEST_AGENT_SHORTCUT="+shortcut, "TEST_AGENT_LAUNCHER="+paths.launcher)
-	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("创建开始菜单快捷方式失败: %s", strings.TrimSpace(string(output)))
+	if _, err := command.CombinedOutput(); err != nil {
+		return errors.New("创建开始菜单快捷方式失败")
 	}
+	launcherEvent("INFO", "launcher_start_menu_shortcut_installed", map[string]any{"name": "TestAgent"})
 	return nil
 }
 
@@ -1002,7 +1114,36 @@ func writeErrorLog(cause error) {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Join(paths.stateDir, "logs"), 0o700)
-	message := fmt.Sprintf("time=%s launcher=%d release=%s error=%s\n", time.Now().UTC().Format(time.RFC3339), launcherVersion, releaseVersion, cause)
-	_ = os.WriteFile(filepath.Join(paths.stateDir, "logs", "windows-launcher-error.log"), []byte(message), 0o600)
+	logsDirectory := filepath.Join(paths.stateDir, "logs")
+	if err := os.MkdirAll(logsDirectory, 0o700); err != nil {
+		return
+	}
+	message := fmt.Sprintf("time=%s session=%s launcher=%d release=%s stage=%s failureCode=%s errorType=%T details=see-launcher.log\n",
+		time.Now().UTC().Format(time.RFC3339), diagnostics.currentSession(), launcherVersion,
+		releaseVersion, diagnostics.currentStage(), launcherFailureCode(), cause)
+	_ = writeSafeSummary(filepath.Join(logsDirectory, "windows-launcher-error.log"), []byte(message))
+}
+
+// writeSafeSummary 用独占创建替换上一份短摘要，避免跟随用户状态目录中的符号链接。
+func writeSafeSummary(path string, content []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return errors.New("错误摘要不是安全的普通文件")
+		}
+		if err := os.Remove(path); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, writeErr := file.Write(content)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	return closeErr
 }

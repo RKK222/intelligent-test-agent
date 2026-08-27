@@ -70,10 +70,15 @@ final class LocalClientLogExporter {
     }
 
     private static boolean isClientLogName(String name) {
-        if ("client.log".equals(name) || "client-error.log".equals(name)) {
+        if ("client.log".equals(name)
+                || "client-error.log".equals(name)
+                || "launcher.log".equals(name)
+                || "windows-launcher-error.log".equals(name)) {
             return true;
         }
-        return (name.startsWith("client-") || name.startsWith("client-error-"))
+        return (name.startsWith("client-")
+                || name.startsWith("client-error-")
+                || name.startsWith("launcher-"))
                 && (name.endsWith(".log") || name.endsWith(".log.gz"));
     }
 

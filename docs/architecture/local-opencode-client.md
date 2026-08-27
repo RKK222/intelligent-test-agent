@@ -216,9 +216,14 @@ macOS、Windows 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托
 
 会话进度来自当前连接最多 64 个有界活动请求，只展示操作类型、数量和耗时，不展示 prompt、路径或请求体。
 托盘定时刷新只复制内存快照，状态不变时不重绘；OpenCode 状态复用原有 5 秒心跳结果，不新增健康探测。
-客户端日志目录在桌面主题和任何 Logger 初始化前创建并写入 Logback 系统属性，由 JVM 自行滚动到 state 目录；
-导出限制为最多 20 个客户端日志、每文件末尾 10 MiB，明确排除
-密钥、配置、OpenCode 日志与工作区文件。
+客户端日志目录在桌面主题和任何 Logger 初始化前创建并写入日志系统属性，由 JVM 自行滚动到 state 目录。Java
+`client.log` 为每次 JVM 启动生成 `trace_client_*` session，并在启动、接入、WSS、工作区注册、生命周期、自更新、公共能力、
+模型转发和 OpenCode 监管阶段记录受控事件名、requestId/traceId、connection generation、状态、耗时及根异常类型。
+麒麟 Shell 和 Windows Go 启动器都在同一目录写 `launcher.log`，以启动 session 串联前置检查、签名校验、release 切换、
+运行时自检、接入、自启、激活及回退；达到 5 MiB 后只保留一份 `launcher-1.log`。Windows 另写安全失败摘要
+`windows-launcher-error.log`。日志不包含统一认证号、Client key/token、认证头、服务端正文、异常 message、prompt、请求正文
+或工作区文件内容。托盘导出限制为最多 20 个 client/launcher 日志、每文件末尾 10 MiB，明确排除密钥、配置、
+`opencode.log` 与工作区文件。
 
 Observability 使用独立 loopback relay token，不复用模型 grant。插件 hook 仅把必要引用放入有界队列，后台微任务脱敏和
 序列化；Java 以最低优先级单线程写未确认 spool。WSS 发送顺序固定为控制/模型/文件优先，Trace 只有在它们全部空闲至少

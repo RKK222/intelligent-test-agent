@@ -332,6 +332,36 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 该日志不会记录统一认证号、Client key、服务端错误正文或 details。`PLATFORM_CONNECTION_FAILED` 必须从真实用户机验证
 到 `mimo.sdc.cs.icbc:9996` 的链路，并检查 Nginx Upgrade 路由；`PLATFORM_REJECTED` 应按同一时间窗和其中的稳定错误码
 检查 `.4/.114` 后端日志，不能反复索取 Key 或用开发者本机连通代替企业侧证据。
+
+### 客户端日志定位
+
+麒麟默认日志目录为 `~/.local/state/testagent/local-opencode-client/logs/`，Windows 默认目录为
+`%LOCALAPPDATA%\TestAgent\local-opencode-client\state\logs\`；若部署时显式覆盖
+`TEST_AGENT_LOCAL_CLIENT_STATE_DIR`，则统一查看该目录下的 `logs/`。排查顺序如下：
+
+1. 先看 `launcher.log`，按 `session`、`stage` 和 `event` 判断失败发生在平台检查、签名制品下载/校验、release 切换、
+   Java/OpenCode 自检、enroll、自启还是更新激活；达到 5 MiB 后上一份为 `launcher-1.log`。
+2. 再看 `client.log`，用 `session=trace_client_*`、`requestId`、`traceId`、generation、`failureCode`、`rootFailureType` 和
+   `durationMs` 对齐 `.4/.114` 后台同一时间窗。Windows 安装器早期失败还可先看 `windows-launcher-error.log` 的阶段摘要。
+3. `opencode.log` 可能包含工作区上下文，不进入托盘日志包；只有在用户授权且确有必要时在本机查看，不应作为普通排障附件。
+
+麒麟最近日志可执行：
+
+~~~bash
+tail -n 200 "$HOME/.local/state/testagent/local-opencode-client/logs/launcher.log"
+tail -n 200 "$HOME/.local/state/testagent/local-opencode-client/logs/client.log"
+~~~
+
+Windows PowerShell 最近日志可执行：
+
+~~~powershell
+Get-Content "$env:LOCALAPPDATA\TestAgent\local-opencode-client\state\logs\launcher.log" -Tail 200
+Get-Content "$env:LOCALAPPDATA\TestAgent\local-opencode-client\state\logs\client.log" -Tail 200
+~~~
+
+日志只记录受控元数据，不记录统一认证号、Client key/token、认证头、服务端响应正文、异常 message、prompt、请求正文或
+工作区文件内容。若日志中出现 `REDACTED`，应使用相邻事件的安全错误码和 traceId 排查，禁止要求用户补发原始敏感值。
+
 客户端完成重连认证后，平台会优先恢复全局最近项，再扫描该用户包含已替换实例在内的全部历史本地工作区，逐个核验真实
 路径摘要与文件系统身份并恢复客户端根映射，不要求用户在页面重复选择。若历史版本已经生成了新实例 ID，同一自动恢复流程会在
 当前唯一在线客户端上保留原 workspaceId 接管每个有效绑定；某个目录已删除或身份变化时只跳过该项，不影响其它目录恢复。

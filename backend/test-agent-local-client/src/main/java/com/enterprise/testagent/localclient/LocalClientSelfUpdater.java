@@ -5,6 +5,8 @@ import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 客户端更新和回退共用的两阶段状态机。
@@ -14,6 +16,7 @@ import java.util.Objects;
  */
 final class LocalClientSelfUpdater {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientSelfUpdater.class);
     static final int LAUNCHER_APPLY_EXIT_CODE = 42;
 
     private final String currentVersion;
@@ -49,6 +52,10 @@ final class LocalClientSelfUpdater {
     /** 下载、验签、解包和候选自检均完成后才发送 PREPARED。重复命令只重发已有结果。 */
     void handleCommand(LocalClientPayloads.UpdateCommand command) {
         validateCommand(command);
+        long startedNanos = System.nanoTime();
+        LOGGER.info("local_client_update_prepare_started commandId={} generation={} policyRevision={} currentVersion={} targetVersion={} direction={}",
+                command.commandId(), command.connectionGeneration(), command.policyRevision(), currentVersion,
+                command.targetVersion(), command.direction());
         AttemptContext context;
         synchronized (this) {
             if (active != null) {
@@ -56,6 +63,8 @@ final class LocalClientSelfUpdater {
                     throw new IllegalStateException("another local client update command is active");
                 }
                 if (active.prepared != null && !active.cancelled && !active.applying) {
+                    LOGGER.info("local_client_update_prepare_replayed commandId={} targetVersion={}",
+                            command.commandId(), command.targetVersion());
                     sendPrepared(active);
                 }
                 return;
@@ -71,6 +80,9 @@ final class LocalClientSelfUpdater {
                     currentVersion,
                     phase -> {
                         requireActive(context);
+                        LOGGER.info("local_client_update_prepare_phase commandId={} targetVersion={} phase={} durationMs={}",
+                                command.commandId(), command.targetVersion(), phase,
+                                LocalClientDiagnostics.elapsedMillis(startedNanos));
                         runtime.sendStatus(status(command, phase.name(), null));
                     });
             requireActive(context);
@@ -82,6 +94,9 @@ final class LocalClientSelfUpdater {
                 context.prepared = prepared;
                 context.preparedAt = Instant.now(clock);
             }
+            LOGGER.info("local_client_update_prepare_completed commandId={} targetVersion={} releaseDigest={} durationMs={}",
+                    command.commandId(), command.targetVersion(), prepared.releaseDigest(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             sendPrepared(context);
         } catch (RuntimeException exception) {
             failPreparation(context, exception);
@@ -103,6 +118,10 @@ final class LocalClientSelfUpdater {
 
         runtime.quiesce();
         runtime.sendStatus(status(context.command, "APPLYING", null));
+        long startedNanos = System.nanoTime();
+        LOGGER.info("local_client_update_apply_started commandId={} currentVersion={} targetVersion={} direction={}",
+                context.command.commandId(), currentVersion, context.command.targetVersion(),
+                context.command.direction());
         try {
             LocalClientPayloads.LifecycleResult stopped = opencodeStopper.stop();
             if (!stopped.success()
@@ -112,13 +131,22 @@ final class LocalClientSelfUpdater {
                 failApply(context, "OPENCODE_STOP_FAILED");
                 return;
             }
+            LOGGER.info("local_client_update_apply_opencode_stopped commandId={} durationMs={}",
+                    context.command.commandId(), LocalClientDiagnostics.elapsedMillis(startedNanos));
             markerStore.writePending(
                     context.command,
                     currentVersion,
                     context.prepared.releaseDigest(),
                     context.preparedAt);
+            LOGGER.info("local_client_update_apply_handoff_ready commandId={} targetVersion={} durationMs={} exitCode={}",
+                    context.command.commandId(), context.command.targetVersion(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos), LAUNCHER_APPLY_EXIT_CODE);
             runtime.requestExit(LAUNCHER_APPLY_EXIT_CODE);
         } catch (RuntimeException exception) {
+            LOGGER.warn("local_client_update_apply_failed commandId={} targetVersion={} durationMs={} rootFailureType={}",
+                    context.command.commandId(), context.command.targetVersion(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos),
+                    LocalClientDiagnostics.rootFailureType(exception));
             failApply(context, "UPDATE_APPLY_FAILED");
         }
     }
@@ -138,11 +166,15 @@ final class LocalClientSelfUpdater {
         active.cancelled = true;
         active = null;
         runtime.resume();
+        LOGGER.info("local_client_update_cancelled commandId={} targetVersion={} source=server",
+                cancel.commandId(), cancel.targetVersion());
     }
 
     /** 连接 generation 消失后废弃尚未 APPLY 的授权，避免重连后沿用旧 fencing 坐标。 */
     synchronized void handleConnectionLost() {
         if (active != null && !active.applying) {
+            LOGGER.info("local_client_update_cancelled commandId={} targetVersion={} source=connection_lost",
+                    active.command.commandId(), active.command.targetVersion());
             active.cancelled = true;
             active = null;
             runtime.resume();
@@ -170,6 +202,9 @@ final class LocalClientSelfUpdater {
                 result.status(),
                 result.errorCode(),
                 result.observedAt()));
+        LOGGER.info("local_client_update_result_reported commandId={} targetVersion={} status={} errorCode={} actualVersion={}",
+                pending.commandId(), pending.targetVersion(), result.status(), result.errorCode(),
+                result.actualVersion());
     }
 
     /** 只接受与唯一持久化 result 完全相同的 ACK，错代或重复 ACK 均保持安全幂等。 */
@@ -188,6 +223,8 @@ final class LocalClientSelfUpdater {
         }
         markerStore.clearPending();
         markerStore.clearResult();
+        LOGGER.info("local_client_update_result_acknowledged commandId={} status={}",
+                ack.commandId(), ack.status());
     }
 
     private void sendPrepared(AttemptContext context) {
@@ -217,6 +254,9 @@ final class LocalClientSelfUpdater {
                         : Thread.currentThread().isInterrupted()
                                 ? "PREPARE_INTERRUPTED"
                                 : "PREPARE_FAILED";
+        LOGGER.warn("local_client_update_prepare_failed commandId={} targetVersion={} errorCode={} rootFailureType={}",
+                context.command.commandId(), context.command.targetVersion(), errorCode,
+                LocalClientDiagnostics.rootFailureType(exception));
         runtime.sendStatus(status(context.command, "FAILED", errorCode));
     }
 
@@ -228,6 +268,8 @@ final class LocalClientSelfUpdater {
         }
         runtime.sendStatus(status(context.command, "FAILED", errorCode));
         runtime.resume();
+        LOGGER.warn("local_client_update_apply_rejected commandId={} targetVersion={} errorCode={}",
+                context.command.commandId(), context.command.targetVersion(), errorCode);
     }
 
     private synchronized AttemptContext requireMatching(LocalClientPayloads.UpdateApply apply) {

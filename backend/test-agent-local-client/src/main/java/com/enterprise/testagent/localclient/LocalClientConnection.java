@@ -62,6 +62,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final LocalClientConfiguration configuration;
     private final LocalClientCredentialFile.Credentials credentials;
     private final LocalClientBuildInfo buildInfo;
+    private final LocalClientPlatform platform = LocalClientPlatform.current();
     private final LocalClientStateStore stateStore;
     private final OpencodeProcessSupervisor supervisor;
     private final LocalModelRelay modelRelay;
@@ -84,6 +85,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             new ConcurrentHashMap<>();
     private final AtomicReference<WebSocket> webSocket = new AtomicReference<>();
     private final AtomicLong generation = new AtomicLong();
+    private final AtomicLong connectionAttemptSequence = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicBoolean resourcesClosed = new AtomicBoolean();
     private final AtomicBoolean acceptingRequests = new AtomicBoolean(true);
@@ -170,7 +172,11 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     int runForever() {
         long backoffSeconds = 1;
         while (!closed.get() && !reEnrollmentRequired.get() && !Thread.currentThread().isInterrupted()) {
+            long attempt = connectionAttemptSequence.incrementAndGet();
+            long attemptStartedNanos = System.nanoTime();
             connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.CONNECTING);
+            LOGGER.info("local_client_connection_attempt_started attempt={} server={} connectTimeoutSeconds={} retryBackoffSeconds={}",
+                    attempt, configuration.serverBaseUri(), 10, backoffSeconds);
             ConnectionListener listener = new ConnectionListener();
             activeListener.set(listener);
             activeConnectionClose.set(listener.closedFuture());
@@ -189,8 +195,10 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 if (!closed.get()) {
                     String failureCode = connectionFailureCode(exception);
                     lastFailure.set(failureCode);
-                    LOGGER.warn("local_client_connection_failed server={} failureCode={} retrySeconds={}",
-                            configuration.serverBaseUri(), failureCode, backoffSeconds);
+                    LOGGER.warn("local_client_connection_attempt_failed attempt={} server={} failureCode={} rootFailureType={} durationMs={} retrySeconds={}",
+                            attempt, configuration.serverBaseUri(), failureCode,
+                            LocalClientDiagnostics.rootFailureType(exception),
+                            LocalClientDiagnostics.elapsedMillis(attemptStartedNanos), backoffSeconds);
                 }
             } finally {
                 activeListener.compareAndSet(listener, null);
@@ -202,6 +210,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 backoffSeconds = reconnectRequested ? 1 : Math.min(30, backoffSeconds * 2);
             }
         }
+        LOGGER.info("local_client_connection_loop_stopped closed={} reEnrollmentRequired={} interrupted={} exitCode={}",
+                closed.get(), reEnrollmentRequired.get(), Thread.currentThread().isInterrupted(), exitCode.get());
         return exitCode.get();
     }
 
@@ -289,6 +299,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (isRegistrationAuthenticationFailure(frame, codec, generation.get())) {
             stateStore.requireReEnrollment();
             reEnrollmentRequired.set(true);
+            LOGGER.warn("local_client_registration_rejected failureCode=UNAUTHENTICATED reEnrollmentRequired=true");
             throw new IllegalStateException("本地客户端凭据已失效，请手动重新接入");
         }
         if (frame.type() == LocalClientFrameType.REGISTERED) {
@@ -314,8 +325,10 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             if (publicCapabilityUpdater != null) {
                 publicCapabilityUpdater.reportVersion();
             }
-            LOGGER.info("local_client_registered clientInstanceId={} generation={}",
-                    stateStore.read().clientInstanceId(), registered.connectionGeneration());
+            LOGGER.info("local_client_registered clientInstanceId={} generation={} clientVersion={} platform={} architecture={} selfUpdateEnabled={} observabilityEnabled={} publicCapabilitySyncEnabled={}",
+                    stateStore.read().clientInstanceId(), registered.connectionGeneration(), buildInfo.clientVersion(),
+                    platform.platform(), platform.architecture(), selfUpdater != null,
+                    observabilityRelay != null, publicCapabilityUpdater != null);
             return;
         }
         long currentGeneration = generation.get();
@@ -376,6 +389,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             throw new IllegalStateException("unknown workspace registration response");
         }
         pending.complete(codec.payload(frame, LocalClientPayloads.WorkspaceRegistered.class));
+        LOGGER.info("local_client_workspace_registration_completed requestId={} traceId={} generation={}",
+                frame.requestId(), frame.traceId(), generation.get());
     }
 
     private boolean completeWorkspaceRegistrationError(LocalClientFrame frame) {
@@ -385,6 +400,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             return false;
         }
         LocalClientPayloads.Error error = codec.payload(frame, LocalClientPayloads.Error.class);
+        LOGGER.warn("local_client_workspace_registration_failed requestId={} traceId={} generation={} failureCode={}",
+                frame.requestId(), frame.traceId(), generation.get(), error.code());
         pending.completeExceptionally(new IllegalStateException(
                 error.message() == null || error.message().isBlank() ? "本地工作区注册失败" : error.message()));
         return true;
@@ -393,6 +410,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private void submit(LocalClientFrame frame, Runnable task) {
         markForegroundActivity();
         if (!acceptingRequests.get()) {
+            LOGGER.info("local_client_operation_rejected requestId={} traceId={} operation={} generation={} reason=CLIENT_UPDATING",
+                    frame.requestId(), frame.traceId(), frame.type(), generation.get());
             sendResponse(frame, LocalClientFrameType.ERROR, new LocalClientPayloads.Error(
                     "LOCAL_CLIENT_UPDATING",
                     "本地客户端正在切换版本",
@@ -404,12 +423,24 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (operations.size() >= MAX_ACTIVE_OPERATIONS) {
             throw new IllegalStateException("too many active local client operations");
         }
+        long operationStartedNanos = System.nanoTime();
         FutureTask<Void> future = new FutureTask<>(() -> {
+            boolean succeeded = false;
             try {
                 task.run();
+                succeeded = true;
             } catch (RuntimeException exception) {
+                LOGGER.warn("local_client_operation_failed requestId={} traceId={} operation={} generation={} durationMs={} rootFailureType={}",
+                        frame.requestId(), frame.traceId(), frame.type(), generation.get(),
+                        LocalClientDiagnostics.elapsedMillis(operationStartedNanos),
+                        LocalClientDiagnostics.rootFailureType(exception));
                 sendError(frame, exception);
             } finally {
+                if (succeeded && frame.type() != LocalClientFrameType.HTTP_REQUEST) {
+                    LOGGER.info("local_client_operation_completed requestId={} traceId={} operation={} generation={} durationMs={}",
+                            frame.requestId(), frame.traceId(), frame.type(), generation.get(),
+                            LocalClientDiagnostics.elapsedMillis(operationStartedNanos));
+                }
                 operations.remove(frame.requestId());
                 operationProgress.remove(frame.requestId());
                 markForegroundActivity();
@@ -421,6 +452,10 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         }
         operationProgress.put(frame.requestId(), new LocalClientRuntimeSnapshot.ActiveOperation(
                 frame.requestId(), frame.type(), Instant.now()));
+        if (frame.type() != LocalClientFrameType.HTTP_REQUEST) {
+            LOGGER.info("local_client_operation_started requestId={} traceId={} operation={} generation={} activeOperations={}",
+                    frame.requestId(), frame.traceId(), frame.type(), generation.get(), operations.size());
+        }
         try {
             operationExecutor.execute(future);
         } catch (RuntimeException exception) {
@@ -436,6 +471,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 stateStore.read().clientInstanceId(), generation.get(), policy)) {
             throw new IllegalArgumentException("version policy coordinates are invalid");
         }
+        LOGGER.info("local_client_version_policy_received generation={} policyRevision={} targetVersion={} direction={} force={}",
+                generation.get(), policy.policyRevision(), policy.targetVersion(), policy.direction(), policy.force());
         // 非强制策略只驱动平台站内信；实际切换始终等待带幂等 commandId 的 UPDATE_COMMAND。
     }
 
@@ -480,6 +517,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         LocalClientSelfUpdater updater = requireSelfUpdater();
         LocalClientPayloads.UpdateCommand command = codec.payload(frame, LocalClientPayloads.UpdateCommand.class);
         requireUpdateCoordinates(frame, command.commandId(), command.connectionGeneration());
+        LOGGER.info("local_client_update_command_submitted commandId={} traceId={} generation={} targetVersion={} direction={} policyRevision={}",
+                command.commandId(), frame.traceId(), command.connectionGeneration(), command.targetVersion(),
+                command.direction(), command.policyRevision());
         FutureTask<Void> future = new FutureTask<>(() -> {
             try {
                 updater.handleCommand(command);
@@ -505,12 +545,16 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private void handleUpdateApply(LocalClientFrame frame) {
         LocalClientPayloads.UpdateApply apply = codec.payload(frame, LocalClientPayloads.UpdateApply.class);
         requireUpdateCoordinates(frame, apply.commandId(), apply.connectionGeneration());
+        LOGGER.info("local_client_update_apply_received commandId={} traceId={} generation={} targetVersion={}",
+                apply.commandId(), frame.traceId(), apply.connectionGeneration(), apply.targetVersion());
         requireSelfUpdater().handleApply(apply);
     }
 
     private void handleUpdateCancel(LocalClientFrame frame) {
         LocalClientPayloads.UpdateCancel cancel = codec.payload(frame, LocalClientPayloads.UpdateCancel.class);
         requireUpdateCoordinates(frame, cancel.commandId(), cancel.connectionGeneration());
+        LOGGER.info("local_client_update_cancel_received commandId={} traceId={} generation={} targetVersion={}",
+                cancel.commandId(), frame.traceId(), cancel.connectionGeneration(), cancel.targetVersion());
         requireSelfUpdater().handleCancel(cancel);
         Future<?> future = operations.remove(cancel.commandId());
         if (future != null) {
@@ -529,6 +573,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private void handleLifecycle(LocalClientFrame frame) {
         LocalClientPayloads.LifecycleCommand command = codec.payload(frame, LocalClientPayloads.LifecycleCommand.class);
         String action = command.action() == null ? "" : command.action().trim().toUpperCase(Locale.ROOT);
+        long startedNanos = System.nanoTime();
+        LOGGER.info("local_opencode_lifecycle_started requestId={} traceId={} action={} preferredPort={}",
+                frame.requestId(), frame.traceId(), action, command.preferredPort());
         LocalClientPayloads.LifecycleResult result = switch (action) {
             case "START" -> supervisor.start(command.preferredPort());
             case "RESTART" -> supervisor.restart(command.preferredPort());
@@ -537,6 +584,10 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             default -> throw new IllegalArgumentException("unsupported lifecycle action");
         };
         processStatus.set(result);
+        LOGGER.info("local_opencode_lifecycle_completed requestId={} traceId={} action={} success={} processStatus={} processId={} port={} healthy={} durationMs={}",
+                frame.requestId(), frame.traceId(), action, result.success(), result.processStatus(),
+                result.processId(), result.opencodePort(), result.opencodeHealthy(),
+                LocalClientDiagnostics.elapsedMillis(startedNanos));
         sendResponse(frame, LocalClientFrameType.LIFECYCLE_RESULT, result);
     }
 
@@ -619,6 +670,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         if (future != null) {
             future.cancel(true);
         }
+        LOGGER.info("local_client_operation_cancelled requestId={} traceId={} targetRequestId={} taskFound={}",
+                frame.requestId(), frame.traceId(), cancel.targetRequestId(), future != null);
     }
 
     private void startHeartbeat() {
@@ -642,6 +695,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             try {
                 status = supervisor.status();
             } catch (RuntimeException exception) {
+                LOGGER.warn("local_opencode_heartbeat_status_failed generation={} rootFailureType={}",
+                        currentGeneration, LocalClientDiagnostics.rootFailureType(exception));
                 status = new LocalClientPayloads.LifecycleResult(
                         false, "FAILED", null, null, null, false, null, "状态检查失败");
             }
@@ -661,6 +716,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                             LocalClientRegistrationFrames.reportedAddresses(),
                             Instant.now()))));
         } catch (RuntimeException exception) {
+            LOGGER.warn("local_client_heartbeat_failed generation={} failureCode={} rootFailureType={}",
+                    generation.get(), connectionFailureCode(exception),
+                    LocalClientDiagnostics.rootFailureType(exception));
             WebSocket socket = webSocket.get();
             if (socket != null) {
                 socket.abort();
@@ -901,6 +959,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             long delay = versionCheckDelaySeconds(ThreadLocalRandom.current().nextInt(61));
             versionCheckTask.set(scheduler.schedule(this::versionCheckSafely, delay, TimeUnit.SECONDS));
         } catch (RuntimeException exception) {
+            LOGGER.warn("local_client_version_check_failed generation={} failureCode={} rootFailureType={}",
+                    generation.get(), connectionFailureCode(exception),
+                    LocalClientDiagnostics.rootFailureType(exception));
             WebSocket socket = webSocket.get();
             if (socket != null) {
                 socket.abort();
@@ -919,6 +980,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         synchronized (this) {
             socket.sendText(codec.encode(frame), true).toCompletableFuture().join();
         }
+        LOGGER.info("local_client_registration_sent requestId={} traceId={} clientVersion={} platform={} architecture={}",
+                frame.requestId(), frame.traceId(), buildInfo.clientVersion(), platform.platform(),
+                platform.architecture());
     }
 
     private void sendResponse(LocalClientFrame request, LocalClientFrameType type, Object payload) {
@@ -932,6 +996,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     }
 
     private void sendError(LocalClientFrame request, RuntimeException exception) {
+        LOGGER.warn("local_client_operation_error_response requestId={} traceId={} operation={} generation={} failureCode=LOCAL_CLIENT_OPERATION_FAILED rootFailureType={}",
+                request.requestId(), request.traceId(), request.type(), generation.get(),
+                LocalClientDiagnostics.rootFailureType(exception));
         try {
             sendResponse(request, LocalClientFrameType.ERROR, new LocalClientPayloads.Error(
                     "LOCAL_CLIENT_OPERATION_FAILED",
@@ -957,6 +1024,9 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     }
 
     private void disconnected() {
+        long previousGeneration = generation.get();
+        Instant previousConnectedAt = connectedAt.get();
+        int activeOperationCount = operations.size();
         webSocket.set(null);
         generation.set(0);
         modelRelay.clearGrant();
@@ -989,6 +1059,14 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         }
         if (selfUpdater != null) {
             selfUpdater.handleConnectionLost();
+        }
+        if (previousGeneration > 0 || previousConnectedAt != null || activeOperationCount > 0) {
+            long onlineDurationMs = previousConnectedAt == null
+                    ? 0L
+                    : Math.max(0L, Duration.between(previousConnectedAt, Instant.now()).toMillis());
+            LOGGER.info("local_client_disconnected previousGeneration={} onlineDurationMs={} cancelledOperations={} closed={} reEnrollmentRequired={}",
+                    previousGeneration, onlineDurationMs, activeOperationCount, closed.get(),
+                    reEnrollmentRequired.get());
         }
     }
 
@@ -1146,6 +1224,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             return;
         }
         connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.STOPPING);
+        LOGGER.info("local_client_connection_close_started generation={} activeOperations={}",
+                generation.get(), operations.size());
         reconnectSignal.release();
         closed.set(true);
         WebSocket socket = webSocket.getAndSet(null);
@@ -1164,6 +1244,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         inboundExecutor.close();
         operationExecutor.close();
         scheduler.close();
+        LOGGER.info("local_client_connection_close_completed");
     }
 
     @Override
@@ -1191,6 +1272,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     @Override
     public void quiesce() {
         acceptingRequests.set(false);
+        LOGGER.info("local_client_runtime_quiesced activeOperations={}", operations.size());
         operations.forEach((id, future) -> future.cancel(true));
         operations.clear();
         fileRpcHandler.abortAll();
@@ -1199,6 +1281,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     @Override
     public void resume() {
         acceptingRequests.set(true);
+        LOGGER.info("local_client_runtime_resumed");
     }
 
     @Override
@@ -1207,6 +1290,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             throw new IllegalArgumentException("unsupported local client exit code");
         }
         exitCode.compareAndSet(0, requestedExitCode);
+        LOGGER.info("local_client_exit_requested source=self_update exitCode={} generation={}",
+                requestedExitCode, generation.get());
         closed.set(true);
         connectionState.set(LocalClientRuntimeSnapshot.ConnectionState.STOPPING);
         reconnectSignal.release();
@@ -1231,6 +1316,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         @Override
         public void onOpen(WebSocket socket) {
             webSocket.set(socket);
+            LOGGER.info("local_client_websocket_opened attempt={}", connectionAttemptSequence.get());
             sendRegistration(socket);
             socket.request(1);
         }
@@ -1271,12 +1357,17 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
 
         @Override
         public CompletionStage<?> onClose(WebSocket socket, int statusCode, String reason) {
+            LOGGER.info("local_client_websocket_closed attempt={} statusCode={} registeredGeneration={}",
+                    connectionAttemptSequence.get(), statusCode, generation.get());
             closedFuture.complete(null);
             return CompletableFuture.completedFuture(null);
         }
 
         @Override
         public void onError(WebSocket socket, Throwable error) {
+            LOGGER.warn("local_client_websocket_error attempt={} failureCode={} rootFailureType={}",
+                    connectionAttemptSequence.get(), connectionFailureCode(error),
+                    LocalClientDiagnostics.rootFailureType(error));
             closedFuture.completeExceptionally(error);
         }
 

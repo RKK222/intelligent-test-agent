@@ -86,13 +86,22 @@ final class OpencodeProcessSupervisor {
             managedModelConfigContent = validated;
             // 客户端升级或重连时可能继承仍在运行的旧 OpenCode；下一次 start 必须重启后再报告就绪。
             managedModelRestartRequired = true;
+            LOGGER.info("local_opencode_managed_model_config_changed configPresent={} restartRequired=true",
+                    validated != null);
         }
     }
 
     synchronized LocalClientPayloads.LifecycleResult start(Integer preferredPort) {
+        long startedNanos = System.nanoTime();
         LocalClientPayloads.LifecycleResult current = status();
+        LOGGER.info("local_opencode_start_requested preferredPort={} currentStatus={} currentProcessId={} currentPort={} currentHealthy={} modelRestartRequired={}",
+                preferredPort, current.processStatus(), current.processId(), current.opencodePort(),
+                current.opencodeHealthy(), managedModelRestartRequired);
         if (current.success() && "RUNNING".equals(current.processStatus()) && current.opencodeHealthy()) {
             if (!managedModelRestartRequired) {
+                LOGGER.info("local_opencode_start_reused processId={} port={} durationMs={}",
+                        current.processId(), current.opencodePort(),
+                        LocalClientDiagnostics.elapsedMillis(startedNanos));
                 return current;
             }
             LocalClientPayloads.LifecycleResult stopped = stop();
@@ -116,19 +125,32 @@ final class OpencodeProcessSupervisor {
         RuntimeException lastFailure = null;
         for (int port : ports) {
             if (!portAvailable(port)) {
+                LOGGER.debug("local_opencode_start_port_skipped port={} reason=PORT_UNAVAILABLE", port);
                 continue;
             }
             try {
-                return startOnPort(executable, port);
+                LocalClientPayloads.LifecycleResult started = startOnPort(executable, port);
+                LOGGER.info("local_opencode_start_completed success={} processStatus={} processId={} port={} healthy={} durationMs={}",
+                        started.success(), started.processStatus(), started.processId(), started.opencodePort(),
+                        started.opencodeHealthy(), LocalClientDiagnostics.elapsedMillis(startedNanos));
+                return started;
             } catch (RuntimeException exception) {
+                LOGGER.warn("local_opencode_start_attempt_failed port={} rootFailureType={} durationMs={}",
+                        port, LocalClientDiagnostics.rootFailureType(exception),
+                        LocalClientDiagnostics.elapsedMillis(startedNanos));
                 lastFailure = exception;
             }
         }
         String message = lastFailure == null ? "没有可用的本地 OpenCode 端口" : "本地 OpenCode 启动失败";
+        LOGGER.warn("local_opencode_start_failed preferredPort={} candidateCount={} failureCode={} rootFailureType={} durationMs={}",
+                preferredPort, ports.size(), lastFailure == null ? "NO_PORT_AVAILABLE" : "PROCESS_START_FAILED",
+                lastFailure == null ? "NONE" : LocalClientDiagnostics.rootFailureType(lastFailure),
+                LocalClientDiagnostics.elapsedMillis(startedNanos));
         return result(false, "FAILED", null, null, null, false, executable.toString(), message);
     }
 
     synchronized LocalClientPayloads.LifecycleResult restart(Integer preferredPort) {
+        LOGGER.info("local_opencode_restart_requested preferredPort={}", preferredPort);
         LocalClientPayloads.LifecycleResult stopped = stop();
         if (!stopped.success()) {
             return stopped;
@@ -137,33 +159,47 @@ final class OpencodeProcessSupervisor {
     }
 
     synchronized LocalClientPayloads.LifecycleResult stop() {
+        long startedNanos = System.nanoTime();
         LocalClientPersistentState.ProcessState recorded = stateStore.read().process();
         if (recorded == null) {
+            LOGGER.info("local_opencode_stop_completed source=no_record durationMs={}",
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(true, "STOPPED", null, null, null, false, requireExecutable().toString(), "已停止");
         }
+        LOGGER.info("local_opencode_stop_started processId={} port={}", recorded.processId(), recorded.port());
         ProcessHandle handle = ProcessHandle.of(recorded.processId()).orElse(null);
         if (handle == null || !handle.isAlive()) {
             // 权威 PID 已退出时，端口上的任何新进程都不再属于本客户端：只清过期记录，绝不控制陌生进程。
             // 后续 start 会通过受控端口探测跳过占用端口，避免陈旧状态永久阻断自动恢复。
             clearProcess(recorded);
+            LOGGER.info("local_opencode_stop_completed processId={} port={} source=stale_record durationMs={}",
+                    recorded.processId(), recorded.port(), LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "原进程已退出");
         }
         IdentityCheck identity = checkIdentity(handle, recorded);
         if (!identity.matches()) {
+            LOGGER.warn("local_opencode_stop_failed processId={} port={} failureCode=PROCESS_IDENTITY_MISMATCH durationMs={}",
+                    recorded.processId(), recorded.port(), LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(),
                     healthy(recorded.port()), recorded.executable(), identity.message());
         }
         handle.destroy();
         waitForExit(handle, Duration.ofSeconds(5));
         if (handle.isAlive()) {
+            LOGGER.info("local_opencode_stop_force_requested processId={} port={}",
+                    recorded.processId(), recorded.port());
             handle.destroyForcibly();
             waitForExit(handle, Duration.ofSeconds(5));
         }
         if (handle.isAlive() || healthy(recorded.port())) {
+            LOGGER.warn("local_opencode_stop_failed processId={} port={} failureCode=STOP_CONFIRMATION_FAILED durationMs={}",
+                    recorded.processId(), recorded.port(), LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(false, "FAILED", recorded.processId(), recorded.startedAt(), recorded.port(),
                     healthy(recorded.port()), recorded.executable(), "本地 OpenCode 停止确认失败");
         }
         clearProcess(recorded);
+        LOGGER.info("local_opencode_stop_completed processId={} port={} source=managed_stop durationMs={}",
+                recorded.processId(), recorded.port(), LocalClientDiagnostics.elapsedMillis(startedNanos));
         return result(true, "STOPPED", null, null, recorded.port(), false, recorded.executable(), "已停止");
     }
 
@@ -198,12 +234,23 @@ final class OpencodeProcessSupervisor {
 
     /** Agent/Skill 只 dispose；Tool/依赖变化必须完整重启，二者都以健康检查作为成功条件。 */
     synchronized LocalClientPayloads.LifecycleResult reloadPublicCapabilities(boolean requiresRestart) {
+        long startedNanos = System.nanoTime();
         LocalClientPayloads.LifecycleResult current = status();
+        LOGGER.info("local_opencode_public_capability_reload_started requiresRestart={} currentStatus={} processId={} port={}",
+                requiresRestart, current.processStatus(), current.processId(), current.opencodePort());
         if (requiresRestart) {
-            return restart(current.opencodePort());
+            LocalClientPayloads.LifecycleResult restarted = restart(current.opencodePort());
+            LOGGER.info("local_opencode_public_capability_reload_completed mode=restart success={} status={} healthy={} durationMs={}",
+                    restarted.success(), restarted.processStatus(), restarted.opencodeHealthy(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
+            return restarted;
         }
         if (!current.success() || current.opencodePort() == null || !current.opencodeHealthy()) {
-            return start(current.opencodePort());
+            LocalClientPayloads.LifecycleResult started = start(current.opencodePort());
+            LOGGER.info("local_opencode_public_capability_reload_completed mode=start success={} status={} healthy={} durationMs={}",
+                    started.success(), started.processStatus(), started.opencodeHealthy(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
+            return started;
         }
         try {
             HttpRequest request = HttpRequest.newBuilder()
@@ -213,15 +260,26 @@ final class OpencodeProcessSupervisor {
                     .build();
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                LOGGER.warn("local_opencode_public_capability_reload_failed mode=dispose status={} durationMs={}",
+                        response.statusCode(), LocalClientDiagnostics.elapsedMillis(startedNanos));
                 return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
                         false, current.executable(), "OpenCode dispose 失败");
             }
-            return status();
+            LocalClientPayloads.LifecycleResult reloaded = status();
+            LOGGER.info("local_opencode_public_capability_reload_completed mode=dispose success={} status={} healthy={} durationMs={}",
+                    reloaded.success(), reloaded.processStatus(), reloaded.opencodeHealthy(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
+            return reloaded;
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
+            LOGGER.warn("local_opencode_public_capability_reload_failed mode=dispose failureCode=INTERRUPTED durationMs={}",
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
                     false, current.executable(), "OpenCode dispose 被中断");
         } catch (IOException exception) {
+            LOGGER.warn("local_opencode_public_capability_reload_failed mode=dispose failureCode=CONNECTION_FAILED rootFailureType={} durationMs={}",
+                    LocalClientDiagnostics.rootFailureType(exception),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(false, "FAILED", current.processId(), current.processStartedAt(), current.opencodePort(),
                     false, current.executable(), "OpenCode dispose 连接失败");
         }
@@ -264,9 +322,9 @@ final class OpencodeProcessSupervisor {
                     path, Duration.between(startedAt, Instant.now()).toMillis());
             return false;
         } catch (IOException exception) {
-            LOGGER.warn("local_opencode_catalog_check_failed path={} durationMs={} errorType={} message={}",
+            LOGGER.warn("local_opencode_catalog_check_failed path={} durationMs={} errorType={}",
                     path, Duration.between(startedAt, Instant.now()).toMillis(),
-                    exception.getClass().getSimpleName(), exception.getMessage());
+                    exception.getClass().getSimpleName());
             return false;
         }
     }
@@ -287,6 +345,7 @@ final class OpencodeProcessSupervisor {
     }
 
     private LocalClientPayloads.LifecycleResult startOnPort(Path executable, int port) {
+        long startedNanos = System.nanoTime();
         Process process = null;
         LocalClientPersistentState.ProcessState recorded = null;
         try {
@@ -341,6 +400,9 @@ final class OpencodeProcessSupervisor {
             }
             builder.redirectErrorStream(true);
             builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logDirectory.resolve("opencode.log").toFile()));
+            LOGGER.info("local_opencode_process_launch_started port={} configSource={} observabilityEnabled={} offlineDependencies=true logFile=opencode.log",
+                    port, publicCapabilityStore == null ? "configured_directory" : "signed_public_capability",
+                    observabilityRelay != null);
             process = builder.start();
             ProcessHandle handle = process.toHandle();
             Instant startedAt = handle.info().startInstant()
@@ -348,18 +410,29 @@ final class OpencodeProcessSupervisor {
             recorded = new LocalClientPersistentState.ProcessState(
                     handle.pid(), startedAt, executable.toString(), port);
             persistProcess(recorded);
+            LOGGER.info("local_opencode_process_started processId={} port={} waitingForHealth=true durationMs={}",
+                    handle.pid(), port, LocalClientDiagnostics.elapsedMillis(startedNanos));
             if (!waitForHealth(handle, port, HEALTH_TIMEOUT)) {
                 stopExact(recorded, handle);
                 throw new IllegalStateException("OpenCode loopback health did not become ready");
             }
             managedModelRestartRequired = false;
+            LOGGER.info("local_opencode_process_healthy processId={} port={} healthTimeoutSeconds={} durationMs={}",
+                    handle.pid(), port, HEALTH_TIMEOUT.toSeconds(),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             return result(true, "RUNNING", handle.pid(), startedAt, port, true,
                     executable.toString(), "启动成功");
         } catch (IOException exception) {
             cleanupFailedStart(process, recorded);
+            LOGGER.warn("local_opencode_process_launch_failed port={} rootFailureType={} durationMs={}",
+                    port, LocalClientDiagnostics.rootFailureType(exception),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             throw new IllegalStateException("failed to launch OpenCode", exception);
         } catch (RuntimeException exception) {
             cleanupFailedStart(process, recorded);
+            LOGGER.warn("local_opencode_process_launch_failed port={} rootFailureType={} durationMs={}",
+                    port, LocalClientDiagnostics.rootFailureType(exception),
+                    LocalClientDiagnostics.elapsedMillis(startedNanos));
             throw exception;
         }
     }

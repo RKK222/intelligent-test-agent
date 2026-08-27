@@ -4,6 +4,6 @@ package main
 
 import "errors"
 
-func ensureSupportedWindows() error {
-	return errors.New("Win10 安装器只能在 Windows 上运行")
+func ensureSupportedWindows() (uint32, error) {
+	return 0, errors.New("Win10 安装器只能在 Windows 上运行")
 }

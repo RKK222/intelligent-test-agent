@@ -20,7 +20,7 @@ AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagen
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
 - [通用长期记忆部署](../../docs/deployment/qa-memory.md)：当前 `.134` 记忆 PostgreSQL 与 `.160` Mem0/VIP/CPU BGE 拓扑，以及扩容到多副本后的双集合热备、离线包、灰度和真实浏览器验收。
-- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：麒麟 ARM64/aarch64 + glibc 正式交付，以及 Windows 10 1809+ x64 候选打包、签名边界与验收闸门。
+- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：麒麟 ARM64/aarch64 + glibc 正式交付，以及 Windows 10 1809+ x64 候选打包、签名边界、验收闸门和 client/launcher 诊断日志定位。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
