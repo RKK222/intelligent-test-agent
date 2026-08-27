@@ -15353,7 +15353,7 @@
 
 ### How
 
-- `bash -n deploy/internal/package-release.sh deploy/internal/deploy-internal-release.sh deploy/internal/package-two-backend-complete.sh` 和 `git diff --check` 通过。
+- `bash -n deploy/internal/package-release.sh deploy/internal/deploy-internal-release.sh deploy/internal/package-two-backend-complete.sh` 和 `git diff --check` 通过；首次执行外层封装时，旧基线 checksum 的手册措辞未命中精确固定标记，门禁按设计在写出候选前失败关闭，随后把语义相同的说明改为门禁固定短语再重试。
 - 变更沿用既有常量、JAR 资源字节校验和 `START-HERE.md` 生成路径；正式内外层重建及独立解包校验将在本次发布追溯提交后重新执行。
 
 ### Result

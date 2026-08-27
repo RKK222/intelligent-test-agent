@@ -634,7 +634,7 @@ order by installed_rank;
 主链版本包括 `20260818094330`、`20260819125704`、`20260820153926`、`20260820182024`、
 `20260820202529`、`20260821113000`、`20260822075000`、`20260822103625`、`20260822201811`、
 `20260823104611`、`20260823123757`、`20260823191023`、`20260824100444`、`20260825091459`。已部署的
-`V20260825091459__local_client_instance_replacements_create.sql` 必须保持 Flyway checksum `749555545`，
+`V20260825091459__local_client_instance_replacements_create.sql` 的 Flyway checksum 固定为 `749555545` 并必须保持，
 源码 SHA-256 固定为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。第一台 `.4` 新 Java 从这套已部署
 history 启动时，本轮 PostgreSQL 只允许新增
 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`，Flyway checksum 固定为 `-976579670`，
