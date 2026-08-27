@@ -26,8 +26,11 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 - 托盘点击弹层改由 `LocalClientTrayPopup` 使用同一 FlatLaf 主题渲染，顶部复用小兔子和实时连接状态，动作分组、圆角、
   轻边框与工作区选择窗口保持一致；不再使用无法消费 Swing 主题的原生 AWT `PopupMenu`。会话进度与能力确认继续使用
   无遗留 Java 吉祥物图标的纯内容对话框。
-- `LocalClientMain` 在任何桌面主题或 Logger 初始化前创建 state 日志目录并设置 Logback 路径，确保 `client.log` 稳定写入
+- `LocalClientMain` 在任何桌面主题或 Logger 初始化前创建 state 日志目录并设置日志路径，确保 `client.log` 稳定写入
   用户状态目录，避免首次启动因占位路径过早固化而缺失文件。
+- 双击安装触发的短时 `enroll` 失败也由顶层错误报告器写入同一 `client.log`。凭据拒绝、企业入口连接失败、平台稳定
+  错误码和协议响应异常分别使用固定类别；日志只附根异常类型，不记录统一认证号、Client key、异常消息、服务端错误正文
+  或 details，终端会保留可执行的中文提示和日志绝对路径，不再只显示 `exit code=1`。
 
 ## Git 权限巡检
 

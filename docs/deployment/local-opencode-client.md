@@ -289,6 +289,12 @@ journalctl --user -u test-agent-local-opencode-client.service --since '5 minutes
 
 成功条件：user systemd service 为 active，日志没有认证或 WSS 连接失败，版本显示已安装 release。首次 enroll 的
 短连接得到 REGISTERED 后才写入 0700 配置目录与 0600 credentials.properties；普通重启、更新、回退和自动回切均复用它们。
+若输入 Client key 后安装退出，先按终端显示的日志绝对路径查看 `client.log`：新版会写入
+`local_client_command_failed`，并用 `AUTHENTICATION_REJECTED`、`PLATFORM_CONNECTION_FAILED`、
+`PLATFORM_REJECTED` 或 `PLATFORM_PROTOCOL_INVALID` 区分凭据/限流、用户机到入口链路、平台稳定错误码和协议版本问题。
+该日志不会记录统一认证号、Client key、服务端错误正文或 details。`PLATFORM_CONNECTION_FAILED` 必须从真实用户机验证
+到 `mimo.sdc.cs.icbc:9996` 的链路，并检查 Nginx Upgrade 路由；`PLATFORM_REJECTED` 应按同一时间窗和其中的稳定错误码
+检查 `.4/.114` 后端日志，不能反复索取 Key 或用开发者本机连通代替企业侧证据。
 客户端完成重连认证后，平台会优先恢复全局最近项，再扫描该用户包含已替换实例在内的全部历史本地工作区，逐个核验真实
 路径摘要与文件系统身份并恢复客户端根映射，不要求用户在页面重复选择。若历史版本已经生成了新实例 ID，同一自动恢复流程会在
 当前唯一在线客户端上保留原 workspaceId 接管每个有效绑定；某个目录已删除或身份变化时只跳过该项，不影响其它目录恢复。

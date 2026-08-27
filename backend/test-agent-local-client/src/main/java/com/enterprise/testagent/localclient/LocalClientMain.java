@@ -12,8 +12,19 @@ public final class LocalClientMain {
     private LocalClientMain() {
     }
 
-    public static void main(String[] args) throws Exception {
-        Command command = parseCommand(args);
+    public static void main(String[] args) {
+        Command command = null;
+        try {
+            command = parseCommand(args);
+            run(command, args);
+        } catch (Exception exception) {
+            LocalClientFailureReporter.report(command, exception, System.err);
+            System.exit(1);
+        }
+    }
+
+    /** 执行已解析命令；顶层统一负责把异常安全地写入持久日志并返回非零退出码。 */
+    static void run(Command command, String[] args) throws Exception {
         if (command == Command.VERSION) {
             System.out.println(versionText(LocalClientBuildInfo.current()));
             return;

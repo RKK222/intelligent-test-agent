@@ -52,22 +52,48 @@ final class LocalClientRegistrationProbe {
                 buildInfo,
                 requestId("lcep_"),
                 requestId("trace_"));
-        LocalClientFrame response = transport.exchange(configuration.websocketUri(), request);
+        LocalClientFrame response;
+        try {
+            response = transport.exchange(configuration.websocketUri(), request);
+        } catch (Exception exception) {
+            throw new PlatformConnectionException(exception);
+        }
         if (response.type() == LocalClientFrameType.ERROR) {
-            // 服务端错误正文可能区分账号、Key 或用户状态，首次接入一律折叠为同一失败。
-            throw new LocalClientEnrollment.AuthenticationException();
+            // 只读取稳定错误码做现场分类；服务端正文和 details 绝不进入客户端异常或日志。
+            LocalClientPayloads.Error error;
+            try {
+                error = codec.payload(response, LocalClientPayloads.Error.class);
+            } catch (RuntimeException exception) {
+                throw new InvalidRegistrationResponseException(exception);
+            }
+            String errorCode = safeErrorCode(error.code());
+            if ("UNAUTHENTICATED".equals(errorCode) || "RATE_LIMITED".equals(errorCode)) {
+                throw new LocalClientEnrollment.AuthenticationException();
+            }
+            throw new RegistrationRejectedException(errorCode);
         }
         if (response.type() != LocalClientFrameType.REGISTERED
                 || !request.requestId().equals(response.requestId())
                 || response.connectionGeneration() == null
                 || response.connectionGeneration() < 1) {
-            throw new LocalClientEnrollment.AuthenticationException();
+            throw new InvalidRegistrationResponseException();
         }
-        LocalClientPayloads.Registered registered = codec.payload(
-                response, LocalClientPayloads.Registered.class);
+        LocalClientPayloads.Registered registered;
+        try {
+            registered = codec.payload(response, LocalClientPayloads.Registered.class);
+        } catch (RuntimeException exception) {
+            throw new InvalidRegistrationResponseException(exception);
+        }
         if (registered.connectionGeneration() != response.connectionGeneration()) {
-            throw new LocalClientEnrollment.AuthenticationException();
+            throw new InvalidRegistrationResponseException();
         }
+    }
+
+    private static String safeErrorCode(String errorCode) {
+        if (errorCode == null || !errorCode.matches("[A-Z][A-Z0-9_]{0,63}")) {
+            return "UNKNOWN_PLATFORM_ERROR";
+        }
+        return errorCode;
     }
 
     private static String requestId(String prefix) {
@@ -77,6 +103,38 @@ final class LocalClientRegistrationProbe {
     @FunctionalInterface
     interface Transport {
         LocalClientFrame exchange(URI websocketUri, LocalClientFrame request) throws Exception;
+    }
+
+    /** 平台已返回受控 ERROR，但不是凭据失败；仅保留稳定错误码。 */
+    static final class RegistrationRejectedException extends Exception {
+        private final String failureCode;
+
+        RegistrationRejectedException(String failureCode) {
+            super("平台拒绝本地客户端登记: " + failureCode);
+            this.failureCode = failureCode;
+        }
+
+        String failureCode() {
+            return failureCode;
+        }
+    }
+
+    /** 用户机未能完成到企业平台登记入口的 WebSocket 交换。 */
+    static final class PlatformConnectionException extends Exception {
+        PlatformConnectionException(Throwable cause) {
+            super("无法连接企业平台登记地址", cause);
+        }
+    }
+
+    /** 平台响应类型、关联 ID 或载荷不符合登记协议。 */
+    static final class InvalidRegistrationResponseException extends Exception {
+        InvalidRegistrationResponseException() {
+            super("平台登记响应无效");
+        }
+
+        InvalidRegistrationResponseException(Throwable cause) {
+            super("平台登记响应无效", cause);
+        }
     }
 
     /** JDK WebSocket 只接收首个注册结果，随后立即关闭，避免首次接入进入控制运行态。 */

@@ -15260,3 +15260,28 @@
 - 最终外层包 SHA-256 为 `003718cdd9c10b388ce3481fb2d8488f41767e31fa2316d7b1dadfd4d10f51e6`，内层包为 `3111564b61a4cf4aed40102723048621b203192cc3ae1af95382458699265285`；`.4`、`.114`、`.2` 节点包依次为 `c8ccfc709b2fc7a67c1e2df980604682aa62488d891d83063b2d992e37f23f3e`、`5adb3b3bc0fcd45d05c74d70235e4a2e8911ef39f431006469bde78366b0c716`、`06bf7ce6c6f44723750d701d3aa5f493364c041f0b2efe2ec91b3d09b0dce498`。
 - 最终应用 JAR、persistence JAR、XXL integration JAR、前端归档 SHA-256 分别为 `c325df59112518e0ac5eede1f0335f6bc223fcbaa283b9895bbac637febba373`、`1e1030b8bc938445db723060fd90eb870a56582ad0ba182ef710fe8944845b40`、`a9cfdedbb59b369e6a9962850264ac7e9fddd2861af96bdd5b811d85b0e2eb9e`、`b6fdbde8f881d8ee0b73ec51e58cdcda047b2cb1f2a8c04679aa1fd07c2b6488`。
 - 固定交付件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，回读 SHA 和 ZIP CRC 均通过，体积约 423 MiB。企业 `.4 → .114 → .2` 尚未执行本轮部署；本条发布追溯提交晚于打包输入，不进入上述 ZIP。
+
+## 2026-08-27 - 补齐企业客户端首次接入失败诊断
+
+### Why
+
+- 企业麒麟用户双击客户端并输入统一认证号与 Client key 后进程以 exit code 1 退出；现场 `client.log` 只有两次桌面主题初始化记录，登记短进程的未捕获异常只写入即将关闭的终端，无法区分凭据、入口链路、后端拒绝或协议错误。
+- 原登记探针还把所有平台 `ERROR` 都折叠为认证失败，会把版本、实例归属和后端内部错误误导为 Key 问题；企业内网不能通过反复索取 Key 或临时联网安装工具绕过取证。
+
+### What
+
+- `LocalClientMain` 顶层统一捕获命令异常，由 `LocalClientFailureReporter` 将固定命令、错误类别、稳定错误码和根异常类型写入持久 `client.log`，终端同步显示中文行动建议和日志绝对路径；异常消息、服务端正文/details、统一认证号和 Client key 均不记录。
+- 首次登记分别归类 `AUTHENTICATION_REJECTED`、`PLATFORM_CONNECTION_FAILED`、`PLATFORM_REJECTED` 和 `PLATFORM_PROTOCOL_INVALID`；`UNAUTHENTICATED/RATE_LIMITED` 继续统一，不泄露 Key 是否存在，非认证平台错误只保留受限格式的稳定 code。
+- 同步客户端模块说明和企业逐机交付文档，明确从真实用户机验证入口链路，并按同一时间窗检查 `.4/.114` 后端日志；不使用开发者本机连通性替代企业证据。
+
+### How
+
+- 本地客户端 Maven reactor 全量测试通过：common 110、protocol 11、local client 107，共 228 项通过、1 项真实 OpenCode 条件跳过；跳过测试打包和正式 shaded JAR `--version` 通过。
+- 在隔离配置/状态目录以交互终端连接不可达地址，真实输出平台连接中文提示并生成 `local_client_command_failed ... rootFailureType=ClosedChannelException`；日志未包含假统一认证号/Key，认证失败前未生成凭据文件。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 通过；生成并逐项 RSA 验签客户端 release `20260827165255`，JAR SHA-256 为 `cb174afa9d67da64c9805650b58041f3b612e4e71f7eba0b943cb6618ca36ce3`，用户包为 `4d04c7f5a396be4460eb239bf52c71254406f4c3ad38fb01312e5ea8b11d7bb2`。JDK、OpenCode 和公共能力包与上一已验签 release 逐字节一致。
+
+### Result
+
+- 新的 U 盘转运包已写入 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260827165255_arm64.tar.gz` 及同名 `.sha256`，回读校验通过，外层 SHA-256 为 `2eb0c3b3d919716245bcdb40e0ade49256ff2a43548d7bd1a5986d9adbcf2e46`。
+- 代码和候选包已验证，但企业 `.2` 尚未发布该 catalog，真实麒麟用户也尚未用新版复测；现有 16:21/16:24 故障的具体类别仍需从两台企业后端同一时间窗日志确认，不能将可观测性修复表述为已修复现场认证或网络根因。
+- 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。
