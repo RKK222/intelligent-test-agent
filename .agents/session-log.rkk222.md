@@ -15333,8 +15333,8 @@
 
 ### Result
 
-- 最终外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 大小约 423 MiB，SHA-256 `47648844bf05673d11b6817b8af0a7e7a71167664f859521f0fa39768745f4b4`；内层 SHA-256 `bdfbb6b78b73d7f78fd8139c512b543bda20f2c3994c8cf99b3285ece913e926`。
-- `.4`、`.114`、`.2` 节点包 SHA-256 分别为 `514dfbf73cab9003b630c3e7e3fddbc9081b4bfb273366c87b2e2d0df747ec77`、`e7e6dc117e3ce48db9b45257df3f1b3ade250083c4317c01b0413d50a6a1fe67`、`4caaf9275de2c0cabc0eae676364cdd081e12ca8ef09461c218dfa142651fd8d`。
+- 首次候选外层 SHA-256 `47648844bf05673d11b6817b8af0a7e7a71167664f859521f0fa39768745f4b4`、内层 SHA-256 `bdfbb6b78b73d7f78fd8139c512b543bda20f2c3994c8cf99b3285ece913e926` 后续因随包 `START-HERE.md` 仍沿用旧 Flyway 增量说明而作废，没有作为最终交付件；修正后的摘要记录在后续“补齐当前 SkillMarket Flyway 发布门禁”条目。
+- 该作废候选的 `.4`、`.114`、`.2` 节点包 SHA-256 分别为 `514dfbf73cab9003b630c3e7e3fddbc9081b4bfb273366c87b2e2d0df747ec77`、`e7e6dc117e3ce48db9b45257df3f1b3ade250083c4317c01b0413d50a6a1fe67`、`4caaf9275de2c0cabc0eae676364cdd081e12ca8ef09461c218dfa142651fd8d`，不得用于现场校验。
 - 应用 JAR、persistence JAR、XXL JAR、前端归档 SHA-256 分别为 `bec7a3107a5641783750ad63fa4fe571b6a02e1d0499bdd361cf2b18f1f57323`、`c0ec4e509804e403499ac71a38444b7285ed64b7bf06b7803ffa9b58d7c963cf`、`007baa8d23b808eec5aed6294ecb113361287df4bf3a6c2c3ca46aeedc80d8c3`、`3f750b66c03c2252292cc626b00470280329f81a113e3e7ef58615ae3fb34a66`。
 - 本地构建和离线包校验已完成；企业 `.4 → .114 → .2` 尚未执行本轮部署和业务验收。本条发布追溯提交晚于产品打包输入，不进入上述 ZIP。
 
@@ -15359,4 +15359,8 @@
 ### Result
 
 - 后续从当前分支生成的内层包、目标机安装结果和外层包都会自动拒绝缺少或字节不一致的 `V20260827183737`；随包操作手册与本轮真实 PostgreSQL 121 → 122 升级结论一致。
+- 修正提交后复用同批已验证 Java、前端和客户端制品执行 `--zip-only`，正式内层门禁明确输出新 migration 的固定 SHA；外层封装同步通过新旧 Flyway 文件名、SHA 和 checksum 手册门禁，随后在全新临时目录再次完成外层/内层 ZIP CRC、嵌套 `cmp`、三节点 checksum、配置、禁带清单、客户端六项 RSA 验签和源码/JAR 字节校验。
+- 最终固定交付件 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 约 423 MiB，外层 SHA-256 `e3cf7e6195f3dfd405fec09af25c79c759fd7ab5eeabf2781c79305999156ef6`，内层 SHA-256 `c7671c4674c670df7c08362a4777b98884f2d13b41d06867b34059a8fcec6240`；`.4/.114/.2` 节点包依次为 `68c00ad2c59e295978c5c13e707c93c6ee35aeee9c17dcc2e71d54a478855007`、`3e50665d39fb75f5eb36f6cfe36d9893b2d7a0b7e5fef9e0a11ba3f72c72a7b3`、`2df3f4cb58c279269215a95429772a12782710ba52ec03f45249b2ef608b3c0f`；固定目录回读 SHA 和 ZIP CRC 通过。
+- 最终包的业务二进制仍来自 `07b9d451aab5473a4c4886feec5dda6dc3e88991`，发布脚本与手册包含到 `ea83e451a`；客户端版本/签名摘要、应用 JAR、persistence JAR、XXL JAR 和前端归档均未因重封改变。企业 `.4 → .114 → .2` 部署与业务验收仍未执行。
+- 本条最终摘要提交晚于固定包生成，不进入该 ZIP；它只在仓库中追溯最终摘要，避免为把自身哈希写回包内而形成循环重封。
 - 本次只修改企业发布脚本、部署手册和会话记录，不改变业务 API、RunEvent/SSE、数据库 SQL 字节、运行时兼容策略、环境配置、generated SDK、OpenCode 只读源码或部署拓扑。
