@@ -4,7 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * handler 返回给框架的结构化结果，由框架统一写入 scheduled_task_runs.result_json。
+ * handler 返回给统一调度适配层的低敏结构化结果，由 XXL 详情日志和完成备注统一展示。
  */
 public record ScheduledTaskResult(Map<String, Object> result) {
 

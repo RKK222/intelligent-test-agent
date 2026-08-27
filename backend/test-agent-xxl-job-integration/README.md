@@ -20,6 +20,7 @@
 - `workspace-management.personal-workspace-relocation` 每 30 分钟使用 `GLOBAL_MUTEX` 触发一次低敏广播；全部 Java 随后只按本机稳定 `linuxServerId` 扫描并租约认领源个人 worktree，XXL 的 ROUND 节点不承担文件服务器亲和。
 - `opencode-runtime.inactive-user-process-cleanup` 每天北京时间 02:00 使用 `GLOBAL_MUTEX` 广播；各 Java 只关闭自己持有 manager 连接、超过 10 天没有 Run 活动且没有执行窗口仍有效的跨夜遗留/北京时间当天待投递任务的用户进程，运行中或状态不确定时跳过。历史 V9 任务名称由更高版本 migration 前向更新为“十天未使用用户 OpenCode 进程关闭”，不改写 V9 字节。
 - `workspace-management.git-access-inspection` 每两小时使用 `GLOBAL_MUTEX` 执行服务器工作空间只读 Git 预检并广播本地客户端巡检；广播为空载荷，各 Java 只处理自己持有的在线客户端连接。
+- 统一 handler 会把任务名称、`taskKey/taskRunId/traceId`、并发策略、开始/结束时间、耗时、是否真正进入业务处理以及 `ScheduledTaskResult` 的低敏聚合结果写入 XXL 执行日志和完成备注。`SKIPPED_LOCK_HELD` 明确显示为“未执行”，失败只记录稳定错误码与安全说明；原始 XXL 参数、凭据和第三方异常 message 不进入日志。
 - 上游源码不在本模块复制或修改，所有登录禁用、平台 SSO、响应安全头都通过扩展 Bean/Filter 实现。
 - 平台 SSO 登录链路发生运行时异常时，由 `PlatformXxlSsoController` 统一记录不含票据的结构化错误并返回 `platform/xxl-sso-status` 503 页面；该页面向父页面发送 `unavailable`，不得落入上游依赖 `window.parent.$.adminTab` 的通用错误页而产生二次前端异常。
 - 平台嵌入态横向导航样式由本模块以 `/static/platform/xxl-job-embedded-shell.css` 提供；只有同源父页面显式添加 `test-agent-xxl-embedded` 根 class 后生效，直接访问 Admin 仍使用上游原生布局。
@@ -38,7 +39,7 @@
 
 ## 测试
 
-- 单元测试覆盖 ticket 原子一次消费/过期、Redis 异常及平台 SSO 运行时异常返回自有 503 状态页、Cookie 安全模式、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止和异常脱敏；真实 Redis 5 容器验证不依赖 `GETDEL`。
+- 单元测试覆盖 ticket 原子一次消费/过期、Redis 异常及平台 SSO 运行时异常返回自有 503 状态页、Cookie 安全模式、session marker、JIT 幂等/改名、原生入口禁用、参数校验、锁/续租/停止、成功/互斥跳过/失败三类 XXL 日志、完成备注 HTML 转义和异常脱敏；真实 Redis 5 容器验证不依赖 `GETDEL`。
 - MySQL 8.4 Testcontainers 覆盖 V1 到当前 HEAD 全新初始化、重复/并发 migration、V8 已执行后升级、analytics/SCM 两套已执行 V12 保持原 checksum 后继续前向升级、未知 V12 checksum 失败关闭、一个 executor 组、十五条任务、十天清理任务名称和无默认管理员；任务固定使用 ROUND、DISCARD_LATER、DO_NOTHING、GLOBAL_MUTEX 和零 XXL 重试。
 - `DefaultXxlJobAdminContextLauncherTest` 启动真实 Servlet/Tomcat 子上下文，验证 Flyway 先于 scheduler、原生登录 403、表单 SSO/JIT、安全 Cookie、上游 AdminLTE 与平台嵌入样式资源可访问，以及两个先注册节点在另一 Admin 新增第三节点后仍保留于共享 MySQL registry。
 - endpoint/readiness/lifecycle 测试验证 advertised IPv4/DNS 地址派生、本机 Admin context path 规整、非法监听地址安全拒绝、非 200 不启动、恢复后只启动一次，以及 Spring 自动装配使用派生地址且不会提前创建 executor 注册线程。

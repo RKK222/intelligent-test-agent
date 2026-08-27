@@ -92,9 +92,10 @@ Admin 响应固定设置 `Content-Security-Policy: frame-ancestors 'self'` 和 `
 ```
 
 - `GLOBAL_MUTEX` 复用旧 scheduler 的 Redis key `test-agent:scheduler:lock:{taskKey}`，并按锁 TTL 的三分之一续租。滚动发布期间新旧入口最多只有一个真正执行。
-- 未取得锁时 XXL 任务正常结束，并在结构化结果中记录 `SKIPPED_LOCK_HELD`。
+- 统一入口为每轮生成 `taskRunId/traceId`，并在 XXL 详情日志中依次记录任务名称与 key、并发策略、锁处理、业务 handler 开始及结构化处理结果；完成备注同步包含开始/结束时间、耗时、`processed` 和业务聚合结果，管理员无需查询平台日志即可判断本轮处理了什么、是否成功。
+- 未取得锁时 XXL 任务正常结束，并在结构化结果中记录 `SKIPPED_LOCK_HELD + processed=false + GLOBAL_MUTEX_LOCK_HELD`；完成备注明确显示“未执行”，不能与 handler 已处理成功混淆。
 - `ALLOW_OVERLAP` 不申请全局锁；结合 XXL `ROUND` 路由可以在不同 Java 节点并发。单个 Java 内由 XXL `DISCARD_LATER` 保持同一 handler 串行。
-- 未知任务、非法参数或策略、锁续租丢失、handler 异常均明确失败，错误响应不包含原始参数、Token、Cookie 或数据库凭据。
+- 未知任务、非法参数或策略、锁续租丢失、handler 异常均明确失败，详情日志和完成备注只包含稳定错误码、安全说明、traceId 与耗时，不包含原始参数、Token、Cookie、数据库凭据或第三方异常 message。`ScheduledTaskResult` 是写入 XXL 的唯一业务结果来源，业务 handler 只能返回低敏聚合字段。
 - XXL 停止请求通过线程中断传给 `ScheduledTaskContext.stopRequested()`；长任务仍须在安全检查点主动检查停止状态。
 
 首批任务统一使用 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`：

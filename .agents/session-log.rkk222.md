@@ -15210,3 +15210,26 @@
 
 - 小地球应用检索支持小写精确输入、唯一模糊输入和模糊检索后点击候选，并始终向后端传递目录中的规范应用简称；任意目录外非空值兼容行为保留。
 - 本次仅修改前端交互、测试与稳定说明，不涉及 API、RunEvent/SSE、数据库、Flyway、部署节点、性能、安全、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-27 - 增强 XXL 任务详情日志和完成备注
+
+### Why
+
+- 企业批量/定时任务只能从 XXL 列表看到笼统成功或失败，无法直接判断任务名称、运行标识、是否真正进入业务处理、耗时和低敏业务结果；全局锁竞争跳过还容易被误解为业务处理成功。
+
+### What
+
+- 统一 XXL handler 为每轮生成并贯穿 `taskRunId/traceId`，记录任务名称、任务 key、并发策略、锁处理、开始/结束时间、耗时、`processed` 和 `ScheduledTaskResult` 低敏聚合结果。
+- `SKIPPED_LOCK_HELD` 明确输出 `processed=false` 和“未执行（全局锁被其他节点持有）”；失败只记录稳定错误码和安全说明，原始 XXL 参数、凭据及第三方异常 message 不进入日志。
+- 完成备注对可变内容执行 HTML 转义并限制长度；同步 scheduler/XXL 模块说明、架构和测试文档，新增真实 XXL Core 上下文日志测试。
+
+### How
+
+- JDK 25 定向运行 `XxlJobScheduledTaskAdapterTest` 与 `TestAgentScheduledTaskXxlHandlerTest`，7 项全部通过，Maven 依赖链编译及 reactor 为 `BUILD SUCCESS`。
+- 尝试运行 `mvn -pl test-agent-xxl-job-integration -am test`：前置 common/domain/observability/scheduler 测试分别通过 110、111、6、8 项，XXL integration 已通过首个 2 项用例；随后本机 Docker/Testcontainers 初始化超过两分钟无输出，终止精确 Maven 进程，因此容器套件没有完整结论。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与 scheduler/XXL 当前改动冲突或残留合并标记。
+
+### Result
+
+- XXL 管理页能够区分业务成功、全局锁跳过和失败，并以 traceId 关联平台日志；聚合结果和完成备注保持低敏、定长和 HTML 安全。
+- 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。代码与定向测试已验证；依赖 Docker 的完整 XXL integration 套件仍需在 Docker 正常环境补跑。

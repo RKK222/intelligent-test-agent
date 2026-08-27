@@ -19,6 +19,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -29,6 +31,8 @@ import org.junit.jupiter.api.Test;
 class XxlJobScheduledTaskAdapterTest {
 
     private static final ScheduledTaskKey TASK_KEY = new ScheduledTaskKey("opencode-runtime.analytics-rollup");
+    private static final String TRACE_ID = "trace_xxl_job_test";
+    private static final XxlJobScheduledTaskAdapter.ExecutionLog NOOP_LOG = (message, arguments) -> { };
     private final java.util.concurrent.ScheduledExecutorService renewalExecutor = Executors.newSingleThreadScheduledExecutor();
 
     @AfterEach
@@ -41,15 +45,26 @@ class XxlJobScheduledTaskAdapterTest {
     void globalMutexSkipsSuccessfullyWhenExistingRedisLockIsHeld() {
         Fixture fixture = fixture(context -> ScheduledTaskResult.empty());
         when(fixture.lock().acquire(TASK_KEY, Duration.ofSeconds(30))).thenReturn(Optional.empty());
+        List<String> logTemplates = new ArrayList<>();
 
-        XxlJobTaskExecutionOutcome outcome = fixture.adapter().execute(param("GLOBAL_MUTEX"));
+        XxlJobTaskExecutionOutcome outcome = fixture.adapter().execute(
+                param("GLOBAL_MUTEX"), TRACE_ID, recordingLog(logTemplates));
 
         assertThat(outcome.status()).isEqualTo(XxlJobTaskExecutionStatus.SKIPPED_LOCK_HELD);
+        assertThat(outcome.processed()).isFalse();
+        assertThat(outcome.taskKey()).isEqualTo(TASK_KEY.value());
+        assertThat(outcome.taskName()).isEqualTo("analytics");
+        assertThat(outcome.traceId()).isEqualTo(TRACE_ID);
+        assertThat(outcome.result()).containsEntry("reason", "GLOBAL_MUTEX_LOCK_HELD");
+        assertThat(logTemplates)
+                .anyMatch(message -> message.contains("【任务信息】"))
+                .anyMatch(message -> message.contains("未取得 Redis 全局锁"));
         assertThat(fixture.handlerInvoked()).isFalse();
     }
 
     @Test
     void allowOverlapSkipsGlobalLockAndPassesPayloadToHandler() {
+        List<String> logTemplates = new ArrayList<>();
         Fixture fixture = fixture(context -> {
             assertThat(context.payload()).containsEntry("scope", "all");
             return ScheduledTaskResult.of(Map.of("updated", 3));
@@ -57,10 +72,19 @@ class XxlJobScheduledTaskAdapterTest {
 
         XxlJobTaskExecutionOutcome outcome = fixture.adapter().execute("""
                 {"taskKey":"opencode-runtime.analytics-rollup","concurrencyPolicy":"ALLOW_OVERLAP","payload":{"scope":"all"}}
-                """);
+                """, TRACE_ID, recordingLog(logTemplates));
 
         assertThat(outcome.status()).isEqualTo(XxlJobTaskExecutionStatus.SUCCEEDED);
+        assertThat(outcome.processed()).isTrue();
+        assertThat(outcome.traceId()).isEqualTo(TRACE_ID);
+        assertThat(outcome.toLogFields())
+                .containsEntry("taskKey", TASK_KEY.value())
+                .containsEntry("processed", true)
+                .containsEntry("durationMillis", 0L);
         assertThat(outcome.result()).containsEntry("updated", 3);
+        assertThat(logTemplates)
+                .anyMatch(message -> message.contains("允许重叠执行"))
+                .anyMatch(message -> message.contains("开始调用已注册 handler"));
         verify(fixture.lock(), never()).acquire(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
@@ -71,10 +95,10 @@ class XxlJobScheduledTaskAdapterTest {
 
         assertThatThrownBy(() -> fixture.adapter().execute("""
                 {"taskKey":"unknown.task","concurrencyPolicy":"GLOBAL_MUTEX","payload":{}}
-                """))
+                """, TRACE_ID, NOOP_LOG))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("handler");
-        assertThatThrownBy(() -> fixture.adapter().execute(param("LOCAL_ONLY")))
+        assertThatThrownBy(() -> fixture.adapter().execute(param("LOCAL_ONLY"), TRACE_ID, NOOP_LOG))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("并发策略");
     }
@@ -96,7 +120,7 @@ class XxlJobScheduledTaskAdapterTest {
         when(fixture.lock().acquire(TASK_KEY, Duration.ofSeconds(30))).thenReturn(Optional.of(lease));
 
         Thread.currentThread().interrupt();
-        assertThatThrownBy(() -> fixture.adapter().execute(param("GLOBAL_MUTEX")))
+        assertThatThrownBy(() -> fixture.adapter().execute(param("GLOBAL_MUTEX"), TRACE_ID, NOOP_LOG))
                 .isInstanceOf(PlatformException.class)
                 .hasMessageContaining("续租");
         assertThat(stopObserved).isTrue();
@@ -149,6 +173,10 @@ class XxlJobScheduledTaskAdapterTest {
         return """
                 {"taskKey":"opencode-runtime.analytics-rollup","concurrencyPolicy":"%s","payload":{}}
                 """.formatted(policy);
+    }
+
+    private static XxlJobScheduledTaskAdapter.ExecutionLog recordingLog(List<String> templates) {
+        return (template, arguments) -> templates.add(template);
     }
 
     private record Fixture(

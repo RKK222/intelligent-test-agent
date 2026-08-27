@@ -9,7 +9,7 @@
 - 平台 Token session digest marker 在登录、刷新、登出和过期后的写入/删除，以及 XXL `LoginStore` 的逐请求失效检查。
 - JIT 用户按 `platform_user_id` 幂等、改名、稳定冲突后缀和无原生密码登录。
 - 原生登录/改密/用户写入口禁用，用户列表只读保留。
-- handler 参数、未知任务/策略、`GLOBAL_MUTEX`/`ALLOW_OVERLAP`、锁续租丢失、线程中断和异常脱敏。
+- handler 参数、未知任务/策略、`GLOBAL_MUTEX`/`ALLOW_OVERLAP`、锁续租丢失和线程中断；使用 XXL Core 真实线程上下文与文件追加器验证成功结果、互斥跳过、失败日志和完成备注，断言任务标识、`processed`、业务计数、耗时、HTML 转义以及原始参数异常脱敏。
 - MySQL 8.4 全新 Flyway、重复启动、并发 migration、V8 已执行后升级当前版本、一个 executor 组、15 个任务和无默认管理员；V5 后夜间分发任务必须启用且 Cron 为每分钟，V6 后应用源码清理任务也必须启用、每分钟执行，V8 后个人工作区搬迁任务必须启用、每 30 分钟执行，V9 后闲置用户进程关闭必须启用、每天北京时间 02:00 执行，V14 后 Git 权限巡检必须启用、每两小时执行；四个广播任务均使用 `GLOBAL_MUTEX` 和空 payload，路由/阻塞/过期/重试策略保持既有契约。V10/V11 新增内部模型供应商探活（每 5 分钟）与观测数据清理（每天北京时间 03:30）；analytics/SCM 两套已执行 V12 必须保持原 checksum 并经 V13 幂等补齐另一任务，再经 V14 前向增加巡检任务；未知 V12 checksum 失败关闭，禁止改写已执行 migration。
 - 每分钟扫描只读取已到 `slotStart` 且未过 `windowEnd` 的 `SCHEDULED`，不按 `NIGHT_WINDOW/ADMIN_CUSTOM` 模式过滤；单轮 500、目标分组 50、服务器并发 8，目标 Java 单批 Run 受理并发 4，接口不等待 Run 终态且没有专属队列。
 - 普通用户缺失 `scheduleMode` 时保持标准夜间语义，伪造 `ADMIN_CUSTOM` 必须在创建任何 Session、幂等锁、会话锁或容量记录前返回 `FORBIDDEN`；超级管理员可创建白天完整分钟任务，边界为下一完整分钟至未来 24 小时，显示区间 1 分钟、重试窗口 15 分钟。
@@ -67,7 +67,7 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 1. 在两台 Linux 各启动一个 Java，使用相同 Admin/executor 端口并共用 PostgreSQL、Redis 和 XXL MySQL。
 2. 确认两个 executor 都自动注册到 `test-agent-backend`，注册地址不含 `linuxServerId` 或任何稳定 Linux 亲和字段。
 3. 从平台系统管理页进入 iframe，确认首次 JIT 创建账号，刷新页面会重新签发票据但复用同一 XXL 用户；菜单处于同一横向导航栏、当前项为浅蓝选中态、右侧账号不可展开，窄屏可单行横向滚动且浏览器控制台无 AdminLTE 404。
-4. 手动触发 `GLOBAL_MUTEX` 任务并制造跨节点重叠，确认只有一个 handler 真正执行，另一条日志为 `SKIPPED_LOCK_HELD`。
+4. 手动触发 `GLOBAL_MUTEX` 任务并制造跨节点重叠，确认只有一个 handler 真正执行；成功日志包含任务名称、taskKey、taskRunId、traceId、开始/结束时间、耗时和业务聚合结果，另一条日志为 `SKIPPED_LOCK_HELD + processed=false`，完成备注明确显示“未执行（全局锁被其他节点持有）”。
 5. 临时用版本 SQL 新增或在测试库配置 `ALLOW_OVERLAP` 任务，确认 `ROUND` 可把相邻触发分配到不同 Java，单节点仍按 `DISCARD_LATER` 串行。
 6. 从 XXL 页面发起停止，确认 handler 在线程中断后观察到 `ScheduledTaskContext.stopRequested()`。
 7. 停止 MySQL 或配置错误凭据，确认平台主 API/readiness 仍可用、`xxlJobAdmin` health 为 DOWN，随后能按指数退避恢复。
@@ -84,4 +84,5 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 - `xxl_job_info` 恰好十五条且 `platform_task_key` 唯一；所有任务为 `ROUND + DISCARD_LATER + DO_NOTHING + retry=0`，夜间分发和应用源码清理均为每分钟 Cron `0 0/1 * * * ? *`，个人工作区搬迁为每 30 分钟 Cron `0 0/30 * * * ? *`，闲置用户进程关闭为每日 Cron `0 0 2 * * ? *`，Git 权限巡检为每两小时 Cron `0 0 0/2 * * ? *`；四个广播任务参数都只含 taskKey、`GLOBAL_MUTEX` 和空 payload。
 - 旧 PostgreSQL scheduler 历史仍存在，但应用内没有 runner，不再产生新的 `CRON`、`MANUAL` 或 `USER_PLAN`；旧夜间 `PENDING/RUNNING/STOPPING USER_PLAN` 在短暂停机升级后均为 `SKIPPED`。
 - URL、访问日志、应用日志和错误响应不得出现票据、Cookie、Token、MySQL 密码或完整 executor 参数中的敏感载荷。
+- XXL 详情日志和完成备注只展示 `ScheduledTaskResult` 的低敏聚合结果；失败不显示原始任务参数和第三方异常 message，完成备注中的可变字段必须经过 HTML 转义并限制长度。
 - XXL 日志保留 30 天；PostgreSQL 已结束 scheduler 历史仍按 7 天清理。

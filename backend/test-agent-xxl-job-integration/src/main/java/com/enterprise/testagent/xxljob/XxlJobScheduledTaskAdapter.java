@@ -6,7 +6,6 @@ import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskKey;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.enterprise.testagent.domain.scheduler.ScheduledTaskTriggerType;
-import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.scheduler.ScheduledTaskContext;
 import com.enterprise.testagent.scheduler.ScheduledTaskHandler;
 import com.enterprise.testagent.scheduler.ScheduledTaskLock;
@@ -18,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -89,7 +89,12 @@ public class XxlJobScheduledTaskAdapter {
         this.ownsExecutor = ownsExecutor;
     }
 
-    public XxlJobTaskExecutionOutcome execute(String rawParameter) {
+    /** 解析 XXL 参数并执行已注册任务；traceId 由统一 XXL 入口生成并贯穿业务 handler 与详情日志。 */
+    public XxlJobTaskExecutionOutcome execute(
+            String rawParameter,
+            String traceId,
+            ExecutionLog executionLog) {
+        Objects.requireNonNull(executionLog, "executionLog must not be null");
         TaskParameter parameter = parse(rawParameter);
         ScheduledTaskKey taskKey = parseTaskKey(parameter.taskKey());
         ScheduledTaskHandler handler = registry.handlerFor(taskKey)
@@ -101,48 +106,92 @@ public class XxlJobScheduledTaskAdapter {
             throw new PlatformException(ErrorCode.CONFLICT, "定时任务 handler 不接受周期触发");
         }
         XxlJobConcurrencyPolicy policy = parsePolicy(parameter.concurrencyPolicy());
-        if (policy == XxlJobConcurrencyPolicy.ALLOW_OVERLAP) {
-            return invoke(handler, taskKey, parameter.payload(), new AtomicBoolean(false));
-        }
-        Optional<ScheduledTaskLockLease> acquired = lock.acquire(taskKey, handler.lockTtl());
-        if (acquired.isEmpty()) {
-            return XxlJobTaskExecutionOutcome.skippedLockHeld();
-        }
-        ScheduledTaskLockLease lease = acquired.get();
-        AtomicBoolean renewalLost = new AtomicBoolean(false);
-        ScheduledFuture<?> renewal = scheduleRenewal(lease, renewalLost);
+        ExecutionMetadata metadata = new ExecutionMetadata(
+                taskKey,
+                handler.name(),
+                new ScheduledTaskRunId(RuntimeIdGenerator.scheduledTaskRunId()),
+                requireText(traceId, "traceId"),
+                policy,
+                clock.instant());
+        executionLog.write(
+                "【任务信息】名称={}，taskKey={}，taskRunId={}，traceId={}，并发策略={}，触发类型=CRON，计划触发时间={}",
+                metadata.taskName(),
+                taskKey.value(),
+                metadata.taskRunId().value(),
+                metadata.traceId(),
+                policy.name(),
+                metadata.startedAt());
         try {
-            XxlJobTaskExecutionOutcome outcome = invoke(handler, taskKey, parameter.payload(), renewalLost);
-            if (renewalLost.get()) {
-                throw new PlatformException(ErrorCode.CONFLICT, "定时任务 Redis 锁续租失败");
+            if (policy == XxlJobConcurrencyPolicy.ALLOW_OVERLAP) {
+                executionLog.write("【并发控制】允许重叠执行，本轮不申请 Redis 全局锁");
+                return invoke(handler, metadata, parameter.payload(), new AtomicBoolean(false), executionLog);
             }
-            return outcome;
-        } finally {
-            renewal.cancel(true);
-            lease.release();
+            Optional<ScheduledTaskLockLease> acquired = lock.acquire(taskKey, handler.lockTtl());
+            if (acquired.isEmpty()) {
+                executionLog.write("【并发控制】未取得 Redis 全局锁，本轮不执行业务处理");
+                return XxlJobTaskExecutionOutcome.skippedLockHeld(
+                        taskKey.value(),
+                        metadata.taskName(),
+                        metadata.taskRunId().value(),
+                        metadata.traceId(),
+                        policy,
+                        metadata.startedAt(),
+                        clock.instant());
+            }
+            ScheduledTaskLockLease lease = acquired.get();
+            AtomicBoolean renewalLost = new AtomicBoolean(false);
+            ScheduledFuture<?> renewal = scheduleRenewal(lease, renewalLost);
+            executionLog.write("【并发控制】已取得 Redis 全局锁，锁租期={}ms", lease.ttl().toMillis());
+            try {
+                XxlJobTaskExecutionOutcome outcome =
+                        invoke(handler, metadata, parameter.payload(), renewalLost, executionLog);
+                if (renewalLost.get()) {
+                    throw new PlatformException(ErrorCode.CONFLICT, "定时任务 Redis 锁续租失败");
+                }
+                return outcome;
+            } finally {
+                renewal.cancel(true);
+                lease.release();
+                executionLog.write("【并发控制】Redis 全局锁已释放");
+            }
+        } catch (PlatformException exception) {
+            logFailure(metadata, exception.errorCode().name(), exception.getMessage(), executionLog);
+            throw exception;
+        } catch (RuntimeException exception) {
+            logFailure(metadata, ErrorCode.INTERNAL_ERROR.name(), "定时任务执行失败", executionLog);
+            throw exception;
         }
     }
 
     private XxlJobTaskExecutionOutcome invoke(
             ScheduledTaskHandler handler,
-            ScheduledTaskKey taskKey,
+            ExecutionMetadata metadata,
             Map<String, Object> payload,
-            AtomicBoolean renewalLost) {
+            AtomicBoolean renewalLost,
+            ExecutionLog executionLog) {
         Thread executionThread = Thread.currentThread();
         ScheduledTaskContext context = new ScheduledTaskContext(
-                new ScheduledTaskRunId(RuntimeIdGenerator.scheduledTaskRunId()),
-                taskKey,
+                metadata.taskRunId(),
+                metadata.taskKey(),
                 null,
                 ScheduledTaskTriggerType.CRON,
                 null,
-                clock.instant(),
-                TraceIdSupport.generate(),
+                metadata.startedAt(),
+                metadata.traceId(),
                 payload,
                 () -> executionThread.isInterrupted() || renewalLost.get());
+        executionLog.write("【业务处理】开始调用已注册 handler");
         try {
             ScheduledTaskResult result = handler.run(context);
             return new XxlJobTaskExecutionOutcome(
                     XxlJobTaskExecutionStatus.SUCCEEDED,
+                    metadata.taskKey().value(),
+                    metadata.taskName(),
+                    metadata.taskRunId().value(),
+                    metadata.traceId(),
+                    metadata.concurrencyPolicy(),
+                    metadata.startedAt(),
+                    clock.instant(),
                     result == null ? Map.of() : result.result());
         } catch (PlatformException exception) {
             throw exception;
@@ -150,6 +199,26 @@ public class XxlJobScheduledTaskAdapter {
             // 第三方异常 message 可能含参数或凭据，对 XXL 只暴露稳定安全错误。
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "定时任务执行失败", Map.of(), exception);
         }
+    }
+
+    /** 失败详情只记录稳定任务标识与安全错误，不输出原始参数或第三方异常 message。 */
+    private void logFailure(
+            ExecutionMetadata metadata,
+            String errorCode,
+            String safeMessage,
+            ExecutionLog executionLog) {
+        long durationMillis = Math.max(
+                0L,
+                Duration.between(metadata.startedAt(), clock.instant()).toMillis());
+        executionLog.write(
+                "【任务失败】名称={}，taskKey={}，taskRunId={}，traceId={}，errorCode={}，message={}，durationMillis={}",
+                metadata.taskName(),
+                metadata.taskKey().value(),
+                metadata.taskRunId().value(),
+                metadata.traceId(),
+                errorCode,
+                safeMessage,
+                durationMillis);
     }
 
     private ScheduledFuture<?> scheduleRenewal(ScheduledTaskLockLease lease, AtomicBoolean renewalLost) {
@@ -230,5 +299,20 @@ public class XxlJobScheduledTaskAdapter {
                     ? Map.of()
                     : Map.copyOf(new LinkedHashMap<>(payload));
         }
+    }
+
+    private record ExecutionMetadata(
+            ScheduledTaskKey taskKey,
+            String taskName,
+            ScheduledTaskRunId taskRunId,
+            String traceId,
+            XxlJobConcurrencyPolicy concurrencyPolicy,
+            Instant startedAt) {
+    }
+
+    /** 由统一入口提供的 XXL 日志写入回调，避免适配器在停止线程上初始化静态日志上下文。 */
+    @FunctionalInterface
+    public interface ExecutionLog {
+        void write(String template, Object... arguments);
     }
 }

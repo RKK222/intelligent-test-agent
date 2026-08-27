@@ -38,7 +38,7 @@ public interface ScheduledTaskHandler {
     }
 
     /**
-     * 执行一次任务。实现方不得自行写运行记录，也不得自行实现分布式互斥。
+     * 执行一次任务。实现方不得自行写运行记录或实现分布式互斥，返回结果只能包含适合管理员日志展示的低敏聚合字段。
      */
     ScheduledTaskResult run(ScheduledTaskContext context);
 }
