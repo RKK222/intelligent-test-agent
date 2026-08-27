@@ -15225,11 +15225,12 @@
 
 ### How
 
-- JDK 25 定向运行 `XxlJobScheduledTaskAdapterTest` 与 `TestAgentScheduledTaskXxlHandlerTest`，7 项全部通过，Maven 依赖链编译及 reactor 为 `BUILD SUCCESS`。
-- 尝试运行 `mvn -pl test-agent-xxl-job-integration -am test`：前置 common/domain/observability/scheduler 测试分别通过 110、111、6、8 项，XXL integration 已通过首个 2 项用例；随后本机 Docker/Testcontainers 初始化超过两分钟无输出，终止精确 Maven 进程，因此容器套件没有完整结论。
+- JDK 25 定向运行 adapter、统一 handler、Spring 装配、任务注册表和保留期任务测试：scheduler 3 项、XXL integration 10 项全部通过，Maven reactor 为 `BUILD SUCCESS`。
+- 尝试运行 `mvn -pl test-agent-xxl-job-integration -am -DskipITs test`：前置 common/domain/observability/scheduler 测试分别通过 110、111、6、8 项；随后 Testcontainers/Ryuk 启动一直停在 Docker `Created` 状态，终止本次精确 Maven 进程，因此依赖容器的完整套件没有结论。
+- 按本地启动规范使用 JDK 25 和根目录 `.env.test` 执行 `./restart-dev-services.sh --profile test --env-file .env.test`：后端 26 个 Maven 模块打包、VitePress、`vue-tsc` 和 Vite 生产构建均通过；托管 ClickHouse 同样停在 Docker `Created` 状态，已仅终止本次启动进程。原有 8080/3000 服务健康，但未加载本次新 JAR，故新代码运行态尚未验证。
 - `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与 scheduler/XXL 当前改动冲突或残留合并标记。
 
 ### Result
 
 - XXL 管理页能够区分业务成功、全局锁跳过和失败，并以 traceId 关联平台日志；聚合结果和完成备注保持低敏、定长和 HTML 安全。
-- 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。代码与定向测试已验证；依赖 Docker 的完整 XXL integration 套件仍需在 Docker 正常环境补跑。
+- 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。代码、定向测试和前后端构建已验证；新产物运行态及依赖 Docker 的完整 XXL integration 套件仍需在 Docker 正常环境补验。
