@@ -15337,3 +15337,26 @@
 - `.4`、`.114`、`.2` 节点包 SHA-256 分别为 `514dfbf73cab9003b630c3e7e3fddbc9081b4bfb273366c87b2e2d0df747ec77`、`e7e6dc117e3ce48db9b45257df3f1b3ade250083c4317c01b0413d50a6a1fe67`、`4caaf9275de2c0cabc0eae676364cdd081e12ca8ef09461c218dfa142651fd8d`。
 - 应用 JAR、persistence JAR、XXL JAR、前端归档 SHA-256 分别为 `bec7a3107a5641783750ad63fa4fe571b6a02e1d0499bdd361cf2b18f1f57323`、`c0ec4e509804e403499ac71a38444b7285ed64b7bf06b7803ffa9b58d7c963cf`、`007baa8d23b808eec5aed6294ecb113361287df4bf3a6c2c3ca46aeedc80d8c3`、`3f750b66c03c2252292cc626b00470280329f81a113e3e7ef58615ae3fb34a66`。
 - 本地构建和离线包校验已完成；企业 `.4 → .114 → .2` 尚未执行本轮部署和业务验收。本条发布追溯提交晚于产品打包输入，不进入上述 ZIP。
+
+## 2026-08-27 - 补齐当前 SkillMarket Flyway 发布门禁
+
+### Why
+
+- 最终 JAR 已包含并验证 `V20260827183737`，但外层包的 `START-HERE.md` 仍把已部署的 `V20260825091459` 写成未部署候选，并声称本轮只新增旧版本；现场按该说明验收会错误判断数据库历史。
+- 三个发布/部署脚本的固定 migration 字节门禁也只覆盖到 `V20260825091459`，新 migration 虽经本轮人工解包校验，却没有成为后续每次打包和安装的自动门禁。
+
+### What
+
+- 复用三个脚本既有 `verify_release_flyway_migrations_jar`，追加 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql` 及固定 SHA-256；没有新增第二套迁移器、校验脚本或旁路发布流程。
+- 外层封装的手册同步门禁同时锁定新 migration 文件名、SHA-256 和 Flyway checksum `-976579670`，缺少任一标记直接拒绝生成外层包。
+- 修正多后台部署手册：`V20260825091459 / 749555545` 是已部署基线，本轮 `.4` 只允许新增 `V20260827183737 / -976579670`，`.114` 只做 validate，并验收可空 `external_created_at` 列。
+
+### How
+
+- `bash -n deploy/internal/package-release.sh deploy/internal/deploy-internal-release.sh deploy/internal/package-two-backend-complete.sh` 和 `git diff --check` 通过。
+- 变更沿用既有常量、JAR 资源字节校验和 `START-HERE.md` 生成路径；正式内外层重建及独立解包校验将在本次发布追溯提交后重新执行。
+
+### Result
+
+- 后续从当前分支生成的内层包、目标机安装结果和外层包都会自动拒绝缺少或字节不一致的 `V20260827183737`；随包操作手册与本轮真实 PostgreSQL 121 → 122 升级结论一致。
+- 本次只修改企业发布脚本、部署手册和会话记录，不改变业务 API、RunEvent/SSE、数据库 SQL 字节、运行时兼容策略、环境配置、generated SDK、OpenCode 只读源码或部署拓扑。

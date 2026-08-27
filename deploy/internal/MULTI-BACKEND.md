@@ -620,8 +620,8 @@ grep -E '^TEST_AGENT_XXL_JOB_MYSQL_PASSWORD=.*REPLACE_|^TEST_AGENT_XXL_JOB_MYSQL
 
 两台第一条都应输出 `1`，第二条均无输出；不要使用 `grep` 直接回显密码。
 
-企业现网上一轮已完成 2026-08-24 平台、XXL 和 ClickHouse 迁移；此前生成但明确未部署的
-`V20260825091459` 客户端实例替换候选包不能作为现网基线。部署前仍必须分别由数据库管理员导出
+企业现网上一轮已完成 2026-08-24 平台、XXL、ClickHouse 迁移以及
+`V20260825091459` 客户端实例替换迁移。部署前仍必须分别由数据库管理员导出
 平台 PostgreSQL 与 XXL MySQL 的完整历史，不能只留最近 20 条：
 
 ```sql
@@ -633,10 +633,12 @@ order by installed_rank;
 上一轮已成功部署时，PostgreSQL 正常现网路径必须满足所有记录 `success=true`，且至少已成功执行并保持 checksum 的
 主链版本包括 `20260818094330`、`20260819125704`、`20260820153926`、`20260820182024`、
 `20260820202529`、`20260821113000`、`20260822075000`、`20260822103625`、`20260822201811`、
-`20260823104611`、`20260823123757`、`20260823191023`、`20260824100444`。第一台 `.4` 新 Java 从这套已部署
+`20260823104611`、`20260823123757`、`20260823191023`、`20260824100444`、`20260825091459`。已部署的
+`V20260825091459__local_client_instance_replacements_create.sql` 必须保持 Flyway checksum `749555545`，
+源码 SHA-256 固定为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。第一台 `.4` 新 Java 从这套已部署
 history 启动时，本轮 PostgreSQL 只允许新增
-`V20260825091459__local_client_instance_replacements_create.sql`，Flyway checksum 固定为 `749555545`，
-源码 SHA-256 固定为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；故障重部署时不得重复新增。
+`V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`，Flyway checksum 固定为 `-976579670`，
+源码 SHA-256 固定为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`；故障重部署时不得重复新增。
 若现场缺少上述上一轮版本，必须先逐条核对真实部署记录，不能直接套用本节增量结论。出现失败记录、未知更高版本或
 未知 checksum 都必须停止发布。正常企业历史不得出现只用于已登记并行
 开发历史的 `20260809120000`、`20260809210000`、`20260809230000`、`20260810090000`、
@@ -667,7 +669,8 @@ V12 选择兼容 location 并由更高版本前向 migration 补齐另一任务�
 `V20260728210000__index_in_flight_app_source_operations.sql` 也必须保留且为 `success=true`。任一失败记录、未知 checksum、
 未知更高版本、缺少上述已部署基线版本或其它历史分叉都必须停止发布；不得启用 Flyway `outOfOrder`、执行
 `repair` 或手工修改历史表。必须先只部署 `.4`，确认 readiness 正常，并按部署前基线确认 PostgreSQL 只新增
-`20260825091459`，XXL MySQL 和 ClickHouse `analytics_schema_history` 都不新增记录（故障重部署时三边都不新增）；
+`20260827183737`，且 `agent_skill_hub_assets.external_created_at` 为可空 `timestamp without time zone`；XXL MySQL 和
+ClickHouse `analytics_schema_history` 都不新增记录（故障重部署时三边都不新增）；
 随后确认搬迁任务仍为每 30 分钟、闲置进程关闭任务为每日 02:00、内部模型探活为每 5 分钟、可观测数据清理为每日 03:30、
 ClickHouse 入库为每分钟、SCM Git 姓名补偿为每日 04:10、工作空间 Git 权限巡检为每两小时，再部署 `.114`。共享数据库上 `.114` 启动只允许
 validate，不应再新增 history。`.4` 日志出现
