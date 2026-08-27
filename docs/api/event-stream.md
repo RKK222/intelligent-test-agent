@@ -1099,6 +1099,13 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 `UNKNOWN + NOT_GIT_REPOSITORY`，表示 Git 能力不适用但工作区本身可用；未声明能力的旧客户端不接收该操作，服务器也把其状态
 保守记录为 `UNKNOWN`。
 
+## `LOCAL_BROWSER_V1` 本地浏览器能力声明
+
+客户端在 `REGISTER.capabilities` 和 `VERSION_CHECK.capabilities` 中声明 `LOCAL_BROWSER_V1`，只表示该客户端可为自己的本地
+OpenCode 进程注入 loopback 浏览器 relay。该能力不新增 WSS 帧、不通过 `FILE_REQUEST` 代理浏览器操作，也不把 CDP 地址、
+relay token、Cookie、profile 或页面数据发送到平台。旧服务端可按既有 capability 列表兼容规则忽略该值；服务器受保护 Agent
+不得据此尝试调用用户浏览器。
+
 ## `PUBLIC_CAPABILITY_SYNC_V1` 公共能力扩展
 
 客户端只有在 `REGISTER.capabilities` 声明 `PUBLIC_CAPABILITY_SYNC_V1` 后才能发送或接收以下帧；旧客户端

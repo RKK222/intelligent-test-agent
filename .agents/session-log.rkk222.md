@@ -15451,3 +15451,29 @@
 
 - 代码、跨平台构建和离线打包链路已验证；最终 Win10 候选 ZIP 可移交真机测试。当前 macOS 不能执行 Windows PE，仍未完成企业 Authenticode 签名和 Win10 1809+ 真机安装/接入/升级/回退/卸载验收；本次也未在真实麒麟 ARM 用户机部署验证。
 - 本次使用 `release`，不新增部署节点，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；未修改 `.env*`，未发布企业正式下载别名。
+
+## 2026-08-27 - 麒麟 ARM 本地客户端增加企业 360 浏览器控制
+
+### Why
+
+- 本地任务需要由当前用户的本地 OpenCode 启动并操作企业 360 浏览器，同时保持可见窗口、独立持久 profile、逐站点授权和离线交付；服务器受保护 Agent、用户日常浏览器 profile 与平台控制面不能获得浏览器控制权。
+- 用户明确要求从本地 `release` 当前提交创建独立 worktree/功能分支开发，完成后保留在功能分支，不自动合回 `release`。
+
+### What
+
+- 从 `release` 提交 `363e1b6babe291018800e76e0cb2c1034cfc230f` 创建 worktree `/Users/kaka/Desktop/intelligent-test-agent-local-browser-360` 和分支 `codex/local-browser-360`；未触碰主 worktree 中既有用户手册改动。
+- 麒麟 Linux ARM64 客户端新增系统 360 可执行文件自动发现/托盘选择、`0700` 独立 profile、可见进程与精确 PID 身份监管、随机 loopback CDP/relay token；只在协议 1.3、Chromium 108..149 和 loopback 调试地址通过自检，停止 OpenCode/客户端时同步停止受管浏览器。
+- 新增公共 Tool 模板 `deploy/internal/local_browser.ts`，通过 `playwright-core@1.61.0` 的 CDP 连接系统浏览器，支持导航、语义定位、输入、表单、多标签、截图、上传和下载；最多 4 个 Session，按 origin 授权，提交/上传/下载逐次确认，未知跨 origin 主导航预请求阻断。
+- 截图和下载只写当前工作区显式目录；模型输出移除 URL 查询、input value、常见 token/密码形态并限制可见文本/控件数量，不返回 Cookie、完整 HTML 或截图字节。运行时 manifest/lock 和归档依赖门禁同步锁定 Playwright Core；模块、架构、事件能力声明、安全、部署与内部交付文档已更新。
+
+### How
+
+- `mvn -pl test-agent-local-client -am test` 最终通过：common 110、protocol 11、local client 115，合计 236 passed / 1 个既有真实 OpenCode 条件跳过；新增设置、平台限制、Chromium 解析和 relay token 回归。
+- 从固定 manifest/lock 真实执行 npm 安装，使用 TypeScript 5.9.2 对 Tool 执行 `--strict` 类型检查通过；重新生成 lockfile 与仓库文件 SHA-256 一致。`tools/verify-opencode-tool-runtime-deploy.sh` 通过 root/archive 的 Playwright 离线依赖门禁。
+- `mvn -pl test-agent-local-client -am -DskipTests package` 成功生成 shaded JAR；实际执行 `java -jar backend/test-agent-local-client/target/test-agent-local-client.jar --version` 输出 `test-agent-local-client 0.1.0-dev`。`git diff --check` 通过，并在提交前回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- Mac 上已完成 Java、Tool 类型、离线依赖、打包和可执行 JAR 验证；功能只在 Linux ARM64 运行时声明 `LOCAL_BROWSER_V1` 并显示托盘入口，Windows/macOS 不启动 relay。
+- 企业麒麟 ARM64 + 实际 360 内核尚未部署，CDP 启动参数、窗口可见性、逐 origin/高风险确认、4 Session、文件产物和退出回收仍是正式发布前现场闸门，不能表述为企业验收通过。权威公共配置 Git 还需按文档把模板同步为 `tools/local_browser.ts` 的明确提交，再走既有签名公共能力包发布流程。
+- 本次不新增部署节点，不新增平台 HTTP、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置或后端文件代理；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未合并回 `release`。

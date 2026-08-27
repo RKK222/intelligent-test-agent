@@ -117,6 +117,39 @@ final class LocalClientDesktopActions {
         }
     }
 
+    /** 浏览器设置只接受用户选择的单个可执行文件，不允许目录或多选。 */
+    static Path chooseExecutableFile(Path initialFile) {
+        if (GraphicsEnvironment.isHeadless()) {
+            throw new IllegalStateException("当前客户端没有可用的图形桌面，无法选择浏览器程序");
+        }
+        AtomicReference<Path> selection = new AtomicReference<>();
+        Runnable show = () -> {
+            JFileChooser chooser = new JFileChooser(initialFile == null
+                    ? Path.of(System.getProperty("user.home", ".")).toFile()
+                    : initialFile.toFile());
+            chooser.setDialogTitle("选择 360 浏览器程序");
+            chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+            chooser.setMultiSelectionEnabled(false);
+            if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION
+                    && chooser.getSelectedFile() != null) {
+                selection.set(chooser.getSelectedFile().toPath().toAbsolutePath().normalize());
+            }
+        };
+        try {
+            if (EventQueue.isDispatchThread()) {
+                show.run();
+            } else {
+                EventQueue.invokeAndWait(show);
+            }
+            return selection.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("浏览器程序选择已取消", exception);
+        } catch (InvocationTargetException exception) {
+            throw new IllegalStateException("浏览器程序选择器打开失败", exception.getCause());
+        }
+    }
+
     private static Path chooseMacDirectory(Path initialDirectory) {
         String previous = System.getProperty(MAC_DIRECTORY_DIALOG_PROPERTY);
         System.setProperty(MAC_DIRECTORY_DIALOG_PROPERTY, "true");

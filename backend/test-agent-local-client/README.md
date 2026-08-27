@@ -49,6 +49,21 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - 所有诊断日志都禁止记录统一认证号、Client key/token、Authorization/Cookie、服务端响应正文、异常 message、prompt、
   请求正文和工作区文件内容。现场排查只传日志里的 session、requestId/traceId、稳定 failureCode 和时间窗，不索取凭据。
 
+## 本地 360 浏览器控制
+
+- 新客户端声明 `LOCAL_BROWSER_V1`。该能力只由本地 OpenCode Tool 使用，不新增平台 HTTP、RunEvent、数据库或文件代理，
+  也不开放给服务器受保护 Agent。客户端从麒麟常见安装路径和 360/Qihoo desktop entry 自动发现浏览器；发现失败时用户可在
+  托盘“浏览器设置与自检”中选择绝对可执行文件，配置以当前用户私有权限保存。
+- `LocalBrowserSupervisor` 始终使用独立持久 profile、可见窗口、随机 loopback CDP 端口和精确 PID/启动时间/命令身份监管；
+  不读取或接管用户日常 profile。CDP 仅在协议 `1.3`、Chromium `108..149` 且调试地址为 loopback 时通过自检。
+  浏览器 stdout/stderr 直接丢弃，避免页面 URL 或站点诊断信息进入客户端日志。
+- `LocalBrowserRelay` 只绑定 `127.0.0.1`，使用每次客户端启动随机生成的 bearer token；OpenCode 子进程只收到 relay URL/token，
+  不直接收到 Cookie、profile 路径或页面数据。停止 OpenCode、退出客户端或显式关闭浏览器时同步停止受管浏览器。
+- 公共 Tool 模板位于 `deploy/internal/local_browser.ts`，依赖离线锁定的 `playwright-core@1.61.0` 并通过 CDP 连接系统 360。
+  站点按 origin 授权；提交、上传和下载每次确认。最多 4 个并行 Session，30 分钟空闲回收；截图和下载分别写入当前工作区
+  `browser-artifacts/<session-id>/`、`browser-downloads/<session-id>/`。模型只收到去查询参数 URL、有界可见文本和不含 input value
+  的控件摘要，不返回 Cookie、token、密码值、完整 HTML 或截图字节。
+
 ## Git 权限巡检
 
 - 新客户端声明 `WORKSPACE_GIT_ACCESS_V1`，通过既有受认证文件 RPC 接收 `workspace.git-access.check`；工作区 ID 与根摘要仍由注册表校验，服务端不能传入任意本地路径。
@@ -112,7 +127,8 @@ mvn -pl test-agent-local-client -am -DskipTests package
 `LocalClientPublicCapabilityStoreTest` 覆盖提交绑定的新包、首版基线兼容、不可变安装、原子切换、回滚与摘要拒绝。企业安装制品还必须通过
 `deploy/internal/package-local-opencode-client.sh` 的 commit/manifest、签名和完整 artifact 校验；Windows 候选包还要执行
 `deploy/internal/tests/local-opencode-client-windows-package-test.sh`，正式包继续受 Authenticode 和 Win10 真机闸门约束。
-`OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
+`OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalBrowserSettingsTest`/`LocalBrowserRelayTest` 覆盖受控发现、
+配置持久化、Chromium 版本解析和 loopback token，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
 
 ## 依赖边界
 
