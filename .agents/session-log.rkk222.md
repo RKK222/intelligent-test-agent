@@ -15234,3 +15234,29 @@
 
 - XXL 管理页能够区分业务成功、全局锁跳过和失败，并以 traceId 关联平台日志；聚合结果和完成备注保持低敏、定长和 HTML 安全。
 - 本次使用 `release`，不新增部署节点，不修改 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、环境配置、generated SDK 或只读 OpenCode 源码。代码、定向测试和前后端构建已验证；新产物运行态及依赖 Docker 的完整 XXL integration 套件仍需在 Docker 正常环境补验。
+
+## 2026-08-27 - 记录当前 release 企业增量包
+
+### Why
+
+- 用户确认上一轮企业包已经完整部署并验收，要求只基于当前本地 `release` 重新生成增量企业包；本轮实际新增客户端离线启动修复、TCDS 应用选择修复和 XXL 任务详情日志，不能重复纳入未变更的 worker、toolbox、ClickHouse、memory 或 trace 运行制品。
+- 已部署 PostgreSQL 基线包含 `V20260825091459__local_client_instance_replacements_create.sql`，本轮没有新增或修改 Flyway，必须保持源码、最终 persistence JAR 与企业已执行版本字节一致。
+
+### What
+
+- 以提交 `c3118d6db871c961f162f3fba00dff769d60c1f8` 为产品代码输入，生成客户端不可变版本 `20260827150207`，并复用已验签的 JDK、OpenCode 1.18.4 和公共能力包离线输入；客户端分发地址固定为 `http://mimo.sdc.cs.icbc:9996`。
+- release component manifest 固定 worker 为 `reuse`（指纹 `877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`）、toolbox 为 `reuse`（指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040`），LobeHub/memory 为 `disabled`，客户端为 `included`；因此部署脚本只校验存量 worker/toolbox 指纹，不替换或重启 manager/worker。
+- 生成三节点外层包 `test-agent-two-backend-complete.zip`，保留 `.4` 和 `.114` 的 `TEST_AGENT_SKILLHUB_ACCESS_KEY=__PRESERVE_FROM_INSTALLED_BACKEND_ENV__`，TCDS 固定为 `http://tcds-prod.sdc.icbc:9080`，AAM 固定为 `http://zfw.sdc.cs.icbc`。
+
+### How
+
+- 首次客户端构建仅配置了规范化 JDK SHA，脚本因未指定本地归档而校验了上游原始包并失败；改为显式传入上一已验签 release 的本地 `jdk.tar.gz` 和 `opencode.tar.gz`，分别复核 SHA-256 `9c03294370119d0703e6c3b4fcbcfb42b147f997aaba769ad5839c6a5c8441a2`、`4d33b499b4b78971d1ea86c24624500379b1d1ed8308647087f820bdb38e13da` 后正式构建，没有放宽校验或修改代码。
+- `package-release.sh` 完成后端 26 模块、VitePress、`vue-tsc`、Vite production build、客户端用户包和内层 ZIP 构建；客户端分发脚本验证通过，catalog、manifest、client JAR、JDK、OpenCode 和公共能力包六项 RSA 签名逐项为 `Verified OK`。
+- 新建独立临时目录解压外层和内层 ZIP，逐项验证 ZIP CRC、内层 `cmp`、三个节点归档 SHA、组件 manifest、节点域名和密钥保留标记；禁带清单未发现 worker、programs、toolbox、ClickHouse、memory 或 trace 运行归档。
+- persistence JAR 内 `V20260825091459...` 与源码 `cmp` 一致，SHA-256 均为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`；应用 JAR 包含 `BOOT-INF/classes/rsa-private.key`。XXL 非容器定向测试 7/7 通过；依赖 Docker/Testcontainers 的完整套件仍停在 Ryuk `Created`，本轮没有把它误报为通过。
+
+### Result
+
+- 最终外层包 SHA-256 为 `003718cdd9c10b388ce3481fb2d8488f41767e31fa2316d7b1dadfd4d10f51e6`，内层包为 `3111564b61a4cf4aed40102723048621b203192cc3ae1af95382458699265285`；`.4`、`.114`、`.2` 节点包依次为 `c8ccfc709b2fc7a67c1e2df980604682aa62488d891d83063b2d992e37f23f3e`、`5adb3b3bc0fcd45d05c74d70235e4a2e8911ef39f431006469bde78366b0c716`、`06bf7ce6c6f44723750d701d3aa5f493364c041f0b2efe2ec91b3d09b0dce498`。
+- 最终应用 JAR、persistence JAR、XXL integration JAR、前端归档 SHA-256 分别为 `c325df59112518e0ac5eede1f0335f6bc223fcbaa283b9895bbac637febba373`、`1e1030b8bc938445db723060fd90eb870a56582ad0ba182ef710fe8944845b40`、`a9cfdedbb59b369e6a9962850264ac7e9fddd2861af96bdd5b811d85b0e2eb9e`、`b6fdbde8f881d8ee0b73ec51e58cdcda047b2cb1f2a8c04679aa1fd07c2b6488`。
+- 固定交付件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，回读 SHA 和 ZIP CRC 均通过，体积约 423 MiB。企业 `.4 → .114 → .2` 尚未执行本轮部署；本条发布追溯提交晚于打包输入，不进入上述 ZIP。
