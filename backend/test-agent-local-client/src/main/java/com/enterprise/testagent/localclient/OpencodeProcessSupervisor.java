@@ -309,9 +309,7 @@ final class OpencodeProcessSupervisor {
                     "--print-logs");
             builder.environment().put("XDG_DATA_HOME", configuration.opencodeDataDirectory().toString());
             builder.environment().put("OPENCODE_CONFIG_DIR", configDirectory.toString());
-            // 企业内网客户端使用随 OpenCode 发布的模型快照；禁止启动时访问 models.dev，
-            // 避免断网环境首次打开工作区时模型目录阻塞两个远端超时窗口。
-            builder.environment().put("OPENCODE_DISABLE_MODELS_FETCH", "true");
+            enforceOfflineRuntime(builder.environment());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
             String configContent = mergeManagedModelConfig(
@@ -364,6 +362,19 @@ final class OpencodeProcessSupervisor {
             cleanupFailedStart(process, recorded);
             throw exception;
         }
+    }
+
+    /**
+     * 企业客户端的 OpenCode 只能消费 release 和签名公共能力包中的依赖，禁止向公网补装。
+     * OpenCode 会同时扫描全局配置、旧配置和受管配置目录；任一目录缺少 node_modules 时，
+     * npm 离线模式必须让后台依赖检查立即结束，避免 Tool/插件目录等待公网连接超时。
+     */
+    static void enforceOfflineRuntime(Map<String, String> environment) {
+        // npm 配置环境变量大小写不敏感，先移除父进程遗留的相反值，保证离线约束唯一且确定。
+        environment.keySet().removeIf("npm_config_offline"::equalsIgnoreCase);
+        environment.put("npm_config_offline", "true");
+        // 企业内网客户端使用随 OpenCode 发布的模型快照，禁止启动时访问 models.dev。
+        environment.put("OPENCODE_DISABLE_MODELS_FETCH", "true");
     }
 
     /** 只追加共享插件 URI，保留用户已有 OPENCODE_CONFIG_CONTENT 和其它插件顺序。 */

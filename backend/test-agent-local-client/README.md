@@ -50,6 +50,10 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
   不做增量覆盖。
 - Agent/Skill-only 变化调用 `/global/dispose`；Tool 或依赖变化重启本地 OpenCode。激活后同时检查进程健康和
   `/agent`、`/command`、`/experimental/tool/ids`，失败自动回切并重启恢复。
+- 受管 OpenCode 启动时固定注入 `npm_config_offline=true` 和 `OPENCODE_DISABLE_MODELS_FETCH=true`。OpenCode 即使同时扫描
+  用户全局目录、旧配置目录和当前受管目录，内部依赖检查也只能使用本机缓存或完整能力包，禁止访问公网 registry/models.dev；
+  缺失的非受管依赖会快速失败，不能阻塞 Tool/插件目录加载。签名公共能力包仍必须携带完整依赖闭包，真正缺失的受管依赖继续
+  触发能力激活失败和自动回切，不能用离线模式跳过目录验收。
 - 客户端在 `PENDING/DOWNLOADING` 中退出时，重启后将旧命令标记失败并等待平台重发；在 `APPLYING` 中退出时，
   重启后先验证已切换版本，验证成功才补报成功，失败则自动回切上一版本并补报回滚状态。
 - 托盘只展示“有更新、更新中、已是最新、失败重试”等用户动作状态，不展示 commit 或 Agent/Skill/Tool 数量；
@@ -87,7 +91,7 @@ mvn -pl test-agent-local-client -am -DskipTests package
 
 `LocalClientPublicCapabilityStoreTest` 覆盖提交绑定的新包、首版基线兼容、不可变安装、原子切换、回滚与摘要拒绝。企业安装制品还必须通过
 `deploy/internal/package-local-opencode-client.sh` 的 commit/manifest、签名和完整 artifact 校验。
-`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
+`OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
 
 ## 依赖边界
 

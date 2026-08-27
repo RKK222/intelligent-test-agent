@@ -320,6 +320,12 @@ Observability 现场验收还必须确认用户包引用的受控 release 包含
 `public-capabilities/manifest.json` 校验 commit，并把该制品、摘要和签名作为 release 的
 `PUBLIC_CAPABILITIES` artifact。禁止复制本机 `.testagent`、公共仓库原始 `node_modules` 或在目标机执行 npm 下载。
 
+客户端启动受管 OpenCode 时固定设置 `npm_config_offline=true` 和 `OPENCODE_DISABLE_MODELS_FETCH=true`，目标机无需也不允许
+访问 npm registry 或 models.dev。公共能力包必须在外网构建阶段携带完整依赖闭包；离线设置只让用户全局或历史配置目录的
+缺失依赖快速失败，不会放宽 `/experimental/tool/ids`、`/agent`、`/command` 验收。若现场日志持续出现
+`local_opencode_catalog_check_failed` 约 30 秒超时、`public_capability_activation_validation_failed` 后反复重启，先核对
+客户端版本是否包含该离线运行约束及 release 是否携带完整能力包，不要重新索取或传递已经接入成功的 Client key。
+
 首次启动从安装 release 自动初始化该基线。后续公共版本只生成完整包并发送通知；用户必须在托盘或网页确认，平台不能
 自动确认。Agent/Skill-only 变化热加载，Tool/依赖变化重启本地 OpenCode；Tool 始终使用当前登录用户权限，不提权。
 候选包经安全解压、文件/内容摘要、目录接口和 OpenCode 健康校验后才原子切换，失败回到上一不可变版本。公共版本

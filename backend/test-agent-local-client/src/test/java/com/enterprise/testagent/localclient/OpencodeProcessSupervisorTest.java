@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,20 @@ class OpencodeProcessSupervisorTest {
         assertThat(URLDecoder.decode(uri.getRawQuery(), StandardCharsets.UTF_8))
                 .isEqualTo("directory=" + directory.toAbsolutePath().normalize());
         assertThat(uri.getRawQuery()).contains("health+check");
+    }
+
+    @Test
+    void managedRuntimeOverridesParentConfigurationAndForcesOfflineDependencyResolution() {
+        Map<String, String> environment = new HashMap<>();
+        environment.put("NPM_CONFIG_OFFLINE", "false");
+        environment.put("OPENCODE_DISABLE_MODELS_FETCH", "false");
+
+        OpencodeProcessSupervisor.enforceOfflineRuntime(environment);
+
+        assertThat(environment)
+                .containsEntry("npm_config_offline", "true")
+                .containsEntry("OPENCODE_DISABLE_MODELS_FETCH", "true")
+                .doesNotContainKey("NPM_CONFIG_OFFLINE");
     }
 
     @Test

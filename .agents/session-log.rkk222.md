@@ -15162,3 +15162,27 @@
 
 - 后续企业排障会明确区分“本机可达”和“企业真实调用路径可达”，无法进入实际发起端时必须保留“企业侧链路尚未验证”的结论。
 - 本次只修改项目内技能、评测样例和会话记录，不涉及产品代码、API、事件、数据库、Flyway、性能、安全协议、环境配置、generated SDK 或只读 OpenCode 源码；无需启动业务服务。
+
+## 2026-08-27 - 修复企业离线客户端能力目录启动超时
+
+### Why
+
+- 企业用户第二次输入 Client key 已接入成功，但客户端在公共能力激活验证时持续等待 `/experimental/tool/ids` 约 30 秒后回滚并退出，导致 user systemd 反复拉起，托盘和网页连接都没有机会初始化。
+- OpenCode 1.18.4 会同时扫描用户全局、旧配置和受管配置目录；目录缺少 `node_modules` 时会启动后台 npm 依赖检查。企业现场不能访问互联网，公网 registry 超时会阻塞插件与 Tool 目录加载。
+
+### What
+
+- 在既有 `OpencodeProcessSupervisor` 受管启动链路强制设置 `npm_config_offline=true`，并清除父进程可能遗留的大小写变体相反值；继续固定 `OPENCODE_DISABLE_MODELS_FETCH=true`。
+- 保留进程 health、`/experimental/tool/ids`、`/agent`、`/command` 验收和失败回滚，不跳过真正缺失的公共能力包依赖。
+- 补充监管器回归测试，并同步本地客户端模块说明、架构和企业逐机交付文档。
+
+### How
+
+- `mvn -pl test-agent-local-client -am test` 通过：依赖链 224 项测试通过，1 项需要显式真实 OpenCode 可执行文件的既有测试跳过。
+- `mvn -pl test-agent-local-client -am -DskipTests package`、正式 shaded JAR `--version` 和字节码调用检查通过。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 通过，覆盖麒麟 ARM64 用户包、不可变签名 release、catalog、安装和制品缓存契约；`git diff --check` 通过。
+
+### Result
+
+- 受管 OpenCode 的后台依赖检查只能使用本机缓存或签名能力包，非受管目录依赖缺失会快速失败，不再因公网连接超时阻塞 Tool/插件目录。
+- 本次使用 `release`，不新增部署节点，不修改 API、事件、数据库、Flyway、环境文件、generated SDK 或只读 OpenCode 源码。新的签名客户端 release 和真实麒麟 ARM64 企业现场重装、托盘/WSS/网页在线验证仍是发布闸门。
