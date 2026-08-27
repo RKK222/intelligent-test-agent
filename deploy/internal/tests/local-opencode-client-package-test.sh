@@ -26,6 +26,7 @@ VERSION=20260820153045
 RELATIVE_OUTPUT_VERSION=20260820153046
 UPGRADE_VERSION=20260820153047
 OLDER_VERSION=20260820153044
+WINDOWS_VERSION=20260820153046
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 HTTP_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 DOWNLOAD_ROOT="http://127.0.0.1:${HTTP_PORT}/"
@@ -327,6 +328,23 @@ if package_release >/dev/null 2>&1; then
   exit 1
 fi
 
+# 共享 catalog 中较新的 Windows release 不能阻断麒麟初装；麒麟启动器应继续选择 linux/arm64。
+WINDOWS_RELEASE_DIR="${TEST_ROOT}/dist/local-opencode-client/releases/${WINDOWS_VERSION}"
+mkdir -p "${WINDOWS_RELEASE_DIR}"
+jq -n --arg version "${WINDOWS_VERSION}" \
+  '{schemaVersion:2,version:$version,publishedAt:"2026-08-20T07:30:46Z",platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"1.18.4",artifacts:[]}' \
+  >"${WINDOWS_RELEASE_DIR}/manifest.json"
+openssl dgst -sha256 -sign "${TEST_ROOT}/signing-private.pem" \
+  -out "${WINDOWS_RELEASE_DIR}/manifest.json.sig" "${WINDOWS_RELEASE_DIR}/manifest.json"
+WINDOWS_MANIFEST_SHA="$(sha256_file "${WINDOWS_RELEASE_DIR}/manifest.json")"
+jq --arg version "${WINDOWS_VERSION}" --arg sha "${WINDOWS_MANIFEST_SHA}" \
+  '.releases += [{version:$version,manifestPath:("releases/"+$version+"/manifest.json"),manifestSha256:$sha,manifestSignaturePath:("releases/"+$version+"/manifest.json.sig")}]' \
+  "${TEST_ROOT}/dist/local-opencode-client/catalog.json" >"${TEST_ROOT}/catalog-with-windows.json"
+mv "${TEST_ROOT}/catalog-with-windows.json" "${TEST_ROOT}/dist/local-opencode-client/catalog.json"
+openssl dgst -sha256 -sign "${TEST_ROOT}/signing-private.pem" \
+  -out "${TEST_ROOT}/dist/local-opencode-client/catalog.json.sig" \
+  "${TEST_ROOT}/dist/local-opencode-client/catalog.json"
+
 python3 -m http.server "${HTTP_PORT}" --bind 127.0.0.1 \
   --directory "${TEST_ROOT}/dist/local-opencode-client" >"${TEST_ROOT}/http.log" 2>&1 &
 HTTP_PID="$!"
@@ -368,6 +386,8 @@ if grep -q '/jdk.tar.gz' "${TEST_ROOT}/http.log"; then
   exit 1
 fi
 for expected_request in \
+  "GET /releases/${WINDOWS_VERSION}/manifest.json " \
+  "GET /releases/${WINDOWS_VERSION}/manifest.json.sig " \
   "GET /releases/${VERSION}/manifest.json " \
   "GET /releases/${VERSION}/manifest.json.sig " \
   "GET /releases/${VERSION}/test-agent-local-client.jar " \
@@ -723,7 +743,7 @@ if grep -Eq "GET /releases/${UPGRADE_VERSION}/(test-agent-local-client\\.jar|ope
   exit 1
 fi
 
-# 修复缓存后重复安装同一 release，不再请求任何 release 文件。
+# 修复缓存后重复安装同一 release，只允许为跨平台筛选复验 manifest，不再请求 release 制品。
 : >"${TEST_ROOT}/http.log"
 PATH="${TOOLS_WITHOUT_JAVA}" \
 TEST_AGENT_LOCAL_CLIENT_TEST_MODE=true \
@@ -733,7 +753,10 @@ TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR="${TEST_ROOT}/install-upgrade-cache/config" \
 TEST_AGENT_LOCAL_CLIENT_STATE_DIR="${TEST_ROOT}/install-upgrade-cache/state" \
 TEST_AGENT_LOCAL_CLIENT_SKIP_SERVICE_START=true \
   sh "${TEST_ROOT}/dist/local-opencode-client/install.sh" >/dev/null
-if grep -q "GET /releases/${UPGRADE_VERSION}/" "${TEST_ROOT}/http.log"; then
+if grep -a "GET /releases/${UPGRADE_VERSION}/" "${TEST_ROOT}/http.log" \
+    | grep -Ev '/manifest\.json(\.sig)? ' >/dev/null; then
+  grep -a "GET /releases/${UPGRADE_VERSION}/" "${TEST_ROOT}/http.log" \
+    | grep -Ev '/manifest\.json(\.sig)? ' >&2
   echo "重复安装同一 release 意外请求了 release 制品" >&2
   exit 1
 fi

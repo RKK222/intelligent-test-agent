@@ -20,7 +20,7 @@ AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagen
 - [空报文体排查手册](EMPTY-RESPONSE-BODY-TROUBLESHOOTING.md)：部署后按浏览器、Nginx、双 Java、RunEvent SSE、用户 OpenCode 和企业模型代理逐层采证，区分正常空请求与异常空响应。
 - [工具盒子离线部署](../../docs/deployment/toolbox.md)：IT-Tools + OmniTools 的 193 项目录、双镜像、双后台共置、Nginx 故障切换和回滚。
 - [通用长期记忆部署](../../docs/deployment/qa-memory.md)：当前 `.134` 记忆 PostgreSQL 与 `.160` Mem0/VIP/CPU BGE 拓扑，以及扩容到多副本后的双集合热备、离线包、灰度和真实浏览器验收。
-- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：仅麒麟 ARM64/aarch64 + glibc 客户端的签名打包、Nginx 明文 HTTP 分发、用户级安装、验收与回滚。
+- [本地 OpenCode 客户端](../../docs/deployment/local-opencode-client.md)：麒麟 ARM64/aarch64 + glibc 正式交付，以及 Windows 10 1809+ x64 候选打包、签名边界与验收闸门。
 
 底层 Java、manager、Redis 路由设计见 [后端部署说明](../../docs/deployment/backend.md)。
 
@@ -246,7 +246,7 @@ deploy/internal/package-release.sh --zip-only --output-dir deploy/internal/dist
 
 - `worker runtime`：Python/通用脚本工具、OpenCode Manager、OpenCode runtime、Codex MCP、Node/MCP SDK、bubblewrap、worker 镜像和 `test-agent-programs.tar.gz` 是一个不可拆分单元。
 - `toolbox`：IT-Tools、OmniTools、修改源码和目录文件是一个单元。
-- `local OpenCode client`：客户端 JAR、麒麟 ARM64 用户包、JRE、OpenCode 归档、完整公共能力基线、安装脚本和签名清单是一个单元。`build-local-opencode-client-user-package.sh` 生成包含静态 ARM64 启动器的 `tar.gz`；普通用户完整解压后可双击运行，安装只写入 `~/.local` / `~/.config`，不生成 DEB，也不调用 sudo/dpkg。
+- `local OpenCode client`：客户端 JAR、平台运行时、OpenCode 归档、完整公共能力基线、安装器和签名清单是一个单元。麒麟由 `build-local-opencode-client-user-package.sh` 生成包含静态 ARM64 启动器的 `tar.gz`；Windows 由 `package-local-opencode-client-windows.sh` 生成包含 Go x64 Setup/稳定启动器的候选 ZIP。两者都按普通用户安装；Windows 候选 ZIP 名固定带 `-unsigned`，完成 Authenticode 和 Win10 真机验收前不得发布为正式下载别名。
   JDK/OpenCode 的规范化归档固定条目顺序、属主、时间与 gzip header；同一输入跨客户端版本保持相同摘要。稳定安装器和客户端自更新统一使用安装根下按 `KIND/SHA-256` 寻址的已验签内容缓存，不依赖上一 release 仍然存在；摘要变化、缓存缺失或验签失败时只重新下载对应制品。
   本机构建输出可保留历史 release 供追溯，但平台 ZIP 只携带当前 release、当前用户包和重新签名的单版本 catalog，不会重复交付未变化的历史客户端运行时。
 

@@ -96,6 +96,24 @@ class LocalClientReleaseCatalogClientTest {
     }
 
     @Test
+    void shouldAcceptSignedWindowsTenX64Release() throws Exception {
+        byte[] manifest = manifest(
+                "1.18.4", "releases/20260820120000/", "windows", "x64");
+        publishManifest(manifest);
+        LocalClientVersionRepository repository = mock(LocalClientVersionRepository.class);
+        when(repository.findRelease(anyString())).thenReturn(Optional.empty());
+
+        client(repository).sync();
+
+        ArgumentCaptor<LocalClientVersionModels.Release> release =
+                ArgumentCaptor.forClass(LocalClientVersionModels.Release.class);
+        verify(repository).insertRelease(release.capture());
+        assertThat(release.getValue().platform()).isEqualTo("windows");
+        assertThat(release.getValue().architecture()).isEqualTo("x64");
+        assertThat(release.getValue().compatible()).isTrue();
+    }
+
+    @Test
     void shouldRejectTamperedManifestSignatureBeforePersistence() throws Exception {
         byte[] manifest = validManifest();
         put("releases/20260820120000/manifest.json", manifest);
@@ -157,12 +175,20 @@ class LocalClientReleaseCatalogClientTest {
     }
 
     private byte[] manifest(String opencodeVersion, String prefix) throws Exception {
+        return manifest(opencodeVersion, prefix, "linux", "arm64");
+    }
+
+    private byte[] manifest(
+            String opencodeVersion,
+            String prefix,
+            String platform,
+            String architecture) throws Exception {
         return objectMapper.writeValueAsBytes(new LocalClientReleaseCatalogClient.ReleaseManifest(
                 2,
                 "20260820120000",
                 Instant.parse("2026-08-20T04:00:00Z"),
-                "linux",
-                "arm64",
+                platform,
+                architecture,
                 1,
                 1,
                 "local-opencode-client.v1",

@@ -275,12 +275,21 @@ public class LocalClientRegistrationService {
 
     private static String normalizeArchitecture(String value) {
         String architecture = requireText(value, "architecture", 64).toLowerCase(Locale.ROOT);
-        return "aarch64".equals(architecture) ? "arm64" : architecture;
+        return switch (architecture) {
+            case "aarch64" -> "arm64";
+            case "amd64", "x86_64" -> "x64";
+            default -> architecture;
+        };
     }
 
     private static void requireSupportedPlatform(String platform, String architecture) {
-        if (!"arm64".equals(architecture) || !("darwin".equals(platform) || "linux".equals(platform))) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "首版客户端仅支持 darwin-arm64 和 linux-arm64-glibc");
+        boolean supportedArm = "arm64".equals(architecture)
+                && ("darwin".equals(platform) || "linux".equals(platform));
+        boolean supportedWindows = "windows".equals(platform) && "x64".equals(architecture);
+        if (!supportedArm && !supportedWindows) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "客户端仅支持 darwin-arm64、linux-arm64-glibc 和 windows-x64");
         }
     }
 

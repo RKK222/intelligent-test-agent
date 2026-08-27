@@ -1,14 +1,51 @@
-# 麒麟 ARM 本地 OpenCode 客户端逐机交付
+# 本地 OpenCode 客户端交付（麒麟正式 / Win10 候选）
 
 ## 范围、版本与停止条件
 
-本交付仅支持麒麟 Linux aarch64/arm64 + glibc 的已登录用户，不支持 macOS、Windows、非 glibc 系统、开机未登录即运行或稳定 Shell 自更新。OpenCode 固定为 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。每次确有客户端内容变化并生成升级 release 时，新版本必须严格大于最后已部署版本和当前分发目录中的所有版本；客户端组件未变化的整包重封继续复用原版本，不制造空升级。
+正式逐机流程当前覆盖麒麟 Linux aarch64/arm64 + glibc 的已登录用户；Windows 10 1809（build 17763）x64 已提供候选包生成能力，但完成企业 Authenticode 签名和真实 Win10 验收前不能作为正式下载包。两类平台都固定 OpenCode 1.18.4。每个 release 使用北京时间 yyyyMMddHHmmss 的 14 位版本；releases/<RELEASE_VERSION>/ 中的 JAR、JDK、OpenCode、manifest 及其签名都是不可变制品，不能原地覆盖。共享 catalog 中版本号跨平台全局唯一；每次确有客户端内容变化并生成升级 release 时，新版本必须严格大于最后已部署版本和当前分发目录中的所有版本；客户端组件未变化的整包重封继续复用原版本，不制造空升级。
 
 当前企业入口固定为 `http://mimo.sdc.cs.icbc:9996`，因此客户端控制连接为同域 `ws://`，必须在客户端包和两台 Java 的 `backend.env` 中同时显式开启明文控制例外。该例外只适用于已批准的可信内网；入口升级 HTTPS 后，客户端 URL 改为 `https://...`，并把前后台明文开关同时恢复为 `false`。
 
 交付路径固定为：外网 Mac 构建和签名 → U 盘只转运生成包 → 企业内部中转机 ~/Desktop/mimoagent/0709 校验并 scp → .4、.114 后台配置 → .2 前端 Nginx 发布 → 麒麟用户安装与接入。中转机不得创建或使用 /data/0709；只有目标节点使用自己的 /data/0709 接收文件。
 
 文中 <RELEASE_VERSION> 必须替换为同一个已批准的 14 位版本，例如 20260820183000；<部署账号> 必须替换为目标节点的实际 SSH 账号。任何一步命令非零退出、摘要不匹配、文件不存在、服务不健康或页面状态异常时，立即停止，不要继续下一台机器，也不要用 repair、outOfOrder、覆盖旧 release 或重新输入/传回 Client key 来绕过问题。
+
+## Win10 x64 候选包生成与正式闸门
+
+Windows 候选使用同一个组织 RSA 发布密钥签署 catalog、manifest、JAR、JDK、OpenCode 和公共能力包；这只能证明平台制品完整性，不能替代 Windows 对 PE 文件的 Authenticode 校验。外网 Mac 可执行：
+
+~~~bash
+deploy/internal/package-local-opencode-client-windows.sh \
+  --output-dir deploy/internal/dist/local-opencode-client \
+  --version <RELEASE_VERSION> \
+  --minimum-version <LAST_DEPLOYED_RELEASE_VERSION> \
+  --download-base-url http://mimo.sdc.cs.icbc:9996/downloads/local-opencode-client/ \
+  --server-url http://mimo.sdc.cs.icbc:9996 \
+  --allow-insecure-control true \
+  --signing-key .secure/local-client-signing-private.pem \
+  --public-config-commit <PUBLIC_GIT_COMMIT> \
+  --public-capability-bundle /secure/input/public-capabilities-<PUBLIC_GIT_COMMIT>.tar.gz
+~~~
+
+脚本固定校验 Temurin 21 Windows x64 与 OpenCode 1.18.4 Windows x64 baseline 上游 SHA-256，生成
+`releases/<RELEASE_VERSION>/`、共享签名 catalog、`TestAgent-Local-Client-Win10-x64-<RELEASE_VERSION>-unsigned.zip`
+和 `windows-x64-package-evidence.json`。ZIP 中 `TestAgent-Local-Client-Setup.exe` 负责最低 build 检查、签名 release 安装、
+本机 enroll、当前用户任务计划和开始菜单；稳定启动器负责同平台更新、激活超时和自动回切。安装只写当前用户
+`%APPDATA%` / `%LOCALAPPDATA%`，不要求管理员权限或系统 Java。
+
+候选自检至少执行：
+
+~~~bash
+GO111MODULE=off go test ./deploy/internal/local-opencode-client/windows-launcher
+deploy/internal/tests/local-opencode-client-windows-package-test.sh
+unzip -tq deploy/internal/dist/local-opencode-client/TestAgent-Local-Client-Win10-x64-<RELEASE_VERSION>-unsigned.zip
+~~~
+
+正式发布前必须在受控 Windows 签名机上对 Setup 和稳定启动器完成企业 Authenticode 签名，回填签名证据并重新封装；随后在
+真实 Windows 10 1809+ x64 普通用户环境验证首次安装、凭据接入、任务计划自启、托盘、工作区、OpenCode 1.18.4、断网重连、
+同平台升级/回退、重复安装身份保持和卸载。当前 Nginx 正式别名仍只指向麒麟包，未签名 Windows ZIP 不得新增公开下载别名。
+共享 catalog 可同时包含两类 release：麒麟启动器从新到旧选择 `linux/arm64`，Windows 只接受 `windows/x64`；服务端同样在
+展示、通知、rollout 和 PREPARED 阶段执行平台隔离。现有全局策略一次只引用一个 release，另一平台需要用户覆盖或分批切换。
 
 ## 1. 外网 Mac：记录构建输入并生成签名交付包
 

@@ -15385,3 +15385,25 @@
 
 - 代码、真实 Git 行为、模块测试、完整打包和本机运行启动均已验证；本地后端 `8080`、前端 `3000` 及配套依赖保持运行，企业 F-FPA Java 节点部署及受影响用户仓库复测尚未执行。
 - 本次使用 `release`，不新增部署节点，不修改路由、DTO、事件、数据库、Flyway、环境配置、generated SDK 或只读 OpenCode 源码；并行出现的 local-client 工作树改动未纳入本次提交。
+
+## 2026-08-27 - 新增 Win10 x64 本地客户端候选安装包
+
+### Why
+
+- 现有本地客户端只有银河麒麟 ARM64 正式包，用户要求先生成 Windows 10 版本，同时不能破坏共享发布目录下既有麒麟安装与升级链路。
+
+### What
+
+- 本地客户端 Java 运行时新增 Windows/x64 平台识别、AppData 路径、`.exe` 布局和跨平台下载自检；服务端注册、目录查询与更新编排接受 Windows/x64，并阻止不同平台版本相互投放。
+- 新增 Go 编写的每用户 Windows Setup/稳定启动器和离线打包脚本，固定 Temurin 21、OpenCode 1.18.4、应用 JAR及组织 RSA 签名；安装流程支持清单验签、安全解包、首次注册、计划任务、开始菜单、后台运行、自更新超时回滚。
+- 麒麟安装脚本改为从共享 catalog 选择最新兼容的 `linux/arm64` 版本，忽略更高版本号的 Windows 条目；同步后端、模块、内部部署、架构、事件和部署文档。
+
+### How
+
+- 相关 Maven reactor 共 1542 passed / 1 skipped；Windows launcher 的 Go test、host/Windows go vet、Windows 交叉编译、Windows 离线打包回归及既有麒麟打包回归全部通过，Shell 语法、ZIP CRC、PE 类型、JAR 版本、JDK 布局、清单与四项制品 RSA 验签均通过。
+- 实际候选版本为 `20260827204600`，ZIP SHA-256 为 `52d31ce402f004d902ca44a9f56b4bc91181f6ca2a591512f825d0e7b9fadb72`；证据文件明确记录 `authenticodeSigned=false` 和 `CANDIDATE_ONLY`。
+
+### Result
+
+- 已在本机生成可移交 Win10 x64 测试的候选 ZIP，但因当前 macOS 环境不能执行 Windows PE，尚未完成 Win10 1809+ 真机安装、首次注册、升级、回滚和卸载验收，也尚未做 Authenticode 签名；因此未发布正式下载别名，不能表述为正式交付包。
+- 本次使用 `release`，不新增部署节点，不变更 HTTP API 结构、RunEvent 类型、数据库、SQL 或 Flyway；只扩展既有注册/发布协议的平台取值与安全校验，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。

@@ -502,7 +502,7 @@ final class LocalClientTray implements AutoCloseable {
     }
 
     private static String platformName() {
-        return LocalClientPaths.isMac() ? "macos" : "linux-arm64";
+        return LocalClientPlatform.current().displayName();
     }
 
     @Override

@@ -1032,7 +1032,9 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 `platform`、`architecture`、`clientVersion`、`opencodeVersion`、`reportedAddresses`；新版在其后追加可选
 `unifiedAuthId`、`launcherVersion`、`capabilities`。只有恰好旧八字段且 `clientVersion=0.1.0` 的客户端允许省略
 `unifiedAuthId`；任何新增字段的新协议注册缺失或空白统一认证号都认证失败。后台验证用户 key 后返回 `REGISTERED`，
-并保存持有 `backendProcessId + generation`。同实例后认证连接立即替代旧连接。
+并保存持有 `backendProcessId + generation`。同实例后认证连接立即替代旧连接。当前受管发布接受
+`darwin/arm64`、`linux/arm64` 和 `windows/x64`；注册会把 `aarch64` 归一为 `arm64`，把 `amd64/x86_64` 归一为 `x64`，
+其它平台/架构组合返回参数错误。
 
 | 帧 | 方向 | 说明 |
 |---|---|---|
@@ -1064,6 +1066,8 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 旧客户端发送 `VERSION_CHECK/UPDATE_PREPARED/UPDATE_STATUS`，也不向其发送策略、命令、应用或取消帧。所有 `UPDATE_*` 均以
 `commandId + clientInstanceId` 幂等，且必须匹配同一 connection generation、policy revision、目标版本和方向；
 平台没有配置全局或个人目标版本时，`VERSION_CHECK` 不产生 `VERSION_POLICY`，客户端保持当前版本和在线连接。
+目标 release 的 platform/architecture 必须与已注册实例一致；不匹配时对该实例不产生策略、通知或 rollout attempt，
+已存在 attempt 在 PREPARED 或补偿发送时发现不匹配则取消，禁止跨平台切换。
 兼容已发布旧服务端时，只允许把
 `targetVersion=null/direction=SAME/policyRevision=0/force=false` 作为无动作空策略；该哨兵不得进入任何
 `UPDATE_*` 命令或 attempt。

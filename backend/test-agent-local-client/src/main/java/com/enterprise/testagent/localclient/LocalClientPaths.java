@@ -2,7 +2,6 @@ package com.enterprise.testagent.localclient;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Locale;
 
 /** 按登录用户和操作系统解析客户端配置、状态与日志目录。 */
 final class LocalClientPaths {
@@ -16,8 +15,13 @@ final class LocalClientPaths {
             return Path.of(override).toAbsolutePath().normalize();
         }
         Path userHome = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
-        if (isMac()) {
+        LocalClientPlatform platform = LocalClientPlatform.current();
+        if (platform.isMac()) {
             return userHome.resolve("Library/Application Support/TestAgent/local-opencode-client");
+        }
+        if (platform.isWindows()) {
+            return windowsUserDirectory("APPDATA", userHome.resolve("AppData/Roaming"))
+                    .resolve("TestAgent/local-opencode-client");
         }
         String xdgConfig = System.getenv("XDG_CONFIG_HOME");
         Path configHome = xdgConfig == null || xdgConfig.isBlank()
@@ -32,8 +36,13 @@ final class LocalClientPaths {
             return Path.of(override).toAbsolutePath().normalize();
         }
         Path userHome = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
-        if (isMac()) {
+        LocalClientPlatform platform = LocalClientPlatform.current();
+        if (platform.isMac()) {
             return userHome.resolve("Library/Application Support/TestAgent/local-opencode-client/state");
+        }
+        if (platform.isWindows()) {
+            return windowsUserDirectory("LOCALAPPDATA", userHome.resolve("AppData/Local"))
+                    .resolve("TestAgent/local-opencode-client/state");
         }
         String xdgState = System.getenv("XDG_STATE_HOME");
         Path stateHome = xdgState == null || xdgState.isBlank()
@@ -52,7 +61,10 @@ final class LocalClientPaths {
         return Files.isDirectory(downloads) ? downloads : userHome;
     }
 
-    static boolean isMac() {
-        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("mac");
+    private static Path windowsUserDirectory(String environmentName, Path fallback) {
+        String configured = System.getenv(environmentName);
+        return configured == null || configured.isBlank()
+                ? fallback.toAbsolutePath().normalize()
+                : Path.of(configured).toAbsolutePath().normalize();
     }
 }

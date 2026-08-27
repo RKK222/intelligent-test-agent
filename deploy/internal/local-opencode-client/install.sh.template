@@ -268,6 +268,38 @@ verify_manifest() {
     || fail "稳定启动器版本不兼容"
 }
 
+# 共享 catalog 可同时包含 Win10 和麒麟发布；稳定启动器只选择最新的 linux/arm64 兼容项。
+select_latest_compatible_version() {
+  candidate_versions="${TEMP_DIR}/catalog-versions.txt"
+  awk -F'"' '$2 == "version" { print $4 }' "${catalog_file}" | sort -r -u >"${candidate_versions}"
+  while IFS= read -r candidate_version; do
+    valid_version "${candidate_version}" || fail "版本 catalog 包含非法版本"
+    EXPECTED_DOWNLOAD_PREFIX="releases/${candidate_version}/"
+    MANIFEST_FILE="${TEMP_DIR}/candidate-${candidate_version}.json"
+    MANIFEST_SIGNATURE_FILE="${MANIFEST_FILE}.sig"
+    download_relative "releases/${candidate_version}/manifest.json" "${MANIFEST_FILE}"
+    download_relative "releases/${candidate_version}/manifest.json.sig" "${MANIFEST_SIGNATURE_FILE}"
+    openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
+      -signature "${MANIFEST_SIGNATURE_FILE}" "${MANIFEST_FILE}" >/dev/null \
+      || fail "catalog 中的发布清单签名无效"
+    launcher_min="$(manifest_number launcherVersionMin)"
+    launcher_max="$(manifest_number launcherVersionMax)"
+    if [ "$(manifest_number schemaVersion)" = 2 ] \
+        && [ "$(manifest_string version)" = "${candidate_version}" ] \
+        && [ "$(manifest_string platform)" = linux ] \
+        && [ "$(manifest_string architecture)" = arm64 ] \
+        && [ "$(manifest_string protocolVersion)" = local-opencode-client.v1 ] \
+        && [ "$(manifest_string opencodeVersion)" = 1.18.4 ] \
+        && [ -n "${launcher_min}" ] && [ -n "${launcher_max}" ] \
+        && [ "${launcher_min}" -le "${LAUNCHER_VERSION}" ] \
+        && [ "${launcher_max}" -ge "${LAUNCHER_VERSION}" ]; then
+      printf '%s\n' "${candidate_version}"
+      return 0
+    fi
+  done <"${candidate_versions}"
+  return 1
+}
+
 read_artifact_metadata() {
   kind="$1"
   ARTIFACT_PATH="$(artifact_string "${kind}" path)"
@@ -537,8 +569,7 @@ bootstrap_release() {
   openssl dgst -sha256 -verify "${PUBLIC_KEY_FILE}" \
     -signature "${catalog_signature}" "${catalog_file}" >/dev/null \
     || fail "版本 catalog 签名校验失败"
-  version="$(awk -F'"' '$2 == "version" { print $4 }' "${catalog_file}" | sort | tail -n 1)"
-  valid_version "${version}" || fail "版本 catalog 没有有效版本"
+  version="$(select_latest_compatible_version)" || fail "版本 catalog 没有兼容的麒麟 ARM64 发布"
   final_directory="${RELEASES_DIR}/${version}"
   if [ -d "${final_directory}" ]; then
     verify_release_directory "${final_directory}" ""

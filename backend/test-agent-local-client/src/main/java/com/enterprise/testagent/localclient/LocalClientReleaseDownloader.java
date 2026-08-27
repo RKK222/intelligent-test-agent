@@ -42,6 +42,7 @@ final class LocalClientReleaseDownloader {
     private final Fetcher fetcher;
     private final ArchiveExtractor extractor;
     private final CandidateChecker candidateChecker;
+    private final LocalClientPlatform platform;
 
     LocalClientReleaseDownloader(
             LocalClientDownloadTrust trust,
@@ -50,12 +51,24 @@ final class LocalClientReleaseDownloader {
             Fetcher fetcher,
             ArchiveExtractor extractor,
             CandidateChecker candidateChecker) {
+        this(trust, installRoot, objectMapper, fetcher, extractor, candidateChecker, LocalClientPlatform.current());
+    }
+
+    LocalClientReleaseDownloader(
+            LocalClientDownloadTrust trust,
+            Path installRoot,
+            ObjectMapper objectMapper,
+            Fetcher fetcher,
+            ArchiveExtractor extractor,
+            CandidateChecker candidateChecker,
+            LocalClientPlatform platform) {
         this.trust = Objects.requireNonNull(trust);
         this.installRoot = Objects.requireNonNull(installRoot).toAbsolutePath().normalize();
         this.objectMapper = Objects.requireNonNull(objectMapper);
         this.fetcher = Objects.requireNonNull(fetcher);
         this.extractor = Objects.requireNonNull(extractor);
         this.candidateChecker = Objects.requireNonNull(candidateChecker);
+        this.platform = Objects.requireNonNull(platform);
     }
 
     PreparedRelease prepare(LocalClientPayloads.UpdateCommand command, String currentVersion) throws Exception {
@@ -93,7 +106,7 @@ final class LocalClientReleaseDownloader {
             verifyPreparedLayout(finalDirectory, artifacts);
             listener.onPhase(PreparationPhase.SELF_CHECKING);
             candidateChecker.check(
-                    finalDirectory.resolve("jdk/bin/java"),
+                    platform.javaExecutable(finalDirectory),
                     finalDirectory.resolve("test-agent-local-client.jar"),
                     finalDirectory,
                     version);
@@ -117,7 +130,7 @@ final class LocalClientReleaseDownloader {
             verifyPreparedLayout(staging, artifacts);
             listener.onPhase(PreparationPhase.SELF_CHECKING);
             candidateChecker.check(
-                    staging.resolve("jdk/bin/java"),
+                    platform.javaExecutable(staging),
                     staging.resolve("test-agent-local-client.jar"),
                     staging,
                     version);
@@ -327,8 +340,8 @@ final class LocalClientReleaseDownloader {
         if (manifest.schemaVersion() != 2
                 || !version.equals(manifest.version())
                 || manifest.publishedAt() == null
-                || !"linux".equals(manifest.platform())
-                || !"arm64".equals(manifest.architecture())
+                || !platform.platform().equals(manifest.platform())
+                || !platform.architecture().equals(manifest.architecture())
                 || manifest.launcherVersionMin() > 1
                 || manifest.launcherVersionMax() < 1
                 || !LocalClientProtocol.VERSION.equals(manifest.protocolVersion())
@@ -382,16 +395,14 @@ final class LocalClientReleaseDownloader {
         }
     }
 
-    private static void verifyPreparedLayout(
+    private void verifyPreparedLayout(
             Path releaseDirectory,
             Map<String, ManifestArtifact> artifacts) throws IOException {
         if (!Files.isRegularFile(releaseDirectory.resolve("test-agent-local-client.jar"))
-                || !Files.isRegularFile(releaseDirectory.resolve("jdk/bin/java"))
-                || !Files.isExecutable(releaseDirectory.resolve("jdk/bin/java"))
-                || !Files.isRegularFile(releaseDirectory.resolve("jdk/bin/javac"))
-                || !Files.isExecutable(releaseDirectory.resolve("jdk/bin/javac"))
-                || !Files.isRegularFile(releaseDirectory.resolve("opencode/bin/opencode"))
-                || !Files.isExecutable(releaseDirectory.resolve("opencode/bin/opencode"))) {
+                || !platform.isExecutable(platform.javaExecutable(releaseDirectory))
+                || !platform.isExecutable(platform.javacExecutable(releaseDirectory))
+                || !platform.isExecutable(platform.managedJavaExecutable(releaseDirectory))
+                || !platform.isExecutable(platform.opencodeExecutable(releaseDirectory))) {
             throw new IllegalStateException("prepared release layout is incomplete");
         }
         boolean bootstrapSystemJdk = hasBootstrapSystemJdkProvenance(releaseDirectory);
@@ -439,7 +450,7 @@ final class LocalClientReleaseDownloader {
         try {
             Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwx------"));
         } catch (UnsupportedOperationException ignored) {
-            // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+            // 麒麟使用 POSIX；Windows 继承当前用户 AppData 目录 ACL。
         }
     }
 
@@ -448,7 +459,7 @@ final class LocalClientReleaseDownloader {
         try {
             Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
         } catch (UnsupportedOperationException ignored) {
-            // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+            // 麒麟使用 POSIX；Windows 继承当前用户 AppData 目录 ACL。
         }
     }
 
@@ -459,7 +470,7 @@ final class LocalClientReleaseDownloader {
             try {
                 Files.setPosixFilePermissions(target, PosixFilePermissions.fromString("rw-------"));
             } catch (UnsupportedOperationException ignored) {
-                // 麒麟使用 POSIX；未来平台依赖用户目录 ACL。
+                // 麒麟使用 POSIX；Windows 继承当前用户 AppData 目录 ACL。
             }
             copied = true;
         } finally {

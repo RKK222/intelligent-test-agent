@@ -14,7 +14,7 @@ flowchart LR
     O <-->|"local-opencode-client.v1 / WSS"| C["本地 Java 客户端"]
     C -->|"127.0.0.1"| OC["OpenCode 1.18.4"]
     C --> FS["已注册本地目录"]
-    N["内网 Nginx HTTP"] -->|"签名清单和 ARM64 制品"| C
+    N["内网 Nginx HTTP"] -->|"共享 catalog 与分平台签名制品"| C
 ```
 
 ## 模块边界
@@ -70,6 +70,12 @@ release，保留 `credentials.properties`、`state.json` 和 OpenCode 数据目�
 重连，凭据失效时才进入交互式 enroll。用户主动退出仍保持 systemd `Restart=on-failure` 语义，不自动违背退出意图。
 JDK 和 OpenCode 归档使用固定条目顺序、元数据和 gzip header 生成确定性摘要；新 release 只复用当前 release 中与
 新签名清单大小、SHA-256 和 RSA 签名均一致的归档，再复制到新的完整不可变目录，任何一项不一致都重新下载。
+
+Windows 10 1809（build 17763）x64 使用同一 Java 业务 JAR 和协议，但运行路径为 `.exe`，配置/状态分别落在当前用户
+`%APPDATA%` / `%LOCALAPPDATA%`，稳定 Go 启动器通过当前用户任务计划运行。共享 catalog 的版本号全局唯一；麒麟安装器
+从新到旧选择 `linux/arm64`，Windows 只接受 `windows/x64`。服务端对版本展示、通知、rollout、PREPARED 和补偿发送执行
+同样的平台/架构复核。现有数据模型仍是一条全局目标加可选用户覆盖，因此一个全局目标只作用于同平台实例；需要同时推进
+另一平台时必须使用对应用户覆盖或分批切换目标，不能把跨平台 release 当作通用版本。
 
 ## 认证与模型密钥
 
@@ -202,7 +208,7 @@ HTTP 响应对象不会取消后续事件，页面取消订阅时仍会沿既有
 
 ## 桌面托盘与资源约束
 
-macOS 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托盘；不支持托盘或无图形会话时降级为后台服务，
+macOS、Windows 和提供 Java SystemTray 的麒麟 ARM 桌面显示客户端托盘；不支持托盘或无图形会话时降级为后台服务，
 协议和本地文件能力不受影响。托盘复用 Web 端 `radar-bunny.png`，显示连接状态，并提供打开网页、重连、
 查看/下载客户端日志、会话进度和退出动作。`webUrl` 与控制面的 `serverUrl` 分离，便于开发环境分别使用
 前端和后台端口；两者生产都必须为 HTTPS。托盘点击弹层由 FlatLaf Swing 卡片统一渲染，复用目录选择等客户端窗口的

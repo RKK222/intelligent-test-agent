@@ -73,7 +73,7 @@ final class LocalClientFirstRunSetup {
             return true;
         }
         Path opencodeExecutable = Path.of(packagedExecutable).toAbsolutePath().normalize();
-        if (!Files.isExecutable(opencodeExecutable)) {
+        if (!LocalClientPlatform.current().isExecutable(opencodeExecutable)) {
             throw new IllegalStateException("原生安装包中的 OpenCode 可执行文件不可用");
         }
         if (GraphicsEnvironment.isHeadless()) {

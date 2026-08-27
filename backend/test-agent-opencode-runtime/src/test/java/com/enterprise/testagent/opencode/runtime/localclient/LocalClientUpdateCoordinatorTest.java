@@ -98,6 +98,7 @@ class LocalClientUpdateCoordinatorTest {
         when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
                 TARGET_VERSION, 7, USER_ID, NOW)));
         when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.empty());
+        when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release("a".repeat(64))));
         when(connections.find(INSTANCE_ID)).thenReturn(Optional.empty());
 
         LocalClientUpdateCoordinator coordinator = coordinator(
@@ -128,6 +129,7 @@ class LocalClientUpdateCoordinatorTest {
         when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
                 TARGET_VERSION, 7, USER_ID, NOW)));
         when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.empty());
+        when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release("a".repeat(64))));
         when(connections.find(INSTANCE_ID)).thenReturn(
                 Optional.of(route(INSTANCE_ID, USER_ID, 7)),
                 Optional.of(route(INSTANCE_ID, USER_ID, 8)));
@@ -196,6 +198,8 @@ class LocalClientUpdateCoordinatorTest {
                 "20260820200000", 6, USER_ID, NOW)));
         when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
                 USER_ID, "20260820170000", 8, USER_ID, NOW)));
+        when(versions.findRelease("20260820170000"))
+                .thenReturn(Optional.of(release("20260820170000", "linux", "arm64", "a".repeat(64))));
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<LocalClientVersionModels.Attempt>> attempts = ArgumentCaptor.forClass(List.class);
 
@@ -218,6 +222,31 @@ class LocalClientUpdateCoordinatorTest {
             assertThat(attempt.targetVersion()).isEqualTo("20260820170000");
             assertThat(attempt.direction()).isEqualTo(LocalClientUpdateDirection.ROLLBACK);
         });
+    }
+
+    @Test
+    void allOnlineRolloutDoesNotSendWindowsReleaseToLinuxInstance() {
+        LocalClientVersionRepository versions = mock(LocalClientVersionRepository.class);
+        LocalClientInstanceRepository instances = mock(LocalClientInstanceRepository.class);
+        LocalClientConnectionStore connections = mock(LocalClientConnectionStore.class);
+        when(instances.findAll()).thenReturn(List.of(instance(true, "20260820180000")));
+        when(connections.find(INSTANCE_ID)).thenReturn(Optional.of(route(INSTANCE_ID, USER_ID, 7)));
+        when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
+                TARGET_VERSION, 9, USER_ID, NOW)));
+        when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.empty());
+        when(versions.findRelease(TARGET_VERSION))
+                .thenReturn(Optional.of(release(TARGET_VERSION, "windows", "x64", "a".repeat(64))));
+
+        LocalClientUpdateCoordinator.RolloutResult result = coordinator(
+                versions, instances, connections, mock(UserNotificationRepository.class))
+                .createRollout(
+                        LocalClientVersionModels.RolloutScope.ALL_ONLINE,
+                        null,
+                        USER_ID,
+                        "trace_cross_platform");
+
+        assertThat(result.attemptCount()).isZero();
+        verify(versions).insertAttempts(List.of());
     }
 
     @Test
@@ -400,6 +429,7 @@ class LocalClientUpdateCoordinatorTest {
                 NOW.minusSeconds(30), NOW.minusSeconds(30));
         when(versions.findDispatchableAttempts(100, 0, NOW)).thenReturn(List.of(
                 expiredOffline, recentOffline, laterOnline));
+        when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release("a".repeat(64))));
         when(instances.findById(expiredId)).thenReturn(Optional.of(instance(
                 expiredId, USER_ID, true, expiredOffline.currentVersion())));
         when(instances.findById(INSTANCE_ID)).thenReturn(Optional.of(instance(
@@ -517,6 +547,7 @@ class LocalClientUpdateCoordinatorTest {
         when(versions.findDispatchableAttempts(100, 0, NOW))
                 .thenReturn(java.util.Collections.nCopies(100, first));
         when(versions.findDispatchableAttempts(100, 100, NOW)).thenReturn(List.of(later));
+        when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release("a".repeat(64))));
         when(instances.findById(INSTANCE_ID)).thenReturn(Optional.of(instance(
                 INSTANCE_ID, USER_ID, true, first.currentVersion())));
         when(instances.findById(laterId)).thenReturn(Optional.of(instance(
@@ -547,6 +578,7 @@ class LocalClientUpdateCoordinatorTest {
         LocalClientVersionModels.Attempt attempt = attempt(
                 LocalClientVersionModels.AttemptStatus.PREPARING, null, null);
         when(versions.findAttempt(attempt.commandId())).thenReturn(Optional.of(attempt));
+        when(instances.findById(INSTANCE_ID)).thenReturn(Optional.of(instance(true, attempt.currentVersion())));
         when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release(digest)));
         when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
                 "20260820200000", 8, USER_ID, NOW)));
@@ -924,6 +956,7 @@ class LocalClientUpdateCoordinatorTest {
         when(versions.findGlobalPolicy()).thenReturn(Optional.of(new LocalClientVersionModels.GlobalPolicy(
                 TARGET_VERSION, 7, USER_ID, NOW)));
         when(versions.findUserPolicy(USER_ID)).thenReturn(Optional.empty());
+        when(versions.findRelease(TARGET_VERSION)).thenReturn(Optional.of(release("a".repeat(64))));
 
         coordinator(versions, instances, mock(LocalClientConnectionStore.class),
                 mock(UserNotificationRepository.class), registry, notifications)
@@ -1265,14 +1298,22 @@ class LocalClientUpdateCoordinatorTest {
     }
 
     private LocalClientVersionModels.Release release(String digest) {
+        return release(TARGET_VERSION, "linux", "arm64", digest);
+    }
+
+    private LocalClientVersionModels.Release release(
+            String version,
+            String platform,
+            String architecture,
+            String digest) {
         return new LocalClientVersionModels.Release(
-                TARGET_VERSION,
-                "linux",
-                "arm64",
+                version,
+                platform,
+                architecture,
                 1,
                 1,
                 "local-opencode-client.v1",
-                "http://downloads.example/releases/" + TARGET_VERSION + "/manifest.json",
+                "http://downloads.example/releases/" + version + "/manifest.json",
                 digest,
                 "manifest-signature",
                 true,

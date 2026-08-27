@@ -68,8 +68,13 @@ final class LocalClientDesktopActions {
     }
 
     static void revealFile(Path file) throws IOException {
-        if (LocalClientPaths.isMac()) {
+        LocalClientPlatform platform = LocalClientPlatform.current();
+        if (platform.isMac()) {
             start("/usr/bin/open", "-R", file.toString());
+            return;
+        }
+        if (platform.isWindows()) {
+            start("explorer.exe", "/select,", file.toString());
             return;
         }
         openDirectory(file.getParent());
@@ -88,7 +93,7 @@ final class LocalClientDesktopActions {
         }
         AtomicReference<Path> selection = new AtomicReference<>();
         try {
-            Runnable showPicker = () -> selection.set(LocalClientPaths.isMac()
+            Runnable showPicker = () -> selection.set(LocalClientPlatform.current().isMac()
                     ? chooseMacDirectory(initialDirectory(initialPath))
                     : chooseSwingDirectory(initialDirectory(initialPath)));
             if (EventQueue.isDispatchThread()) {
@@ -190,8 +195,11 @@ final class LocalClientDesktopActions {
     }
 
     private static void openWithPlatformCommand(String target) throws IOException {
-        if (LocalClientPaths.isMac()) {
+        LocalClientPlatform platform = LocalClientPlatform.current();
+        if (platform.isMac()) {
             start("/usr/bin/open", target);
+        } else if (platform.isWindows()) {
+            start("explorer.exe", target);
         } else {
             start("xdg-open", target);
         }

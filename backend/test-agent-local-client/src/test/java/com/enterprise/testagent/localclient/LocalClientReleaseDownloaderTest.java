@@ -399,8 +399,8 @@ class LocalClientReleaseDownloaderTest {
         manifest.put("schemaVersion", 2);
         manifest.put("version", TARGET_VERSION);
         manifest.put("publishedAt", Instant.parse("2026-08-20T07:30:45Z").toString());
-        manifest.put("platform", "linux");
-        manifest.put("architecture", "arm64");
+        manifest.put("platform", LocalClientPlatform.current().platform());
+        manifest.put("architecture", LocalClientPlatform.current().architecture());
         manifest.put("launcherVersionMin", 1);
         manifest.put("launcherVersionMax", 1);
         manifest.put("protocolVersion", "local-opencode-client.v1");

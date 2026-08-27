@@ -1,6 +1,6 @@
 # test-agent-local-client
 
-Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode 1.18.4 进程监管、本地文件 RPC、工作区原生选择、
+Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 Windows 10 1809（build 17763）x64。负责 WSS 反向连接、OpenCode 1.18.4 进程监管、本地文件 RPC、工作区原生选择、
 整客户端自更新和公共 Agent/Skill/Tool 完整能力包激活。客户端不直接访问平台数据库，也不把本地 OpenCode 请求
 回退到服务器运行时。
 
@@ -8,6 +8,10 @@ Mac/麒麟普通用户侧 Java 21 客户端。负责 WSS 反向连接、OpenCode
 
 - 麒麟稳定启动器的重复 `setup` 是就地升级入口：每次重新校验签名 catalog，安装并原子切换最新 release，随后 restart
   已有 user systemd service；配置、凭据、`state.json`、OpenCode 数据和工作区根映射位于 release 目录之外并保持不变。
+- Windows 安装器和稳定启动器是 Go x64 PE：安装器把签名 release 写入当前用户 `%LOCALAPPDATA%`，配置写入
+  `%APPDATA%`，通过当前用户任务计划和开始菜单启动，不要求管理员权限或系统 Java。稳定启动器只接受
+  `windows/x64` release，并在切换前复验清单及全部原始制品的大小、SHA-256 和 RSA 签名；PE 本身还必须在正式发布前
+  完成企业 Authenticode 签名和真实 Win10 验收。
 - 服务端拒绝旧 Client key 时，Java 会写入 `state/re-enrollment-required`。重复 `setup` 或应用菜单中的“Test Agent
   本地客户端”启动动作会先识别该标记，要求用户在本机重新输入统一认证号和当前 Client key，成功后清除标记并重启
   user systemd service；没有标记时普通启动不会重复索取凭据。用户从托盘主动退出后服务保持停止，必须由该桌面入口
@@ -93,7 +97,8 @@ mvn -pl test-agent-local-client -am -DskipTests package
 ```
 
 `LocalClientPublicCapabilityStoreTest` 覆盖提交绑定的新包、首版基线兼容、不可变安装、原子切换、回滚与摘要拒绝。企业安装制品还必须通过
-`deploy/internal/package-local-opencode-client.sh` 的 commit/manifest、签名和完整 artifact 校验。
+`deploy/internal/package-local-opencode-client.sh` 的 commit/manifest、签名和完整 artifact 校验；Windows 候选包还要执行
+`deploy/internal/tests/local-opencode-client-windows-package-test.sh`，正式包继续受 Authenticode 和 Win10 真机闸门约束。
 `OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
 
 ## 依赖边界

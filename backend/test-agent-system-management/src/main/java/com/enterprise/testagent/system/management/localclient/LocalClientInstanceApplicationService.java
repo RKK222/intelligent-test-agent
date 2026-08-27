@@ -104,6 +104,7 @@ public class LocalClientInstanceApplicationService {
             LocalClientInstance instance,
             LocalClientVersionModels.EffectivePolicy effective,
             LocalClientConnectionRoute route) {
+        String compatibleTarget = compatibleTargetVersion(instance, effective.targetVersion());
         return new LocalClientInstanceResponses.InstanceView(
                 instance.clientInstanceId().value(),
                 instance.clientName(),
@@ -125,11 +126,24 @@ public class LocalClientInstanceApplicationService {
                 instance.lastDisconnectedAt(),
                 CAPABILITIES,
                 instance.selfUpdateSupported(),
-                effective.targetVersion(),
-                direction(instance, effective.targetVersion()),
+                compatibleTarget,
+                direction(instance, compatibleTarget),
                 instance.lastUpdateStatus(),
                 instance.lastUpdateAt(),
                 publicCapabilities(instance));
+    }
+
+    /** 页面不能把其它平台的全局目标展示成当前实例的可执行更新。 */
+    private String compatibleTargetVersion(LocalClientInstance instance, String targetVersion) {
+        if (targetVersion == null) {
+            return null;
+        }
+        return versionRepository.findRelease(targetVersion)
+                .filter(LocalClientVersionModels.Release::compatible)
+                .filter(release -> release.platform().equals(instance.platform()))
+                .filter(release -> release.architecture().equals(instance.architecture()))
+                .map(LocalClientVersionModels.Release::version)
+                .orElse(null);
     }
 
     private LocalClientInstanceResponses.PublicCapabilitiesView publicCapabilities(LocalClientInstance instance) {

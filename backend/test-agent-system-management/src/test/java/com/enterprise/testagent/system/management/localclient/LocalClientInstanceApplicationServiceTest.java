@@ -45,6 +45,8 @@ class LocalClientInstanceApplicationServiceTest {
                 "20260820200000", 6, userId, now)));
         when(versions.findUserPolicy(userId)).thenReturn(Optional.of(new LocalClientVersionModels.UserPolicy(
                 userId, "20260820180000", 7, userId, now)));
+        when(versions.findRelease("20260820180000")).thenReturn(Optional.of(release(
+                "20260820180000", "linux", "arm64", now)));
         when(rollout.isEnabled(userId)).thenReturn(true);
 
         LocalClientInstanceApplicationService service =
@@ -173,6 +175,32 @@ class LocalClientInstanceApplicationServiceTest {
                 now,
                 now.minusSeconds(30),
                 revokedAt);
+    }
+
+    private static LocalClientVersionModels.Release release(
+            String version,
+            String platform,
+            String architecture,
+            Instant now) {
+        return new LocalClientVersionModels.Release(
+                version,
+                platform,
+                architecture,
+                1,
+                1,
+                "local-opencode-client.v1",
+                "http://downloads.example/releases/" + version + "/manifest.json",
+                "a".repeat(64),
+                "manifest-signature",
+                true,
+                now.minusSeconds(60),
+                now,
+                List.of(new LocalClientVersionModels.Artifact(
+                        "CLIENT_JAR",
+                        "http://downloads.example/releases/" + version + "/test-agent-local-client.jar",
+                        1,
+                        "b".repeat(64),
+                        "artifact-signature")));
     }
 
     private static LocalClientConnectionRoute route(

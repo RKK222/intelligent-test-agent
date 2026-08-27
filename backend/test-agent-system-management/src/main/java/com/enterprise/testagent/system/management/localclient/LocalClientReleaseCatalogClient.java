@@ -158,8 +158,10 @@ public class LocalClientReleaseCatalogClient {
                     digest(artifact.sha256(), "artifactSha256"),
                     Base64.getEncoder().encodeToString(signature));
         }).toList();
-        boolean compatible = "linux".equals(manifest.platform())
-                && "arm64".equals(manifest.architecture())
+        boolean supportedPlatform = ("linux".equals(manifest.platform())
+                && "arm64".equals(manifest.architecture()))
+                || ("windows".equals(manifest.platform()) && "x64".equals(manifest.architecture()));
+        boolean compatible = supportedPlatform
                 && manifest.launcherVersionMin() <= 1
                 && manifest.launcherVersionMax() >= 1
                 && "local-opencode-client.v1".equals(manifest.protocolVersion());

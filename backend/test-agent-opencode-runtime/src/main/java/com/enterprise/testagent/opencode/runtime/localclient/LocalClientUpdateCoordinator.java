@@ -160,8 +160,9 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
             throw staleNotification(actorUserId, notificationId, traceId);
         }
         LocalClientVersionModels.EffectivePolicy effective = effectivePolicy(actorUserId);
-        if (effective.targetVersion() == null
-                || !effective.targetVersion().equals(expectedTargetVersion)
+        String compatibleTarget = compatibleTargetVersion(instance, effective);
+        if (compatibleTarget == null
+                || !compatibleTarget.equals(expectedTargetVersion)
                 || !notification.dedupKey().endsWith(
                         ":" + expectedTargetVersion + ":" + effective.policyRevision())) {
             throw staleNotification(actorUserId, notificationId, traceId);
@@ -205,10 +206,11 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
             throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端未声明 SELF_UPDATE_V1 能力");
         }
         LocalClientVersionModels.EffectivePolicy effective = effectivePolicy(userId);
-        LocalClientUpdateDirection direction = direction(instance, effective.targetVersion());
+        String compatibleTarget = compatibleTargetVersion(instance, effective);
+        LocalClientUpdateDirection direction = direction(instance, compatibleTarget);
         // 新部署尚未设置任何版本策略时没有可下发的目标，不能把内部哨兵 revision=0
         // 编码成 VERSION_POLICY；已发布客户端会把非正 revision 视为失效 fencing 并断开连接。
-        if (effective.targetVersion() == null) {
+        if (compatibleTarget == null) {
             notifications.invalidateLocalClientUpdate(
                     userId, clientInstanceId.value(), "POLICY_SATISFIED", traceId);
             return;
@@ -221,7 +223,7 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
                     clientInstanceId.value(),
                     instance.clientName(),
                     instance.clientVersion(),
-                    effective.targetVersion(),
+                    compatibleTarget,
                     direction.name(),
                     effective.policyRevision(),
                     traceId);
@@ -235,7 +237,7 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
                 codec.payload(new LocalClientPayloads.VersionPolicy(
                         clientInstanceId.value(),
                         generation,
-                        effective.targetVersion(),
+                        compatibleTarget,
                         direction.name(),
                         effective.policyRevision(),
                         false))));
@@ -261,9 +263,11 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
                 true);
         LocalClientVersionModels.Release release = versionRepository.findRelease(attempt.targetVersion())
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "更新目标版本已不可用"));
+        LocalClientInstance instance = requireOwned(userId, clientInstanceId);
         LocalClientVersionModels.EffectivePolicy effective = effectivePolicy(userId);
         if (!Objects.equals(effective.targetVersion(), attempt.targetVersion())
                 || effective.policyRevision() != attempt.policyRevision()
+                || !releaseMatches(instance, release)
                 || !release.manifestSha256().equals(prepared.releaseDigest())) {
             cancelAttempt(attempt, clientInstanceId, generation, "POLICY_OR_RELEASE_CHANGED", traceId);
             return;
@@ -448,8 +452,9 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
                 continue;
             }
             LocalClientVersionModels.EffectivePolicy policy = effectivePolicy(instance.userId());
-            LocalClientUpdateDirection direction = direction(instance, policy.targetVersion());
-            if (policy.targetVersion() == null || direction == LocalClientUpdateDirection.SAME) {
+            String compatibleTarget = compatibleTargetVersion(instance, policy);
+            LocalClientUpdateDirection direction = direction(instance, compatibleTarget);
+            if (compatibleTarget == null || direction == LocalClientUpdateDirection.SAME) {
                 continue;
             }
             attempts.add(new LocalClientVersionModels.Attempt(
@@ -460,7 +465,7 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
                     route.connectionGeneration(),
                     policy.policyRevision(),
                     instance.clientVersion(),
-                    policy.targetVersion(),
+                    compatibleTarget,
                     direction,
                     LocalClientVersionModels.AttemptStatus.PENDING,
                     null,
@@ -566,6 +571,12 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
             terminal(attempt, LocalClientVersionModels.AttemptStatus.CANCELLED, "CAPABILITY_UNAVAILABLE", traceId);
             return;
         }
+        LocalClientVersionModels.Release targetRelease =
+                versionRepository.findRelease(attempt.targetVersion()).orElse(null);
+        if (targetRelease == null || !releaseMatches(registeredInstance, targetRelease)) {
+            terminal(attempt, LocalClientVersionModels.AttemptStatus.CANCELLED, "PLATFORM_INCOMPATIBLE", traceId);
+            return;
+        }
         if (!route.backendProcessId().value().equals(identity.backendProcessId())) {
             return;
         }
@@ -598,7 +609,10 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
     private void authorizePreparedAttempt(LocalClientVersionModels.Attempt attempt, String traceId) {
         LocalClientVersionModels.EffectivePolicy effective = effectivePolicy(attempt.userId());
         LocalClientVersionModels.Release release = versionRepository.findRelease(attempt.targetVersion()).orElse(null);
+        LocalClientInstance instance = instanceRepository.findById(attempt.clientInstanceId()).orElse(null);
         if (release == null
+                || instance == null
+                || !releaseMatches(instance, release)
                 || !Objects.equals(effective.targetVersion(), attempt.targetVersion())
                 || effective.policyRevision() != attempt.policyRevision()
                 || !Objects.equals(release.manifestSha256(), attempt.releaseDigest())) {
@@ -695,6 +709,27 @@ public class LocalClientUpdateCoordinator implements ServerBroadcastHandler {
         return LocalClientVersionModels.resolveEffectivePolicy(
                 versionRepository.findGlobalPolicy().orElse(null),
                 versionRepository.findUserPolicy(userId).orElse(null));
+    }
+
+    /** 单一全局策略保持现有数据模型，但不允许跨平台 release 下发到另一类实例。 */
+    private String compatibleTargetVersion(
+            LocalClientInstance instance,
+            LocalClientVersionModels.EffectivePolicy policy) {
+        if (policy.targetVersion() == null) {
+            return null;
+        }
+        return versionRepository.findRelease(policy.targetVersion())
+                .filter(release -> releaseMatches(instance, release))
+                .map(LocalClientVersionModels.Release::version)
+                .orElse(null);
+    }
+
+    private static boolean releaseMatches(
+            LocalClientInstance instance,
+            LocalClientVersionModels.Release release) {
+        return release.compatible()
+                && release.platform().equals(instance.platform())
+                && release.architecture().equals(instance.architecture());
     }
 
     private LocalClientUpdateDirection direction(LocalClientInstance instance, String targetVersion) {

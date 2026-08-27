@@ -10,7 +10,6 @@ import java.net.NetworkInterface;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 
 /** 统一构造常规连接和首次接入探测使用的 REGISTER，避免认证字段在两个入口漂移。 */
 final class LocalClientRegistrationFrames {
@@ -74,11 +73,10 @@ final class LocalClientRegistrationFrames {
     }
 
     private static String platform() {
-        return LocalClientPaths.isMac() ? "darwin" : "linux";
+        return LocalClientPlatform.current().platform();
     }
 
     private static String architecture() {
-        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-        return "aarch64".equals(arch) ? "arm64" : arch;
+        return LocalClientPlatform.current().architecture();
     }
 }

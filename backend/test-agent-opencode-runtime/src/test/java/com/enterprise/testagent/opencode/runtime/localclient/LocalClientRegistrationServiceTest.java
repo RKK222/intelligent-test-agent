@@ -44,9 +44,9 @@ class LocalClientRegistrationServiceTest {
         LocalClientPayloads.Register payload = new LocalClientPayloads.Register(
                 "unused-after-authentication",
                 clientInstanceId.value(),
-                "麒麟工作站",
-                "linux",
-                "arm64",
+                "Win10 工作站",
+                "windows",
+                "amd64",
                 "20260825135217",
                 "1.18.4",
                 List.of("127.0.0.1"),

@@ -50,13 +50,14 @@ final class LocalClientSelfCheck {
             throw new IllegalStateException("candidate Java or build version is incompatible");
         }
 
+        LocalClientPlatform platform = LocalClientPlatform.current();
         Path expectedJdk = releaseRoot.resolve("jdk");
-        Path expectedJava = expectedJdk.resolve("bin/java");
+        Path expectedJava = platform.javaExecutable(releaseRoot);
         Path expectedJar = releaseRoot.resolve("test-agent-local-client.jar");
-        Path expectedOpencode = releaseRoot.resolve("opencode/bin/opencode");
-        requireExecutable(expectedJava, "candidate Java executable is invalid");
+        Path expectedOpencode = platform.opencodeExecutable(releaseRoot);
+        requireExecutable(platform, expectedJava, "candidate Java executable is invalid");
         requireRegularFile(expectedJar, "candidate JAR is invalid");
-        requireExecutable(expectedOpencode, "candidate OpenCode executable is invalid");
+        requireExecutable(platform, expectedOpencode, "candidate OpenCode executable is invalid");
 
         if (!expectedJdk.toRealPath().equals(runningJavaHome.toAbsolutePath().normalize().toRealPath())
                 || !expectedJar.toRealPath().equals(runningJar.toAbsolutePath().normalize().toRealPath())) {
@@ -70,9 +71,8 @@ final class LocalClientSelfCheck {
         }
     }
 
-    private static void requireExecutable(Path path, String message) {
-        requireRegularFile(path, message);
-        if (!Files.isExecutable(path)) {
+    private static void requireExecutable(LocalClientPlatform platform, Path path, String message) {
+        if (!platform.isExecutable(path)) {
             throw new IllegalStateException(message);
         }
     }

@@ -47,16 +47,15 @@ final class LocalClientCandidateChecker implements LocalClientReleaseDownloader.
             String targetVersion) {
         String version = LocalClientReleaseVersion.parse(targetVersion).value();
         Path releaseRoot = releaseDirectory.toAbsolutePath().normalize();
+        LocalClientPlatform platform = LocalClientPlatform.current();
         Path javaPath = javaExecutable.toAbsolutePath().normalize();
-        Path javacPath = releaseRoot.resolve("jdk/bin/javac");
+        Path javacPath = platform.javacExecutable(releaseRoot);
         Path jarPath = clientJar.toAbsolutePath().normalize();
         if (!version.equals(releaseRoot.getFileName().toString())
-                || !javaPath.equals(releaseRoot.resolve("jdk/bin/java"))
+                || !javaPath.equals(platform.javaExecutable(releaseRoot))
                 || !jarPath.equals(releaseRoot.resolve("test-agent-local-client.jar"))
-                || !Files.isRegularFile(javaPath, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isExecutable(javaPath)
-                || !Files.isRegularFile(javacPath, LinkOption.NOFOLLOW_LINKS)
-                || !Files.isExecutable(javacPath)
+                || !platform.isExecutable(javaPath)
+                || !platform.isExecutable(javacPath)
                 || !Files.isRegularFile(jarPath, LinkOption.NOFOLLOW_LINKS)) {
             throw new IllegalStateException("candidate self-check inputs are invalid");
         }
