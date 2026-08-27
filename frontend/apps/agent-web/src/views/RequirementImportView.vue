@@ -48,12 +48,22 @@ function applicationLabel(application: RequirementImportApplication): string {
   return `${application.appName}（${application.appShortName}）`;
 }
 
+function applicationSearchText(application: RequirementImportApplication): string {
+  return `${application.appName} ${application.appShortName}`.toLocaleLowerCase();
+}
+
 function resolveApplication(raw: string): RequirementImportApplication | undefined {
-  const normalized = raw.trim();
-  return applications.value.find((application) =>
-    application.appShortName === normalized
-    || application.appName === normalized
-    || applicationLabel(application) === normalized);
+  const normalized = raw.trim().toLocaleLowerCase();
+  if (!normalized) return undefined;
+  const exact = applications.value.find((application) =>
+    application.appShortName.toLocaleLowerCase() === normalized
+    || application.appName.toLocaleLowerCase() === normalized
+    || applicationLabel(application).toLocaleLowerCase() === normalized);
+  if (exact) return exact;
+  // 只有唯一模糊命中时才自动规范为应用简称；多条候选继续交给用户明确选择，避免静默选错应用。
+  const fuzzyMatches = applications.value.filter((application) =>
+    applicationSearchText(application).includes(normalized));
+  return fuzzyMatches.length === 1 ? fuzzyMatches[0] : undefined;
 }
 
 const versions = computed(() => {
@@ -74,7 +84,7 @@ const filteredApplications = computed(() => {
   // 聚焦或主动展开时展示全量建议；一旦用户键入，即使刚好完整命中简称，也必须保持筛选结果。
   if (!applicationSearchActive.value || !query) return applications.value;
   return applications.value.filter((application) =>
-    `${application.appName} ${application.appShortName}`.toLocaleLowerCase().includes(query));
+    applicationSearchText(application).includes(query));
 });
 
 const filteredItems = computed(() => {
@@ -448,7 +458,7 @@ onBeforeUnmount(() => window.removeEventListener("message", receiveParentMessage
               role="option"
               :aria-selected="application.appShortName === selectedApp"
             >
-              <button type="button" @click="selectApplication(application)">
+              <button type="button" @mousedown.prevent @click="selectApplication(application)">
                 <span>{{ application.appName }}</span>
                 <code>{{ application.appShortName }}</code>
               </button>

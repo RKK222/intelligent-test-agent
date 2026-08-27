@@ -393,6 +393,65 @@ describe("RequirementImportView", () => {
     wrapper.unmount();
   });
 
+  it("applies lowercase and unique fuzzy application input with the canonical short name", async () => {
+    listApplications.mockResolvedValueOnce([
+      { appName: "基础应用", appShortName: "F-BASE" },
+      { appName: "其他应用", appShortName: "F-BATCH" }
+    ]);
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_case_insensitive_application"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+
+    await applicationInput.setValue("f-batch");
+    await applicationInput.trigger("keydown.enter");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "F-BATCH", expect.any(String)));
+    expect((applicationInput.element as HTMLInputElement).value).toBe("其他应用（F-BATCH）");
+
+    await applicationInput.setValue("基础");
+    await applicationInput.trigger("change");
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "F-BASE", expect.any(String)));
+    expect((applicationInput.element as HTMLInputElement).value).toBe("基础应用（F-BASE）");
+    wrapper.unmount();
+  });
+
+  it("keeps the application option selectable after fuzzy typing", async () => {
+    const wrapper = mountView();
+    window.dispatchEvent(new MessageEvent("message", {
+      origin: window.location.origin,
+      source: window.parent,
+      data: {
+        type: "ITA_REQUIREMENT_IMPORT_CONTEXT",
+        workspaceId: "wrk_1",
+        requestId: "req_fuzzy_application_click"
+      }
+    }));
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenCalledTimes(1));
+    const applicationInput = wrapper.get('input[aria-label="TCDS 应用"]');
+    await applicationInput.trigger("focus");
+    (applicationInput.element as HTMLInputElement).value = "app-b";
+    await applicationInput.trigger("input");
+    const optionButton = wrapper.get('#requirement-import-application-options [role="option"] button');
+    const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    optionButton.element.dispatchEvent(mouseDown);
+    expect(mouseDown.defaultPrevented).toBe(true);
+    await optionButton.trigger("click");
+
+    await vi.waitFor(() => expect(listItems).toHaveBeenLastCalledWith("wrk_1", "APP-B", expect.any(String)));
+    expect((applicationInput.element as HTMLInputElement).value).toBe("应用乙（APP-B）");
+    wrapper.unmount();
+  });
+
   it("filters sub-items by parent or child tokens, preserves selection, and supports selected-only view", async () => {
     listItems.mockResolvedValueOnce([
       {
