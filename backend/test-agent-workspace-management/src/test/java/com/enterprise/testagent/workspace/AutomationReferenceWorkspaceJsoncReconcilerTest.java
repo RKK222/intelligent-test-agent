@@ -126,4 +126,10 @@ class AutomationReferenceWorkspaceJsoncReconcilerTest {
 
         assertThat(reconciler.reconcile(first, "app_demo", List.of(patch))).isEqualTo(first);
     }
+
+    @Test
+    void blankConfigurationWithoutAutomationReferencesRemainsBlank() {
+        assertThat(reconciler.reconcile("", "app_demo", List.of())).isEmpty();
+        assertThat(reconciler.reconcile("  \n", "app_demo", List.of())).isEqualTo("  \n");
+    }
 }

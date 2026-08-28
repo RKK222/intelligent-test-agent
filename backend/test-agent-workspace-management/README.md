@@ -12,6 +12,7 @@
 - `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，只装载当前工作树 `.opencode/opencode.jsonc` 中由平台写入且应用、版本库、generation、目录和逻辑配置路径均可重新验证的自动化条目；使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 定位器提供目录、文本、分片和二进制只读读取。每次操作重新授权，不接受客户端物理路径；`.git`、符号链接、越界和全部写/Git/搜索/requirements 操作固定拒绝。
 - 浏览器不再读取、解析或写入自动化 JSONC；它只通过 Agent 配置文件 WebSocket 的 `agent-config.automation-reference.reconcile` 请求后端权威对账。应用资产库仍保留前端 `patchReferenceConfig` 的既有最小补丁，二者不能互相复用实现或形成第二套自动化规则。
 - 存量个人 runtime Workspace 若仍记录在应用目录而配置留在固定 `workspace/.opencode`，Agent 配置读取与组合树可兼容该受控子目录；首次引用保存会写入会话根的标准 `.opencode/opencode.jsonc`，使 OpenCode 从当前 cwd 原生加载同一份 references/permission。不会递归搜索，也不接受客户端物理路径。
+- 应用工作区未创建可选的 `.opencode` 目录时，配置树按空目录返回、单文件读取按 `NOT_FOUND` 返回；真实工作区根目录缺失仍保持 `ROOT_UNAVAILABLE`。没有自动化引用的 Run 不创建空 `.opencode/opencode.jsonc`，只有实际需要写入托管引用时才通过既有条件写链路创建标准目录和配置文件。
 
 ## 工程定位
 

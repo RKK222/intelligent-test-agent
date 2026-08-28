@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -101,6 +102,28 @@ class ApplicationAutomationReferenceWorkspaceReconciliationServiceTest {
     }
 
     @Test
+    void missingConfigurationWithReadyReplicaCreatesManagedReference() {
+        when(automationRepository.findReplicas(APP_ID, REPOSITORY_ID, 3L))
+                .thenReturn(List.of(replica(ReferenceRepositoryReplicaStatus.READY)));
+        when(agentConfigService.readWorkspaceAgentFile("wrk_main", "opencode.jsonc", null))
+                .thenThrow(new PlatformException(ErrorCode.NOT_FOUND, "文件不存在"));
+        when(agentConfigService.writeWorkspaceAgentFileIfUnchanged(
+                        eq("wrk_main"), eq("opencode.jsonc"), eq(false), eq(null), anyString(), eq(null)))
+                .thenReturn(true);
+
+        var result = service.reconcile(workspace(), USER_ID, "trace-run");
+
+        assertThat(result.configurationChanged()).isTrue();
+        assertThat(result.warnings()).isEmpty();
+        assertThat(result.leases()).hasSize(1);
+        ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
+        verify(agentConfigService).writeWorkspaceAgentFileIfUnchanged(
+                eq("wrk_main"), eq("opencode.jsonc"), eq(false), eq(null), content.capture(), eq(null));
+        assertThat(content.getValue())
+                .contains("\"automation-tests\"", "\"testagent-automation-generation\":3");
+    }
+
+    @Test
     void unavailableReplicaRemovesStaleReferenceAndReturnsLocalWarning() {
         when(automationRepository.findReplicas(APP_ID, REPOSITORY_ID, 3L))
                 .thenReturn(List.of(replica(ReferenceRepositoryReplicaStatus.BLOCKED)));
@@ -168,6 +191,21 @@ class ApplicationAutomationReferenceWorkspaceReconciliationServiceTest {
         assertThatThrownBy(() -> service.reconcile(workspace(), USER_ID, "trace-run"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void missingConfigurationWithoutAutomationReferencesRemainsAbsent() {
+        when(configurationRepository.findRepositoriesByApplication(APP_ID)).thenReturn(List.of());
+        when(agentConfigService.readWorkspaceAgentFile("wrk_main", "opencode.jsonc", null))
+                .thenThrow(new PlatformException(ErrorCode.NOT_FOUND, "文件不存在"));
+
+        var result = service.reconcile(workspace(), USER_ID, "trace-run");
+
+        assertThat(result.configurationChanged()).isFalse();
+        assertThat(result.leases()).isEmpty();
+        assertThat(result.warnings()).isEmpty();
+        verify(agentConfigService, never()).writeWorkspaceAgentFileIfUnchanged(
+                eq("wrk_main"), eq("opencode.jsonc"), eq(false), eq(null), anyString(), eq(null));
     }
 
     private CodeRepository repository() {

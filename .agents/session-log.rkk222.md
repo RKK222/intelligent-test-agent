@@ -15542,3 +15542,25 @@
 
 - 并行 dispose 行为、同进程安全边界、完整编译与自动化回归均已验证；真实 Spring Boot readiness 因当前 `.env.test` 外部状态未完成，不能表述为完整运行验收通过。
 - 本次使用 `release`，不新增部署节点；不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、鉴权、安全协议、generated SDK 或 OpenCode 只读源码。工作区原有 4 份用户手册改动继续保留且不纳入本次提交。
+
+## 2026-08-28 - 修复应用缺少 OpenCode 配置目录时对话失败
+
+### Why
+
+- 企业现场多个应用的个人工作区真实存在，但应用尚未创建可选的 `.opencode` 目录；Run 启动前的自动化引用对账读取 `opencode.jsonc` 时，把缺少配置目录误报成 `VALIDATION_ERROR / ROOT_UNAVAILABLE`，导致对话在接口已触发后仍失败。
+
+### What
+
+- `AgentConfigApplicationService` 区分“真实工作区根目录缺失”和“可选 Agent 配置目录缺失”：前者继续返回 `ROOT_UNAVAILABLE`，后者在单文件/分片读取时返回既有 `NOT_FOUND`，配置树仍按空目录处理。
+- 自动化引用 JSONC 对账在原配置为空且应用没有托管自动化引用时保持空状态，不为普通 Run 创建无业务内容的 `.opencode/opencode.jsonc`；存在就绪引用时仍复用既有条件写链路创建标准配置。
+- 新增缺目录、缺真实根目录、无引用不落盘和有引用正常创建的回归测试，并同步 workspace-management README。
+
+### How
+
+- 三组定向测试与 `test-agent-workspace-management` 依赖链全量测试均通过；`git diff --check` 通过。JDK 25 下 26 模块 `mvn clean package -Dmaven.test.skip=true` 构建成功。
+- 按根目录 `.env.test` / `test` profile 执行项目启动，当前环境实际连接未运行的回环 PostgreSQL `127.0.0.1:15432/test_agent`，后端因连接拒绝退出；未修改 dotenv、未切换数据库，启动脚本和半启动进程均已清理。
+
+### Result
+
+- 代码层已阻断“没有 `.opencode` 就无法发起对话”的误报，同时保留真实工作区丢失的诊断和实际自动化引用的配置创建能力；企业环境仍需部署新后端后用原问题应用复验。
+- 本次使用 `release`，不新增部署节点，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、鉴权、安全协议、generated SDK、环境文件或只读 OpenCode 源码。工作区并行存在的用户手册与 help-center 测试改动保持未暂存，不纳入本次提交。

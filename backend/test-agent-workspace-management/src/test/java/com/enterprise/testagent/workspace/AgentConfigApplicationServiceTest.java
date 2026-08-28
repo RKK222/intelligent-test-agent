@@ -1450,6 +1450,67 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void missingWorkspaceAgentDirectoryIsAnEmptyConfigurationInsteadOfAnUnavailableWorkspace() throws Exception {
+        Path workspaceRoot = Files.createDirectories(root.resolve("project-without-agent-config"));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_without_agent_config"),
+                        "project-without-agent-config",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        assertThat(service.listWorkspaceAgentFiles("wrk_without_agent_config", "", null)).isEmpty();
+        assertThatThrownBy(() -> service.readWorkspaceAgentFile(
+                        "wrk_without_agent_config", "opencode.jsonc", null))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThatThrownBy(() -> service.readWorkspaceAgentFilePreviewChunk(
+                        "wrk_without_agent_config", "opencode.jsonc", 0, null, null, null))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode"))).isFalse();
+    }
+
+    @Test
+    void missingWorkspaceRootStillReportsRootUnavailable() {
+        Path workspaceRoot = root.resolve("missing-workspace-root");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_missing_root"),
+                        "missing-workspace-root",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        assertThatThrownBy(() -> service.readWorkspaceAgentFile("wrk_missing_root", "opencode.jsonc", null))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.details()).containsEntry("reason", "ROOT_UNAVAILABLE");
+                });
+    }
+
+    @Test
     void workspaceAgentFilesUsePluralAgentsDirectory() throws Exception {
         Path workspaceRoot = root.resolve("project");
         Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));

@@ -1058,7 +1058,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
     }
 
     public FileContentResponse readWorkspaceAgentFile(String workspaceId, String relativePath, String worktreeId) {
-        return fileService.readContent(workspaceAgentRootForRead(workspaceId, worktreeId).toString(), relativePath);
+        return fileService.readContent(existingWorkspaceAgentRootForRead(workspaceId, worktreeId).toString(), relativePath);
     }
 
     /** 应用 Agent 大文件按 UTF-8 字节偏移渐进只读预览。 */
@@ -1070,7 +1070,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             Long expectedLastModifiedMillis,
             String worktreeId) {
         return fileService.readContentChunk(
-                workspaceAgentRootForRead(workspaceId, worktreeId).toString(),
+                existingWorkspaceAgentRootForRead(workspaceId, worktreeId).toString(),
                 relativePath,
                 offset,
                 expectedSize,
@@ -2670,6 +2670,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
 
     private Path workspaceAgentRootForRead(String workspaceId, String worktreeId) {
         Path repoRoot = repoRootForWorkspaceOperation(workspaceId, worktreeId);
+        if (!Files.isDirectory(repoRoot)) {
+            // 真实工作区缺失仍保持原有失败语义，不能与“尚未配置应用 Agent”混为一谈。
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "工作区根目录不存在",
+                    Map.of("reason", "ROOT_UNAVAILABLE"));
+        }
         Path standard = workspaceStandardAgentRoot(repoRoot);
         if (Files.isDirectory(standard)) {
             return standard;
@@ -2684,6 +2691,15 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         }
         Path legacy = repoRoot.resolve(WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT).normalize();
         return Files.isDirectory(legacy) ? legacy : standard;
+    }
+
+    /** 应用未创建可选的 {@code .opencode} 目录时，单文件读取按配置文件不存在处理。 */
+    private Path existingWorkspaceAgentRootForRead(String workspaceId, String worktreeId) {
+        Path agentRoot = workspaceAgentRootForRead(workspaceId, worktreeId);
+        if (!Files.isDirectory(agentRoot)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在");
+        }
+        return agentRoot;
     }
 
     private Path workspaceAgentRootForWrite(String workspaceId, String worktreeId) {

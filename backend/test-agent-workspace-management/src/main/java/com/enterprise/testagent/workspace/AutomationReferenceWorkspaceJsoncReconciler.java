@@ -44,6 +44,10 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
                 throw invalid("同一应用的自动化版本库或引用别名不能重复");
             }
         }
+        // 应用没有自动化引用且尚未建立项目配置时保持空状态，避免普通 Run 产生无业务内容的 Git 变更。
+        if ((content == null || content.isBlank()) && safePatches.isEmpty()) {
+            return content == null ? "" : content;
+        }
 
         String output = content == null || content.isBlank()
                 ? "{\n  \"$schema\": \"" + SCHEMA + "\"\n}\n"
