@@ -16121,5 +16121,12 @@
   生命周期按设计探测同 JVM `127.0.0.1:18083`，而 Admin 只监听 LAN，导致 `9999` 未启动、已有任务持续连接拒绝。
   正式容器改为监听 `0.0.0.0`，同时显式保留 LAN advertised host，并把 executor `9999` TCP connect 纳入发布门禁；
   `#14` 仍不能作为完整交付结论，必须再次实发验证 executor。
+- Jenkins `#15` 已以精确提交 `8032caf38f94d14fe3b149541f5f9938fe5fa3f6` 发布不可变标签
+  `release-15-8032caf3` 并取得 `SUCCESS`。平台和 Admin readiness、前端同源代理均为 `UP`，前端 HTTP 200，
+  `/api/auth/me` 经直连和代理均返回预期未登录 401，executor 明确记录在 Admin readiness 后启动且 `9999` TCP 可连接；
+  新容器日志中的 executor 拒绝、端口冲突、Redis/XXL MySQL 连接错误均为 0，两个 Compose 容器重启次数均为 0。
+- `#15` 的克隆升级源/结果、正式发布前/后 Flyway history 均为 123 条且分别字节一致，验证结果为 `SUCCESS`；临时
+  验证容器、网络和数据库均为 0。Jenkins、保留的 `abc` OpenCode 4096 与 MockCenter 18080 持续可用；远端人工
+  release 工作树已有的 Compose 修改、备份文件及并行出现的 `ReferenceConfigurationDialog.vue` 修改均未被流水线触碰。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构、SQL/Flyway、性能协议、generated SDK、OpenCode 源码
   或 `.env*`；仅调整测试环境 Jenkins 运行端口、反向代理和发布验证契约。
