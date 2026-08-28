@@ -102,7 +102,7 @@ class WorkspaceViewApplicationServiceTest {
         when(commonParameters.resolvedValue("OPENCODE_REFERENCES_DIR"))
                 .thenReturn(Optional.of(referencesRoot.toString()));
         when(commonParameters.resolvedValue("REFERENCES_SDD_FOLDER_NAMES"))
-                .thenReturn(Optional.of("docs,spec"));
+                .thenReturn(Optional.of("docs,spec,ai-agent/spec"));
 
         ReferenceRepositoryApplicationService referenceService = new ReferenceRepositoryApplicationService(
                 configurationRepository,
@@ -178,12 +178,12 @@ class WorkspaceViewApplicationServiceTest {
     }
 
     @Test
-    void preservesDirectAndVersionedSpecLayoutsWithReadonlyRequirementAssets() throws Exception {
+    void mountsOnlyNestedSpecAtWorkspaceSpecAndPreservesReadonlyRequirementLayouts() throws Exception {
         writeConfig("""
                 {
                   "references": {
                     "spec-requirements": {
-                      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/spec",
+                      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec",
                       "merge": true,
                       "sdd-folder-name": "spec",
                       "description": "需求规格、概要设计与需求用例"
@@ -194,7 +194,10 @@ class WorkspaceViewApplicationServiceTest {
         Files.createDirectories(workspaceRoot.resolve("spec"));
         Files.writeString(workspaceRoot.resolve("spec/工作区补充.md"), "workspace-note");
 
-        Path referenceSpec = Files.createDirectories(referencesRoot.resolve("requirements/spec"));
+        Files.writeString(
+                Files.createDirectories(referencesRoot.resolve("requirements/ai-agent")).resolve("not-mounted.md"),
+                "outside-spec");
+        Path referenceSpec = Files.createDirectories(referencesRoot.resolve("requirements/ai-agent/spec"));
         Files.createDirectories(referenceSpec.resolve("I20260623-0170"));
         Files.writeString(referenceSpec.resolve("I20260623-0170/概要设计.md"), "direct-design");
         Files.createDirectories(referenceSpec.resolve("2610/I20260825-9999"));
@@ -213,6 +216,9 @@ class WorkspaceViewApplicationServiceTest {
         assertThat(specChildren.entries())
                 .extracting(WorkspaceViewEntry::name)
                 .containsExactly("2610", "I20260623-0170", "工作区补充.md");
+        assertThat(specChildren.entries())
+                .extracting(WorkspaceViewEntry::name)
+                .doesNotContain("not-mounted.md");
 
         WorkspaceViewEntry directRequirement = specChildren.entries().stream()
                 .filter(entry -> entry.name().equals("I20260623-0170"))

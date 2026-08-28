@@ -457,7 +457,7 @@ export type ReferenceRepositoryStatus = {
   message?: string | null;
 };
 
-/** 引用资产库单层目录响应；只有后端标记的首层 SDD 目录允许配置。 */
+/** 引用资产库单层目录响应；只有后端按精确 SDD 相对路径标记的目录允许配置。 */
 export type ReferenceRepositoryTreeNode = {
   path: string;
   name: string;

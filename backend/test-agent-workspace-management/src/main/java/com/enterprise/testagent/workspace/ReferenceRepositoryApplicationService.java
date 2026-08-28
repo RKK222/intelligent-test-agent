@@ -486,7 +486,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         String normalizedPath = normalizeRelativePath(path == null ? null : path.trim());
         Path root = repositoryRoot(repository);
         Path directory = resolveSafeDirectory(root, normalizedPath);
-        Set<String> highlightedNames = normalizedPath.isEmpty() ? sddFolderNames() : Set.of();
+        Set<String> selectablePaths = sddFolderPaths();
         try (java.util.stream.Stream<Path> entries = Files.list(directory)) {
             return entries
                     .filter(entry -> !".git".equalsIgnoreCase(entry.getFileName().toString()))
@@ -495,7 +495,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                             .comparing((Path entry) -> !Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS))
                             .thenComparing(entry -> entry.getFileName().toString()))
                     .limit(MAX_TREE_ENTRIES)
-                    .map(entry -> treeNode(root, entry, normalizedPath.isEmpty(), highlightedNames))
+                    .map(entry -> treeNode(root, entry, selectablePaths))
                     .toList();
         } catch (IOException exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取引用资产目录失败", Map.of(), exception);
@@ -1303,9 +1303,7 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "引用资产库不存在"));
         repository = requireLinkedAssetRepository(applicationId(appId), repository.repositoryId());
         String normalizedFolder = normalizeRelativePath(folder);
-        if (normalizedFolder.isEmpty()
-                || normalizedFolder.contains("/")
-                || !sddFolderNames().contains(normalizedFolder)) {
+        if (normalizedFolder.isEmpty() || !sddFolderPaths().contains(normalizedFolder)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "引用资产目录不在当前规格目录白名单中");
         }
         requireReadyLocalState(repository);
@@ -1349,16 +1347,24 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
         return Path.of(value).toAbsolutePath().normalize();
     }
 
-    private Set<String> sddFolderNames() {
+    private Set<String> sddFolderPaths() {
         String value = commonParameterValues.resolvedValue(SDD_FOLDERS_PARAMETER).orElse("");
-        Set<String> names = new LinkedHashSet<>();
+        Set<String> paths = new LinkedHashSet<>();
         for (String segment : value.split(",")) {
-            String name = segment.trim();
-            if (!name.isEmpty() && name.equals(name.toLowerCase(java.util.Locale.ROOT))) {
-                names.add(name);
+            String path = segment.trim();
+            if (path.isEmpty() || !path.equals(path.toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
+            try {
+                String normalized = normalizeRelativePath(path);
+                if (normalized.equals(path)) {
+                    paths.add(normalized);
+                }
+            } catch (PlatformException ignored) {
+                // 单个错误配置不能拖垮整个资产库目录树；非法项按未配置处理。
             }
         }
-        return Set.copyOf(names);
+        return Set.copyOf(paths);
     }
 
     private Path resolveSafeDirectory(Path root, String relativePath) {
@@ -1417,14 +1423,14 @@ public class ReferenceRepositoryApplicationService implements ServerBroadcastHan
     private ReferenceRepositoryResponses.TreeNode treeNode(
             Path root,
             Path entry,
-            boolean rootLevel,
-            Set<String> highlightedNames) {
+            Set<String> selectablePaths) {
         boolean directory = Files.isDirectory(entry, LinkOption.NOFOLLOW_LINKS);
         String name = entry.getFileName().toString();
-        boolean marked = rootLevel && directory && highlightedNames.contains(name);
+        String relativePath = root.relativize(entry).toString().replace('\\', '/');
+        boolean marked = directory && selectablePaths.contains(relativePath);
         try {
             return new ReferenceRepositoryResponses.TreeNode(
-                    root.relativize(entry).toString().replace('\\', '/'),
+                    relativePath,
                     name,
                     directory,
                     directory ? 0L : Files.size(entry),

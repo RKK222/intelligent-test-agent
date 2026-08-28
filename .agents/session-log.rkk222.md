@@ -15854,3 +15854,29 @@
 
 - 远端测试环境已允许从引用配置选择根层 `ai-agent`，Agent 可按需递归检索其下二级规格目录；最终引用层级保持 `ai-agent/spec/...`。
 - 本次不涉及 HTTP API 契约、RunEvent/SSE、数据库结构、Flyway、前端、generated SDK、OpenCode 源码或 `.env*`，没有新增部署节点。
+
+## 2026-08-28 - 精确引用 ai-agent/spec 并合并到工作区 spec
+
+### Why
+
+- 用户进一步澄清只需要把资产库的 `ai-agent/spec` 引入工作区，不能把整个 `ai-agent` 挂载；上一条“放开 ai-agent 根目录资产引用”的配置语义因此作废。
+- 现有实现只允许根层目录名，单纯把 `ai-agent` 加入参数会扩大只读授权范围，也会让工作区多出不需要的父目录。
+
+### What
+
+- `REFERENCES_SDD_FOLDER_NAMES` 改为小写、安全、精确的仓库相对路径清单；目录树逐层浏览，但只对完整路径命中的目录返回可选。组合视图分别保留源目录 `ai-agent/spec` 和逻辑目标 `spec`，因此父目录内容不进入工作区。
+- 前端允许选择后端标记的二级目录，JSONC 保存完整源路径及对应精确 `/*` 权限，`sdd-folder-name` 仍为 `spec`；未授权 `ai-agent/*`。同步更新 workspace 模块、前端、用户手册、HTTP API、部署参数和测试用例文档。
+- 远端公共参数先以审计 trace `trace_restore_spec_root_config_20260828` 撤回错误的 `ai-agent`，再以 `trace_nested_spec_config_20260828` 设置为 `docs,spec,ai-agent/spec`；原有 `docs/spec` 只是继续可选，不会自动挂载。
+- 100 上 `18082` 已替换为当前 JAR，旧 `test-agent-app.uHOsp4.jar` 保留；远端旧前端基线不具备当前 release 的自动化面板文件，因此只在其原组件上落入两处兼容改动并把原文件备份到 `.tmp/dev-services`，未覆盖既有 Compose 修改，也未触碰 Jenkins `18081`。
+
+### How
+
+- 后端定向 Maven 共 75 项通过，覆盖精确路径标记、非法参数忽略、跨应用既有拒绝用例、`ai-agent/spec` 到工作区 `spec` 的组合读取、只读与父目录隔离；前端引用配置 Vitest 51/51 通过。
+- 按根 `.env.test` 和 `test` profile 完整运行 `restart-dev-services.sh`，26 模块后端打包、用户手册、全 workspace typecheck 和 production build 通过；本地 backend/readiness 为 `UP`，前端 3000 返回 200。
+- 本机与远端分别构造并清理临时 `ai-agent/spec` 探针：根层 `ai-agent` 均为 `selectable=false`，`ai-agent/spec` 为 `selectable=true`，其下需求目录不可单独配置。远端 `18082` readiness 为 `UP`，Vite 对兼容组件编译返回 200，并确认生成代码保存 `${repository.englishName}/${node.path}`。
+- `tools/verify-ai-docs.sh`、`git diff --check` 通过；运行态参数查询确认当前值和最近三条修改审计完整。验收资产探针已精确删除，两个资产副本 Git 状态恢复干净。
+
+### Result
+
+- 当前行为是 `资产库/ai-agent/spec/... -> 工作区/spec/...`；`ai-agent` 自身及其兄弟内容不进入组合视图，`spec` 内版本级需求用例和需求项目录设计资料保持原相对路径与只读语义。
+- 不新增部署节点，不变更 HTTP 路径/DTO、RunEvent/SSE、数据库结构、SQL、Flyway、generated SDK 或 OpenCode 只读源码；只扩展既有参数值语义并保持根层 `docs/spec` 向后兼容。未修改 `.env*`，未新建分支。

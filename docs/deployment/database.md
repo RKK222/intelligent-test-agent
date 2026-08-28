@@ -654,7 +654,7 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 | 参数 | 平台 | 默认值 | editable | 说明 |
 |---|---|---|---|---|
 | `OPENCODE_REFERENCES_DIR` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/references` | `false` | 引用资产根目录，统一引用 `SYS_DATA_ROOT_DIR`，运行态由通用参数解析器按当前/目标平台展开。只读，不允许前端修改。 |
-| `REFERENCES_SDD_FOLDER_NAMES` | `all` | `docs,spec` | `true` | 规格驱动（SDD）场景识别规格目录的名称清单，逗号分隔、小写。允许前端按团队约定调整。 |
+| `REFERENCES_SDD_FOLDER_NAMES` | `all` | `docs,spec` | `true` | 规格驱动（SDD）场景识别规格目录的精确相对路径清单，逗号分隔、小写；支持 `ai-agent/spec`。允许前端按团队约定调整。 |
 
 兼容策略：
 

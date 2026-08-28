@@ -155,7 +155,7 @@ public class WorkspaceViewApplicationService {
         ReferenceRepositoryApplicationService.ViewContent content = referenceService.readView(
                 mount.appId().value(),
                 mount.repositoryEnglishName(),
-                mount.folder(),
+                mount.sourceFolder(),
                 normalized.path());
         String logicalPath = join(mount.merge() ? mount.folder() : mount.alias(), content.path());
         return new WorkspaceViewReadResponse(
@@ -219,7 +219,7 @@ public class WorkspaceViewApplicationService {
         FilePreviewChunkResponse chunk = referenceService.readViewChunk(
                 mount.appId().value(),
                 mount.repositoryEnglishName(),
-                mount.folder(),
+                mount.sourceFolder(),
                 normalized.path(),
                 offset,
                 expectedSize,
@@ -286,7 +286,7 @@ public class WorkspaceViewApplicationService {
         FileBinaryChunkResponse chunk = referenceService.readViewBinaryChunk(
                 mount.appId().value(),
                 mount.repositoryEnglishName(),
-                mount.folder(),
+                mount.sourceFolder(),
                 normalized.path(),
                 offset,
                 expectedSize,
@@ -349,7 +349,7 @@ public class WorkspaceViewApplicationService {
                 listing = referenceService.listView(
                         mount.appId().value(),
                         mount.repositoryEnglishName(),
-                        mount.folder(),
+                        mount.sourceFolder(),
                         referencePath,
                         MAX_ENTRIES + 1);
             } catch (PlatformException exception) {
@@ -561,7 +561,7 @@ public class WorkspaceViewApplicationService {
             listing = referenceService.listView(
                     mount.appId().value(),
                     mount.repositoryEnglishName(),
-                    mount.folder(),
+                    mount.sourceFolder(),
                     locator.path(),
                     MAX_ENTRIES + 1);
         } catch (PlatformException exception) {
@@ -689,7 +689,7 @@ public class WorkspaceViewApplicationService {
                 referenceService.listView(
                         mount.appId().value(),
                         mount.repositoryEnglishName(),
-                        mount.folder(),
+                        mount.sourceFolder(),
                         "",
                         1);
                 valid.add(new ValidatedMount(mount));
@@ -784,18 +784,19 @@ public class WorkspaceViewApplicationService {
         }
         String suffix = path.substring(REFERENCE_PREFIX.length());
         String[] segments = suffix.split("/", -1);
-        if (segments.length != 2 || !safeSegment(segments[0]) || !safeSegment(segments[1])) {
+        if (segments.length < 2 || java.util.Arrays.stream(segments).anyMatch(segment -> !safeSegment(segment))) {
             warnings.add(warning(alias, "INVALID_REFERENCE_PATH", "引用路径结构无效"));
             return null;
         }
         String repositoryEnglishName = segments[0];
-        String folder = segments[1];
+        String sourceFolder = String.join("/", java.util.Arrays.copyOfRange(segments, 1, segments.length));
+        String folder = segments[segments.length - 1];
         if (!alias.equals(folder + "-" + repositoryEnglishName)
                 || !folder.equals(folderNode.textValue())) {
             warnings.add(warning(alias, "INVALID_REFERENCE_IDENTITY", "引用别名或规格目录不匹配"));
             return null;
         }
-        return new Mount(appId, alias, repositoryEnglishName, folder, mergeNode.booleanValue());
+        return new Mount(appId, alias, repositoryEnglishName, sourceFolder, folder, mergeNode.booleanValue());
     }
 
     private WorkspaceViewWarning warning(String alias, String code, String message) {
@@ -952,6 +953,7 @@ public class WorkspaceViewApplicationService {
             ApplicationId appId,
             String alias,
             String repositoryEnglishName,
+            String sourceFolder,
             String folder,
             boolean merge) {
     }

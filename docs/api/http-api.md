@@ -1577,7 +1577,7 @@ Base URL：`/api/internal/platform/workspace-management/applications/{appId}/ref
 - 总体状态必须为 `READY`，且当前 Java 所在 `linuxServerId` 的同 generation 副本必须为 `READY`；否则返回 `CONFLICT`，不跨 Java 代理读取其它服务器目录。
 - `path` 为空表示仓库根目录；只接受使用 `/` 的相对路径，拒绝绝对路径、反斜杠、`.`、`..`、任意层级 `.git`、路径穿越和符号链接。目录不存在返回 `NOT_FOUND`。
 - 每次只列一层，目录优先并按名称排序，最多返回 1000 项；`.git` 和符号链接不进入结果。
-- 只有仓库根层、名称命中 `REFERENCES_SDD_FOLDER_NAMES` 小写清单的真实目录才返回 `highlighted=true`、`selectable=true`。文件和所有嵌套目录均不可选。
+- 只有仓库内相对路径精确命中 `REFERENCES_SDD_FOLDER_NAMES` 小写清单的真实目录才返回 `highlighted=true`、`selectable=true`；清单支持根层 `docs`、`spec` 和 `ai-agent/spec` 等安全相对路径。父目录仅供逐层浏览，文件和未精确配置的目录均不可选。
 
 初始化接口只负责首次固定分支；再次用相同分支调用为幂等查询，用不同分支调用返回 `CONFLICT`，后续分支变化必须使用受控 `switch-branch` 接口。未初始化时调用同步返回 `CONFLICT`。应用不存在或未启用返回 `NOT_FOUND`；代码库未关联当前应用、类型错误、ID/分支/英文名不合法返回 `VALIDATION_ERROR`；缺少当前用户 SSH key 返回 `FORBIDDEN`；Git 网络/超时按统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT` 返回。终止请求的 `expectedGeneration < 1` 返回 `VALIDATION_ERROR`，与当前代次不一致返回 `CONFLICT`。缺少引用根目录参数、磁盘读取或原子落盘异常按统一安全错误返回。
 

@@ -1548,7 +1548,7 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.emitted("saved")).toEqual([[]]);
   });
 
-  it("saves the whole spec root beside an existing docs reference without flattening its internal layout", async () => {
+  it("saves only a configured nested spec beside an existing docs reference without mounting its parent", async () => {
     const existing = `{
   "references": {
     "docs-requirements": {
@@ -1569,12 +1569,35 @@ describe("ReferenceConfigurationDialog", () => {
         (_appId: string, _repositoryId: string, path: string) => Promise.resolve(path === ""
           ? [
               { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true },
-              { path: "spec", name: "spec", directory: true, size: 0, highlighted: true, selectable: true }
-            ]
-          : [
-              { path: "spec/2610", name: "2610", directory: true, size: 0, highlighted: false, selectable: false },
               {
-                path: "spec/I20260623-0170",
+                path: "ai-agent",
+                name: "ai-agent",
+                directory: true,
+                size: 0,
+                highlighted: false,
+                selectable: false
+              }
+            ]
+          : path === "ai-agent"
+            ? [{
+                path: "ai-agent/spec",
+                name: "spec",
+                directory: true,
+                size: 0,
+                highlighted: true,
+                selectable: true
+              }]
+            : [
+              {
+                path: "ai-agent/spec/2610",
+                name: "2610",
+                directory: true,
+                size: 0,
+                highlighted: false,
+                selectable: false
+              },
+              {
+                path: "ai-agent/spec/I20260623-0170",
                 name: "I20260623-0170",
                 directory: true,
                 size: 0,
@@ -1596,12 +1619,17 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("仅展示当前应用关联的资产库");
-    expect(wrapper.text()).toContain("版本目录中的需求用例和需求项目录中的设计资料均保持只读");
+    expect(wrapper.text()).toContain("只会引用选中的整个 spec");
+    expect(wrapper.findAll('button[data-reference-selectable="true"]')).toHaveLength(1);
+
+    await wrapper.get('button[aria-label="展开 ai-agent"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "ai-agent");
     expect(wrapper.findAll('button[data-reference-selectable="true"]')).toHaveLength(2);
 
     await wrapper.get('button[aria-label="展开 spec"]').trigger("click");
     await flushPromises();
-    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "spec");
+    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "ai-agent/spec");
     expect(wrapper.findAll('button[data-reference-selectable="true"]')).toHaveLength(2);
     expect(wrapper.text()).toContain("2610");
     expect(wrapper.text()).toContain("I20260623-0170");
@@ -1614,7 +1642,7 @@ describe("ReferenceConfigurationDialog", () => {
     );
     expect(wrapper.get('input[aria-label="路径（path）"]').element).toHaveProperty(
       "value",
-      "{env:OPENCODE_REFERENCES_DIR}/requirements/spec"
+      "{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec"
     );
     expect(wrapper.get('input[aria-label="规格驱动目录名称（sdd-folder-name）"]').element).toHaveProperty(
       "value",
@@ -1629,9 +1657,10 @@ describe("ReferenceConfigurationDialog", () => {
     expect(written).toContain('"docs-requirements"');
     expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
     expect(written).toContain('"spec-requirements"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/spec"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec"');
     expect(written).toContain('"sdd-folder-name": "spec"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/spec/*": "allow"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec/*": "allow"');
+    expect(written).not.toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/*": "allow"');
   });
 
   it("loads an existing local reference, enables Update only after a change, and preserves unknown fields", async () => {

@@ -1307,11 +1307,12 @@ class ReferenceRepositoryApplicationServiceTest {
     }
 
     @Test
-    void treeMarksOnlyConfiguredRootFoldersAndRejectsTraversalGitAndSymlink() throws Exception {
+    void treeMarksOnlyConfiguredRelativePathsAndRejectsTraversalGitAndSymlink() throws Exception {
         Path repositoryRoot = tempDir.resolve("assets");
         Files.createDirectories(repositoryRoot.resolve("docs"));
         Files.createDirectories(repositoryRoot.resolve("spec/I20260623-0170"));
         Files.createDirectories(repositoryRoot.resolve("spec/2610/I20260825-9999"));
+        Files.createDirectories(repositoryRoot.resolve("ai-agent/spec/2610"));
         Files.createDirectories(repositoryRoot.resolve("nested/docs"));
         Files.writeString(repositoryRoot.resolve("README.md"), "reference assets");
         Path outside = tempDir.resolve("outside");
@@ -1324,12 +1325,14 @@ class ReferenceRepositoryApplicationServiceTest {
         when(parameterValues.resolvedValue("OPENCODE_REFERENCES_DIR"))
                 .thenReturn(Optional.of(tempDir.toString()));
         when(parameterValues.resolvedValue("REFERENCES_SDD_FOLDER_NAMES"))
-                .thenReturn(Optional.of("docs,spec"));
+                .thenReturn(Optional.of("docs,spec,ai-agent/spec,../unsafe,UPPER/spec"));
 
         List<ReferenceRepositoryResponses.TreeNode> root = service.tree(APP.value(), ASSET_ID.value(), "");
         List<ReferenceRepositoryResponses.TreeNode> spec = service.tree(APP.value(), ASSET_ID.value(), "spec");
         List<ReferenceRepositoryResponses.TreeNode> version = service.tree(
                 APP.value(), ASSET_ID.value(), "spec/2610");
+        List<ReferenceRepositoryResponses.TreeNode> aiAgent = service.tree(
+                APP.value(), ASSET_ID.value(), "ai-agent");
         List<ReferenceRepositoryResponses.TreeNode> nested = service.tree(APP.value(), ASSET_ID.value(), "nested");
 
         assertThat(root).filteredOn(node -> node.name().equals("docs")).singleElement().satisfies(node -> {
@@ -1337,6 +1340,15 @@ class ReferenceRepositoryApplicationServiceTest {
             assertThat(node.selectable()).isTrue();
         });
         assertThat(root).filteredOn(node -> node.name().equals("spec")).singleElement().satisfies(node -> {
+            assertThat(node.highlighted()).isTrue();
+            assertThat(node.selectable()).isTrue();
+        });
+        assertThat(root).filteredOn(node -> node.name().equals("ai-agent")).singleElement().satisfies(node -> {
+            assertThat(node.highlighted()).isFalse();
+            assertThat(node.selectable()).isFalse();
+        });
+        assertThat(aiAgent).singleElement().satisfies(node -> {
+            assertThat(node.path()).isEqualTo("ai-agent/spec");
             assertThat(node.highlighted()).isTrue();
             assertThat(node.selectable()).isTrue();
         });

@@ -922,7 +922,7 @@ async function retryTreeLevel(path: string) {
 }
 
 function nodeSelectable(node: VisibleTreeNode) {
-  return node.depth === 0 && node.directory && node.highlighted && node.selectable;
+  return node.directory && node.highlighted && node.selectable;
 }
 
 async function readWorkspaceConfig(workspaceId = props.workspaceId): Promise<string> {
@@ -939,7 +939,7 @@ async function selectFolder(node: VisibleTreeNode) {
   const repository = selectedRepository.value;
   const target: ReferenceConfigTarget = {
     alias: `${node.name}-${repository.englishName}`,
-    path: `{env:OPENCODE_REFERENCES_DIR}/${repository.englishName}/${node.name}`,
+    path: `{env:OPENCODE_REFERENCES_DIR}/${repository.englishName}/${node.path}`,
     folder: node.name
   };
   const dialogToken = dialogGeneration;
@@ -1475,7 +1475,7 @@ onBeforeUnmount(() => {
                 <section class="reference-tree-panel" aria-label="引用目录树">
                   <div class="reference-panel-title">目录</div>
                   <p class="reference-tree-guidance">
-                    仅展示当前应用关联的资产库。选择 spec 会按原层级引用整个目录；版本目录中的需求用例和需求项目录中的设计资料均保持只读。
+                    仅展示当前应用关联的资产库。spec 可按配置位于仓库根层或 ai-agent 等目录下；只会引用选中的整个 spec，内部需求用例和设计资料保持原层级只读。
                   </p>
                   <div v-if="treeLoadingPaths.has('')" class="reference-compact-state">正在读取目录…</div>
                   <div v-else-if="treeErrors['']" class="reference-compact-state is-error">
@@ -1486,7 +1486,7 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                   <div v-else-if="visibleTreeNodes.length === 0" class="reference-compact-state">
-                    未找到可引用的首层目录。应用资产库只展示系统允许的 SDD 目录（默认 docs、spec）。
+                    未找到可引用的目录。请逐层展开资产库，选择系统配置的 SDD 目录（默认 docs、spec）。
                   </div>
                   <div v-else class="reference-tree" role="list">
                     <div
@@ -1555,7 +1555,7 @@ onBeforeUnmount(() => {
                 <section class="reference-form-panel" aria-label="引用表单">
                   <div class="reference-panel-title">配置</div>
                   <div v-if="!configTarget" class="reference-compact-state is-centered">
-                    选择蓝色首层目录后配置引用。
+                    选择蓝色目录后配置引用。
                   </div>
                   <div v-else-if="configLoading" class="reference-compact-state is-centered">正在读取工作区配置…</div>
                   <form v-else class="reference-form" @submit.prevent="submitConfig">
@@ -2286,7 +2286,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* 应用资产使用蓝色来源语义：后端明确标记 highlighted + selectable 的仓库首层 SDD 目录。 */
+/* 应用资产使用蓝色来源语义：后端明确标记 highlighted + selectable 的精确 SDD 相对路径。 */
 .reference-tree-row.is-reference-selectable .reference-tree-icon,
 .reference-tree-row.is-reference-selectable .reference-tree-name {
   color: var(--reference-folder-accent);
