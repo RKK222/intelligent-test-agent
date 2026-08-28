@@ -18,6 +18,7 @@ FRONTEND_URL=${FRONTEND_URL:-http://192.168.8.100:3000}
 BACKEND_PORT=${BACKEND_PORT:-18082}
 FRONTEND_BIND_ADDRESS=${FRONTEND_BIND_ADDRESS:-192.168.8.100}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
+XXL_JOB_ADMIN_PORT=${XXL_JOB_ADMIN_PORT:-18083}
 VERIFY_BACKEND_PORT=${VERIFY_BACKEND_PORT:-28082}
 POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-15432}
 DATABASE_CONTAINER=${DATABASE_CONTAINER:-test-agent-postgres}
@@ -142,6 +143,14 @@ validate_postgres_identifier() {
     }
 }
 
+validate_tcp_port() {
+    local value=$1 label=$2
+    [[ "${value}" =~ ^[1-9][0-9]{0,4}$ && "${value}" -le 65535 ]] || {
+        echo "Invalid ${label} port: ${value}" >&2
+        return 1
+    }
+}
+
 database_linux_data_root() {
     local database_name=$1 value
     validate_postgres_identifier "${database_name}" database
@@ -161,6 +170,7 @@ validate_host() {
     require_command curl
     require_command git
     require_command python3
+    validate_tcp_port "${XXL_JOB_ADMIN_PORT}" "XXL Admin"
     validate_secret_file
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     configured_data_root=$(database_linux_data_root "${source_db_name}")
@@ -258,7 +268,7 @@ write_stack() {
     python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_SOURCE}" \
         "${RUNTIME_DATA_ROOT}" "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
         "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" "${RUNTIME_SERVICE_HOST}" \
-        "${xxl_job_mysql_url}" <<'PY'
+        "${xxl_job_mysql_url}" "${XXL_JOB_ADMIN_PORT}" <<'PY'
 import json
 import sys
 
@@ -276,6 +286,7 @@ import sys
     backend_port,
     runtime_service_host,
     xxl_job_mysql_url,
+    xxl_job_admin_port,
 ) = sys.argv[1:]
 
 stack = {
@@ -299,6 +310,7 @@ stack = {
                 "TEST_AGENT_START_OPENCODE_MANAGER": "false",
                 "TEST_AGENT_REDIS_HOST": runtime_service_host,
                 "TEST_AGENT_XXL_JOB_MYSQL_URL": xxl_job_mysql_url,
+                "TEST_AGENT_XXL_JOB_ADMIN_PORT": xxl_job_admin_port,
             },
             "volumes": [
                 f"{release_dir}:/release:ro",
@@ -399,7 +411,10 @@ prepare_release() {
     mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"
     cp "${backend_jar}" "${release_dir}/backend.jar"
     cp -R "${frontend_dist}/." "${release_dir}/frontend/"
-    cp "${script_dir}/jenkins-nginx.conf" "${release_dir}/nginx.conf"
+    sed "s/__XXL_JOB_ADMIN_PORT__/${XXL_JOB_ADMIN_PORT}/g" \
+        "${script_dir}/jenkins-nginx.conf" >"${release_dir}/nginx.conf"
+    grep -Fq "host.docker.internal:${XXL_JOB_ADMIN_PORT}" "${release_dir}/nginx.conf"
+    ! grep -Fq '__XXL_JOB_ADMIN_PORT__' "${release_dir}/nginx.conf"
     validate_backend_jar "${release_dir}/backend.jar"
     write_stack "${release_dir}" "${release_dir}/stack.json"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
@@ -570,7 +585,7 @@ verify_database_upgrade() {
 }
 
 verify_deployment() {
-    local tag=$1 attempt backend_ready=false frontend_ready=false
+    local tag=$1 attempt backend_ready=false frontend_ready=false xxl_admin_ready=false xxl_admin_proxy_ready=false
     validate_tag "${tag}"
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]]
@@ -598,6 +613,30 @@ verify_deployment() {
     done
     [[ "${frontend_ready}" == true ]] || {
         echo "Frontend did not become ready within the deployment window." >&2
+        return 1
+    }
+    # 主上下文 readiness 不包含独立 Servlet 子上下文；必须单独等待 XXL Admin，防止端口冲突被误报为发布成功。
+    for attempt in $(seq 1 120); do
+        if curl -fsS --connect-timeout 2 --max-time 5 \
+            "http://127.0.0.1:${XXL_JOB_ADMIN_PORT}/xxl-job-admin/actuator/health/readiness" 2>/dev/null \
+            | grep -q '"status":"UP"'; then
+            xxl_admin_ready=true
+            break
+        fi
+        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        sleep 2
+    done
+    [[ "${xxl_admin_ready}" == true ]] || {
+        echo "XXL Admin did not become ready within the deployment window." >&2
+        return 1
+    }
+    if curl -fsS --connect-timeout 2 --max-time 5 \
+        "${FRONTEND_URL}/xxl-job-admin/actuator/health/readiness" 2>/dev/null \
+        | grep -q '"status":"UP"'; then
+        xxl_admin_proxy_ready=true
+    fi
+    [[ "${xxl_admin_proxy_ready}" == true ]] || {
+        echo "Frontend same-origin XXL Admin proxy is not ready." >&2
         return 1
     }
 }

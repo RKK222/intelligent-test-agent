@@ -16086,3 +16086,33 @@
 - 当前服务已恢复可用，但 Jenkins `#11` 结果仍为 `FAILURE`，且 `current` 发布指针尚未由成功任务确认；必须由后续
   Jenkins `DEPLOY` 完成正式验证后才能称为发布完成。不涉及产品 API、事件、SQL/Flyway、generated SDK、OpenCode
   源码或 `.env*`，不新增部署节点。
+
+## 2026-08-28 - 隔离 Jenkins XXL Admin 端口并补齐发布门禁
+
+### Why
+
+- Jenkins `#12` 已完成全量构建、123 条真实 Flyway history 克隆升级、正式 Compose 发布和主服务 readiness，产物
+  `release-12-969c090b`、当前指针与发布结果均已写入；但最终日志复核发现独立 XXL Admin 子上下文仍启动失败。
+- 现场 `18080` 由 `mockcenter-isolated-admin-server-1` 占用，主 WebFlux readiness 不包含该 Servlet 子上下文，原门禁
+  会把“平台主服务可用、定时任务管理不可用”误报为成功。
+
+### What
+
+- Jenkins 发布实例把 `TEST_AGENT_XXL_JOB_ADMIN_PORT` 固定为现场空闲的 `18083`；发布时用同一值渲染 Nginx
+  `/xxl-job-admin/` 同源代理，保留 MockCenter `18080`，不停止或修改其容器。
+- 发布门禁在主后端和前端通过后，继续有界等待 XXL Admin readiness，并通过前端同源路径再次验证；任一失败都会阻止
+  `current` 指针和成功结果更新。同步 Jenkins README 与契约自检。
+
+### How
+
+- 在 `192.168.8.100` 用 `ss` 与 Docker 容器端口清单确认 `18080` 的监听者是 MockCenter，`18083` 和 executor
+  `9999` 当前空闲；未修改运行密钥、数据库、真实数据根或现有容器。
+- Shell 语法、Jenkins 发布契约与 `git diff --check` 已通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，
+  未发现与本次 Jenkins 文件冲突的未完成改动。
+
+### Result
+
+- `#12` 只证明旧门禁下的平台主服务发布成功，不能作为完整 Jenkins 交付结论；本次修正仍须新的 Jenkins `DEPLOY`
+  实际启动 `18083`、验证同源代理并取得 `SUCCESS`。
+- 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构、SQL/Flyway、性能协议、generated SDK、OpenCode 源码
+  或 `.env*`；仅调整测试环境 Jenkins 运行端口、反向代理和发布验证契约。
