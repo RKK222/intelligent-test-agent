@@ -1,9 +1,13 @@
 ---
 name: restart-services
-description: 重启本地开发环境和服务，配置 JAVA_HOME 和 PATH
+description: 重启 Mac 本地开发环境和服务，配置 JAVA_HOME 和 PATH；共享测试环境部署必须改用项目 Jenkins 部署技能。
 ---
 
 # 重启本地开发环境和服务
+
+## 测试环境边界
+
+本技能只处理开发者 Mac 上的本地服务。用户要求“部署测试环境”“更新 192.168.8.100”“测试环境端到端验收”时，必须改用 `.agents/skills/jenkins-test-environment-deploy/SKILL.md`：通过 Jenkins 发布 `release` 分支，不能直接向测试机复制 JAR、前端源码或构建产物，也不能运行远端工作树的重启脚本替代 Jenkins。发布成功后的回复必须提供浏览器可访问的测试环境地址。
 
 在 Mac 本地重启前后端和 opencode 等开发服务时，**必须先覆盖当前 shell 继承的 Java 配置**，再调用项目脚本。不得直接运行 `./restart-dev-services.sh` 后等构建失败再补 `JAVA_HOME`，也不得信任调用前的 `java -version` 或已有 `JAVA_HOME`。
 
