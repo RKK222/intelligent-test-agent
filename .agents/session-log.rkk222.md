@@ -15684,3 +15684,27 @@
 
 - 本轮纯平台增量包已完成 Mac 侧构建与独立验收，可按 `.4 -> .114 -> .2` 部署；客户端、manager/worker、toolbox 和独立数据面均不重装、不重启、不重复同步。
 - 本次打包没有修改产品代码或稳定文档；仅追加本机发布追溯并提交，不推送远程。企业三台服务器和浏览器业务验收尚未执行，不能把本候选登记为已部署基线。
+
+## 2026-08-28 - 应用资产库 spec 双应用真实端到端验收
+
+### Why
+
+- 用户要求对应用资产库整体引用 `spec` 做真实端到端验收，并明确本机 Redis、XXL MySQL 可直接使用 `192.168.8.100` 上的 TestAgent 依赖，不建立 SSH 或本机端口转发。
+- 100 上原 TestAgent Redis/MySQL 容器已停止，同端口当时由仅绑定 loopback 的 MockCenter 容器占用；远端 Jenkins 同时占用 `18081`，不能继续沿用旧测试端口。
+
+### What
+
+- 100 上 TestAgent 自有 Redis/MySQL 改为分别监听 `192.168.8.100:16379/13306` 并保持健康；MockCenter 依赖恢复为 `127.0.0.1:16379/13306`，两套容器互不串用。TestAgent compose 原文件已留远端备份。
+- 本机 `.env.test` 继续使用固定 PostgreSQL `192.168.8.100:15432/testagent_dev`，Redis 与 XXL MySQL 改为直连 100；远端当前后端包部署到临时验收端口 `18082`，避免 Jenkins `18081`，本机与远端 Java、manager、frontend 均启动成功。
+- 为 `F-COSS/appdocs` 和 `E2E 开源项目质量验证/e2e-vue-core` 临时准备图 1、图 2 目录并完成浏览器验收；结束后恢复代码库 URL、版本提交、个人工作区和最近工作区数据，删除本轮新建的个人工作区记录，临时物理目录与远端 fixture 移入可恢复 Trash。直连依赖 compose 与正在运行的 TestAgent 基础服务按用户要求保留。
+
+### How
+
+- Chromium 真实登录 `888888888`，分别从“引用配置”选择并保存整个 `docs/spec`；断言只有根层 `docs/spec` 可配置，内部 `I2026...` 与 `2610` 只能浏览。组合文件树实际读取应用 1 根层 `I20260623-0170/概要设计.md`，以及应用 2 `2610/` 直放需求用例和 `2610/I20260825-9999/概要设计.md`；引用文件键入探针无效，工作区原文件仍为可写节点，两个 JSONC 均保留 `custom.keep` 和并存的 `docs/spec` 引用。
+- 两个方向的跨应用真实 tree 请求均返回 `400 VALIDATION_ERROR / 引用资产库未关联当前应用`，没有新增对称自动化用例；现有拒绝用例与目录树、组合视图定向 Maven 共 3 项通过。引用配置 Vitest 51/51 通过；本轮启动前后端全量跳测构建、用户手册/类型检查/Vite build 均通过。
+- 验收截图保留在 `frontend/.tmp/spec-e2e-app{1,2}-{reference-dialog,file-tree}.png`；浏览器验收脚本保留为忽略文件 `frontend/.tmp/spec-e2e-acceptance.mjs`。本地与远端 readiness 均为 `UP`，本地前端返回 200，100 上 TestAgent Redis/MySQL 与 MockCenter Redis/MySQL 四个容器均为 healthy。
+
+### Result
+
+- `spec` 按应用独立、原层级整体合并的两种真实结构验收通过；应用 2 的需求用例确认直接位于 `2610/`，Agent 可同时读取版本级用例和下级需求项目录设计资料。跨应用边界仍由现有实现拒绝。
+- 本轮未修改产品代码、HTTP API、DTO、事件、数据库结构、Flyway、generated SDK 或 OpenCode 只读源码；未新建分支。远端 `18082` 运行的是本机当前构建包，远端 compose 和临时验收 env/JAR 均有备份，后续若回收该验收节点需显式恢复对应备份。
