@@ -13,6 +13,8 @@
   输出、归档或写入 Git 任何密码、Token 或数据库连接密钥。
 - 前端固定使用带 git 的 `node:22.16.0-bookworm` 构建镜像；VitePress 会读取页面对应的 Git 提交时间，不能
   换成不含 git 的 slim 镜像。
+- 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
+  额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
   `4096` OpenCode 进程、`/home/abc/intelligent-test-agent-dev/.testagent` 数据根和未提交文件均保留。
 - 企业离线发布仍按 `deploy/internal/README.md` 执行；不能把本地 Jenkins 产物上传到企业内替代标准离线包。

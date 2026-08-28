@@ -23,6 +23,11 @@ grep -Fq "branches: [[name: '*/release']]" "${jenkinsfile}"
 grep -Fq "disableConcurrentBuilds()" "${jenkinsfile}"
 grep -Fq "verify-database-upgrade" "${jenkinsfile}"
 grep -Fq 'NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}' "${release_script}"
+grep -Fq 'validate_backend_jar "${release_dir}/backend.jar"' "${release_script}"
+if grep -Eq '^[[:space:]]*jar tf ' "${release_script}"; then
+    echo 'Release script still requires the host jar command.' >&2
+    exit 1
+fi
 grep -Fq 'sudo "${HOST_CONTROL}" stop-legacy' "${release_script}"
 grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control status' "${sudoers_file}"
 grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control stop-legacy' "${sudoers_file}"

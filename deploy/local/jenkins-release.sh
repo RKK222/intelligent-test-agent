@@ -143,6 +143,16 @@ maven_run() {
         mvn -Dmaven.repo.local=/maven-cache "$@"
 }
 
+validate_backend_jar() {
+    local backend_jar=$1
+    # Jenkins 宿主只保证 Java 运行时；复用固定 JDK 构建镜像校验 JAR，避免额外安装宿主工具。
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        --volume "${backend_jar}:/artifact/backend.jar:ro" \
+        "${MAVEN_IMAGE}" \
+        sh -euc 'jar tf /artifact/backend.jar' >/dev/null
+}
+
 build_release() {
     validate_host
     echo '==> Verify Flyway migration naming and immutable bytes'
@@ -317,7 +327,7 @@ prepare_release() {
     cp "${backend_jar}" "${release_dir}/backend.jar"
     cp -R "${frontend_dist}/." "${release_dir}/frontend/"
     cp "${script_dir}/jenkins-nginx.conf" "${release_dir}/nginx.conf"
-    jar tf "${release_dir}/backend.jar" >/dev/null
+    validate_backend_jar "${release_dir}/backend.jar"
     write_stack "${release_dir}" "${release_dir}/stack.json"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
     write_manifest "${release_dir}" "${tag}" "${commit}"
@@ -355,7 +365,7 @@ PY
     [[ "${actual_stack}" == "${expected_stack}" ]] || { echo "Stack checksum mismatch" >&2; return 1; }
     (cd "${release_dir}" && sha256sum -c frontend.sha256 >/dev/null)
     (cd "${release_dir}" && sha256sum -c source.sha256 >/dev/null)
-    jar tf "${release_dir}/backend.jar" >/dev/null
+    validate_backend_jar "${release_dir}/backend.jar"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
 }
 

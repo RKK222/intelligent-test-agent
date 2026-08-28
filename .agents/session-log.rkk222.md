@@ -15785,6 +15785,29 @@
 - `#3` 同样在创建发布目录、数据库克隆和线上切换前失败，原服务未被停止；后续构建需验证完整 Node 镜像、
   数据库门禁及正式发布。
 
+## 2026-08-28 - 去除 Jenkins 宿主 JDK 工具依赖
+
+### Why
+
+- Jenkins `#4` 已通过后端打包、前端全 workspace typecheck 和 production build，在准备不可变发布目录时因
+  Jenkins 宿主只有 Java 运行时、没有 JDK `jar` 命令而失败。
+
+### What
+
+- 新增 `validate_backend_jar`，把发布 JAR 只读挂载到固定 Maven JDK 21 镜像内执行 `jar tf`；准备发布和清单
+  复核统一复用该方法，不要求修改宿主 Java 安装。
+- 发布契约禁止重新引入宿主 `jar tf`，稳定 README 同步说明依赖边界。
+
+### How
+
+- `#4` 前端 VitePress、所有 workspace typecheck 与 agent-web production build 均通过，失败点精确位于发布目录
+  校验。提交前复跑 Shell 语法、Jenkins 发布契约、AI 文档与差异检查。
+
+### Result
+
+- `#4` 已创建带 `FAILED` 状态的不可变审计目录，但未执行数据库克隆、源库 migration 或旧服务停止；后续构建
+  需继续验证数据库和正式发布阶段。
+
 ## 2026-08-28 - 放开 ai-agent 根目录资产引用
 
 ### Why
