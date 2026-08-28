@@ -132,6 +132,8 @@ describe("help center", () => {
     expect(prompt).toContain("长期记忆会在新任务中自动复用经验");
     expect(prompt).toContain("本地 OpenCode 客户端（按账号灰度开放）");
     expect(prompt).toContain("客户端灰度");
+    expect(weekly).toContain("本地客户端失败时导出受限诊断日志");
+    expect(weekly).toContain("公共 Agent 发布后按进程有界并行排空");
     expect(prompt).toContain("2026 年 8 月 24 日—8 月 30 日");
     expect(prompt).toContain("从顶部或左下角直接新增版本");
     expect(prompt).toContain("下载本地客户端用户包");
@@ -168,6 +170,8 @@ describe("help center", () => {
 
     expect(settings).toContain("系统管理 → 用户管理");
     expect(settings).toContain("客户端灰度");
+    expect(settings).toContain("不同用户的旧进程会有界并行排空");
+    expect(settings).toContain("同一进程上的多个更新仍按顺序处理");
     expect(settings).toContain("记忆灰度");
     expect(settings).toContain("不会互相开启");
     expect(settings).toContain("不停止客户端、不重启本地 OpenCode，也不撤销 client key");
@@ -181,6 +185,7 @@ describe("help center", () => {
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
+    expect(faq).toContain("客户端安装、接入或更新失败，怎样提供排查信息？");
     expect(faq).toContain("客户端注册了本地目录后，怎样在工作台打开？");
     expect(faq).toContain("为什么“新增版本”不可用或创建失败？");
     expect(faq).toContain("为什么看不到“上传 Skill”，或上传后目录还没有出现？");
