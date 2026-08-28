@@ -15947,6 +15947,9 @@
 - 客户端继续复用版本 `20260827222702`、企业域名、公共能力提交
   `81605f245d1512e1ab0dd73812391f6da7d008b5` 和固定组织签名公钥；节点包继续锁定 TCDS、AAM、SkillHub、
   ClickHouse、Mem0、双入口 CORS 和 `.2:9996` 配置，敏感值仅做非空/继承门禁而不输出。
+- 封包复核发现多后台手册仍把已部署的 `V20260827183737` 写成“本轮允许新增”，已复用现有
+  `MULTI-BACKEND.md -> START-HERE.md` 单一生成路径，将企业 README 和现场手册统一改为本轮三套数据库均不新增 history；
+  现有完整包验证脚本增加反向断言，禁止旧增量口径再次进入交付包。
 
 ### How
 
@@ -15956,8 +15959,10 @@
 - 在全新临时目录验证外层与内层 ZIP CRC、外嵌内层逐字节一致、三节点 SHA、组件清单与大组件排除、前端 AAM 字符串、
   TCDS/SkillHub/数据面地址、双入口 CORS、`.2:9996` 和敏感项非空门禁；首次验收命令误按已展开前端目录检查 AAM，
   改为解开 `dist/test-agent-frontend-dist.tar.gz` 后复验通过，产物本身没有失败。
-- 最终外包 SHA-256 为 `34e8673685ca5345b61a84f51d3cd79079ac2cf0ffd5e7dbc583c1f9a844f9bc`，内包为
-  `231479e6d4c686c28e7cb52693b8bc5a2e548ae0e04818818d1c1439bfa8e6ca`，大小 155467217 字节；App、persistence、
+- 企业前后端构建输入在并发 Jenkins 测试环境提交前后保持不变；修正文档后使用现有 `--zip-only` 路径复用已验证二进制，
+  重新装配内包并重建外包。`tools/verify-internal-two-backend-complete-package.sh`、Shell 语法和差异检查通过。
+- 最终外包 SHA-256 为 `6019802c985a1283bf467a1ff75d295be8f958595ef254a82457e5a0e21311f2`，内包为
+  `6e61cad15ccfa6f641d2022e09cf37e668c4fc3b80a427804f924f7b117e4f10`，大小 155468475 字节；App、persistence、
   XXL、前端归档 SHA-256 分别为 `1bde1397f34efee4d203ad07ffe80ab0244b4253606d268e9d0fcb13a9d99d4e`、
   `35b423859dff40b21718664ae8d2d5a669c3ca1f1ebc2b12be3e494f0ca35140`、
   `bfb13aa9b293e81acf2e19b8b6411d914b4a82c81a61d0626e84833a977519dc`、

@@ -172,6 +172,11 @@ grep -Fxq 'test-agent-two-backend-complete/nodes/test-agent-two-backend-122.233.
 START_HERE="${TMP_ROOT}/START-HERE.md"
 unzip -p "${BUNDLE}" 'test-agent-two-backend-complete/START-HERE.md' >"${START_HERE}"
 grep -Fq 'V20260728160800__create_toolbox_click_tracking.sql' "${START_HERE}"
+grep -Fq '本轮 PostgreSQL 不应新增 history' "${START_HERE}"
+if grep -Fq '本轮 PostgreSQL 只允许新增' "${START_HERE}"; then
+  echo 'Complete package START-HERE.md still treats an already deployed PostgreSQL migration as new' >&2
+  exit 1
+fi
 cmp -s "${ROOT_DIR}/deploy/internal/MULTI-BACKEND.md" "${START_HERE}" || {
   echo 'Complete package START-HERE.md differs from the current multi-backend runbook' >&2
   exit 1

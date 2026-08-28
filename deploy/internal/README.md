@@ -654,12 +654,11 @@ bash /data/testagent/deploy/internal/ensure-experience-workspace-content.sh \
 实际打进 `test-agent-persistence-0.1.0-SNAPSHOT.jar`；打包、外层封装、节点预校验和安装后
 复验会锁定 PostgreSQL 主/兼容 migration（含 QA 历史兼容、通知处置类型、体验工作区、运营 outbox、本地客户端、应用自动化与工作空间 Git 权限巡检）以及 XXL MySQL V10-V14、两套已执行 V12 历史资源和本轮时间戳前向 migration 的 SHA-256，并分别比较发布包与安装后的
 persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app JAR 不能证明数据库资源已更新。
-当前上一轮已部署平台包的业务源码提交为 `f5c88d8cad2054a3ea7272d4e6ef348801347c0c`，内层 ZIP SHA-256 为
-`a13f0cc83850d5a1eb6eecfb37caa378e3d8cf67ebe277371b1e66390ef62397`。上一轮成功后 PostgreSQL 主链应已执行到
-`20260823191023`，XXL MySQL 应已完成已登记 V12 分支及 V13/V14，ClickHouse history 应已执行到 `20260823001128`。
-第一台 `.4` 从该 history 启动时，本轮只允许 PostgreSQL 新增 `20260824100444`、XXL MySQL 新增
-`20260824100401`、ClickHouse 新增 `20260824110209`。故障重部署不得新增 history，`.114` 只做
-validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
+当前上一轮已确认部署平台包的业务源码提交为 `363e1b6babe291018800e76e0cb2c1034cfc230f`，内层 ZIP SHA-256 为
+`62d2db9bce215f239c3c79d0385159e1c091448b4e38c2d30ad878e7ec0788b6`。上一轮成功后 PostgreSQL 主链应已执行到
+`20260827183737`，XXL MySQL 应已完成已登记 V12 分支、V13/V14 及 `20260824100401`，ClickHouse history 应已执行到
+`20260824110209`。第一台 `.4` 从该 history 启动时，本轮 PostgreSQL、XXL MySQL 与 ClickHouse 均不应新增 history，
+`.114` 同样只做 validate。必须按多后台手册读取两套完整 `flyway_schema_history`，不能只凭
 提交号、启动日志或最高版本判断数据库历史一致。
 
 ## 首次部署与版本升级顺序
@@ -668,9 +667,9 @@ validate。必须按多后台手册读取两套完整 `flyway_schema_history`，
 
 1. 从两台后台确认外部 `122.210.106.43:3306` 可达，两份 `backend.env` 使用同一个 JDBC 地址、账号密码和 XXL access token。
 2. 替换 Java JAR、`backend/lib/` 和随包 XXL 上游许可证材料。
-3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一轮已执行到 `20260823191023` 的现场 history
-   只允许新增 `20260824100444`；外部 XXL MySQL 从已登记 V12 分支和 V13/V14 只允许新增 `20260824100401`；
-   ClickHouse 只允许新增 `20260824110209`。任何失败、倒序、未知版本或 checksum 都停止。
+3. 升级先停止全部旧 Java，再启动 `.4` 新版本。平台 PostgreSQL 从上一轮已执行到 `20260827183737` 的现场 history
+   启动后不应新增记录；外部 XXL MySQL 和 ClickHouse 同样只做 validate，不应新增 history。任何失败、倒序、
+   未知版本或 checksum 都停止。
    随后确认 Admin health、搬迁任务
    每 30 分钟、闲置进程关闭每日 02:00、模型探活每 5 分钟和可观测清理
    每日 03:30、ClickHouse 运营入库每分钟及 SCM Git 姓名补偿每日 04:10 均正常。任一校验失败时不得继续 `.114` 和前端。
