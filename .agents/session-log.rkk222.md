@@ -15904,3 +15904,48 @@
 
 - 当前行为是 `资产库/ai-agent/spec/... -> 工作区/spec/...`；`ai-agent` 自身及其兄弟内容不进入组合视图，`spec` 内版本级需求用例和需求项目录设计资料保持原相对路径与只读语义。
 - 不新增部署节点，不变更 HTTP 路径/DTO、RunEvent/SSE、数据库结构、SQL、Flyway、generated SDK 或 OpenCode 只读源码；只扩展既有参数值语义并保持根层 `docs/spec` 向后兼容。未修改 `.env*`，未新建分支。
+
+## 2026-08-28 - 基于当前 release 重打企业增量包
+
+### Why
+
+- 用户要求基于当前代码重新打企业包；上一轮候选包尚未收到企业现场部署确认，因此仍以最后确认部署的
+  `release@363e1b6babe291018800e76e0cb2c1034cfc230f` 和外包
+  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770` 为现场基线，不把未确认候选登记为已部署。
+- 本轮源码输入为干净的本地 `release@457ebe8a6a83d57b27d3d24baec34a7b5828c5c9`，不拉远程；相对上一候选源码新增
+  应用资产精确引用二级 `spec` 目录及测试环境 Jenkins 流水线。Jenkins 本地部署文件不属于企业运行包载荷。
+
+### What
+
+- 使用 JDK 25 重建后端、用户手册和 agent-web 前端，并重新封装固定名三节点企业包；业务增量允许把
+  `ai-agent/spec` 等精确二级目录映射到工作区逻辑 `spec`，不把父目录或兄弟目录扩大到引用范围。
+- worker runtime、toolbox、本地客户端均为 `reuse`，LobeHub 与 memory 组件为 `disabled`；不携带客户端运行时、
+  manager/worker、工具箱镜像、CK、Mem0、BGE、pgvector、trace 或独立数据面载荷，不改 `.4` 的模型灰度。
+- 客户端继续复用版本 `20260827222702`、企业域名、公共能力提交
+  `81605f245d1512e1ab0dd73812391f6da7d008b5` 和固定组织签名公钥；节点包继续锁定 TCDS、AAM、SkillHub、
+  ClickHouse、Mem0、双入口 CORS 和 `.2:9996` 配置，敏感值仅做非空/继承门禁而不输出。
+
+### How
+
+- 发布脚本的 Spring Bean 构造器装配门禁、JDK 25 后端打包、VitePress、`vue-tsc` 和 Vite production build 通过；
+  `ReferenceRepositoryApplicationServiceTest`、`WorkspaceViewApplicationServiceTest` 定向 Maven 通过，前端全量
+  158 个测试文件通过，结果为 `2269 passed / 1 skipped`。
+- 在全新临时目录验证外层与内层 ZIP CRC、外嵌内层逐字节一致、三节点 SHA、组件清单与大组件排除、前端 AAM 字符串、
+  TCDS/SkillHub/数据面地址、双入口 CORS、`.2:9996` 和敏感项非空门禁；首次验收命令误按已展开前端目录检查 AAM，
+  改为解开 `dist/test-agent-frontend-dist.tar.gz` 后复验通过，产物本身没有失败。
+- 最终外包 SHA-256 为 `34e8673685ca5345b61a84f51d3cd79079ac2cf0ffd5e7dbc583c1f9a844f9bc`，内包为
+  `231479e6d4c686c28e7cb52693b8bc5a2e548ae0e04818818d1c1439bfa8e6ca`，大小 155467217 字节；App、persistence、
+  XXL、前端归档 SHA-256 分别为 `1bde1397f34efee4d203ad07ffe80ab0244b4253606d268e9d0fcb13a9d99d4e`、
+  `35b423859dff40b21718664ae8d2d5a669c3ca1f1ebc2b12be3e494f0ca35140`、
+  `bfb13aa9b293e81acf2e19b8b6411d914b4a82c81a61d0626e84833a977519dc`、
+  `ff4711484c6a30137c4c42eb2dde90cb67989b1032c36d2804ea9e7a63562b46`。
+- 本轮没有新增或修改 PostgreSQL、XXL MySQL 或 ClickHouse migration；最终 persistence JAR 内
+  `V20260825091459`、`V20260827183737` 与源码字节 SHA-256 分别保持
+  `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`、
+  `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`，现场重部署不应新增 Flyway history。
+
+### Result
+
+- 固定交付文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，回读 SHA 与 ZIP CRC 均通过，可按
+  `.4 -> .114 -> .2` 滚动部署；客户端、manager/worker、toolbox 和已部署数据面均不重装、不重启、不重复同步。
+- 本次没有修改产品代码或稳定文档，只追加本机发布追溯；企业目标机和浏览器业务验收尚未执行，不能把本候选登记为已部署基线。
