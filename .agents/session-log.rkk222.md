@@ -15476,3 +15476,24 @@
 
 - 企业增量包已完成本机构建与独立验收，可移交企业中转机；尚未在 `.4/.114/.2` 部署，Flyway 只能由 `.4` 首节点执行，`.114` 必须在前者成功后以 validate-only 接入。
 - Windows 仍为 `CANDIDATE_ONLY`，未完成 Authenticode 和 Win10 真机验证，不随正式客户端目录发布。4 份用户手册改动已进入本次前端产物，但继续保留为用户未提交改动；本日志提交不纳入这些文件，也未推送远程。
+
+## 2026-08-28 - 从大数据规约修复提交重打公共配置完整替换包
+
+### Why
+
+- 用户要求打包公共 Config Git 库；已有固定名企业完整替换包仍是 8 月 1 日旧制品，未包含本次 BDP/BDSP 分域和 Hudi 完整链路修复。
+
+### What
+
+- 以干净个人公共配置分支 `public-usr_test_dev` 的 `a089368c31f10732b43431c36f59153ba00d6659` 为唯一源，重新生成 `deploy/internal/dist/test-agent-public-agents-skills.zip` 及同名 `.sha256`。
+- 延续既有完整替换包白名单，只收录根 `README.md` / `.gitignore` 和全部 `opencode/**`；不收录 Git 元数据、`node_modules`、缓存、个人 Agent Session/Workspace 或验收样例。
+
+### How
+
+- ZIP CRC 通过；归档 120 个文件，包含 8 个 Agent、16 个 Skill 和 10 个 Tool。解压结果与目标 Git 提交的同白名单归档逐文件字节一致。
+- 禁带路径扫描通过；包内规约复核 BDP、BDSP、Hudi“注册/启动 → 实时消费 → 日终作业”、Skill 分域路由和 `spec-index.md` 文件路由均通过，且不再包含“不强制消费”表述。
+
+### Result
+
+- 新包 SHA-256 为 `4c43a37187256f984e4059e1b0b57cc5846bfd9f6477490fe15fbec74779efeb`，可经“系统管理 → 配置管理 → opencode 公共配置管理”导入个人 worktree、查看 Diff、提交并发布；禁止直接覆盖共享运行目录。
+- 源分支仍未推送 Gitee、未执行平台发布，因此共享运行配置尚未生效。本次只更新忽略的离线制品和本会话日志，不涉及 API、RunEvent/SSE、数据库、Flyway、性能、安全协议、环境配置、generated SDK 或 OpenCode 只读源码。
