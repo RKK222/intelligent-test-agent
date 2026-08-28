@@ -16034,3 +16034,25 @@
 
 - 修正仅影响 Jenkins 测试环境持久化挂载与发布前一致性门禁；不修改源库数据、通用参数、`.env*`、HTTP API、事件、
   SQL/Flyway、generated SDK 或 OpenCode 源码，不新增部署节点。真实发布仍需新的 Jenkins 构建验证。
+
+## 2026-08-28 - 同步 Jenkinsfile 数据根覆盖
+
+### Why
+
+- Jenkins `#10` 在发布契约阶段被新门禁阻止：根 Jenkinsfile 仍显式导出旧 `RUNTIME_DATA_SOURCE/ROOT`，覆盖了脚本
+  已修正的默认值，因此与数据库 `/data/.testagent` 不一致。构建、临时库和端口接管均未开始。
+
+### What
+
+- 根 Jenkinsfile 的运行数据源和容器目标同步为 `/data/.testagent`；发布契约同时锁定 Jenkinsfile 与脚本默认值，
+  防止后续只改一处再次漂移。
+
+### How
+
+- `#10` 日志确认失败点仅为 `validate-host` 的精确不一致提示；旧 Java、Vite、OpenCode 和源数据库均未修改。
+- Shell 语法、Jenkins 发布契约、AI 文档和差异检查将在提交前复跑。
+
+### Result
+
+- 仅修正 Jenkins 流水线环境覆盖，不涉及产品 API、事件、数据库结构、Flyway、`.env*`、generated SDK 或 OpenCode
+  源码，不新增部署节点。真实发布仍需新的 Jenkins 构建验证。
