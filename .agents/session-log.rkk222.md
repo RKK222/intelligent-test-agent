@@ -15762,3 +15762,24 @@
 
 - 修复只影响 Jenkins 前端构建容器的临时 HOME 与缓存路径；`#2` 在创建发布目录、数据库克隆和线上切换前失败，
   原 `abc` Java/Vite/OpenCode 服务未被停止。真实发布仍需由后续 Jenkins 构建验证。
+
+## 2026-08-28 - 放开 ai-agent 根目录资产引用
+
+### Why
+
+- 用户反馈实际资产库的规格资料位于二级目录 `ai-agent/spec`，现有远端参数只允许选择根层 `docs/spec`，因此该资产根未进入 Agent 引用范围。
+
+### What
+
+- 未修改产品代码；通过 `192.168.8.100:18082` 的通用参数管理 API，把远端测试库 `REFERENCES_SDD_FOLDER_NAMES/all` 从 `docs,spec` 调整为 `docs,spec,ai-agent`。
+- 保持现有配置语义：参数填写可引用的仓库根目录名称，不把 `ai-agent/spec` 硬编码成新的目录规则；选择 `ai-agent` 后，其内部 `spec` 或其它实际目录结构原样进入只读引用。
+
+### How
+
+- 更新接口返回 `success=true`，随后按英文名和平台查询确认当前值为 `docs,spec,ai-agent`。
+- 修改历史接口确认旧值、新值、修改账号和 trace `trace_spec_ai_agent_config_20260828` 已落审计；运行态按现有实现直读数据库，无需重启后端或 OpenCode 进程。
+
+### Result
+
+- 远端测试环境已允许从引用配置选择根层 `ai-agent`，Agent 可按需递归检索其下二级规格目录；最终引用层级保持 `ai-agent/spec/...`。
+- 本次不涉及 HTTP API 契约、RunEvent/SSE、数据库结构、Flyway、前端、generated SDK、OpenCode 源码或 `.env*`，没有新增部署节点。
