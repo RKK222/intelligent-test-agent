@@ -15658,3 +15658,29 @@
 
 - 用户可在离线手册中安全导出客户端排查材料；超级管理员可按实际页面状态等待公共 Agent 发布后的旧进程收敛，运行中的会话不会因文案建议而被强行中断。
 - 本次仅更新用户手册与帮助中心测试，不涉及 API、事件、数据库、性能、安全协议、环境配置、generated SDK 或 OpenCode 源码；目标分支为 `release`，不新增部署节点。
+
+## 2026-08-28 - 基于当前 release 重打纯平台企业增量包
+
+### Why
+
+- 用户要求基于当前代码重新打包；最后确认成功部署的现场基线仍是 `release@363e1b6babe291018800e76e0cb2c1034cfc230f`、外层 SHA-256 `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。
+- 上一纯平台候选外层 `c6027fb7ba234e3a7f69c1868259a449e9d1622c1982b6221e6a5465d243c165` 未收到部署成功确认，现由本轮候选替代，不登记为现场基线。
+
+### What
+
+- 构建输入为干净工作树 `release@bfaba3e630992e595719f0ee1aa3f321acc47d4d`；相对现场基线包含公共 Agent 发布后有界并行排空、缺少可选 `.opencode` 目录时仍可对话、TCDS 案例维护失败不弹空白标签且成功后直接跳转、应用资产库整体引用 `spec` 目录，以及同步后的内置用户手册。
+- worker runtime、toolbox、本地客户端均为 `reuse`，LobeHub 和 memory 组件为 `disabled`；不携带客户端、manager/worker、工具箱、CK、Mem0、BGE、pgvector、trace、Python 库或独立 ClickHouse 载荷，不修改 `.4` 现有模型灰度。
+- 客户端继续复用已部署版本 `20260827222702`、企业域名和公共能力提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`；规范化 JDK/OpenCode 摘要按既有已验签制品固定，组织签名公钥 DER SHA-256 仍为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。
+- 最终固定名外层包 SHA-256 为 `417246c6fdef6fc06a3d1f97a8c3f6d026699a6f37001c4712b618f2dfccc0ab`，内层包为 `7f6d56c9144d4ff81da0dfc222a427f993eb1b15699540867db907837e5a09df`，大小 148 MiB；已覆盖 `/Users/kaka/Desktop/mimoagent/0709/`。
+
+### How
+
+- 发布脚本的 Spring Bean 构造器装配门禁和 JDK 25 后端构建通过；`ReferenceRepositoryApplicationServiceTest`、`WorkspaceViewApplicationServiceTest` 定向 Maven 通过。VitePress、`vue-tsc`、Vite production build 通过；前端本轮三组定向 79 项通过，全量 158 文件为 2269 passed / 1 skipped。
+- 全新临时目录独立验证外层/内层 ZIP CRC、外嵌内层逐字节一致、三节点归档及 SHA、组件排除、TCDS `http://tcds-prod.sdc.icbc:9080`、AAM、双入口 CORS、两后台 SkillHub key 非空和 `.2:9996` Nginx 配置；固定交付目录再次通过 SHA 与 ZIP CRC 校验。
+- 最终 App、persistence、XXL、前端 SHA-256 分别为 `beee2aaa6c759c8df895b146a68287b8835436f87385f8aa5eaffaeeab8a14f8`、`d8621e6878376af5d97d6a2d0df1307f35be4eab387119a7e1b9cd1441c54310`、`cfa92f879218f60025692c8ac12438e0b48e07450c307d910b8b18267de5d845`、`7d09bef21f0fa4dbdc593152828ed35431ff29ca63cc7211e1b64fec4e8e5986`。
+- 本轮没有新增或修改 PostgreSQL、XXL MySQL 或 ClickHouse migration；最终 persistence JAR 内 `V20260825091459` 和 `V20260827183737` 与源码字节一致，部署后不应新增 Flyway history。
+
+### Result
+
+- 本轮纯平台增量包已完成 Mac 侧构建与独立验收，可按 `.4 -> .114 -> .2` 部署；客户端、manager/worker、toolbox 和独立数据面均不重装、不重启、不重复同步。
+- 本次打包没有修改产品代码或稳定文档；仅追加本机发布追溯并提交，不推送远程。企业三台服务器和浏览器业务验收尚未执行，不能把本候选登记为已部署基线。
