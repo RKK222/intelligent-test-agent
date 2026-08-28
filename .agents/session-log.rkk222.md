@@ -15590,3 +15590,28 @@
 
 - 企业增量包已完成本机构建、生产编译、签名和独立归档校验，可移交中转机；尚未在 `.4/.114/.2` 执行部署，Flyway 只能先由 `.4` 升级，确认成功后再部署 `.114` 和 `.2`。
 - 本次不修改产品代码、API、DTO、RunEvent/SSE、数据库 SQL、环境文件、generated SDK 或 OpenCode 只读源码；只提交本发布记录。5 个现有前端/手册改动继续留在工作树且已进入构建产物，不推送远程。
+
+## 2026-08-28 - 更正企业部署基线并重打纯平台增量包
+
+### Why
+
+- 用户补充确认 8 月 27 日晚间外层包 `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770` 已完整部署；因此麒麟客户端 `20260827222702` 和 `V20260827183737` 已属于企业现场基线，不能再次按 `include` 或待执行 migration 处理。
+- 上一条记录的 423 MiB 候选外层包 `17cceffa620678c354948c6dbb7b4690e38464669a8f7dfdff51323399776477`、内层包 `08531ab7270a6a3c2fc3dfde70a9d21fc34fe17986f89f531c1dccfd9627da92` 基于错误现场假设生成，现明确作废，禁止部署。
+
+### What
+
+- 仍以业务源码 `release@1904d985fad1d917d314cc074b5cec52afaaebf0` 和 5 个现有未提交帮助中心/用户手册文件为构建输入，只交付新后台和前端产物。
+- worker runtime、toolbox、本地客户端均改为 `reuse`；客户端继续复用已部署版本 `20260827222702`，包内不携带客户端、manager/worker、toolbox、CK、Mem0、BGE、pgvector、LobeHub、trace、Python 库或独立 ClickHouse 载荷。
+- 最终固定名外层包 SHA-256 为 `c6027fb7ba234e3a7f69c1868259a449e9d1622c1982b6221e6a5465d243c165`，内层包为 `c129c263ab038785dadcbfee564ac7bfa9cbe4571526dd987dcbb5fa6d3b3287`，大小 148 MiB；已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`。
+
+### How
+
+- 在隔离目录重新生成内层包，组件清单验证 worker runtime、toolbox、本地客户端全部为 `reuse`，LobeHub 和 memory 为 `disabled`；`dist/` 只含后台与前端产物。
+- 使用全新临时目录独立验证外层/内层 ZIP CRC、嵌套内层逐字节一致、三节点归档 SHA、TCDS、AAM、双入口 CORS、两后台 SkillHub key 非空和 `.2:9996` Nginx 配置；固定交付目录再次通过 SHA-256 与 ZIP CRC 校验。
+- 最终 App、persistence、XXL、前端 SHA-256 分别为 `2141bcf8b1ae55766b7272ccd2fae29bb8612d0784b71d63d01ff773fbb331c2`、`8f800ec2630cddd7edd57aa310e7bd96f0cd7d683bd36e5ce845d70d7e618e9c`、`38c28a32046496ffc0d29fac1856a73a343da1964bbd8728852b4f5de0978092`、`06d290634e62241921915570d7aa95aa9783a8b13762b774c2edce5876441f0c`。
+- 本轮没有新增或修改 Flyway SQL；最终 persistence JAR 内 `V20260825091459` 和 `V20260827183737` 与源码字节一致。部署当前包不得新增 PostgreSQL Flyway 历史行，只需确认已部署的 `20260827183737` checksum 为 `-976579670`。
+
+### Result
+
+- 纯平台增量包已完成本机构建和独立验收，可按 `.4 -> .114 -> .2` 更新前后台；客户端和 worker/toolbox 均不安装、不覆盖、不重启。
+- Maven、VitePress、`vue-tsc` 和 Vite production build 均通过；前端根级 Vitest 仍为 `2264 passed / 1 skipped / 2 failed`，失败来自 5 个未提交手册改动使 6700 字符帮助提示截断旧断言。该风险未在打包任务中擅自修改，5 个文件继续留在工作树但已进入前端产物。本次仅提交更正后的发布记录，不推送远程。
