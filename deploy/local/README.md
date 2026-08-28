@@ -8,9 +8,11 @@
 
 - 后端继续使用根 Maven reactor、`test-agent-app` 可执行 JAR 和现有 Flyway migration；前端继续使用
   `frontend` pnpm workspace 与 `agent-web` 生产构建。
-- 运行配置从测试机已有 `/home/abc/intelligent-test-agent/.env.test` 受控复制到
+- 运行配置从测试机已有 `/data/offload/home/abc/intelligent-test-agent-dev/.env.test` 受控复制到
   `/data2/deploy/intelligent-test-agent/shared/runtime.env`，权限只能为 `0640 root:jenkins` 或更严格。流水线不
   输出、归档或写入 Git 任何密码、Token 或数据库连接密钥。
+- 前端固定使用带 git 的 `node:22.16.0-bookworm` 构建镜像；VitePress 会读取页面对应的 Git 提交时间，不能
+  换成不含 git 的 slim 镜像。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
   `4096` OpenCode 进程、`/home/abc/intelligent-test-agent-dev/.testagent` 数据根和未提交文件均保留。
 - 企业离线发布仍按 `deploy/internal/README.md` 执行；不能把本地 Jenkins 产物上传到企业内替代标准离线包。

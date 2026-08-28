@@ -23,7 +23,8 @@ POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-15432}
 DATABASE_CONTAINER=${DATABASE_CONTAINER:-test-agent-postgres}
 PROJECT_NAME=${PROJECT_NAME:-intelligent-test-agent-jenkins}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
-NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm-slim}
+# 用户手册构建会读取 Git 提交时间，使用含 git 的固定 Node 完整镜像。
+NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}
 JAVA_RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE:-eclipse-temurin:21-jre-jammy}
 NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.27-alpine}
 VERIFY_REDIS_IMAGE=${VERIFY_REDIS_IMAGE:-redis:7.4.9-alpine}

@@ -15763,6 +15763,28 @@
 - 修复只影响 Jenkins 前端构建容器的临时 HOME 与缓存路径；`#2` 在创建发布目录、数据库克隆和线上切换前失败，
   原 `abc` Java/Vite/OpenCode 服务未被停止。真实发布仍需由后续 Jenkins 构建验证。
 
+## 2026-08-28 - 补齐 Jenkins 前端构建镜像 Git
+
+### Why
+
+- Jenkins `#3` 已完成冻结锁文件安装，用户手册 VitePress 在读取页面最后更新时间时因 slim Node 镜像没有
+  `git`，以 `[vitepress] spawn git ENOENT` 失败。
+
+### What
+
+- 前端构建镜像从 `node:22.16.0-bookworm-slim` 固定为带 git 的 `node:22.16.0-bookworm`，发布契约新增镜像门禁；
+  稳定 README 同步说明 VitePress 对 git 的运行依赖，并纠正运行配置的宿主真实来源路径。
+
+### How
+
+- `#3` 后端 JDK 21 reactor 构建成功，pnpm 695 个锁定包安装完成；失败点精确位于用户手册 typecheck。
+- Shell 语法、Jenkins 发布契约、AI 文档校验和差异检查在提交前复跑。
+
+### Result
+
+- `#3` 同样在创建发布目录、数据库克隆和线上切换前失败，原服务未被停止；后续构建需验证完整 Node 镜像、
+  数据库门禁及正式发布。
+
 ## 2026-08-28 - 放开 ai-agent 根目录资产引用
 
 ### Why
