@@ -1,0 +1,3 @@
+# Jenkins 只能调用 root 固定安装的宿主端口接管器，禁止以 root 执行 SCM 工作区脚本。
+jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control status
+jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control stop-legacy

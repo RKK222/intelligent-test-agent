@@ -15708,3 +15708,36 @@
 
 - `spec` 按应用独立、原层级整体合并的两种真实结构验收通过；应用 2 的需求用例确认直接位于 `2610/`，Agent 可同时读取版本级用例和下级需求项目录设计资料。跨应用边界仍由现有实现拒绝。
 - 本轮未修改产品代码、HTTP API、DTO、事件、数据库结构、Flyway、generated SDK 或 OpenCode 只读源码；未新建分支。远端 `18082` 运行的是本机当前构建包，远端 compose 和临时验收 env/JAR 均有备份，后续若回收该验收节点需显式恢复对应备份。
+
+## 2026-08-28 - 增加 192.168.8.100 Jenkins release 发布编排
+
+### Why
+
+- 用户要求登录 `192.168.8.100`，参考已配置的 `precisiontesttool-release` 完成当前项目 Jenkins 发布；现有
+  `abc` 工作树有未提交的 `deploy/local/docker-compose.yml` 改动，不能被 Jenkins 清理或覆盖。
+- 当前测试 PostgreSQL 的 Flyway history 停在 `V20260812144051`，当前 `release` 仍有后续 migration；仅编译
+  成功不能证明可以从现场历史升级。
+
+### What
+
+- 新增根 `Jenkinsfile`，固定私有 GitLab `wrui/intelligent-test-agent` 的 `release` 分支、SCM 凭据 ID、禁并发、
+  150 分钟超时、30 次保留、`DEPLOY/ROLLBACK` 参数和不可变 `release-{build}-{commit}` 标签。
+- 新增 `deploy/local/jenkins-release.sh`，复用 Maven reactor、`FlywayMigrationNamingTest`、pnpm workspace、
+  `test-agent-app` JAR 和 agent-web production build；生成带源码、JAR、Nginx、Compose 与逐文件 SHA-256 的发布目录。
+- 正式接管前从当前 `test-agent-postgres` 做逻辑复制，以独立临时 PostgreSQL 库和 Redis 启动本次 JAR，完成真实
+  migration/readiness 验证；成功后才通过 root 固定副本 `jenkins-host-control.sh` 精确停止 `18082/3000` 的旧
+  Java/Vite，保留 `4096` OpenCode、数据根和原工作树。
+- 新增同源 API/XXL 代理与 SPA fallback Nginx 配置、发布契约自检和 `deploy/local/README.md`，并在文档索引登记。
+
+### How
+
+- `tools/verify-jenkins-release.sh`、`tools/verify-ai-docs.sh`、三份 Shell `bash -n` 与 `git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；本次只新增 Jenkins/本地部署文件、文档索引和本日志，未触碰
+  远端 `abc` 工作树的两处未提交文件、`.env*`、generated SDK 或 OpenCode 只读源码。
+
+### Result
+
+- 仓库侧 Jenkins 发布契约已实现并通过静态自检；下一步仍需在 `192.168.8.100` 创建 GitLab 镜像与只读 Deploy
+  Key、安装最小 sudo 白名单、注册 Jenkins 任务并执行真实 `DEPLOY`。在远端构建与运行验证成功前不能称为发布完成。
+- 本轮不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构或 migration 文件；会使用现有测试库做受控
+  前向升级，因此真实发布必须保留升级前后完整 Flyway history，失败时停止而不执行 `repair/outOfOrder`。

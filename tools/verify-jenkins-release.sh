@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+root_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+release_script="${root_dir}/deploy/local/jenkins-release.sh"
+host_control="${root_dir}/deploy/local/jenkins-host-control.sh"
+jenkinsfile="${root_dir}/Jenkinsfile"
+sudoers_file="${root_dir}/deploy/local/jenkins-sudoers"
+
+bash -n "${release_script}" "${host_control}"
+"${release_script}" validate-tag release-1-deadbeef
+if "${release_script}" validate-tag release-0-deadbeef >/dev/null 2>&1; then
+    echo 'validate-tag accepted build number zero.' >&2
+    exit 1
+fi
+if "${release_script}" validate-tag release-1-DEADBEEF >/dev/null 2>&1; then
+    echo 'validate-tag accepted an uppercase commit prefix.' >&2
+    exit 1
+fi
+
+grep -Fq "credentialsId: 'intelligent-test-agent-git-ssh'" "${jenkinsfile}"
+grep -Fq "branches: [[name: '*/release']]" "${jenkinsfile}"
+grep -Fq "disableConcurrentBuilds()" "${jenkinsfile}"
+grep -Fq "verify-database-upgrade" "${jenkinsfile}"
+grep -Fq 'sudo "${HOST_CONTROL}" stop-legacy' "${release_script}"
+grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control status' "${sudoers_file}"
+grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control stop-legacy' "${sudoers_file}"
+
+echo 'Jenkins release contract verification passed.'
