@@ -15741,3 +15741,24 @@
   Key、安装最小 sudo 白名单、注册 Jenkins 任务并执行真实 `DEPLOY`。在远端构建与运行验证成功前不能称为发布完成。
 - 本轮不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构或 migration 文件；会使用现有测试库做受控
   前向升级，因此真实发布必须保留升级前后完整 Flyway history，失败时停止而不执行 `repair/outOfOrder`。
+
+## 2026-08-28 - 修复 Jenkins 前端构建缓存权限
+
+### Why
+
+- Jenkins `#2` 已通过后端 migration 命名测试与 JDK 21 全量打包，但 pnpm 执行 `config set` 时尝试在容器内
+  root 创建的 `/tmp/jenkins-home` 下新增 `.config`，以 Jenkins UID 运行的进程收到 `EACCES`。
+
+### What
+
+- 将 Corepack 缓存直接挂载到 `/corepack-cache` 并显式设置 `COREPACK_HOME`；前端容器 HOME 改为可写 `/tmp`。
+- 不再写 pnpm 用户配置，改为在冻结锁文件安装命令上显式传入共享 `--store-dir=/pnpm-store`。
+
+### How
+
+- `deploy/local/jenkins-release.sh` 通过 `bash -n`，Jenkins 发布契约、AI 文档校验与 `git diff --check` 均通过。
+
+### Result
+
+- 修复只影响 Jenkins 前端构建容器的临时 HOME 与缓存路径；`#2` 在创建发布目录、数据库克隆和线上切换前失败，
+  原 `abc` Java/Vite/OpenCode 服务未被停止。真实发布仍需由后续 Jenkins 构建验证。

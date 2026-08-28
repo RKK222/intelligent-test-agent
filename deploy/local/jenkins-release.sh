@@ -159,17 +159,18 @@ build_release() {
         --user "$(id -u):$(id -g)" \
         --volume "${repository_root}:/workspace" \
         --volume "${PNPM_STORE_DIR}:/pnpm-store" \
-        --volume "${COREPACK_CACHE_DIR}:/tmp/jenkins-home/.cache/node/corepack" \
+        --volume "${COREPACK_CACHE_DIR}:/corepack-cache" \
         --workdir /workspace/frontend \
-        --env HOME=/tmp/jenkins-home \
-        --env PNPM_HOME=/tmp/jenkins-home/.local/share/pnpm \
+        --env HOME=/tmp \
+        --env COREPACK_HOME=/corepack-cache \
+        --env PNPM_HOME=/tmp/pnpm-home \
         --env "VITE_TEST_AGENT_API_BASE_URL=${BACKEND_BASE_URL}" \
         --env VITE_TEST_AGENT_LOBEHUB_ENABLED=false \
         "${NODE_IMAGE}" \
         sh -euc '
             corepack pnpm --version | grep -Fx 10.25.0
-            corepack pnpm config set store-dir /pnpm-store
-            corepack pnpm install --frozen-lockfile
+            # 容器以 Jenkins UID 运行，显式参数避免 pnpm 向只读挂载的 HOME 父目录写配置。
+            corepack pnpm install --frozen-lockfile --store-dir=/pnpm-store
             corepack pnpm typecheck
             corepack pnpm build
         '
