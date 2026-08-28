@@ -15808,6 +15808,32 @@
 - `#4` 已创建带 `FAILED` 状态的不可变审计目录，但未执行数据库克隆、源库 migration 或旧服务停止；后续构建
   需继续验证数据库和正式发布阶段。
 
+## 2026-08-28 - 修复只读发布源码的嵌套写卷挂载
+
+### Why
+
+- Jenkins `#5` 已通过后端、前端、发布 JAR 和不可变清单校验，并完成源库 history 捕获与临时数据库复制；验证
+  后端启动时，OCI 无法在只读 `/release/source` 下临时创建不存在的 `backend/logs` mountpoint。
+- 验证提前失败后，EXIT trap 在函数局部变量退出作用域后再次求值，`set -u` 又报告 `backend_name` 未定义。
+
+### What
+
+- 归档源码后预建 `source/backend/logs` 和 `source/temp` 两个空挂载点；运行时仍由独立读写卷覆盖，源码整体保持
+  只读且不会被应用回写。
+- 数据库验证清理函数改为显式参数，并将 shell 安全转义后的固定参数写入 EXIT trap，失败和成功路径均精确清理
+  本构建的后端、Redis、网络和临时数据库。
+- JAR 校验容器补充可写 HOME/Maven 配置，去除非 root UID 尝试创建 `/root` 的无效告警。
+
+### How
+
+- `#5` 全 workspace typecheck、agent-web production build 和发布目录清单校验通过；失败点发生在验证后端容器创建，
+  未运行源库 migration、未停止旧服务。提交前复跑 Shell、发布契约、AI 文档和差异检查。
+
+### Result
+
+- `#5` 只对临时验证库做了逻辑复制；修复前的 trap 未生效，随后已按构建号精确删除并复核临时库、后端容器、
+  Redis 和网络均不存在。源库及旧 Java/Vite/OpenCode 服务未变；后续构建需再次验证自动清理和真实升级 readiness。
+
 ## 2026-08-28 - 放开 ai-agent 根目录资产引用
 
 ### Why

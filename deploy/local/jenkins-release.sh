@@ -149,6 +149,8 @@ validate_backend_jar() {
     docker run --rm \
         --user "$(id -u):$(id -g)" \
         --volume "${backend_jar}:/artifact/backend.jar:ro" \
+        --env HOME=/tmp/jenkins-home \
+        --env MAVEN_CONFIG=/tmp/jenkins-home/.m2 \
         "${MAVEN_IMAGE}" \
         sh -euc 'jar tf /artifact/backend.jar' >/dev/null
 }
@@ -324,6 +326,8 @@ prepare_release() {
     umask 022
     mkdir -p "${release_dir}/source" "${release_dir}/frontend"
     git -C "${repository_root}" archive "${commit}" | tar -xf - -C "${release_dir}/source"
+    # 只读源码挂载前预建嵌套写卷目标，否则 OCI 无法在只读父挂载内创建 mountpoint。
+    mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"
     cp "${backend_jar}" "${release_dir}/backend.jar"
     cp -R "${frontend_dist}/." "${release_dir}/frontend/"
     cp "${script_dir}/jenkins-nginx.conf" "${release_dir}/nginx.conf"
@@ -395,14 +399,18 @@ verify_database_upgrade() {
     mkdir -p "${verify_root}/data" "${verify_root}/backend-logs"
 
     cleanup_database_verification() {
-        docker rm -f "${backend_name}" >/dev/null 2>&1 || true
-        docker rm -f "${redis_name}" >/dev/null 2>&1 || true
-        docker network rm "${network_name}" >/dev/null 2>&1 || true
+        local cleanup_backend_name=$1 cleanup_redis_name=$2 cleanup_network_name=$3 cleanup_db_name=$4
+        docker rm -f "${cleanup_backend_name}" >/dev/null 2>&1 || true
+        docker rm -f "${cleanup_redis_name}" >/dev/null 2>&1 || true
+        docker network rm "${cleanup_network_name}" >/dev/null 2>&1 || true
         docker exec "${DATABASE_CONTAINER}" sh -c \
-            'dropdb --if-exists --force -U "$POSTGRES_USER" "$1"' sh "${db_name}" >/dev/null 2>&1 || true
+            'dropdb --if-exists --force -U "$POSTGRES_USER" "$1"' sh "${cleanup_db_name}" >/dev/null 2>&1 || true
     }
-    trap cleanup_database_verification EXIT
-    cleanup_database_verification
+    local cleanup_trap
+    printf -v cleanup_trap 'cleanup_database_verification %q %q %q %q' \
+        "${backend_name}" "${redis_name}" "${network_name}" "${db_name}"
+    trap "${cleanup_trap}" EXIT
+    cleanup_database_verification "${backend_name}" "${redis_name}" "${network_name}" "${db_name}"
 
     capture_database_history "${verify_root}/source-flyway-history.tsv"
     docker exec "${DATABASE_CONTAINER}" sh -c '
@@ -477,7 +485,7 @@ verify_database_upgrade() {
         | sed -E 's#((PASSWORD|TOKEN|SECRET|AUTHORIZATION)[=:][[:space:]]*)[^[:space:]]+#\1***REDACTED***#Ig' \
         >"${verify_root}/backend.log"
     printf '%s\n' SUCCESS >"${verify_root}/result"
-    cleanup_database_verification
+    cleanup_database_verification "${backend_name}" "${redis_name}" "${network_name}" "${db_name}"
     trap - EXIT
 }
 

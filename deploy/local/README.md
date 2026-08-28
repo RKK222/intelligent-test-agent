@@ -34,6 +34,8 @@ Jenkins 所在测试机用 Docker Compose 管理两个容器，不经过 Portain
 发布目录位于 `/data2/deploy/intelligent-test-agent/releases/`，每个标签包含源码快照、后端 JAR、前端静态文件、
 Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
 `/data2/deploy/intelligent-test-agent/logs/`；共享缓存继续复用 `/data2/deploy/shared/`。
+源码快照整体只读挂载，`source/backend/logs` 与 `source/temp` 仅作为预建的嵌套挂载点，实际写入分别落到受控
+日志目录和运行时临时目录，不回写不可变发布源码。
 
 ## 数据库门禁
 
