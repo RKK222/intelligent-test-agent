@@ -8,6 +8,7 @@ RELEASE_ROOT=${RELEASE_ROOT:-/data2/deploy/intelligent-test-agent/releases}
 LOG_ROOT=${LOG_ROOT:-/data2/deploy/intelligent-test-agent/logs}
 SHARED_ROOT=${SHARED_ROOT:-/data2/deploy/intelligent-test-agent/shared}
 ENV_FILE=${ENV_FILE:-${SHARED_ROOT}/runtime.env}
+RUNTIME_DATA_SOURCE=${RUNTIME_DATA_SOURCE:-/data/offload/home/abc/intelligent-test-agent-dev/.testagent}
 RUNTIME_DATA_ROOT=${RUNTIME_DATA_ROOT:-/home/abc/intelligent-test-agent-dev/.testagent}
 MAVEN_CACHE_DIR=${MAVEN_CACHE_DIR:-/data2/deploy/shared/maven-repository}
 PNPM_STORE_DIR=${PNPM_STORE_DIR:-/data2/deploy/shared/pnpm-store}
@@ -111,8 +112,8 @@ validate_host() {
     require_command git
     require_command python3
     validate_secret_file
-    [[ -d "${RUNTIME_DATA_ROOT}" && ! -L "${RUNTIME_DATA_ROOT}" ]] || {
-        echo "Runtime data root is missing or is a symbolic link: ${RUNTIME_DATA_ROOT}" >&2
+    [[ -d "${RUNTIME_DATA_SOURCE}" && ! -L "${RUNTIME_DATA_SOURCE}" ]] || {
+        echo "Runtime data source is missing or is a symbolic link: ${RUNTIME_DATA_SOURCE}" >&2
         return 1
     }
     [[ -x "${HOST_CONTROL}" ]] || {
@@ -176,8 +177,8 @@ build_release() {
 
 write_stack() {
     local release_dir=$1 output=$2
-    python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_ROOT}" \
-        "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
+    python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_SOURCE}" \
+        "${RUNTIME_DATA_ROOT}" "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
         "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" <<'PY'
 import json
 import sys
@@ -186,6 +187,7 @@ import sys
     output,
     release_dir,
     env_file,
+    runtime_data_source,
     runtime_data_root,
     shared_root,
     frontend_bind_address,
@@ -217,7 +219,7 @@ stack = {
             },
             "volumes": [
                 f"{release_dir}:/release:ro",
-                f"{runtime_data_root}:{runtime_data_root}:rw",
+                f"{runtime_data_source}:{runtime_data_root}:rw",
                 f"{shared_root}/runtime-temp:/release/source/temp:rw",
                 f"{shared_root}/backend-logs:/release/source/backend/logs:rw",
             ],

@@ -23,7 +23,7 @@ Jenkins 所在测试机用 Docker Compose 管理两个容器，不经过 Portain
 
 | 组件 | 容器 | 入口 | 数据 |
 |---|---|---|---|
-| Java 后端 | `test-agent-jenkins-backend` | `http://192.168.8.100:18082` | 复用 `/home/abc/intelligent-test-agent-dev/.testagent` |
+| Java 后端 | `test-agent-jenkins-backend` | `http://192.168.8.100:18082` | 宿主真实路径 `/data/offload/home/abc/intelligent-test-agent-dev/.testagent` 挂载为原逻辑路径 `/home/abc/intelligent-test-agent-dev/.testagent` |
 | agent-web | `test-agent-jenkins-frontend` | `http://192.168.8.100:3000` | 不落业务数据 |
 | OpenCode | 现有 `abc` 进程 | `http://127.0.0.1:4096` | Jenkins 不停止、不重建 |
 
