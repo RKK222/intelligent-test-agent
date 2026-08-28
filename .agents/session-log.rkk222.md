@@ -16056,3 +16056,33 @@
 
 - 仅修正 Jenkins 流水线环境覆盖，不涉及产品 API、事件、数据库结构、Flyway、`.env*`、generated SDK 或 OpenCode
   源码，不新增部署节点。真实发布仍需新的 Jenkins 构建验证。
+
+## 2026-08-28 - 修正 Jenkins 正式容器依赖地址与 readiness 等待
+
+### Why
+
+- Jenkins `#11` 已通过全量构建、不可变制品、123 条 Flyway 克隆校验和临时后端 readiness，随后首次接管旧端口；
+  正式 Compose 启动后只探测一次，容器尚未监听即误判失败。
+- 容器继续继承 `runtime.env` 的 loopback Redis/XXL MySQL 地址，而现场 `127.0.0.1:16379/13306` 实际由 MockCenter
+  占用；TestAgent 自己的 Redis/MySQL 发布在 `192.168.8.100` 同端口。后端因此在注册 heartbeat 时退出重启，XXL
+  子上下文也收到账号拒绝。
+
+### What
+
+- 正式 Compose 显式覆盖 `TEST_AGENT_REDIS_HOST=192.168.8.100` 和不含凭据的 XXL JDBC 主机地址；端口、库名、账号、
+  Redis/MySQL 密码继续来自受控 `runtime.env`，未复制到 Git。
+- 发布后端 readiness 改为最多 120 次、每 2 秒一次的有界等待，前端最多等待 60 秒；容器停止或超时才失败。
+- 现场先精确移除失败重启的 `test-agent-jenkins-backend`，以同一 `release-11-ea2fe513` 制品和上述两个地址覆盖
+  重建；未改不可变发布目录、数据库或真实 `.testagent` 数据。
+
+### How
+
+- 重建后的后端在 30 秒内 readiness 返回 `{"status":"UP"}`，容器 `restartCount=0`；前端与 OpenCode 均返回
+  HTTP 200。`#11` 发布前后的临时验证资源已由 trap 精确清理。
+- Shell 语法、Jenkins 发布契约、AI 文档和差异检查将在提交前复跑。
+
+### Result
+
+- 当前服务已恢复可用，但 Jenkins `#11` 结果仍为 `FAILURE`，且 `current` 发布指针尚未由成功任务确认；必须由后续
+  Jenkins `DEPLOY` 完成正式验证后才能称为发布完成。不涉及产品 API、事件、SQL/Flyway、generated SDK、OpenCode
+  源码或 `.env*`，不新增部署节点。

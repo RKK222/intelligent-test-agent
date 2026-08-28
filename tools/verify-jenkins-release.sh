@@ -28,6 +28,10 @@ grep -Fq 'NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}' "${release_script}"
 grep -Fq 'JAVA_RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE:-maven:3.9.9-eclipse-temurin-21}' "${release_script}"
 grep -Fq 'RUNTIME_DATA_SOURCE=${RUNTIME_DATA_SOURCE:-/data/.testagent}' "${release_script}"
 grep -Fq 'RUNTIME_DATA_ROOT=${RUNTIME_DATA_ROOT:-/data/.testagent}' "${release_script}"
+grep -Fq 'RUNTIME_SERVICE_HOST=${RUNTIME_SERVICE_HOST:-192.168.8.100}' "${release_script}"
+grep -Fq 'xxl_job_mysql_port=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_PORT)' "${release_script}"
+grep -Fq 'xxl_job_mysql_database=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_DATABASE)' "${release_script}"
+grep -Fq 'xxl_job_mysql_url="jdbc:mysql://${RUNTIME_SERVICE_HOST}:${xxl_job_mysql_port}/${xxl_job_mysql_database}?' "${release_script}"
 grep -Fq "command -v git >/dev/null" "${release_script}"
 grep -Fq 'configured_data_root=$(database_linux_data_root "${source_db_name}")' "${release_script}"
 grep -Fq 'validate_backend_jar "${release_dir}/backend.jar"' "${release_script}"
@@ -40,6 +44,10 @@ grep -Fq -- '--workspace-dir "${verify_root}/data/agent-opencode/workspace/exper
 grep -Fq -- '--env "HOME=${RUNTIME_DATA_ROOT}"' "${release_script}"
 grep -Fq -- '--volume "${verify_root}/data:${RUNTIME_DATA_ROOT}:rw"' "${release_script}"
 grep -Fq '"HOME": "/release/source/temp"' "${release_script}"
+grep -Fq '"TEST_AGENT_REDIS_HOST": runtime_service_host' "${release_script}"
+grep -Fq '"TEST_AGENT_XXL_JOB_MYSQL_URL": xxl_job_mysql_url' "${release_script}"
+grep -Fq 'for attempt in $(seq 1 120)' "${release_script}"
+grep -Fq 'Backend did not become ready within the deployment window.' "${release_script}"
 if grep -Fq '"SYS_DATA_ROOT_DIR": runtime_data_root' "${release_script}" \
     || grep -Fq -- '--env SYS_DATA_ROOT_DIR=/verify/data' "${release_script}"; then
     echo 'Jenkins release attempts to override database-controlled SYS_DATA_ROOT_DIR with an environment variable.' >&2

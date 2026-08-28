@@ -15,6 +15,8 @@
   换成不含 git 的 slim 镜像。
 - 后端验证和正式运行固定复用 `maven:3.9.9-eclipse-temurin-21`；体验工作区和应用资产会在运行期调用 Git，
   不能换成不含 git 的纯 JRE 镜像。流水线在宿主门禁中同时检查镜像内的 Java 和 Git。
+- 现场 `127.0.0.1:16379/13306` 由 MockCenter 占用；正式容器显式把 Redis 与 XXL MySQL 主机覆盖为
+  `192.168.8.100`，继续从受控 `runtime.env` 读取端口、库名、用户和密钥，不能把密钥写进 Compose 或 Git。
 - 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
   额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
@@ -90,4 +92,5 @@ docker ps --filter name=test-agent-jenkins-
 ```
 
 成功条件是后端 readiness 返回 `{"status":"UP"}`、前端返回 HTTP 200、两个固定容器均为 `Up`，并且 Jenkins
-构建页最终状态为 `SUCCESS`。
+构建页最终状态为 `SUCCESS`。后端首次启动可能需要完成 Flyway、配置加载和 Git 初始化，流水线最多等待 240 秒；
+等待超时或容器停止才判失败，不能在 `docker compose up` 后只做一次瞬时探测。

@@ -30,6 +30,7 @@ JAVA_RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.27-alpine}
 VERIFY_REDIS_IMAGE=${VERIFY_REDIS_IMAGE:-redis:7.4.9-alpine}
 HOST_CONTROL=${HOST_CONTROL:-/usr/local/sbin/test-agent-jenkins-host-control}
+RUNTIME_SERVICE_HOST=${RUNTIME_SERVICE_HOST:-192.168.8.100}
 
 usage() {
     cat <<'EOF' >&2
@@ -245,10 +246,19 @@ build_release() {
 }
 
 write_stack() {
-    local release_dir=$1 output=$2
+    local release_dir=$1 output=$2 xxl_job_mysql_port xxl_job_mysql_database xxl_job_mysql_url
+    xxl_job_mysql_port=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_PORT)
+    xxl_job_mysql_database=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_DATABASE)
+    [[ "${xxl_job_mysql_port}" =~ ^[1-9][0-9]{0,4}$ && "${xxl_job_mysql_port}" -le 65535 ]] || {
+        echo "Invalid XXL MySQL port in runtime environment." >&2
+        return 1
+    }
+    validate_postgres_identifier "${xxl_job_mysql_database}" "XXL MySQL database"
+    xxl_job_mysql_url="jdbc:mysql://${RUNTIME_SERVICE_HOST}:${xxl_job_mysql_port}/${xxl_job_mysql_database}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai"
     python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_SOURCE}" \
         "${RUNTIME_DATA_ROOT}" "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
-        "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" <<'PY'
+        "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" "${RUNTIME_SERVICE_HOST}" \
+        "${xxl_job_mysql_url}" <<'PY'
 import json
 import sys
 
@@ -264,6 +274,8 @@ import sys
     java_image,
     nginx_image,
     backend_port,
+    runtime_service_host,
+    xxl_job_mysql_url,
 ) = sys.argv[1:]
 
 stack = {
@@ -285,6 +297,8 @@ stack = {
                 "TESTAGENT": "/release/source",
                 "HOME": "/release/source/temp",
                 "TEST_AGENT_START_OPENCODE_MANAGER": "false",
+                "TEST_AGENT_REDIS_HOST": runtime_service_host,
+                "TEST_AGENT_XXL_JOB_MYSQL_URL": xxl_job_mysql_url,
             },
             "volumes": [
                 f"{release_dir}:/release:ro",
@@ -556,14 +570,36 @@ verify_database_upgrade() {
 }
 
 verify_deployment() {
-    local tag=$1
+    local tag=$1 attempt backend_ready=false frontend_ready=false
     validate_tag "${tag}"
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]]
-    curl -fsS --connect-timeout 5 --max-time 15 \
-        "${BACKEND_BASE_URL}/actuator/health/readiness" \
-        | grep -q '"status":"UP"'
-    [[ "$(curl -sS --connect-timeout 5 --max-time 15 -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/")" == 200 ]]
+    for attempt in $(seq 1 120); do
+        if curl -fsS --connect-timeout 2 --max-time 5 \
+            "${BACKEND_BASE_URL}/actuator/health/readiness" 2>/dev/null \
+            | grep -q '"status":"UP"'; then
+            backend_ready=true
+            break
+        fi
+        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        sleep 2
+    done
+    [[ "${backend_ready}" == true ]] || {
+        echo "Backend did not become ready within the deployment window." >&2
+        return 1
+    }
+    for attempt in $(seq 1 30); do
+        if [[ "$(curl -sS --connect-timeout 2 --max-time 5 -o /dev/null -w '%{http_code}' "${FRONTEND_URL}/" 2>/dev/null || true)" == 200 ]]; then
+            frontend_ready=true
+            break
+        fi
+        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]] || break
+        sleep 2
+    done
+    [[ "${frontend_ready}" == true ]] || {
+        echo "Frontend did not become ready within the deployment window." >&2
+        return 1
+    }
 }
 
 deploy_release() {
