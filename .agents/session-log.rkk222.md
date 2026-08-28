@@ -15520,3 +15520,25 @@
 
 - Win10 x64 单机测试候选已完成 Mac 侧构建与反向验收，可移交 Windows 10 1809+ x64 真机测试；当前尚未完成 Authenticode 和真机首次安装、接入、计划任务、OpenCode、升级/回退及卸载验收，不能作为正式发布包。
 - 本轮只生成忽略的候选制品并更新本会话日志，不修改产品代码、文档、API、RunEvent/SSE、数据库、Flyway、安全协议、环境配置、generated SDK 或 OpenCode 只读源码；工作区原有 4 份用户手册改动未纳入本次提交。
+
+## 2026-08-28 - 公共 Agent 发布后并行排空用户进程
+
+### Why
+
+- 公共 Agent 发布完成 Git 同步后，原定时 worker 每轮只认领并串行 dispose 一个用户 OpenCode 进程，用户数量增加时全局 rollout 收敛时间按人数线性增长。
+
+### What
+
+- `PublicAgentConfigRolloutService` 改为每台 Java 默认认领并有界并行排空最多 8 个不同 OpenCode 进程，复用 Reactor `boundedElastic` 承载既有阻塞式 runtime 调用；并发度配置限制在 `1..32`。
+- 继续复用现有进程 `ProcessKey`，同一精确服务器/容器/端口/PID/启动时间命中的多个公共、应用或个人目标仍在组内串行，避免对同一 OpenCode 实例重入 dispose 或重启。
+- 新增不同进程确实重叠 dispose、同一进程保持串行的单元测试，并同步 runtime README 与应用工作树测试说明。
+
+### How
+
+- `PublicAgentConfigRolloutServiceTest` 定向 43 项通过；runtime 依赖链完整 Maven 回归共 1,357 项通过、0 失败；JDK 25 后端 26 模块 clean package 和前端 VitePress、`vue-tsc`、Vite production build 均成功。
+- 按 `.env.test` 执行完整重启时，当前文件实际仍指向未运行的回环 PostgreSQL `127.0.0.1:15432/test_agent`，后端因连接拒绝退出；这与仓库验收规范声明的 `.100/testagent_dev` 不一致。本次未修改 dotenv、未启动本机数据库，也未用其它环境替代，重启等待脚本和半启动进程均已清理。
+
+### Result
+
+- 并行 dispose 行为、同进程安全边界、完整编译与自动化回归均已验证；真实 Spring Boot readiness 因当前 `.env.test` 外部状态未完成，不能表述为完整运行验收通过。
+- 本次使用 `release`，不新增部署节点；不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、鉴权、安全协议、generated SDK 或 OpenCode 只读源码。工作区原有 4 份用户手册改动继续保留且不纳入本次提交。

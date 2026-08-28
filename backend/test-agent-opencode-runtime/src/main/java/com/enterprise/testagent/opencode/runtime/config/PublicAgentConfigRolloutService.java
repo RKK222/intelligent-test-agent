@@ -47,6 +47,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,6 +61,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Agent 配置发布与个人拉取重载协调器：持久化禁发、登记存量进程，并在 Session 空闲后 dispose。
@@ -69,7 +74,7 @@ public class PublicAgentConfigRolloutService
         implements PublicAgentConfigRolloutCoordinator, PublicAgentConfigMessageGate {
 
     private static final String OPENCODE_AGENT_ID = "opencode";
-    private static final int CLAIM_LIMIT = 1;
+    private static final int MAX_DISPOSE_PARALLELISM = 32;
     /** 分页进程仓储单次查询硬上限；当前 manager 容量远低于该值。 */
     private static final int TOPOLOGY_LIMIT = PageRequest.MAX_SIZE;
     private static final Duration TARGET_LEASE = Duration.ofSeconds(60);
@@ -86,6 +91,8 @@ public class PublicAgentConfigRolloutService
     private final BackendInstanceIdentity backendInstanceIdentity;
     private final ManagedWorkspacePathResolver workspacePathResolver;
     private final Duration retryDelay;
+    private final int disposeParallelism;
+    private final Scheduler disposeScheduler;
     private OpencodeProcessConfigLinkService configLinkService;
     private OpencodeProcessStopService stopService;
     private PublicAgentConfigRuntimeImpactResolver runtimeImpactResolver;
@@ -123,6 +130,7 @@ public class PublicAgentConfigRolloutService
         this.notificationService = Objects.requireNonNull(notificationService, "notificationService must not be null");
     }
 
+    @Autowired
     public PublicAgentConfigRolloutService(
             PublicAgentConfigRolloutRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore,
@@ -130,7 +138,31 @@ public class PublicAgentConfigRolloutService
             AgentRuntimeRegistry runtimeRegistry,
             BackendInstanceIdentity backendInstanceIdentity,
             ManagedWorkspacePathResolver workspacePathResolver,
-            @Value("${test-agent.public-agent-config.rollout.retry-delay-ms:5000}") long retryDelayMillis) {
+            @Value("${test-agent.public-agent-config.rollout.retry-delay-ms:5000}") long retryDelayMillis,
+            @Value("${test-agent.public-agent-config.rollout.dispose-parallelism:8}") int disposeParallelism) {
+        this(
+                repository,
+                heartbeatStore,
+                processRepository,
+                runtimeRegistry,
+                backendInstanceIdentity,
+                workspacePathResolver,
+                retryDelayMillis,
+                disposeParallelism,
+                Schedulers.boundedElastic());
+    }
+
+    /** 测试可注入同步或专用调度器，生产统一复用 boundedElastic 承载阻塞式 OpenCode 调用。 */
+    PublicAgentConfigRolloutService(
+            PublicAgentConfigRolloutRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessManagementRepository processRepository,
+            AgentRuntimeRegistry runtimeRegistry,
+            BackendInstanceIdentity backendInstanceIdentity,
+            ManagedWorkspacePathResolver workspacePathResolver,
+            long retryDelayMillis,
+            int disposeParallelism,
+            Scheduler disposeScheduler) {
         this.repository = repository;
         this.heartbeatStore = heartbeatStore;
         this.processRepository = processRepository;
@@ -138,6 +170,8 @@ public class PublicAgentConfigRolloutService
         this.backendInstanceIdentity = backendInstanceIdentity;
         this.workspacePathResolver = workspacePathResolver;
         this.retryDelay = Duration.ofMillis(Math.max(1000L, retryDelayMillis));
+        this.disposeParallelism = Math.max(1, Math.min(MAX_DISPOSE_PARALLELISM, disposeParallelism));
+        this.disposeScheduler = Objects.requireNonNull(disposeScheduler, "disposeScheduler must not be null");
     }
 
     /** 在任何远端 push 或共享运行副本切换前建立 PREPARING 闸门。 */
@@ -861,6 +895,7 @@ public class PublicAgentConfigRolloutService
 
     /**
      * 每台 Java 服务只认领本服务器目标；数据库 SKIP LOCKED 与租约保证本机多进程下不重复处理且可恢复。
+     * 不同 OpenCode 进程并行排空，同一进程的多个配置目标保持串行，避免重复 dispose 或重启相互干扰。
      */
     @Scheduled(
             fixedDelayString = "${test-agent.public-agent-config.rollout.poll-delay-ms:5000}",
@@ -871,11 +906,29 @@ public class PublicAgentConfigRolloutService
                 backendInstanceIdentity.linuxServerId(),
                 now,
                 now.plus(TARGET_LEASE),
-                CLAIM_LIMIT);
-        for (PublicAgentConfigRolloutTarget target : targets) {
-            drainTarget(target);
-        }
+                disposeParallelism);
+        drainTargetsInParallel(targets);
         repository.completeReadyRollouts(Instant.now());
+    }
+
+    /** 以精确进程代次分组后有界并行；共享 boundedElastic 由 Reactor 统一管理线程生命周期。 */
+    private void drainTargetsInParallel(List<PublicAgentConfigRolloutTarget> targets) {
+        Map<ProcessKey, List<PublicAgentConfigRolloutTarget>> targetsByProcess = new HashMap<>();
+        for (PublicAgentConfigRolloutTarget target : targets) {
+            ProcessKey processKey = new ProcessKey(
+                    target.linuxServerId(),
+                    target.containerId(),
+                    target.port(),
+                    target.processPid(),
+                    normalizedStartedAt(target.processStartedAt()));
+            targetsByProcess.computeIfAbsent(processKey, ignored -> new ArrayList<>()).add(target);
+        }
+        Flux.fromIterable(targetsByProcess.values())
+                .flatMap(targetsForProcess -> Mono.fromRunnable(
+                                () -> targetsForProcess.forEach(this::drainTarget))
+                        .subscribeOn(disposeScheduler), disposeParallelism)
+                .then()
+                .block();
     }
 
     private void drainTarget(PublicAgentConfigRolloutTarget target) {

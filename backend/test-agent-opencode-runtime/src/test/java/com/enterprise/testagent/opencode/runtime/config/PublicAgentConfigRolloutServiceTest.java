@@ -57,10 +57,14 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 class PublicAgentConfigRolloutServiceTest {
 
@@ -100,7 +104,9 @@ class PublicAgentConfigRolloutServiceTest {
                 registry,
                 backendInstanceIdentity,
                 workspacePathResolver,
-                1000L);
+                1000L,
+                1,
+                Schedulers.immediate());
         service.setNotificationService(notificationService);
     }
 
@@ -863,6 +869,93 @@ class PublicAgentConfigRolloutServiceTest {
                 eq("act_failed"), eq("acl_failed"), eq(1), any(Instant.class),
                 eq("TARGET_PROCESS_IDENTITY_MISSING"), any(Instant.class));
         verify(repository).markTargetDisposed(eq("act_healthy"), eq("acl_healthy"), any());
+    }
+
+    @Test
+    void publicRolloutDisposesDifferentProcessesInParallel() throws InterruptedException {
+        PublicAgentConfigRolloutTarget first = target(0);
+        PublicAgentConfigRolloutTarget second = new PublicAgentConfigRolloutTarget(
+                "act_second", "acr_rollout", AgentConfigRolloutScope.PUBLIC,
+                "usr-2", "linux-1", "container-1", 4097,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4097", 0,
+                Instant.now().plusSeconds(60), "acl_second", "trace-second");
+        PublicAgentConfigRolloutService parallelService = new PublicAgentConfigRolloutService(
+                repository,
+                heartbeatStore,
+                processRepository,
+                registry,
+                backendInstanceIdentity,
+                workspacePathResolver,
+                1000L,
+                2,
+                Schedulers.boundedElastic());
+        parallelService.setNotificationService(notificationService);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(2))).thenReturn(List.of(first, second));
+        when(repository.findTargetWorkspaceRootPaths(any())).thenReturn(List.of());
+        when(repository.renewTargetLease(any(), any(), any(), any())).thenReturn(true);
+        when(repository.markTargetDisposed(any(), any(), any())).thenReturn(true);
+        useManagerPorts(4096, 4097);
+        CountDownLatch disposeStarted = new CountDownLatch(2);
+        AtomicInteger activeDisposes = new AtomicInteger();
+        AtomicInteger maxActiveDisposes = new AtomicInteger();
+        when(runtime.runtime(any(AgentRuntimeCommand.class))).thenAnswer(invocation -> {
+            AgentRuntimeCommand command = invocation.getArgument(0);
+            assertThat(command.path()).isEqualTo("/global/dispose");
+            int active = activeDisposes.incrementAndGet();
+            maxActiveDisposes.accumulateAndGet(active, Math::max);
+            disposeStarted.countDown();
+            boolean overlapped = disposeStarted.await(2, TimeUnit.SECONDS);
+            activeDisposes.decrementAndGet();
+            return Mono.just(new AgentRuntimeResult(
+                    objectMapper.getNodeFactory().booleanNode(overlapped)));
+        });
+
+        parallelService.drainTargets();
+
+        assertThat(disposeStarted.getCount()).isZero();
+        assertThat(maxActiveDisposes).hasValue(2);
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+        verify(repository).markTargetDisposed(eq("act_second"), eq("acl_second"), any());
+    }
+
+    @Test
+    void parallelDrainKeepsTargetsForSameProcessSerial() {
+        PublicAgentConfigRolloutTarget first = target(0);
+        PublicAgentConfigRolloutTarget second = new PublicAgentConfigRolloutTarget(
+                "act_second", "acr_application", AgentConfigRolloutScope.APPLICATION,
+                "usr-1", "linux-1", "container-1", 4096,
+                123L, PROCESS_STARTED_AT, "http://127.0.0.1:4096", 0,
+                Instant.now().plusSeconds(60), "acl_second", "trace-second");
+        PublicAgentConfigRolloutService parallelService = new PublicAgentConfigRolloutService(
+                repository,
+                heartbeatStore,
+                processRepository,
+                registry,
+                backendInstanceIdentity,
+                workspacePathResolver,
+                1000L,
+                2,
+                Schedulers.boundedElastic());
+        parallelService.setNotificationService(notificationService);
+        when(repository.claimTargets(eq("linux-1"), any(), any(), eq(2))).thenReturn(List.of(first, second));
+        when(repository.findTargetWorkspaceRootPaths(any())).thenReturn(List.of());
+        when(repository.renewTargetLease(any(), any(), any(), any())).thenReturn(true);
+        when(repository.markTargetDisposed(any(), any(), any())).thenReturn(true);
+        useManagerPorts(4096);
+        AtomicInteger activeDisposes = new AtomicInteger();
+        AtomicInteger maxActiveDisposes = new AtomicInteger();
+        when(runtime.runtime(any(AgentRuntimeCommand.class))).thenAnswer(invocation -> {
+            int active = activeDisposes.incrementAndGet();
+            maxActiveDisposes.accumulateAndGet(active, Math::max);
+            activeDisposes.decrementAndGet();
+            return Mono.just(new AgentRuntimeResult(objectMapper.getNodeFactory().booleanNode(true)));
+        });
+
+        parallelService.drainTargets();
+
+        assertThat(maxActiveDisposes).hasValue(1);
+        verify(repository).markTargetDisposed(eq("act_target"), eq("acl_lease"), any());
+        verify(repository).markTargetDisposed(eq("act_second"), eq("acl_second"), any());
     }
 
     @Test

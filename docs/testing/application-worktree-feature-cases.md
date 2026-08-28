@@ -131,14 +131,14 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 个人 workspace 拉取远程 | 从当前 workspace 标题栏“…”菜单确认应用 Agent 范围和直接 Git merge 后，在点击者的整棵应用个人 worktree fetch/merge 远端；确认可按用户在当前浏览器设为不再提示，但每次仍展示执行步骤和结果文件；同一分支的其它 workspace 目录与应用 Agent 一起更新；不提交、不推送、不修改共享 target | 其他用户、共享副本和公共 Agent 均不变化；应用 workspace 与应用 Agent 统一交给原生 Git，不重叠改动原样保留，只有实际会被覆盖的文件阻止拉取 | 结果弹框明确显示：普通文件无 dispose；成功合入应用 Agent/Skill/JSONC 且本人进程运行时，后端以 `PERSONAL_APPLICATION` 只登记当前用户并持久化等待空闲；刷新或关闭页面不丢任务，前端不保存待 dispose 标记。进程未运行时下次启动直接加载；不启动共享 APPLICATION 或 PUBLIC rollout |
 | 公共 Agent/Skill/JSONC 保存 | 只写当前超管公共个人 worktree并进入公共 Diff；目录定义保存后把本人的有效公共配置软链接切到该 worktree | 无 | 当前任务空闲时只 dispose 当前超管本人，下一次 bootstrap 读取个人 worktree；共享副本和别人不变 |
 | 公共 Agent/Skill/JSONC 本地提交 | 只更新 `public-{userId}` | 无 | 不新增 dispose；本人保存后的预览链接继续有效 |
-| 超管刷新公共 Agent Git | 从远端分支解析固定 commit；全服务器共享运行副本 checkout/reset 到该 commit，所有有效公共个人 worktree 原生 merge。共享副本 dirty 必须先聚合确认且锁内恢复；个人 worktree 不 stash/reset/clean | 非重叠 staged/unstaged/untracked 内容原样保留；覆盖风险或冲突只把对应 worktree 记为 `AWAITING_USER`，其它用户和服务器继续 | 主 rollout 按服务器同步并逐用户排空；页面活动期禁用重复刷新并展示每服务器 `lastError`。个人补偿不延长主 rollout，收敛后再处理该用户运行态 |
-| 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 逐用户等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose` |
+| 超管刷新公共 Agent Git | 从远端分支解析固定 commit；全服务器共享运行副本 checkout/reset 到该 commit，所有有效公共个人 worktree 原生 merge。共享副本 dirty 必须先聚合确认且锁内恢复；个人 worktree 不 stash/reset/clean | 非重叠 staged/unstaged/untracked 内容原样保留；覆盖风险或冲突只把对应 worktree 记为 `AWAITING_USER`，其它用户和服务器继续 | 主 rollout 按服务器同步；各服务器默认最多并行排空 8 个不同进程，页面活动期禁用重复刷新并展示每服务器 `lastError`。个人补偿不延长主 rollout，收敛后再处理该用户运行态 |
+| 公共 Agent/Skill/JSONC 提交并推送 | 先合并远端公共分支并推送，再把固定提交同步到所有服务器公共运行副本 | 所有用户最终读取同一共享固定提交 | 全局 rollout 对不同用户进程有界并行等待旧任务空闲，先把有效指针恢复到共享副本，再调用原生 `/global/dispose`；同一进程的多个配置目标仍串行 |
 
 普通 workspace 文件推送成功后，平台会主动把固定 feature 提交 merge 到相关用户的个人 worktree，其他用户不需要手工点击“拉取远程”。干净 worktree 和只有非重叠本地改动的 worktree 都会自动更新；只有 Git 判断会覆盖本地文件或产生真实冲突时才等待该用户处理。“拉取远程”是本人主动补拉或重试入口，不是跨用户更新的必经步骤；普通文件不进入 OpenCode 配置缓存，因此无论自动更新还是个人拉取都不 dispose。
 
 应用资产引用本身仍由资产库 generation/副本程序维护；`opencode.jsonc` 只记录引用关系及当前所选根层 SDD 目录的精确外部目录 allow，不写仓库级或全局 `* allow`。保存引用 JSONC 只热加载本人；只有管理员明确把该 JSONC 提交并推送后，引用配置才随 feature 固定提交合并到其他个人 worktree，资产文件不会复制进应用仓库，也不会把资产库分支合并进 feature。
 
-表中的“全局 rollout”仍是逐用户进程执行，不存在所有用户共用的 OpenCode 进程。只对已有运行进程登记 dispose 目标；没有运行进程的用户在下次初始化时直接加载最新公共配置和个人 worktree 配置。
+表中的“全局 rollout”仍是每用户独立进程执行，不存在所有用户共用的 OpenCode 进程；不同用户进程可以有界并行，同一进程的多个配置目标保持串行。只对已有运行进程登记 dispose 目标；没有运行进程的用户在下次初始化时直接加载最新公共配置和个人 worktree 配置。
 
 前端验证需覆盖：进程归属查询失败时保持路由未解析，不能等同于成功返回的无 binding；查询未解析或无 binding 时既不自动创建公共个人 worktree，也不加载或展示首台服务器的公共直接目录；超级管理员 worktree 准备失败时同样不能降级读取共享直接目录；初始化成功后即使服务器 ID 不变，也必须按响应中的精确 `worktreeId/linuxServerId` 替换旧挂载并刷新目录；服务器或工作空间切换期间旧请求迟到不能覆盖最新挂载。
 
@@ -158,7 +158,7 @@ OPENCODE_CONFIG_DIR / manager configPath
 | 应用配置发布热加载 | `PublicAgentConfigRolloutCoordinator` 的 APPLICATION scope | 同仓库兄弟目录会同步固定提交，但只在发布源目录的个人 worktree 包含目标后登记其用户，等待空闲并调用现有 OpenCode client 的 `/global/dispose` |
 | 公共保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` → `POST /agent-config/public/runtime-reload` → `PersonalAgentConfigRuntimeReloadService` | Controller 把同步等待 dispose 的本地调用或跨服务器转发调度到 `boundedElastic`，避免在 WebFlux 事件线程调用 `block()`；随后校验 worktree owner/服务器，原子切换 `{sessionPath}/.testagent-runtime/current-public-config` 到本人公共 worktree，再只调用本人进程 `/global/dispose` |
 | 应用保存时本人热加载 | `AgentWorkbench.refreshRuntimeCatalogAfterAgentConfigSave` | 当前用户在个人 worktree 保存后直接调用 `disposeGlobal()`；OpenCode 下一次按请求 directory 重读该个人 worktree `.opencode` |
-| 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，逐进程等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；升级前直接读取共享路径的旧进程兼容只 dispose |
+| 公共发布热加载 | `PublicAgentConfigRolloutService` 的 PUBLIC scope | 各服务器共享 Git 副本固定提交同步后，默认按最多 8 个不同进程有界并行等待全部 Session 空闲，恢复共享配置链接并调用 `/global/dispose`；同一进程多目标仍串行，升级前直接读取共享路径的旧进程兼容只 dispose |
 | 发布失败恢复 | `GitChangesPanel` + `ManagedWorkspaceApplicationService` | 本地提交成功后网络失败保留待推送白名单；刷新可幂等重试且不重复 commit。后端按远端包含/未包含/未知三态处理 feature 临时提交，未知状态保留 PREPARING 闸门；用户可只清除浏览器提醒，管理员仍可按 traceId 排查 |
 
 兼容接口 `POST /personal-workspaces/{id}/sync-from-application` 不再逐文件复制，也不接受 `force` 覆盖个人内容；`files: []` 是“合并整个固定 feature commit”的合法请求，旧客户端传非空路径时只校验格式，不以路径缩小合并范围。
@@ -236,7 +236,7 @@ tools/create-workspace-branch-model-test-data.sh
 | 不应热加载 | 普通文件、`skills/**/rules/**`、`skills/**/templates/**` | 文件写盘并进入 Diff，但无 dispose 请求 |
 | Diff 分类 | 任意 Git 可见 `.opencode/**` 与一个普通工作区文件 | 前者全部出现在“应用 Agent”Diff，后者只出现在普通工作区 Diff；没有两边都不可见的脏文件 |
 | 权限与边界 | USER 写应用配置、非成员访问、任意角色发布 spec | 后端拒绝且 Git ref、工作树不发生越权变化 |
-| rollout | 应用配置推送、公共配置推送 | 固定 commit 同步完成后，逐用户等待任务空闲并 dispose；无运行进程不被额外启动 |
+| rollout | 应用配置推送、公共配置推送 | 固定 commit 同步完成后，不同用户进程有界并行等待任务空闲并 dispose，同一进程多目标串行；无运行进程不被额外启动 |
 
 ### 6.3 通过判定原则
 
