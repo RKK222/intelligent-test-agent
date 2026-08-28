@@ -15564,3 +15564,29 @@
 
 - 代码层已阻断“没有 `.opencode` 就无法发起对话”的误报，同时保留真实工作区丢失的诊断和实际自动化引用的配置创建能力；企业环境仍需部署新后端后用原问题应用复验。
 - 本次使用 `release`，不新增部署节点，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、鉴权、安全协议、generated SDK、环境文件或只读 OpenCode 源码。工作区并行存在的用户手册与 help-center 测试改动保持未暂存，不纳入本次提交。
+
+## 2026-08-28 - 基于当前 release 工作树重打企业增量包
+
+### Why
+
+- 用户要求基于当前代码重新打包；上一候选尚未部署，企业成功部署基线仍为 `release@7152a4340`，不能把本机构建状态误记成现场状态。
+- 当前 `release@1904d985fad1d917d314cc074b5cec52afaaebf0` 之后需要交付公共 Agent 发布后有界并行排空、应用缺少可选 `.opencode` 目录时仍可对话，以及工作树中 5 个未提交的帮助中心/用户手册改动。
+
+### What
+
+- 完整重编后台、VitePress 用户手册和前端生产资源；worker runtime 指纹 `877cea1827a6f55b994f4a82f0934d72ca1361fb12b9872ce77e45430073be33`、toolbox 指纹 `35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040` 均为 `reuse`，不携带或重启 manager/worker、工具箱、CK、Mem0、BGE、pgvector、LobeHub、trace、Python 库或独立 ClickHouse 制品。
+- 客户端源码和配置相对上一候选未变，不伪造新版本；企业仍未部署该候选，因此正式包继续包含组织密钥签名的麒麟 ARM64 客户端 `20260827222702`，固定企业入口 `http://mimo.sdc.cs.icbc:9996`，公共能力仍锁定已发布提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`。Win10 `20260828090513` 仍是未做 Authenticode 的独立候选，不进入正式 catalog 或平台包。
+- 最终固定名外层包 SHA-256 为 `17cceffa620678c354948c6dbb7b4690e38464669a8f7dfdff51323399776477`，内层包为 `08531ab7270a6a3c2fc3dfde70a9d21fc34fe17986f89f531c1dccfd9627da92`；已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`。
+
+### How
+
+- 固定组织私钥自检通过，私钥推导公钥与固定公钥 DER 指纹均为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`。14 模块 Maven reactor 全部成功，`test-agent-opencode-runtime` 988 项通过；正式后端打包、Flyway 资源门禁、VitePress、`vue-tsc` 和 Vite production build 均通过。
+- 前端根级全量 Vitest 为 158 个文件，`2264 passed / 1 skipped / 2 failed`；两处失败均来自当前未提交手册新增段落使内置帮助 6700 字符提示截断，旧断言期待的后段文字不再进入 prompt。该问题不影响 production build，但仍是部署后帮助问答待验收风险；本次打包任务没有擅自修改或提交这 5 个现有文件。
+- 首次封装发现共享本机构建目录的 catalog 被 Win10 测试候选追加为最高版本，而 `stable` 仍是麒麟版本，正式门禁正确拒绝混合。改用隔离临时目录从上一可信内层包恢复单版本麒麟分发，再装入本轮新前后台；最终正式 catalog 只含 `20260827222702`，catalog、manifest 和客户端制品 RSA 验签通过。
+- 全新临时目录独立验证外层/内层 ZIP CRC、嵌套内层逐字节一致、三节点归档 SHA、组件排除、TCDS `http://tcds-prod.sdc.icbc:9080`、AAM、企业域名、两后台 SkillHub key 非空和麒麟客户端签名。最终 App、persistence、XXL、前端 SHA-256 分别为 `2141bcf8b1ae55766b7272ccd2fae29bb8612d0784b71d63d01ff773fbb331c2`、`8f800ec2630cddd7edd57aa310e7bd96f0cd7d683bd36e5ce845d70d7e618e9c`、`38c28a32046496ffc0d29fac1856a73a343da1964bbd8728852b4f5de0978092`、`06d290634e62241921915570d7aa95aa9783a8b13762b774c2edce5876441f0c`。
+- 本轮没有新增或修改 Flyway SQL；相对企业已部署 `V20260825091459` 仍只允许 `.4` 首节点新增 `V20260827183737__agent_skill_hub_assets_add_external_created_at.sql`，checksum `-976579670`、源码和最终 persistence JAR 内 SHA-256 均为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。`V20260825091459` 最终 JAR 字节 SHA-256 仍为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`。
+
+### Result
+
+- 企业增量包已完成本机构建、生产编译、签名和独立归档校验，可移交中转机；尚未在 `.4/.114/.2` 执行部署，Flyway 只能先由 `.4` 升级，确认成功后再部署 `.114` 和 `.2`。
+- 本次不修改产品代码、API、DTO、RunEvent/SSE、数据库 SQL、环境文件、generated SDK 或 OpenCode 只读源码；只提交本发布记录。5 个现有前端/手册改动继续留在工作树且已进入构建产物，不推送远程。
