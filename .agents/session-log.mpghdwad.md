@@ -420,3 +420,24 @@
 
 - 数据行选择框不会再滚入表头区域，表头继续保留唯一的全选框。
 - 不涉及 API、RunEvent、数据库、Flyway、部署、性能、安全、generated SDK、OpenCode 源码或环境配置；未重启服务、未推送远程。自动视觉验证仍需在浏览器连接恢复后或由用户重启页面后复测。
+
+## 2026-08-28 - TCDS 案例维护失败时不再弹出空白标签页
+
+### Why
+
+- `041-测试设计` 案例维护原先会在调用平台维护接口前立即打开 `about:blank` 占位；下游 `createGraphCase` 失败时虽然随后关闭，用户仍会看到新标签页被弹出。
+
+### What
+
+- 将跳转页创建延后到平台案例维护接口成功之后；成功路径仍复用当前编辑器正文执行原缓存和跳转，失败路径保留案例维护弹窗与统一错误提示，且不调用 `window.open`。
+- 新增成功调用顺序及失败零开页的回归测试，并同步前端 README、agent-web README 和 HTTP API 交互说明。
+
+### How
+
+- 案例维护组包与弹窗定向 Vitest 2 个文件共 18 项通过；`agent-web` typecheck/lint 与 `git diff --check` 通过。
+- `FigmaEditorArea.test.ts` 在导入任务外思维导图运行时时，因当前 `node_modules` 无法解析 `simple-mind-map/src/plugins/Drag.js` 而在收集阶段失败；该套件未执行测试，本次未修改对应依赖或编辑器入口组件。
+
+### Result
+
+- `createGraphCase` 成功后才会进入既有新标签页缓存跳转，失败或异常不会再短暂弹出空白 tab。
+- 使用 `release`，不新增部署节点；不变更 HTTP API 路径/DTO、RunEvent/SSE、数据库、Flyway、后端、安全、环境配置、generated SDK 或 OpenCode 只读源码，未调用真实 TCDS。

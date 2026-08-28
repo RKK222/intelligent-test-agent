@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildTcdsTestCaseMaintenancePayload,
+  openTcdsJumpWindowAfterMaintenance,
   parseMarkdownTestCases
 } from "../src/components/test-case-maintenance";
 
@@ -221,5 +222,35 @@ status=99
 
   it("reports an actionable error when the required case table is absent", () => {
     expect(() => parseMarkdownTestCases("# 没有可解析的案例")).toThrow("未找到可维护的案例内容");
+  });
+
+  it("opens the existing jump flow only after TCDS maintenance succeeds", async () => {
+    const callOrder: string[] = [];
+    const popup = { opener: {} } as Window;
+    const openWindow = vi.fn(() => {
+      callOrder.push("open");
+      return popup;
+    });
+
+    const result = await openTcdsJumpWindowAfterMaintenance({
+      maintain: async () => { callOrder.push("maintain"); },
+      openWindow
+    });
+
+    expect(callOrder).toEqual(["maintain", "open"]);
+    expect(openWindow).toHaveBeenCalledOnce();
+    expect(result).toBe(popup);
+    expect(popup.opener).toBeNull();
+  });
+
+  it("does not open a new tab when TCDS maintenance fails", async () => {
+    const openWindow = vi.fn(() => ({ opener: null } as Window));
+
+    await expect(openTcdsJumpWindowAfterMaintenance({
+      maintain: async () => { throw new Error("createGraphCase failed"); },
+      openWindow
+    })).rejects.toThrow("createGraphCase failed");
+
+    expect(openWindow).not.toHaveBeenCalled();
   });
 });

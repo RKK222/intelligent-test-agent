@@ -248,6 +248,7 @@ import PersonalWorkspacePullDialog, {
 import TestCaseMaintenanceDialog from "./TestCaseMaintenanceDialog.vue";
 import {
   buildTcdsTestCaseMaintenancePayload,
+  openTcdsJumpWindowAfterMaintenance,
   parseMarkdownTestCases,
   type TestCaseMaintenanceDraft
 } from "./test-case-maintenance";
@@ -9620,12 +9621,13 @@ async function submitTestCaseMaintenance(cases: TestCaseMaintenanceDraft[]) {
     return;
   }
 
-  // 确认点击时立即占用新标签页，避免维护与缓存两个异步请求结束后被浏览器拦截。
-  const jumpWindow = window.open("about:blank", "_blank");
-  if (jumpWindow) jumpWindow.opener = null;
+  let jumpWindow: Window | null = null;
   testCaseMaintenanceSubmitting.value = true;
   try {
-    await api.maintainTcdsTestCases(request);
+    jumpWindow = await openTcdsJumpWindowAfterMaintenance({
+      maintain: () => api.maintainTcdsTestCases(request),
+      openWindow: () => window.open("about:blank", "_blank")
+    });
 
     testCaseMaintenanceSource.value = null;
     ElMessage.success("案例维护成功，正在跳转");
