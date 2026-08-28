@@ -25,7 +25,8 @@ PROJECT_NAME=${PROJECT_NAME:-intelligent-test-agent-jenkins}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 # 用户手册构建会读取 Git 提交时间，使用含 git 的固定 Node 完整镜像。
 NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}
-JAVA_RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE:-eclipse-temurin:21-jre-jammy}
+# 体验工作区和应用资产运行期需要执行 Git；复用已固定的 Maven JDK 21 镜像，避免使用不含 Git 的纯 JRE 镜像。
+JAVA_RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 NGINX_IMAGE=${NGINX_IMAGE:-nginx:1.27-alpine}
 VERIFY_REDIS_IMAGE=${VERIFY_REDIS_IMAGE:-redis:7.4.9-alpine}
 HOST_CONTROL=${HOST_CONTROL:-/usr/local/sbin/test-agent-jenkins-host-control}
@@ -162,6 +163,7 @@ validate_host() {
         }
     done
     docker info >/dev/null
+    docker run --rm "${JAVA_RUNTIME_IMAGE}" sh -euc 'command -v java >/dev/null; command -v git >/dev/null'
     sudo "${HOST_CONTROL}" status
 }
 
@@ -262,6 +264,7 @@ stack = {
                 "TEST_AGENT_FRONTEND_URL": f"http://192.168.8.100:{frontend_port}",
                 "TEST_AGENT_ROOT": "/release/source",
                 "TESTAGENT": "/release/source",
+                "HOME": "/release/source/temp",
                 "SYS_DATA_ROOT_DIR": runtime_data_root,
                 "TEST_AGENT_START_OPENCODE_MANAGER": "false",
             },
@@ -439,6 +442,10 @@ verify_database_upgrade() {
     verify_root="${release_dir}/database-upgrade-verification"
     mkdir -p "${verify_root}/data" "${verify_root}/backend-logs"
 
+    # 临时后端沿用正式启动契约：在隔离数据根补齐体验模板并初始化 Git，不读取或修改真实运行数据。
+    bash "${release_dir}/source/deploy/internal/ensure-experience-workspace-content.sh" \
+        --workspace-dir "${verify_root}/data/agent-opencode/workspace/experience"
+
     cleanup_database_verification() {
         local cleanup_backend_name=$1 cleanup_redis_name=$2 cleanup_network_name=$3 cleanup_db_name=$4
         docker rm -f "${cleanup_backend_name}" >/dev/null 2>&1 || true
@@ -478,6 +485,7 @@ verify_database_upgrade() {
         --env "TEST_AGENT_FRONTEND_URL=http://127.0.0.1:${FRONTEND_PORT}" \
         --env TEST_AGENT_ROOT=/release/source \
         --env TESTAGENT=/release/source \
+        --env HOME=/verify/data \
         --env SYS_DATA_ROOT_DIR=/verify/data \
         --env TEST_AGENT_SERVER_ADVERTISED_HOST=127.0.0.1 \
         --env TEST_AGENT_TEST_DB_HOST=host.docker.internal \

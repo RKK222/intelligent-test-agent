@@ -15977,3 +15977,31 @@
 - 固定交付文件已覆盖到 `/Users/kaka/Desktop/mimoagent/0709/`，回读 SHA 与 ZIP CRC 均通过，可按
   `.4 -> .114 -> .2` 滚动部署；客户端、manager/worker、toolbox 和已部署数据面均不重装、不重启、不重复同步。
 - 本次没有修改产品代码或稳定文档，只追加本机发布追溯；企业目标机和浏览器业务验收尚未执行，不能把本候选登记为已部署基线。
+
+## 2026-08-28 - 补齐 Jenkins 后端运行 Git 与体验目录验证
+
+### Why
+
+- Jenkins `#8` 已完成后端、前端构建和 123 条真实 Flyway history 克隆校验，临时 Java 也已启动 Netty；但隔离数据根
+  没有体验工作区，且原 `eclipse-temurin:21-jre-jammy` 不含 Git，`ExperienceWorkspaceStartupRunner` 按既有
+  失败关闭契约阻止 readiness。失败发生在宿主接管前，原 `abc` Java、Vite 和 OpenCode 均未停止。
+
+### What
+
+- 临时数据库升级验证在启动 Java 前复用发布源码中的 `ensure-experience-workspace-content.sh`，只在本次发布目录的
+  隔离数据根补齐体验模板并初始化无 remote Git 仓库，不读取或修改真实 `.testagent` 数据。
+- 后端验证和正式运行镜像统一固定为已有的 `maven:3.9.9-eclipse-temurin-21`，复用其 Java 21 与 Git；宿主门禁
+  显式检查两个命令。验证容器与正式容器分别设置可写 HOME，避免 Git 访问镜像内 root HOME。
+- 同步本地 Jenkins README 和发布契约检查；没有新增跳过体验初始化的产品开关，保留原启动失败关闭语义。
+
+### How
+
+- 在 `192.168.8.100` 实际确认 Maven JDK 镜像包含 `/usr/bin/git`，原纯 JRE 镜像不含 Git；同时确认 Jenkins `#8`
+  的验证容器、网络和临时数据库均已精确清理。
+- `deploy/local/jenkins-release.sh`、host helper 和体验模板脚本通过 `bash -n`；Jenkins 发布契约、AI 文档校验及
+  `git diff --check` 通过。提交前已回顾全部 `.agents/session-log*.md` 近期记录，未覆盖并行提交。
+
+### Result
+
+- 修正覆盖 Jenkins 测试环境发布的运行依赖与隔离门禁，不修改 HTTP API、RunEvent/SSE、数据库结构、SQL、Flyway、
+  generated SDK、OpenCode 源码或 `.env*`，不新增部署节点。真实发布仍以新的 Jenkins `DEPLOY` 构建结果为准。

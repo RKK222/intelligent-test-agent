@@ -13,6 +13,8 @@
   输出、归档或写入 Git 任何密码、Token 或数据库连接密钥。
 - 前端固定使用带 git 的 `node:22.16.0-bookworm` 构建镜像；VitePress 会读取页面对应的 Git 提交时间，不能
   换成不含 git 的 slim 镜像。
+- 后端验证和正式运行固定复用 `maven:3.9.9-eclipse-temurin-21`；体验工作区和应用资产会在运行期调用 Git，
+  不能换成不含 git 的纯 JRE 镜像。流水线在宿主门禁中同时检查镜像内的 Java 和 Git。
 - 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
   额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
@@ -44,7 +46,8 @@ Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
 1. 运行 `FlywayMigrationNamingTest`，锁定 migration 命名、重复版本和已冻结文件字节。
 2. 从受控 `runtime.env` 读取当前应用数据库名和角色（测试基线为 `testagent_dev`），在 `test-agent-postgres` 内做
    一致性逻辑复制；临时库归应用角色所有并以该角色恢复对象权限，再配合独立 Redis 使用本次后端 JAR 完成真实
-   PostgreSQL 升级与 readiness 检查。验证容器、网络和临时库随后按精确名称清理；源库只读。
+   PostgreSQL 升级与 readiness 检查。验证数据根先复用发布源码中的体验工作区模板脚本建立独立 Git 仓库，既
+   覆盖启动契约，也不会读取或修改真实运行数据。验证容器、网络和临时库随后按精确名称清理；源库只读。
 
 验证后端只在 Docker bridge 内把 `SERVER_ADDRESS` 覆盖为 `0.0.0.0`，并复用克隆库已有的 Linux server ID，避免
 把宿主绑定地址或虚构 server ID 带入临时环境；这些覆盖不进入正式发布容器。
