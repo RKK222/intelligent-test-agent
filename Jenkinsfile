@@ -31,6 +31,7 @@ pipeline {
         COREPACK_CACHE_DIR = '/data2/deploy/shared/corepack-cache'
         BACKEND_BASE_URL = 'http://192.168.8.100:18082'
         FRONTEND_URL = 'http://192.168.8.100:3000'
+        RUNTIME_SERVICE_HOST = '192.168.8.100'
         XXL_JOB_ADMIN_PORT = '18083'
         RELEASE_SCRIPT = 'deploy/local/jenkins-release.sh'
     }

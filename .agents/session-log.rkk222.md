@@ -16114,5 +16114,8 @@
 
 - `#12` 只证明旧门禁下的平台主服务发布成功，不能作为完整 Jenkins 交付结论；本次修正仍须新的 Jenkins `DEPLOY`
   实际启动 `18083`、验证同源代理并取得 `SUCCESS`。
+- 首次复跑 `#13` 时，XXL Admin 已在 `192.168.8.100:18083` 返回 `UP`，但 Java 只监听现场 LAN 地址；原门禁误探测
+  `127.0.0.1`，Nginx 的 `host.docker.internal` 又解析为 `172.17.0.1`，因此同源路径返回 502。已主动终止该必然超时
+  的构建，并把主 API、XXL 代理和直接健康探测统一到显式 `RUNTIME_SERVICE_HOST=192.168.8.100`；仍需再次实发验证。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构、SQL/Flyway、性能协议、generated SDK、OpenCode 源码
   或 `.env*`；仅调整测试环境 Jenkins 运行端口、反向代理和发布验证契约。

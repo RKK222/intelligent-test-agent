@@ -411,10 +411,14 @@ prepare_release() {
     mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"
     cp "${backend_jar}" "${release_dir}/backend.jar"
     cp -R "${frontend_dist}/." "${release_dir}/frontend/"
-    sed "s/__XXL_JOB_ADMIN_PORT__/${XXL_JOB_ADMIN_PORT}/g" \
+    sed \
+        -e "s/__RUNTIME_SERVICE_HOST__/${RUNTIME_SERVICE_HOST}/g" \
+        -e "s/__BACKEND_PORT__/${BACKEND_PORT}/g" \
+        -e "s/__XXL_JOB_ADMIN_PORT__/${XXL_JOB_ADMIN_PORT}/g" \
         "${script_dir}/jenkins-nginx.conf" >"${release_dir}/nginx.conf"
-    grep -Fq "host.docker.internal:${XXL_JOB_ADMIN_PORT}" "${release_dir}/nginx.conf"
-    ! grep -Fq '__XXL_JOB_ADMIN_PORT__' "${release_dir}/nginx.conf"
+    grep -Fq "proxy_pass http://${RUNTIME_SERVICE_HOST}:${BACKEND_PORT};" "${release_dir}/nginx.conf"
+    grep -Fq "proxy_pass http://${RUNTIME_SERVICE_HOST}:${XXL_JOB_ADMIN_PORT};" "${release_dir}/nginx.conf"
+    ! grep -Eq '__[A-Z0-9_]+__' "${release_dir}/nginx.conf"
     validate_backend_jar "${release_dir}/backend.jar"
     write_stack "${release_dir}" "${release_dir}/stack.json"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
@@ -618,7 +622,7 @@ verify_deployment() {
     # 主上下文 readiness 不包含独立 Servlet 子上下文；必须单独等待 XXL Admin，防止端口冲突被误报为发布成功。
     for attempt in $(seq 1 120); do
         if curl -fsS --connect-timeout 2 --max-time 5 \
-            "http://127.0.0.1:${XXL_JOB_ADMIN_PORT}/xxl-job-admin/actuator/health/readiness" 2>/dev/null \
+            "http://${RUNTIME_SERVICE_HOST}:${XXL_JOB_ADMIN_PORT}/xxl-job-admin/actuator/health/readiness" 2>/dev/null \
             | grep -q '"status":"UP"'; then
             xxl_admin_ready=true
             break

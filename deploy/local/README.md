@@ -19,6 +19,8 @@
   `192.168.8.100`，继续从受控 `runtime.env` 读取端口、库名、用户和密钥，不能把密钥写进 Compose 或 Git。
 - 现场 `18080` 同样由 MockCenter 占用；Jenkins 发布实例把内置 XXL Admin 固定到 `18083`，并让前端
   `/xxl-job-admin/` 同源代理与发布健康门禁使用同一端口，不停止或修改 MockCenter。
+- Java 按现场配置监听服务器 LAN 地址而不是 Docker bridge gateway；Nginx 的 `/api/` 与 `/xxl-job-admin/`
+  统一代理到 `192.168.8.100` 对应端口，不能改回解析为 `172.17.0.1` 的 `host.docker.internal`。
 - 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
   额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
