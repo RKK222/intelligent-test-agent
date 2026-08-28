@@ -15477,3 +15477,26 @@
 - Mac 上已完成 Java、Tool 类型、离线依赖、打包和可执行 JAR 验证；功能只在 Linux ARM64 运行时声明 `LOCAL_BROWSER_V1` 并显示托盘入口，Windows/macOS 不启动 relay。
 - 企业麒麟 ARM64 + 实际 360 内核尚未部署，CDP 启动参数、窗口可见性、逐 origin/高风险确认、4 Session、文件产物和退出回收仍是正式发布前现场闸门，不能表述为企业验收通过。权威公共配置 Git 还需按文档把模板同步为 `tools/local_browser.ts` 的明确提交，再走既有签名公共能力包发布流程。
 - 本次不新增部署节点，不新增平台 HTTP、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置或后端文件代理；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未合并回 `release`。
+
+## 2026-08-28 - 构建麒麟 360 浏览器单机测试候选包
+
+### Why
+
+- 用户只要求单独验证本地客户端包，并希望复用 Mac 上已有的上一版制品，不部署 `.4/.114/.2` 平台节点，也不覆盖既有候选包。
+
+### What
+
+- 从上一版 Linux ARM64 release `20260827222702` 复用已经签名链路验证过的 JDK 与官方 OpenCode 二进制输入；使用现有组织 RSA 密钥重新签署新的不可变客户端 release `20260828094319`，下载根固定为测试机回环 `http://127.0.0.1:18080/`。
+- 旧公共能力包 `81605f245d1512e1ab0dd73812391f6da7d008b5` 不含浏览器 Tool，因此从其能力文件创建未发布的隔离候选公共 Git 提交 `81977f9c6178f19e2ac2b613e203ade182b0e37e`，加入 `tools/local_browser.ts`，并复用生产 `PublicClientCapabilityPackageBuilder` 与锁文件生成完整能力包；该候选只用于单机测试，不是企业权威公共配置 release。
+- 最终 HTTP 分发目录为 `deploy/internal/dist-local-client-20260828094319/local-opencode-client/`；U 盘传输包和摘要已放到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260828094319_arm64.tar.gz{,.sha256}`。所有旧包均保留，未覆盖无版本别名。
+
+### How
+
+- `mvn -pl test-agent-workspace-management -am -DskipTests package` 通过；客户端浏览器与版本定向 Maven 测试通过，`deploy/internal/tests/local-opencode-client-package-test.sh` 完整回归通过。
+- catalog、manifest 和 CLIENT_JAR/JDK/OPENCODE/PUBLIC_CAPABILITIES 四类制品使用固定组织公钥逐项 RSA 验签通过；`verify-local-opencode-client-distribution.sh` 通过，用户启动器确认为静态 `ELF 64-bit ARM aarch64`，JAR 包含 FlatLaf，能力包包含 `local_browser.ts` 和 `playwright-core@1.61.0`。
+- catalog、manifest、用户包和传输包 SHA-256 分别为 `046d34c849ebe672174a73bd09baf64bacbbbcab6bb5849111dd7a487c10004c`、`70aeccfc479d2137c86e5532e4320dce71780ae1bb1667860febd380bdb19542`、`b24f88e7e8958e5b475a5608948cac350dc474ae13d473f014cfaf80e80d1431`、`28a57a2163ae35901380f954b7aaa5bcf9e06bea1bd2eabadcc195b532bbba05`；中转目录复验输出 `OK`。
+
+### Result
+
+- Mac 侧单机测试候选包已构建并完成离线完整性、签名、安装器模拟和回归验证；未修改 `backend.env`、`docker.env`、Nginx、数据库、worker、manager、企业公共 Git 或企业平台状态。
+- Mac 无法运行麒麟 ARM64 桌面程序；真实企业 360 启动、CDP 1.3、逐 origin 授权、高风险确认、四 Session、文件产物和退出回收仍需由专用麒麟 ARM64 测试账号完成，当前只能表述为“Mac 构建验证通过”，不能表述为企业验收通过。
