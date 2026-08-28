@@ -16117,5 +16117,9 @@
 - 首次复跑 `#13` 时，XXL Admin 已在 `192.168.8.100:18083` 返回 `UP`，但 Java 只监听现场 LAN 地址；原门禁误探测
   `127.0.0.1`，Nginx 的 `host.docker.internal` 又解析为 `172.17.0.1`，因此同源路径返回 502。已主动终止该必然超时
   的构建，并把主 API、XXL 代理和直接健康探测统一到显式 `RUNTIME_SERVICE_HOST=192.168.8.100`；仍需再次实发验证。
+- `#14` 以 `release-14-1c6ab18f` 通过修正后的 Admin/同源门禁并取得 Jenkins `SUCCESS`；最终日志验收又发现 executor
+  生命周期按设计探测同 JVM `127.0.0.1:18083`，而 Admin 只监听 LAN，导致 `9999` 未启动、已有任务持续连接拒绝。
+  正式容器改为监听 `0.0.0.0`，同时显式保留 LAN advertised host，并把 executor `9999` TCP connect 纳入发布门禁；
+  `#14` 仍不能作为完整交付结论，必须再次实发验证 executor。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构、SQL/Flyway、性能协议、generated SDK、OpenCode 源码
   或 `.env*`；仅调整测试环境 Jenkins 运行端口、反向代理和发布验证契约。

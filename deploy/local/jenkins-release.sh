@@ -19,6 +19,7 @@ BACKEND_PORT=${BACKEND_PORT:-18082}
 FRONTEND_BIND_ADDRESS=${FRONTEND_BIND_ADDRESS:-192.168.8.100}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 XXL_JOB_ADMIN_PORT=${XXL_JOB_ADMIN_PORT:-18083}
+XXL_JOB_EXECUTOR_PORT=${XXL_JOB_EXECUTOR_PORT:-9999}
 VERIFY_BACKEND_PORT=${VERIFY_BACKEND_PORT:-28082}
 POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-15432}
 DATABASE_CONTAINER=${DATABASE_CONTAINER:-test-agent-postgres}
@@ -171,6 +172,7 @@ validate_host() {
     require_command git
     require_command python3
     validate_tcp_port "${XXL_JOB_ADMIN_PORT}" "XXL Admin"
+    validate_tcp_port "${XXL_JOB_EXECUTOR_PORT}" "XXL executor"
     validate_secret_file
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     configured_data_root=$(database_linux_data_root "${source_db_name}")
@@ -268,7 +270,7 @@ write_stack() {
     python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_SOURCE}" \
         "${RUNTIME_DATA_ROOT}" "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
         "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" "${RUNTIME_SERVICE_HOST}" \
-        "${xxl_job_mysql_url}" "${XXL_JOB_ADMIN_PORT}" <<'PY'
+        "${xxl_job_mysql_url}" "${XXL_JOB_ADMIN_PORT}" "${XXL_JOB_EXECUTOR_PORT}" <<'PY'
 import json
 import sys
 
@@ -287,6 +289,7 @@ import sys
     runtime_service_host,
     xxl_job_mysql_url,
     xxl_job_admin_port,
+    xxl_job_executor_port,
 ) = sys.argv[1:]
 
 stack = {
@@ -301,6 +304,7 @@ stack = {
             "env_file": [env_file],
             "environment": {
                 "SPRING_PROFILES_ACTIVE": "test",
+                "SERVER_ADDRESS": "0.0.0.0",
                 "SERVER_PORT": backend_port,
                 "TEST_AGENT_BASE_URL": f"http://192.168.8.100:{backend_port}",
                 "TEST_AGENT_FRONTEND_URL": f"http://192.168.8.100:{frontend_port}",
@@ -308,9 +312,11 @@ stack = {
                 "TESTAGENT": "/release/source",
                 "HOME": "/release/source/temp",
                 "TEST_AGENT_START_OPENCODE_MANAGER": "false",
+                "TEST_AGENT_SERVER_ADVERTISED_HOST": runtime_service_host,
                 "TEST_AGENT_REDIS_HOST": runtime_service_host,
                 "TEST_AGENT_XXL_JOB_MYSQL_URL": xxl_job_mysql_url,
                 "TEST_AGENT_XXL_JOB_ADMIN_PORT": xxl_job_admin_port,
+                "TEST_AGENT_XXL_JOB_EXECUTOR_PORT": xxl_job_executor_port,
             },
             "volumes": [
                 f"{release_dir}:/release:ro",
@@ -590,6 +596,7 @@ verify_database_upgrade() {
 
 verify_deployment() {
     local tag=$1 attempt backend_ready=false frontend_ready=false xxl_admin_ready=false xxl_admin_proxy_ready=false
+    local xxl_executor_ready=false
     validate_tag "${tag}"
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]]
@@ -641,6 +648,27 @@ verify_deployment() {
     fi
     [[ "${xxl_admin_proxy_ready}" == true ]] || {
         echo "Frontend same-origin XXL Admin proxy is not ready." >&2
+        return 1
+    }
+    # executor 没有无认证 HTTP health；以 TCP connect 验证公共生命周期已在 Admin readiness 后实际启动端口。
+    for attempt in $(seq 1 120); do
+        if python3 - "${RUNTIME_SERVICE_HOST}" "${XXL_JOB_EXECUTOR_PORT}" <<'PY'
+import socket
+import sys
+
+host, port = sys.argv[1], int(sys.argv[2])
+with socket.create_connection((host, port), timeout=2):
+    pass
+PY
+        then
+            xxl_executor_ready=true
+            break
+        fi
+        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        sleep 2
+    done
+    [[ "${xxl_executor_ready}" == true ]] || {
+        echo "XXL executor did not open its configured port within the deployment window." >&2
         return 1
     }
 }

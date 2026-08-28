@@ -33,6 +33,7 @@ pipeline {
         FRONTEND_URL = 'http://192.168.8.100:3000'
         RUNTIME_SERVICE_HOST = '192.168.8.100'
         XXL_JOB_ADMIN_PORT = '18083'
+        XXL_JOB_EXECUTOR_PORT = '9999'
         RELEASE_SCRIPT = 'deploy/local/jenkins-release.sh'
     }
 
