@@ -248,7 +248,7 @@ import PersonalWorkspacePullDialog, {
 import TestCaseMaintenanceDialog from "./TestCaseMaintenanceDialog.vue";
 import {
   buildTcdsTestCaseMaintenancePayload,
-  openTcdsJumpWindowAfterMaintenance,
+  maintainTcdsTestCasesBeforeNavigate,
   parseMarkdownTestCases,
   type TestCaseMaintenanceDraft
 } from "./test-case-maintenance";
@@ -9621,19 +9621,17 @@ async function submitTestCaseMaintenance(cases: TestCaseMaintenanceDraft[]) {
     return;
   }
 
-  let jumpWindow: Window | null = null;
   testCaseMaintenanceSubmitting.value = true;
   try {
-    jumpWindow = await openTcdsJumpWindowAfterMaintenance({
+    await maintainTcdsTestCasesBeforeNavigate({
       maintain: () => api.maintainTcdsTestCases(request),
-      openWindow: () => window.open("about:blank", "_blank")
+      navigate: async () => {
+        testCaseMaintenanceSource.value = null;
+        ElMessage.success("案例维护成功，正在跳转");
+        await handleCacheAndNavigate(source.path, "file", { content: source.content });
+      }
     });
-
-    testCaseMaintenanceSource.value = null;
-    ElMessage.success("案例维护成功，正在跳转");
-    await handleCacheAndNavigate(source.path, "file", { content: source.content, jumpWindow });
   } catch (error) {
-    jumpWindow?.close();
     console.error("维护案例失败", error);
     ElMessage.error(error instanceof Error ? error.message : "维护案例失败");
   } finally {
@@ -9644,10 +9642,9 @@ async function submitTestCaseMaintenance(cases: TestCaseMaintenanceDraft[]) {
 async function handleCacheAndNavigate(
   path: string,
   type: "file" | "directory",
-  options: { content?: string; jumpWindow?: Window | null } = {}
+  options: { content?: string } = {}
 ) {
   if (!selectedWorkspace.value) {
-    options.jumpWindow?.close();
     return;
   }
   const workspaceId = selectedWorkspace.value.workspaceId;
@@ -9657,7 +9654,6 @@ async function handleCacheAndNavigate(
   const cacheDataUrl = import.meta.env.VITE_CACHE_DATA_URL ?? "";
 
   if (!cacheDataUrl) {
-    options.jumpWindow?.close();
     ElMessage.error("缓存数据地址未配置");
     return;
   }
@@ -9716,17 +9712,11 @@ async function handleCacheAndNavigate(
     console.log("============请求后台=====================", result);
 
     if (result.data?.jumpUrl) {
-      if (options.jumpWindow && !options.jumpWindow.closed) {
-        options.jumpWindow.location.replace(result.data.jumpUrl);
-      } else {
-        window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
-      }
+      window.open(result.data.jumpUrl, "_blank", "noopener,noreferrer");
     } else {
-      options.jumpWindow?.close();
       ElMessage.error("获取跳转地址失败");
     }
   } catch (error) {
-    options.jumpWindow?.close();
     console.error("缓存数据并跳转失败", error);
     ElMessage.error(error instanceof Error ? error.message : "缓存数据并跳转失败");
   }

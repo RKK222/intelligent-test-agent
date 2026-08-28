@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildTcdsTestCaseMaintenancePayload,
-  openTcdsJumpWindowAfterMaintenance,
+  maintainTcdsTestCasesBeforeNavigate,
   parseMarkdownTestCases
 } from "../src/components/test-case-maintenance";
 
@@ -224,33 +224,29 @@ status=99
     expect(() => parseMarkdownTestCases("# 没有可解析的案例")).toThrow("未找到可维护的案例内容");
   });
 
-  it("opens the existing jump flow only after TCDS maintenance succeeds", async () => {
+  it("starts the existing direct jump flow only after TCDS maintenance succeeds", async () => {
     const callOrder: string[] = [];
-    const popup = { opener: {} } as Window;
-    const openWindow = vi.fn(() => {
-      callOrder.push("open");
-      return popup;
+    const navigate = vi.fn(async () => {
+      callOrder.push("navigate");
     });
 
-    const result = await openTcdsJumpWindowAfterMaintenance({
+    await maintainTcdsTestCasesBeforeNavigate({
       maintain: async () => { callOrder.push("maintain"); },
-      openWindow
+      navigate
     });
 
-    expect(callOrder).toEqual(["maintain", "open"]);
-    expect(openWindow).toHaveBeenCalledOnce();
-    expect(result).toBe(popup);
-    expect(popup.opener).toBeNull();
+    expect(callOrder).toEqual(["maintain", "navigate"]);
+    expect(navigate).toHaveBeenCalledOnce();
   });
 
-  it("does not open a new tab when TCDS maintenance fails", async () => {
-    const openWindow = vi.fn(() => ({ opener: null } as Window));
+  it("does not cache or open a new tab when TCDS maintenance fails", async () => {
+    const navigate = vi.fn(async () => undefined);
 
-    await expect(openTcdsJumpWindowAfterMaintenance({
+    await expect(maintainTcdsTestCasesBeforeNavigate({
       maintain: async () => { throw new Error("createGraphCase failed"); },
-      openWindow
+      navigate
     })).rejects.toThrow("createGraphCase failed");
 
-    expect(openWindow).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
   });
 });

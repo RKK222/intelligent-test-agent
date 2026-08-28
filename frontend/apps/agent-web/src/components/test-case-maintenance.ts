@@ -23,15 +23,13 @@ export type TcdsTestCaseMaintenancePayload = {
   }>;
 };
 
-/** 只有 createGraphCase 成功后才创建跳转页，避免失败请求也短暂弹出空白标签页。 */
-export async function openTcdsJumpWindowAfterMaintenance(input: {
+/** 只有 createGraphCase 成功后才继续缓存跳转，失败时不触发任何新页面。 */
+export async function maintainTcdsTestCasesBeforeNavigate(input: {
   maintain: () => Promise<void>;
-  openWindow: () => Window | null;
-}): Promise<Window | null> {
+  navigate: () => Promise<void>;
+}): Promise<void> {
   await input.maintain();
-  const jumpWindow = input.openWindow();
-  if (jumpWindow) jumpWindow.opener = null;
-  return jumpWindow;
+  await input.navigate();
 }
 
 const CASE_TABLE_HEADERS = ["案例名称", "测试步骤", "测试数据", "预期结果"] as const;

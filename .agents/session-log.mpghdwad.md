@@ -429,8 +429,8 @@
 
 ### What
 
-- 将跳转页创建延后到平台案例维护接口成功之后；成功路径仍复用当前编辑器正文执行原缓存和跳转，失败路径保留案例维护弹窗与统一错误提示，且不调用 `window.open`。
-- 新增成功调用顺序及失败零开页的回归测试，并同步前端 README、agent-web README 和 HTTP API 交互说明。
+- 参考 `042-测试执行`，平台案例维护成功后先复用当前编辑器正文调用缓存接口，取得最终 `jumpUrl` 后才直接打开目标标签页；不再创建或替换 `about:blank`。
+- `createGraphCase` 失败时保留案例维护弹窗与统一错误提示，缓存失败时显示既有缓存错误；两种失败都不调用 `window.open`。新增维护成功后继续导航及失败不导航的回归测试，并同步前端 README、agent-web README 和 HTTP API 交互说明。
 
 ### How
 
@@ -439,5 +439,5 @@
 
 ### Result
 
-- `createGraphCase` 成功后才会进入既有新标签页缓存跳转，失败或异常不会再短暂弹出空白 tab。
+- `createGraphCase` 成功且缓存接口返回 `jumpUrl` 后才直接打开目标页；成功路径不再出现空白 tab，任一前置调用失败也不会创建新标签页。
 - 使用 `release`，不新增部署节点；不变更 HTTP API 路径/DTO、RunEvent/SSE、数据库、Flyway、后端、安全、环境配置、generated SDK 或 OpenCode 只读源码，未调用真实 TCDS。
