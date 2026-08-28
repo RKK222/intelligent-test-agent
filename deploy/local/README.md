@@ -18,7 +18,7 @@
 - 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
   额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
-  `4096` OpenCode 进程、`/home/abc/intelligent-test-agent-dev/.testagent` 数据根和未提交文件均保留。
+  `4096` OpenCode 进程、数据库 `SYS_DATA_ROOT_DIR` 指向的 `/data/.testagent` 数据根和未提交文件均保留。
 - 企业离线发布仍按 `deploy/internal/README.md` 执行；不能把本地 Jenkins 产物上传到企业内替代标准离线包。
 
 ## 任务结构
@@ -29,7 +29,7 @@ Jenkins 所在测试机用 Docker Compose 管理两个容器，不经过 Portain
 
 | 组件 | 容器 | 入口 | 数据 |
 |---|---|---|---|
-| Java 后端 | `test-agent-jenkins-backend` | `http://192.168.8.100:18082` | 宿主真实路径 `/data/offload/home/abc/intelligent-test-agent-dev/.testagent` 挂载为原逻辑路径 `/home/abc/intelligent-test-agent-dev/.testagent` |
+| Java 后端 | `test-agent-jenkins-backend` | `http://192.168.8.100:18082` | 宿主 `/data/.testagent` 原路径挂载，必须与数据库 Linux 平台 `SYS_DATA_ROOT_DIR` 完全一致 |
 | agent-web | `test-agent-jenkins-frontend` | `http://192.168.8.100:3000` | 不落业务数据 |
 | OpenCode | 现有 `abc` 进程 | `http://127.0.0.1:4096` | Jenkins 不停止、不重建 |
 
@@ -46,11 +46,13 @@ Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
 1. 运行 `FlywayMigrationNamingTest`，锁定 migration 命名、重复版本和已冻结文件字节。
 2. 从受控 `runtime.env` 读取当前应用数据库名和角色（测试基线为 `testagent_dev`），在 `test-agent-postgres` 内做
    一致性逻辑复制；临时库归应用角色所有并以该角色恢复对象权限，再配合独立 Redis 使用本次后端 JAR 完成真实
-   PostgreSQL 升级与 readiness 检查。验证数据根先复用发布源码中的体验工作区模板脚本建立独立 Git 仓库，既
-   覆盖启动契约，也不会读取或修改真实运行数据。验证容器、网络和临时库随后按精确名称清理；源库只读。
+   PostgreSQL 升级与 readiness 检查。门禁先读取克隆源库的 Linux `SYS_DATA_ROOT_DIR`，要求正式挂载目标与其
+   完全一致；验证数据根再挂载到相同容器路径，并复用发布源码中的体验工作区模板脚本建立独立 Git 仓库，既覆盖
+   启动契约，也不会读取或修改真实运行数据。验证容器、网络和临时库随后按精确名称清理；源库只读。
 
 验证后端只在 Docker bridge 内把 `SERVER_ADDRESS` 覆盖为 `0.0.0.0`，并复用克隆库已有的 Linux server ID，避免
-把宿主绑定地址或虚构 server ID 带入临时环境；这些覆盖不进入正式发布容器。
+把宿主绑定地址或虚构 server ID 带入临时环境；数据库通用参数仍是路径权威来源，不能用同名环境变量覆盖。
+这些验证覆盖不进入正式发布容器。
 
 升级验证失败时不得执行宿主接管。正式启动前再次保存源库全部
 `installed_rank/version/description/checksum/success`；新后端 readiness 通过后保存升级后 history。未知 checksum、

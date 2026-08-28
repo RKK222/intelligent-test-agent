@@ -16005,3 +16005,32 @@
 
 - 修正覆盖 Jenkins 测试环境发布的运行依赖与隔离门禁，不修改 HTTP API、RunEvent/SSE、数据库结构、SQL、Flyway、
   generated SDK、OpenCode 源码或 `.env*`，不新增部署节点。真实发布仍以新的 Jenkins `DEPLOY` 构建结果为准。
+
+## 2026-08-28 - 对齐 Jenkins 容器与数据库数据根
+
+### Why
+
+- Jenkins `#9` 已确认体验模板脚本和含 Git 运行镜像生效，Flyway 再次校验 123 条 history；但平台路径不读取同名
+  环境变量，权威值来自 `common_parameters` 的 Linux `SYS_DATA_ROOT_DIR=/data/.testagent`。原 Jenkins 挂载目标误用
+  `/home/abc/intelligent-test-agent-dev/.testagent`，因此隔离体验目录仍不可见。
+
+### What
+
+- 正式数据源与容器目标统一改为现场真实 `/data/.testagent`；验证容器把独立数据目录挂到相同容器路径，不再尝试用
+  `SYS_DATA_ROOT_DIR` 环境变量覆盖数据库通用参数。
+- 宿主门禁新增只读查询，要求运行挂载目标与源库 Linux `SYS_DATA_ROOT_DIR` 完全一致且是单一绝对路径，避免数据库
+  参数、体验工作区、Agent 配置和实际持久化卷再次错位。
+- 同步 Jenkins README 和契约自检，固定测试环境数据根的权威来源与隔离验证方式。
+
+### How
+
+- 在 `192.168.8.100` 实际查询 `testagent_dev.common_parameters`，确认 `OPENCODE_EXPERIENCE_WORKSPACE_DIR` 为
+  `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`，Linux 根为 `/data/.testagent`；该目录约 480 MiB，体验
+  目录和公共 Agent 配置目录均存在、非符号链接并由 `abc:abc` 持有。原错误路径只有约 696 KiB。
+- 用与脚本完全相同的 PostgreSQL 查询命令返回 `/data/.testagent`；`#9` 的验证容器、网络和临时数据库均为 0，
+  临时 Jenkins API 认证文件已清理，原 Java、Vite 与 OpenCode 未被接管。
+
+### Result
+
+- 修正仅影响 Jenkins 测试环境持久化挂载与发布前一致性门禁；不修改源库数据、通用参数、`.env*`、HTTP API、事件、
+  SQL/Flyway、generated SDK 或 OpenCode 源码，不新增部署节点。真实发布仍需新的 Jenkins 构建验证。

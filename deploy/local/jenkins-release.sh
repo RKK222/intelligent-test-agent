@@ -8,8 +8,8 @@ RELEASE_ROOT=${RELEASE_ROOT:-/data2/deploy/intelligent-test-agent/releases}
 LOG_ROOT=${LOG_ROOT:-/data2/deploy/intelligent-test-agent/logs}
 SHARED_ROOT=${SHARED_ROOT:-/data2/deploy/intelligent-test-agent/shared}
 ENV_FILE=${ENV_FILE:-${SHARED_ROOT}/runtime.env}
-RUNTIME_DATA_SOURCE=${RUNTIME_DATA_SOURCE:-/data/offload/home/abc/intelligent-test-agent-dev/.testagent}
-RUNTIME_DATA_ROOT=${RUNTIME_DATA_ROOT:-/home/abc/intelligent-test-agent-dev/.testagent}
+RUNTIME_DATA_SOURCE=${RUNTIME_DATA_SOURCE:-/data/.testagent}
+RUNTIME_DATA_ROOT=${RUNTIME_DATA_ROOT:-/data/.testagent}
 MAVEN_CACHE_DIR=${MAVEN_CACHE_DIR:-/data2/deploy/shared/maven-repository}
 PNPM_STORE_DIR=${PNPM_STORE_DIR:-/data2/deploy/shared/pnpm-store}
 COREPACK_CACHE_DIR=${COREPACK_CACHE_DIR:-/data2/deploy/shared/corepack-cache}
@@ -141,13 +141,32 @@ validate_postgres_identifier() {
     }
 }
 
+database_linux_data_root() {
+    local database_name=$1 value
+    validate_postgres_identifier "${database_name}" database
+    value=$(docker exec "${DATABASE_CONTAINER}" sh -lc \
+        'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1" -At -c "select parameter_value from common_parameters where parameter_english = '\''SYS_DATA_ROOT_DIR'\'' and platform = '\''linux'\''"' \
+        sh "${database_name}")
+    [[ "${value}" == /* && "${value}" != *$'\n'* ]] || {
+        echo "Database SYS_DATA_ROOT_DIR must be one absolute Linux path." >&2
+        return 1
+    }
+    printf '%s\n' "${value}"
+}
+
 validate_host() {
-    local item
+    local item source_db_name configured_data_root
     require_command docker
     require_command curl
     require_command git
     require_command python3
     validate_secret_file
+    source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
+    configured_data_root=$(database_linux_data_root "${source_db_name}")
+    [[ "${configured_data_root}" == "${RUNTIME_DATA_ROOT}" ]] || {
+        echo "Runtime mount target must match database SYS_DATA_ROOT_DIR." >&2
+        return 1
+    }
     [[ -d "${RUNTIME_DATA_SOURCE}" && ! -L "${RUNTIME_DATA_SOURCE}" ]] || {
         echo "Runtime data source is missing or is a symbolic link: ${RUNTIME_DATA_SOURCE}" >&2
         return 1
@@ -265,7 +284,6 @@ stack = {
                 "TEST_AGENT_ROOT": "/release/source",
                 "TESTAGENT": "/release/source",
                 "HOME": "/release/source/temp",
-                "SYS_DATA_ROOT_DIR": runtime_data_root,
                 "TEST_AGENT_START_OPENCODE_MANAGER": "false",
             },
             "volumes": [
@@ -485,8 +503,7 @@ verify_database_upgrade() {
         --env "TEST_AGENT_FRONTEND_URL=http://127.0.0.1:${FRONTEND_PORT}" \
         --env TEST_AGENT_ROOT=/release/source \
         --env TESTAGENT=/release/source \
-        --env HOME=/verify/data \
-        --env SYS_DATA_ROOT_DIR=/verify/data \
+        --env "HOME=${RUNTIME_DATA_ROOT}" \
         --env TEST_AGENT_SERVER_ADVERTISED_HOST=127.0.0.1 \
         --env TEST_AGENT_TEST_DB_HOST=host.docker.internal \
         --env "TEST_AGENT_TEST_DB_PORT=${POSTGRES_HOST_PORT}" \
@@ -501,6 +518,7 @@ verify_database_upgrade() {
         --publish "127.0.0.1:${VERIFY_BACKEND_PORT}:${VERIFY_BACKEND_PORT}" \
         --volume "${release_dir}:/release:ro" \
         --volume "${verify_root}:/verify:rw" \
+        --volume "${verify_root}/data:${RUNTIME_DATA_ROOT}:rw" \
         --volume "${verify_root}/backend-logs:/release/source/backend/logs:rw" \
         --workdir /release/source/backend \
         "${JAVA_RUNTIME_IMAGE}" \
