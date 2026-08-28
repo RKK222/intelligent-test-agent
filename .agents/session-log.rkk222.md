@@ -16130,3 +16130,24 @@
   release 工作树已有的 Compose 修改、备份文件及并行出现的 `ReferenceConfigurationDialog.vue` 修改均未被流水线触碰。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库结构、SQL/Flyway、性能协议、generated SDK、OpenCode 源码
   或 `.env*`；仅调整测试环境 Jenkins 运行端口、反向代理和发布验证契约。
+
+## 2026-08-28 - 同步 release 用户手册的嵌套 spec 引用说明
+
+### Why
+
+- `release` 已交付应用资产库对 `REFERENCES_SDD_FOLDER_NAMES` 精确相对路径的支持；`ai-agent/spec` 可被单独选择，不能继续只按根层目录描述。
+
+### What
+
+- 更新引用配置专题、功能总览、本周功能和 FAQ，说明通用参数入口、权限、选择步骤、只读数据边界与父目录不挂载/不授权的行为。
+- 周报沿用稳定专题的真实截图；当前没有包含“展开 ai-agent 并选中 spec”的脱敏同屏截图，明确留给人工补拍，未生成或伪造图片。
+
+### How
+
+- 帮助中心定向 Vitest 在 jsdom 环境中通过 17/17；VitePress 用户手册构建通过；全量手册操作截图引用检查和 `git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，未发现与本次手册文件冲突的未完成事项。
+
+### Result
+
+- 用户可按真实入口精确接入嵌套 `spec`，并理解这不会暴露父目录或扩大外部目录权限。
+- 本次仅更新内置用户手册，不涉及 API、事件、数据库、性能、安全、兼容性、前端 TypeScript、`.env*`、generated SDK 或 OpenCode 源码；不新增部署节点。
