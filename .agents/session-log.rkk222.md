@@ -15497,3 +15497,26 @@
 
 - 新包 SHA-256 为 `4c43a37187256f984e4059e1b0b57cc5846bfd9f6477490fe15fbec74779efeb`，可经“系统管理 → 配置管理 → opencode 公共配置管理”导入个人 worktree、查看 Diff、提交并发布；禁止直接覆盖共享运行目录。
 - 源分支仍未推送 Gitee、未执行平台发布，因此共享运行配置尚未生效。本次只更新忽略的离线制品和本会话日志，不涉及 API、RunEvent/SSE、数据库、Flyway、性能、安全协议、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-28 - 生成 Win10 x64 单机测试候选包
+
+### Why
+
+- 用户要求单独验证 Win10 客户端，需要基于当前 `release` 源码重新生成可完整解压、独立安装的测试 ZIP，并继续沿用组织签名、公用能力和企业 HTTP 入口。
+
+### What
+
+- 以 `release@5a5f128624b55e98030a5481ca56954431846da0` 为源码输入，客户端版本为 `20260828090513`；公共能力固定已发布提交 `81605f245d1512e1ab0dd73812391f6da7d008b5`，控制与下载入口仍为 `http://mimo.sdc.cs.icbc:9996`。
+- 最终候选为 `TestAgent-Local-Client-Win10-x64-20260828090513-unsigned.zip`，SHA-256 为 `046c2024fdae4e702564d541c8db86cec40cd4cb36debf2514990b7b3e66275c`；证据保持 `CANDIDATE_ONLY`、`authenticodeSigned=false` 和最低 Windows build `17763`。
+- 首次为减少下载而从上一签名 release 反向重建源 ZIP，文件正文一致但归档权限元数据改变，导致 JDK/OpenCode 摘要漂移；该 `20260828090159` 候选未交付，已移入忽略的 `superseded/20260828090159`，最终候选改用脚本锁定的官方原始归档重建。
+
+### How
+
+- 组织私钥自检通过，私钥推导公钥与固定公钥 DER 指纹均为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`；最终 catalog、manifest 和 `CLIENT_JAR/JDK/OPENCODE/PUBLIC_CAPABILITIES` 四类制品均从最终 ZIP 回读并通过大小、SHA-256 和 RSA 验签。
+- 最终 JDK 与 OpenCode 摘要分别为 `5f46abd53a4b5b6dc9b982c70542bb62c6c7b0640a2c9b0b219c26385918aa5a`、`a4eb19eb4bf2e2c94ecb4858e1192821696a80d807296c0d5a3c640f7e88c628`，与上一可信 Win10 release 完全相同；Setup 和稳定启动器均为 Windows x64 PE，JAR manifest 版本和诊断类存在。
+- Windows launcher Go test、Windows 离线打包回归、host/Windows go vet 通过；本地客户端 Maven reactor 共 231 passed / 1 skipped。ZIP CRC、固定别名逐字节一致、组织私钥不入包和中间候选不入 catalog 均通过。
+
+### Result
+
+- Win10 x64 单机测试候选已完成 Mac 侧构建与反向验收，可移交 Windows 10 1809+ x64 真机测试；当前尚未完成 Authenticode 和真机首次安装、接入、计划任务、OpenCode、升级/回退及卸载验收，不能作为正式发布包。
+- 本轮只生成忽略的候选制品并更新本会话日志，不修改产品代码、文档、API、RunEvent/SSE、数据库、Flyway、安全协议、环境配置、generated SDK 或 OpenCode 只读源码；工作区原有 4 份用户手册改动未纳入本次提交。
