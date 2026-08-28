@@ -1548,6 +1548,92 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.emitted("saved")).toEqual([[]]);
   });
 
+  it("saves the whole spec root beside an existing docs reference without flattening its internal layout", async () => {
+    const existing = `{
+  "references": {
+    "docs-requirements": {
+      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
+      "merge": true,
+      "sdd-folder-name": "docs",
+      "description": "产品需求"
+    }
+  },
+  "permission": {
+    "external_directory": {
+      "{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"
+    }
+  }
+}`;
+    const mockApi = api({
+      listReferenceRepositoryTree: vi.fn().mockImplementation(
+        (_appId: string, _repositoryId: string, path: string) => Promise.resolve(path === ""
+          ? [
+              { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true },
+              { path: "spec", name: "spec", directory: true, size: 0, highlighted: true, selectable: true }
+            ]
+          : [
+              { path: "spec/2610", name: "2610", directory: true, size: 0, highlighted: false, selectable: false },
+              {
+                path: "spec/I20260623-0170",
+                name: "I20260623-0170",
+                directory: true,
+                size: 0,
+                highlighted: false,
+                selectable: false
+              }
+            ])
+      ),
+      readWorkspaceAgentFile: vi.fn().mockResolvedValue({
+        path: "opencode.jsonc",
+        content: existing,
+        size: existing.length
+      })
+    });
+    const wrapper = render(mockApi);
+    await flushPromises();
+
+    await wrapper.get('button[aria-label="选择需求资产库"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("仅展示当前应用关联的资产库");
+    expect(wrapper.text()).toContain("版本目录中的需求用例和需求项目录中的设计资料均保持只读");
+    expect(wrapper.findAll('button[data-reference-selectable="true"]')).toHaveLength(2);
+
+    await wrapper.get('button[aria-label="展开 spec"]').trigger("click");
+    await flushPromises();
+    expect(mockApi.listReferenceRepositoryTree).toHaveBeenCalledWith("app-demo", "repo-assets", "spec");
+    expect(wrapper.findAll('button[data-reference-selectable="true"]')).toHaveLength(2);
+    expect(wrapper.text()).toContain("2610");
+    expect(wrapper.text()).toContain("I20260623-0170");
+
+    await wrapper.get('button[aria-label="配置目录 spec"]').trigger("click");
+    await flushPromises();
+    expect(wrapper.get('input[aria-label="参考别名（alias）"]').element).toHaveProperty(
+      "value",
+      "spec-requirements"
+    );
+    expect(wrapper.get('input[aria-label="路径（path）"]').element).toHaveProperty(
+      "value",
+      "{env:OPENCODE_REFERENCES_DIR}/requirements/spec"
+    );
+    expect(wrapper.get('input[aria-label="规格驱动目录名称（sdd-folder-name）"]').element).toHaveProperty(
+      "value",
+      "spec"
+    );
+
+    await wrapper.get('textarea[aria-label="描述（description）"]').setValue("需求用例与设计资料");
+    await wrapper.get('button[aria-label="保存引用配置"]').trigger("click");
+    await flushPromises();
+
+    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
+    expect(written).toContain('"docs-requirements"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
+    expect(written).toContain('"spec-requirements"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/spec"');
+    expect(written).toContain('"sdd-folder-name": "spec"');
+    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/spec/*": "allow"');
+  });
+
   it("loads an existing local reference, enables Update only after a change, and preserves unknown fields", async () => {
     const existing = `{
   // keep root comment

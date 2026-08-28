@@ -1474,6 +1474,9 @@ onBeforeUnmount(() => {
               <div v-else class="reference-ready-layout">
                 <section class="reference-tree-panel" aria-label="引用目录树">
                   <div class="reference-panel-title">目录</div>
+                  <p class="reference-tree-guidance">
+                    仅展示当前应用关联的资产库。选择 spec 会按原层级引用整个目录；版本目录中的需求用例和需求项目录中的设计资料均保持只读。
+                  </p>
                   <div v-if="treeLoadingPaths.has('')" class="reference-compact-state">正在读取目录…</div>
                   <div v-else-if="treeErrors['']" class="reference-compact-state is-error">
                     {{ treeErrors[""]?.message }}
@@ -2219,6 +2222,15 @@ onBeforeUnmount(() => {
 
 .reference-tree {
   padding: 5px 0;
+}
+
+.reference-tree-guidance {
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--ta-border);
+  color: var(--ta-tree-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .reference-tree-row {

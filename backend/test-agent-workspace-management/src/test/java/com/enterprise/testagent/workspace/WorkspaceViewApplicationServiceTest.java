@@ -178,6 +178,98 @@ class WorkspaceViewApplicationServiceTest {
     }
 
     @Test
+    void preservesDirectAndVersionedSpecLayoutsWithReadonlyRequirementAssets() throws Exception {
+        writeConfig("""
+                {
+                  "references": {
+                    "spec-requirements": {
+                      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/spec",
+                      "merge": true,
+                      "sdd-folder-name": "spec",
+                      "description": "需求规格、概要设计与需求用例"
+                    }
+                  }
+                }
+                """);
+        Files.createDirectories(workspaceRoot.resolve("spec"));
+        Files.writeString(workspaceRoot.resolve("spec/工作区补充.md"), "workspace-note");
+
+        Path referenceSpec = Files.createDirectories(referencesRoot.resolve("requirements/spec"));
+        Files.createDirectories(referenceSpec.resolve("I20260623-0170"));
+        Files.writeString(referenceSpec.resolve("I20260623-0170/概要设计.md"), "direct-design");
+        Files.createDirectories(referenceSpec.resolve("2610/I20260825-9999"));
+        Files.writeString(referenceSpec.resolve("2610/【需求用例】气球贷二期用例.md"), "version-case");
+        Files.writeString(referenceSpec.resolve("2610/I20260825-9999/概要设计.md"), "versioned-design");
+
+        WorkspaceViewEntry specRoot = service.list(WORKSPACE_ID, WorkspaceViewLocator.root()).entries().stream()
+                .filter(entry -> entry.name().equals("spec"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(specRoot.source()).isEqualTo(WorkspaceViewSource.MIXED);
+        assertThat(specRoot.merged()).isTrue();
+        assertThat(specRoot.locator().kind()).isEqualTo(WorkspaceViewLocatorKind.COMPOSITE);
+
+        WorkspaceViewListResponse specChildren = service.list(WORKSPACE_ID, specRoot.locator());
+        assertThat(specChildren.entries())
+                .extracting(WorkspaceViewEntry::name)
+                .containsExactly("2610", "I20260623-0170", "工作区补充.md");
+
+        WorkspaceViewEntry directRequirement = specChildren.entries().stream()
+                .filter(entry -> entry.name().equals("I20260623-0170"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(directRequirement.path()).isEqualTo("spec/I20260623-0170");
+        assertThat(directRequirement.readonly()).isTrue();
+
+        WorkspaceViewEntry directDesign = service.list(WORKSPACE_ID, directRequirement.locator())
+                .entries()
+                .getFirst();
+        assertThat(directDesign.path()).isEqualTo("spec/I20260623-0170/概要设计.md");
+        assertThat(directDesign.locator().path()).isEqualTo("I20260623-0170/概要设计.md");
+        assertThat(directDesign.readonly()).isTrue();
+
+        WorkspaceViewEntry version = specChildren.entries().stream()
+                .filter(entry -> entry.name().equals("2610"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(version.path()).isEqualTo("spec/2610");
+        assertThat(version.readonly()).isTrue();
+
+        WorkspaceViewListResponse versionChildren = service.list(WORKSPACE_ID, version.locator());
+        assertThat(versionChildren.entries())
+                .extracting(WorkspaceViewEntry::name)
+                .containsExactly("I20260825-9999", "【需求用例】气球贷二期用例.md");
+        WorkspaceViewEntry versionCase = versionChildren.entries().stream()
+                .filter(entry -> entry.name().equals("【需求用例】气球贷二期用例.md"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(versionCase.path()).isEqualTo("spec/2610/【需求用例】气球贷二期用例.md");
+        assertThat(versionCase.locator().path()).isEqualTo("2610/【需求用例】气球贷二期用例.md");
+        assertThat(versionCase.readonly()).isTrue();
+
+        WorkspaceViewEntry versionRequirement = versionChildren.entries().stream()
+                .filter(entry -> entry.name().equals("I20260825-9999"))
+                .findFirst()
+                .orElseThrow();
+        WorkspaceViewEntry versionedDesign = service.list(WORKSPACE_ID, versionRequirement.locator())
+                .entries()
+                .getFirst();
+        assertThat(versionedDesign.path()).isEqualTo("spec/2610/I20260825-9999/概要设计.md");
+        assertThat(versionedDesign.locator().path()).isEqualTo("2610/I20260825-9999/概要设计.md");
+        assertThat(versionedDesign.readonly()).isTrue();
+
+        WorkspaceViewReadResponse versionCaseRead = service.read(WORKSPACE_ID, versionCase.locator());
+        assertThat(versionCaseRead.path()).isEqualTo("spec/2610/【需求用例】气球贷二期用例.md");
+        assertThat(versionCaseRead.content()).isEqualTo("version-case");
+        assertThat(versionCaseRead.readonly()).isTrue();
+
+        WorkspaceViewReadResponse versionedDesignRead = service.read(WORKSPACE_ID, versionedDesign.locator());
+        assertThat(versionedDesignRead.path()).isEqualTo("spec/2610/I20260825-9999/概要设计.md");
+        assertThat(versionedDesignRead.content()).isEqualTo("versioned-design");
+        assertThat(versionedDesignRead.readonly()).isTrue();
+    }
+
+    @Test
     void readsReferencesFromFixedWorkspaceChildForLegacyRuntimeRoot() throws Exception {
         Files.createDirectories(workspaceRoot.resolve("workspace/.opencode"));
         Files.writeString(workspaceRoot.resolve("workspace/.opencode/opencode.jsonc"), """

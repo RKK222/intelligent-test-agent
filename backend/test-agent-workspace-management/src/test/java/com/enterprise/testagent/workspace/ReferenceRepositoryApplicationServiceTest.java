@@ -1310,6 +1310,8 @@ class ReferenceRepositoryApplicationServiceTest {
     void treeMarksOnlyConfiguredRootFoldersAndRejectsTraversalGitAndSymlink() throws Exception {
         Path repositoryRoot = tempDir.resolve("assets");
         Files.createDirectories(repositoryRoot.resolve("docs"));
+        Files.createDirectories(repositoryRoot.resolve("spec/I20260623-0170"));
+        Files.createDirectories(repositoryRoot.resolve("spec/2610/I20260825-9999"));
         Files.createDirectories(repositoryRoot.resolve("nested/docs"));
         Files.writeString(repositoryRoot.resolve("README.md"), "reference assets");
         Path outside = tempDir.resolve("outside");
@@ -1325,11 +1327,29 @@ class ReferenceRepositoryApplicationServiceTest {
                 .thenReturn(Optional.of("docs,spec"));
 
         List<ReferenceRepositoryResponses.TreeNode> root = service.tree(APP.value(), ASSET_ID.value(), "");
+        List<ReferenceRepositoryResponses.TreeNode> spec = service.tree(APP.value(), ASSET_ID.value(), "spec");
+        List<ReferenceRepositoryResponses.TreeNode> version = service.tree(
+                APP.value(), ASSET_ID.value(), "spec/2610");
         List<ReferenceRepositoryResponses.TreeNode> nested = service.tree(APP.value(), ASSET_ID.value(), "nested");
 
         assertThat(root).filteredOn(node -> node.name().equals("docs")).singleElement().satisfies(node -> {
             assertThat(node.highlighted()).isTrue();
             assertThat(node.selectable()).isTrue();
+        });
+        assertThat(root).filteredOn(node -> node.name().equals("spec")).singleElement().satisfies(node -> {
+            assertThat(node.highlighted()).isTrue();
+            assertThat(node.selectable()).isTrue();
+        });
+        assertThat(spec).extracting(ReferenceRepositoryResponses.TreeNode::name)
+                .containsExactly("2610", "I20260623-0170");
+        assertThat(spec).allSatisfy(node -> {
+            assertThat(node.highlighted()).isFalse();
+            assertThat(node.selectable()).isFalse();
+        });
+        assertThat(version).singleElement().satisfies(node -> {
+            assertThat(node.name()).isEqualTo("I20260825-9999");
+            assertThat(node.highlighted()).isFalse();
+            assertThat(node.selectable()).isFalse();
         });
         assertThat(root).extracting(ReferenceRepositoryResponses.TreeNode::name).doesNotContain("escape");
         assertThat(nested).singleElement().satisfies(node -> {
