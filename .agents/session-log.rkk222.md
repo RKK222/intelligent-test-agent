@@ -15834,6 +15834,30 @@
 - `#5` 只对临时验证库做了逻辑复制；修复前的 trap 未生效，随后已按构建号精确删除并复核临时库、后端容器、
   Redis 和网络均不存在。源库及旧 Java/Vite/OpenCode 服务未变；后续构建需再次验证自动清理和真实升级 readiness。
 
+## 2026-08-28 - 修正 Jenkins 克隆数据库与对象属主
+
+### Why
+
+- Jenkins `#6` 已成功创建验证后端，Flyway 连接临时库后因 `flyway_schema_history` 权限不足退出。现场 PostgreSQL
+  容器初始化库/角色是 `test_agent`，但 `.env.test` 固定验收数据库/角色实际为 `testagent_dev`；原流程误复制
+  `POSTGRES_DB`，并以容器管理员角色恢复对象。
+
+### What
+
+- 从权限受控的 `runtime.env` 严格读取并校验 `TEST_AGENT_TEST_DB_NAME/USERNAME`，历史捕获、逻辑 dump 和正式发布
+  前后 history 全部以应用实际数据库为准，不再读取容器初始化库。
+- 临时数据库显式归应用角色所有，`pg_restore` 使用 `--role` 让无 owner/ACL 的对象由应用角色创建；dump 临时文件
+  增加 EXIT 清理，仍禁止 `repair`、`outOfOrder` 或修改历史表。
+
+### How
+
+- `#6` 后端、前端、不可变发布目录和嵌套挂载均通过，失败日志精确显示 PostgreSQL `42501`；失败后自动清理复核
+  为容器 0、网络 0、临时数据库 0。提交前复跑 Shell、发布契约、AI 文档与差异检查。
+
+### Result
+
+- `#6` 未修改实际 `testagent_dev` migration，也未停止旧服务；修复后的后续构建才会从正确现场基线验证升级。
+
 ## 2026-08-28 - 放开 ai-agent 根目录资产引用
 
 ### Why

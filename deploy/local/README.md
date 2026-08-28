@@ -42,8 +42,9 @@ Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
 `DEPLOY` 在停止旧进程前先完成两层检查：
 
 1. 运行 `FlywayMigrationNamingTest`，锁定 migration 命名、重复版本和已冻结文件字节。
-2. 从 `test-agent-postgres` 当前 `test_agent` 数据库做一致性逻辑复制，创建唯一临时库和独立 Redis，使用本次
-   后端 JAR 完成真实 PostgreSQL 升级与 readiness 检查。验证容器、网络和临时库随后按精确名称清理；源库只读。
+2. 从受控 `runtime.env` 读取当前应用数据库名和角色（测试基线为 `testagent_dev`），在 `test-agent-postgres` 内做
+   一致性逻辑复制；临时库归应用角色所有并以该角色恢复对象权限，再配合独立 Redis 使用本次后端 JAR 完成真实
+   PostgreSQL 升级与 readiness 检查。验证容器、网络和临时库随后按精确名称清理；源库只读。
 
 升级验证失败时不得执行宿主接管。正式启动前再次保存源库全部
 `installed_rank/version/description/checksum/success`；新后端 readiness 通过后保存升级后 history。未知 checksum、

@@ -106,6 +106,40 @@ validate_secret_file() {
     }
 }
 
+runtime_env_value() {
+    local key=$1
+    python3 - "${ENV_FILE}" "${key}" <<'PY'
+import sys
+
+path, expected_key = sys.argv[1:]
+with open(path, encoding="utf-8") as source:
+    for raw_line in source:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() != expected_key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if not value:
+            raise SystemExit(f"Runtime environment value is empty: {expected_key}")
+        print(value)
+        break
+    else:
+        raise SystemExit(f"Runtime environment key is missing: {expected_key}")
+PY
+}
+
+validate_postgres_identifier() {
+    local value=$1 label=$2
+    [[ "${value}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+        echo "Invalid PostgreSQL ${label}: ${value}" >&2
+        return 1
+    }
+}
+
 validate_host() {
     local item
     require_command docker
@@ -374,9 +408,11 @@ PY
 }
 
 capture_database_history() {
-    local output=$1
+    local output=$1 database_name=$2
+    validate_postgres_identifier "${database_name}" database
     docker exec "${DATABASE_CONTAINER}" sh -lc \
-        'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At -F "|" -c "select installed_rank,version,description,checksum,success from flyway_schema_history order by installed_rank"' \
+        'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1" -At -F "|" -c "select installed_rank,version,description,checksum,success from flyway_schema_history order by installed_rank"' \
+        sh "${database_name}" \
         >"${output}"
     [[ -s "${output}" ]] || {
         echo "Flyway history capture is empty: ${output}" >&2
@@ -386,8 +422,13 @@ capture_database_history() {
 
 verify_database_upgrade() {
     local release_dir=$1 tag=$2 build_number db_name network_name redis_name backend_name verify_root
+    local source_db_name source_db_user
     validate_manifest "${release_dir}" "${tag}"
     validate_secret_file
+    source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
+    source_db_user=$(runtime_env_value TEST_AGENT_TEST_DB_USERNAME)
+    validate_postgres_identifier "${source_db_name}" database
+    validate_postgres_identifier "${source_db_user}" role
     build_number=${tag#release-}
     build_number=${build_number%%-*}
     [[ "${build_number}" =~ ^[1-9][0-9]*$ ]] || return 1
@@ -412,15 +453,16 @@ verify_database_upgrade() {
     trap "${cleanup_trap}" EXIT
     cleanup_database_verification "${backend_name}" "${redis_name}" "${network_name}" "${db_name}"
 
-    capture_database_history "${verify_root}/source-flyway-history.tsv"
+    capture_database_history "${verify_root}/source-flyway-history.tsv" "${source_db_name}"
     docker exec "${DATABASE_CONTAINER}" sh -c '
         set -eu
         dump_file="/tmp/$1.dump"
-        createdb -U "$POSTGRES_USER" "$1"
-        pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --file="$dump_file"
-        pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" -d "$1" "$dump_file"
-        unlink "$dump_file"
-    ' sh "${db_name}"
+        trap '\''unlink "$dump_file" 2>/dev/null || true'\'' EXIT
+        pg_dump -U "$POSTGRES_USER" -d "$3" --format=custom --file="$dump_file"
+        createdb -U "$POSTGRES_USER" --owner="$2" "$1"
+        pg_restore --exit-on-error --no-owner --no-privileges --role="$2" \
+            -U "$POSTGRES_USER" -d "$1" "$dump_file"
+    ' sh "${db_name}" "${source_db_user}" "${source_db_name}"
     docker network create "${network_name}" >/dev/null
     docker run -d --name "${redis_name}" --network "${network_name}" "${VERIFY_REDIS_IMAGE}" >/dev/null
     docker run -d \
@@ -477,9 +519,7 @@ verify_database_upgrade() {
     curl -fsS --connect-timeout 2 --max-time 5 \
         "http://127.0.0.1:${VERIFY_BACKEND_PORT}/actuator/health/readiness" \
         | grep -q '"status":"UP"'
-    docker exec "${DATABASE_CONTAINER}" sh -c \
-        'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1" -At -F "|" -c "select installed_rank,version,description,checksum,success from flyway_schema_history order by installed_rank"' \
-        sh "${db_name}" >"${verify_root}/upgraded-flyway-history.tsv"
+    capture_database_history "${verify_root}/upgraded-flyway-history.tsv" "${db_name}"
     docker logs "${backend_name}" 2>&1 \
         | tail -n 300 \
         | sed -E 's#((PASSWORD|TOKEN|SECRET|AUTHORIZATION)[=:][[:space:]]*)[^[:space:]]+#\1***REDACTED***#Ig' \
@@ -501,14 +541,16 @@ verify_deployment() {
 }
 
 deploy_release() {
-    local release_dir=$1 tag=$2 current_link next_link
+    local release_dir=$1 tag=$2 current_link next_link source_db_name
     validate_manifest "${release_dir}" "${tag}"
     validate_host
-    capture_database_history "${release_dir}/pre-deploy-flyway-history.tsv"
+    source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
+    validate_postgres_identifier "${source_db_name}" database
+    capture_database_history "${release_dir}/pre-deploy-flyway-history.tsv" "${source_db_name}"
     sudo "${HOST_CONTROL}" stop-legacy
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans
     verify_deployment "${tag}"
-    capture_database_history "${release_dir}/post-deploy-flyway-history.tsv"
+    capture_database_history "${release_dir}/post-deploy-flyway-history.tsv" "${source_db_name}"
     current_link="${RELEASE_ROOT}/current"
     next_link="${RELEASE_ROOT}/.current-${tag}"
     unlink "${next_link}" 2>/dev/null || true

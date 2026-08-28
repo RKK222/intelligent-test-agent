@@ -26,6 +26,8 @@ grep -Fq 'NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}' "${release_script}"
 grep -Fq 'validate_backend_jar "${release_dir}/backend.jar"' "${release_script}"
 grep -Fq 'mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"' "${release_script}"
 grep -Fq 'printf -v cleanup_trap' "${release_script}"
+grep -Fq 'source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)' "${release_script}"
+grep -Fq 'pg_restore --exit-on-error --no-owner --no-privileges --role="$2"' "${release_script}"
 if grep -Eq '^[[:space:]]*jar tf ' "${release_script}"; then
     echo 'Release script still requires the host jar command.' >&2
     exit 1
