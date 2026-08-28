@@ -473,12 +473,12 @@ verify_database_upgrade() {
         --env-file "${ENV_FILE}" \
         --env SPRING_PROFILES_ACTIVE=test \
         --env "SERVER_PORT=${VERIFY_BACKEND_PORT}" \
+        --env SERVER_ADDRESS=0.0.0.0 \
         --env "TEST_AGENT_BASE_URL=http://127.0.0.1:${VERIFY_BACKEND_PORT}" \
         --env "TEST_AGENT_FRONTEND_URL=http://127.0.0.1:${FRONTEND_PORT}" \
         --env TEST_AGENT_ROOT=/release/source \
         --env TESTAGENT=/release/source \
         --env SYS_DATA_ROOT_DIR=/verify/data \
-        --env "TEST_AGENT_LINUX_SERVER_ID=jenkins-verify-${build_number}" \
         --env TEST_AGENT_SERVER_ADVERTISED_HOST=127.0.0.1 \
         --env TEST_AGENT_TEST_DB_HOST=host.docker.internal \
         --env "TEST_AGENT_TEST_DB_PORT=${POSTGRES_HOST_PORT}" \

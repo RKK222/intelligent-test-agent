@@ -15858,6 +15858,29 @@
 
 - `#6` 未修改实际 `testagent_dev` migration，也未停止旧服务；修复后的后续构建才会从正确现场基线验证升级。
 
+## 2026-08-28 - 隔离 Jenkins 验证容器监听地址
+
+### Why
+
+- Jenkins `#7` 已用正确应用角色恢复临时库，Flyway 成功校验 123 条 migration，并确认当前版本
+  `20260827183737` 无需升级；随后 Netty 因继承宿主 `SERVER_ADDRESS=192.168.8.100` 而无法在 bridge 容器绑定。
+- 验证容器还把 Linux server ID 覆盖为克隆库中不存在的 `jenkins-verify-7`，退出回写因此触发外键告警。
+
+### What
+
+- 仅对临时验证容器显式设置 `SERVER_ADDRESS=0.0.0.0`，端口仍只发布到宿主 loopback `127.0.0.1:28082`。
+- 不再构造临时 Linux server ID，复用克隆数据中已有的现场 ID；所有进程状态写入仍只发生在随后删除的克隆库。
+
+### How
+
+- `#7` 后端、前端、JAR/清单、数据库 dump/restore、权限和 Flyway 全部通过，失败日志精确定位 Netty
+  `Cannot assign requested address`。提交前复跑 Shell、发布契约、AI 文档和差异检查。
+
+### Result
+
+- `#7` 没有修改源库 migration 或切换线上服务；自动清理复核为容器 0、网络 0、临时数据库 0。后续构建需
+  验证临时 readiness 与正式接管。
+
 ## 2026-08-28 - 放开 ai-agent 根目录资产引用
 
 ### Why

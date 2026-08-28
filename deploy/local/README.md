@@ -46,6 +46,9 @@ Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
    一致性逻辑复制；临时库归应用角色所有并以该角色恢复对象权限，再配合独立 Redis 使用本次后端 JAR 完成真实
    PostgreSQL 升级与 readiness 检查。验证容器、网络和临时库随后按精确名称清理；源库只读。
 
+验证后端只在 Docker bridge 内把 `SERVER_ADDRESS` 覆盖为 `0.0.0.0`，并复用克隆库已有的 Linux server ID，避免
+把宿主绑定地址或虚构 server ID 带入临时环境；这些覆盖不进入正式发布容器。
+
 升级验证失败时不得执行宿主接管。正式启动前再次保存源库全部
 `installed_rank/version/description/checksum/success`；新后端 readiness 通过后保存升级后 history。未知 checksum、
 Flyway validate 失败或 readiness 失败时任务失败，不执行 `repair`、`outOfOrder` 或手工修改 history。

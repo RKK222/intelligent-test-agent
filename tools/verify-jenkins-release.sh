@@ -28,6 +28,11 @@ grep -Fq 'mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/t
 grep -Fq 'printf -v cleanup_trap' "${release_script}"
 grep -Fq 'source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)' "${release_script}"
 grep -Fq 'pg_restore --exit-on-error --no-owner --no-privileges --role="$2"' "${release_script}"
+grep -Fq -- '--env SERVER_ADDRESS=0.0.0.0' "${release_script}"
+if grep -Fq 'TEST_AGENT_LINUX_SERVER_ID=jenkins-verify-' "${release_script}"; then
+    echo 'Database verification uses a Linux server ID absent from the cloned database.' >&2
+    exit 1
+fi
 if grep -Eq '^[[:space:]]*jar tf ' "${release_script}"; then
     echo 'Release script still requires the host jar command.' >&2
     exit 1
