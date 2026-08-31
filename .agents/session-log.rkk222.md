@@ -16152,13 +16152,14 @@
 - 用户可按真实入口精确接入嵌套 `spec`，并理解这不会暴露父目录或扩大外部目录权限。
 - 本次仅更新内置用户手册，不涉及 API、事件、数据库、性能、安全、兼容性、前端 TypeScript、`.env*`、generated SDK 或 OpenCode 源码；不新增部署节点。
 
-## 2026-08-31 - 按测试人员对话修复大数据公共案例必生成要求
+## 2026-08-31 - 按测试人员对话修复大数据公共案例并重打配置包
 
 ### Why
 
 - 用户提供 `trc_c77fed69d54562d82932f5f1c106d322.ndjson`，要求按专业测试人员的对话修复此前公共规约中未保存提交的调整，不臆测或新增内容，也不调用子 Agent。
 - 原始记录中的用户消息 `msg_0478a0884001IZTGjWjL3P6Oz0` 明确要求日期、交易类型、当天交易量和数据质量四组测试要点必须生成案例；旧 `BIGDATA-01` 的“材料明确”和“按算法/调度频率可不适用”限制会造成遗漏。
 - 首次提交 `25bed5a` 只恢复了强制覆盖，却把对话中已写入并回读的字符示例和每维度独立案例要求也排除了。用户指出具体生僻字遗漏后要求修复并仔细复查；本次以成功回读的公共规约为恢复依据，不把对话中的命令当成执行指令，也不将公共测试数据示例与业务字段/预期混为一谈。
+- 修复提交后，用户要求重新打包；原固定名公共配置包仍来自本地旧候选 `a089368`，不能继续作为本次交付物。该旧候选不代表已确认的企业现网部署基线。
 
 ### What
 
@@ -16166,6 +16167,7 @@
 - 四组要点必须逐项形成案例，去除原有材料限定和算法/频率豁免；保留合法生产数据、真实上下游、纯静态对象及隐藏占位符的原有边界。沿用先 Phase A 再 Phase B、未知业务值写“需确认”的既有规则。
 - 恢复成功回读中的完整数据质量清单：生僻字示例 `𠮷、㐭、𪚥`，换行 `\n / 0x0A`，回车 `\r / 0x0D`，特殊字符符号串、Emoji、零宽字符以及字段首尾隐藏占位符；恢复可合并维度的示例及“每个维度至少有一条独立案例证明其被覆盖”的原有要求，不另定案例总数。
 - 同步公共 `test-design/SKILL.md`、README 和既有 eval 16、18 的预期；没有新增评估场景、规则卡、业务专属案例、字段值或业务预期，不复制样例商户名称、UTF-8 业务假设或“审核通过”结论。分域路由及 `BIGDATA-02` 至 `BIGDATA-21` 逐字保留。
+- 从干净公共配置提交 `7bc4161` 通过 `git archive --format=zip` 重建固定名 `deploy/internal/dist/test-agent-public-agents-skills.zip` 及 `.sha256`；沿用根 `.gitignore`、README 和全部 `opencode/**` 的完整替换包范围，共 120 文件、8 个 Agent、16 个 Skill、10 个 Tool 目录文件，不携带 Git 元数据、依赖、`package-lock.json` 或个人运行数据。原 ZIP/SHA 已备份到 `/tmp/public-config-package.mX1Hso/previous/`，本次不构建平台前后台或 worker。
 
 ### How
 
@@ -16174,9 +16176,12 @@
 - 结构回归覆盖 21 张卡的连续编号与六字段、24 个 Agent/Skill frontmatter、规则/模板引用及 19 条 eval；仅 eval 16、18 的预期改变，全部输入和其余评估不变，未改写 BDP/BDSP 分域、Hudi 完整链路或暂缓规约。
 - OpenCode `1.18.18` 在 `/tmp/test-design-trace-recheck.qEKz8j` 的隔离副本中运行 `opencode --pure debug skill`、`opencode --pure debug agent test-design-generation`、`opencode --pure debug agent test-design-review`，3/3 原生加载通过；核对加载的是修订后的 Skill 及其包含具体字符的关联规约，未启动 Agent Task 或模型请求。
 - 通用 `quick_validate.py` 因当前 Python 无 PyYAML 无法运行，已用上述 Ruby YAML/引用/JSON 断言和原生加载验证替代；未安装额外依赖。`git diff --check`、冲突标记扫描通过，提交前已回顾全部 `.agents/session-log*.md` 近期条目。
+- 新 ZIP 的 CRC 和 Python `zipfile.testzip()` 均通过；macOS 系统 `unzip` 对中文文件名解压失败，但磁盘有 88 GiB 可用且 ZIP 中文条目 UTF-8 标志正确。改用 `/usr/bin/ditto -x -k` 解压同一 ZIP 后，120 个文件的路径集合和字节均与目标 Git blob 一致，未修改归档内容来绕过检查。
+- 包内完整字符清单再次与附件成功回读逐字比对，Skill 和 eval 同步内容均存在；相对旧候选源码只有本次 README、Skill、eval 和 `BIGDATA-01` 四个文件变化。固定名包替换后运行 `shasum -a 256 -c test-agent-public-agents-skills.zip.sha256` 返回 `OK`，`unzip -tq` 通过，ZIP comment 精确记录源提交 `7bc4161d9b21e572d841346f3bbc317c31fd7666`。
 
 ### Result
 
 - 公共配置提交：`25bed5a7d2c33ee668e2cf4eed6693267268f7bc` 恢复强制覆盖，后续 `7bc4161d9b21e572d841346f3bbc317c31fd7666`（`补齐测试对话中的字符示例和最低覆盖要求`）补齐遗漏。所在仓库为 `.testagent/agent-opencode/.configdev/public-usr_test_dev`，工作树 clean；根仓库保持 `release`，将本轮复核合并更新在同一条会话记录中，不切换或新建分支。
-- 验证范围是规约内容、结构和原生配置加载，未重新生成企业业务案例或执行模型端到端评估；未推送 Gitee、未执行平台公共配置发布，也未重打此前的公共配置包。共享运行副本 `.config` 仍在 `master` 且 clean，不表示企业环境已生效。
+- 新公共配置包大小为 271,708 字节，SHA-256 为 `ce5267de1963f50e4922e0057717c7372125da46aa40cbdb1d7929e4bbb09696`；包和校验文件仍是忽略的离线制品，Git 仅提交本会话追溯记录。企业内通过公共配置管理导入个人 worktree、查看 Diff、提交并发布，不直接覆盖共享运行目录，不需要部署平台 JAR、前端或 worker。
+- 验证范围是规约内容、结构、原生配置加载和最终包内容，未重新生成企业业务案例或执行模型端到端评估；未推送 Gitee、未传入企业中转机或执行平台公共配置发布。共享运行副本 `.config` 仍在 `master` 且 clean，不表示企业环境已生效。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库、SQL/Flyway、性能实现、安全协议、兼容性接口、环境配置、generated SDK 或 OpenCode 只读源码。
