@@ -16151,3 +16151,28 @@
 
 - 用户可按真实入口精确接入嵌套 `spec`，并理解这不会暴露父目录或扩大外部目录权限。
 - 本次仅更新内置用户手册，不涉及 API、事件、数据库、性能、安全、兼容性、前端 TypeScript、`.env*`、generated SDK 或 OpenCode 源码；不新增部署节点。
+
+## 2026-08-31 - 按测试人员对话修复大数据公共案例必生成要求
+
+### Why
+
+- 用户提供 `trc_c77fed69d54562d82932f5f1c106d322.ndjson`，要求按专业测试人员的对话修复此前公共规约中未保存提交的调整，不臆测或新增内容，也不调用子 Agent。
+- 原始记录中的用户消息 `msg_0478a0884001IZTGjWjL3P6Oz0` 明确要求日期、交易类型、当天交易量和数据质量四组测试要点必须生成案例；旧 `BIGDATA-01` 的“材料明确”和“按算法/调度频率可不适用”限制会造成遗漏。
+
+### What
+
+- 在既有公共配置个人分支 `public-usr_test_dev` 修订 `BIGDATA-01`：日期覆盖工作日、节假日、年末、月末、季末、跨年、跨月且连续至少 2 日；交易类型覆盖新增、修改、删除；交易量覆盖当天有交易、当天无交易；数据质量覆盖正常数据、生僻字、换行符、回车符、特殊字符。
+- 四组要点必须逐项形成案例，去除原有材料限定和算法/频率豁免；保留合法生产数据、真实上下游、纯静态对象及隐藏占位符的原有边界。沿用先 Phase A 再 Phase B、未知业务值写“需确认”的既有规则。
+- 同步公共 `test-design/SKILL.md`、README 和既有 eval 16、18 的预期；没有新增评估场景、规则卡、具体业务案例、字段值或预期，也未照搬附件中 AI 自行添加的 Emoji、零宽字符、案例数量和“审核通过”结论。分域路由及 `BIGDATA-02` 至 `BIGDATA-21` 逐字保留。
+
+### How
+
+- Ruby 内容与结构断言 17/17 通过：核对对话中的 18 个明确覆盖点、旧豁免删除、原有边界、21 张卡的连续编号与六字段、24 个 Agent/Skill frontmatter、规则/模板引用及 19 条 eval 的唯一性；仅 eval 16、18 的预期改变，其余输入和评估不变。
+- OpenCode `1.18.18` 在 `/tmp/test-design-config-check.RV05JO` 的隔离副本中运行 `opencode --pure debug skill`、`opencode --pure debug agent test-design-generation`、`opencode --pure debug agent test-design-review`，3/3 原生加载通过；核对加载的是修订后的 Skill，未启动 Agent Task 或模型请求。
+- 通用 `quick_validate.py` 因当前 Python 无 PyYAML 无法运行，已用上述 Ruby YAML/引用/JSON 断言和原生加载验证替代；未安装额外依赖。`git diff --check`、冲突标记扫描通过，提交前已回顾全部 `.agents/session-log*.md` 近期条目。
+
+### Result
+
+- 公共配置提交：`25bed5a7d2c33ee668e2cf4eed6693267268f7bc`（`按测试对话修复大数据公共案例必生成要求`），所在仓库为 `.testagent/agent-opencode/.configdev/public-usr_test_dev`，工作树 clean。根仓库保持 `release`，仅提交本条会话记录，不切换或新建分支。
+- 验证范围是规约内容、结构和原生配置加载，未重新生成企业业务案例或执行模型端到端评估；未推送 Gitee、未执行平台公共配置发布，也未重打此前的公共配置包。共享运行副本 `.config` 仍在 `master` 且 clean，不表示企业环境已生效。
+- 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库、SQL/Flyway、性能实现、安全协议、兼容性接口、环境配置、generated SDK 或 OpenCode 只读源码。
