@@ -27,6 +27,15 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 - 新版不再配置 `OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_LINUX_SERVER_ID`。
 - 当前前端实体 Nginx 安装在 `/data/apps/nginx`；单后台现场先运行 `configure-single-deployment.sh frontend` 生成 `nginx.env`，不要用 PATH 中可能读取 `/root/conf/nginx.conf` 的其他 `nginx`。
 
+## 企业 Docker 默认 privileged
+
+- 用户已于 2026-08-31 明确批准后续企业内网 Docker 部署默认使用 `--privileged`，不再仅限于此前列举的少数中间件。生成或修改交付命令时，检查实际启动脚本及其调用链，覆盖本次任务需要创建或重建的服务、中间件和一次性容器，不能只给本机 smoke test 加参数，也不必每个镜像先复现失败再采用该基线。
+- 该规则只适用于用户的企业部署任务，不是所有 Docker 的通用要求。不得修改 daemon 全局默认，不得为了统一权限重建无关存量容器（含共置平台 PostgreSQL、克隆机遗留容器）或普通 Mac 开发容器。现有 UID/GID、最小挂载、端口 ACL、密钥权限仍需保持；privileged 扩大宿主权限，不能描述为已被这些措施抵消，也不额外添加 host 网络、Docker socket 或宿主根目录挂载。
+- 企业 Docker 18.09 继续用 `docker image inspect` 核对架构，运行时不传 `--platform`，也不引入 Compose。实际重建后用 `docker inspect -f '{{.HostConfig.Privileged}}' <已确认容器名>` 验证为 `true`，随后验收 readiness 和真实业务链路；脚本中出现参数不等于存量容器已生效，`docker restart` 不会应用新的创建参数。
+- 已导入镜像且只改变启动参数时，优先给出基于已读脚本的精确、幂等且带备份的 `sed` 修改和重新部署命令；不要求重打镜像、重新传输或覆盖现场配置。服务重建仍需属于用户本次部署/修复范围，诊断请求不自动授权重启。
+- 旧 seccomp 下线程创建 `EPERM`、Python `can't start new thread` 等错误可结合对照证据识别，但不把所有启动失败归因于它。数据库首次初始化失败可能留下非空目录：保留原目录和日志，确认业务数据情况后另行备份恢复，禁止自动清空。`net.ipv4.ip_forward=0`、防火墙和外部依赖是独立问题，不由 privileged 修复。
+- Mac 现代 Docker 实启通过仅记作本机通过；企业实际旧 Docker 启动、权限和跨节点调用必须单独留证。尚未收到企业回验时明确写“企业侧未验证”。安全边界同步遵循 `docs/standards/security.md` 的企业 Docker 运行权限基线。
+
 ## 重复发布问题路由
 
 用户提出“重新打包/再打一次/基于最新代码打包”、质疑包体积或未变化组件、询问签名私钥/公钥、反馈客户端安装失败，或现场出现组件指纹、SkillHub key、Flyway 启动错误时，执行前必须阅读并应用

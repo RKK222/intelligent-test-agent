@@ -16250,3 +16250,24 @@
 - 本轮 API 路径/DTO、RunEvent、数据库、部署节点和客户端协议不变；TCDS 错误语义收敛涉及安全展示。没有推送远端。
   企业真实启动、TCDS 请求、跨节点对话/公共发布/嵌套引用、批量任务和现有客户端下载仍待现场验收；已完成的是拉取合并、
   构建与离线制品核验，不宣称企业部署完成。worker/manager、工具容器、`.4` models、CK/Mem0/BGE/pgvector 无升级动作。
+
+## 2026-08-31 - 企业 Docker 部署默认 privileged 技能基线
+
+### Why
+
+- 用户提供企业 Docker 18.09 环境的线程创建 A/B 结果：默认 seccomp 失败，unconfined 后成功，并明确要求后续企业部署默认 privileged、同步相关技能；现场修复只需给出 sed 命令，不重新传镜像。
+
+### What
+
+- 在 `release` 更新 `enterprise-offline-deploy`、`enterprise-troubleshooting` 技能和安全规范，将此前仅部分中间件的批准范围更新为本次授权任务内新建/重建的企业容器。全局 offline-docker-packaging、mimoagent-enterprise-docker-pack 技能在仓库外同步。
+- 明确实际启动脚本、HostConfig.Privileged 检查、重建而非 restart、生效后的业务验收，以及现代 Mac 与旧 Docker 企业现场证据的区别。保留只读诊断边界，不改 daemon 全局默认、不重启无关存量容器，不将 IPv4 转发或数据库初始化残留误报为已修复。
+
+### How
+
+- 盘点全局及项目内企业部署技能，四个相关 SKILL.md 均通过 skill-creator quick_validate.py；`tools/verify-ai-docs.sh` 和 `git diff --check` 通过。已回顾所有 session-log 近期记录，仅暂存本次技能、安全规范和本条记录。
+- 外部匿名意见应用仅调整原启动行为 `docker run -d --privileged`，在原镜像内验证 Linux sed 的备份、幂等及 Bash 语法；以 API 1.39 在本机 Docker 24.0.2 重建，Privileged=true、healthy，原 6 条意见保留，浏览器连续提交 2 条并入库，Cookie 复用、控制台错误 0。
+
+### Result
+
+- 本仓库只改技能与安全文档，不新增部署节点，不修改应用代码、API、事件、SQL、数据库、环境配置、generated SDK、OpenCode 源码或部署二进制，也未重启 TestAgent 服务或推送远端。
+- 企业真实 Linux 4.19 / Docker 18.09.7 的启动和跨机业务回验仍待现场执行；没有清空 MySQL 失败目录、修改宿主网络或重建离线 ZIP。后续企业部署任务应用此默认值，不表示现存所有脚本/容器已批量更新。
