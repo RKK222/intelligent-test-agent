@@ -41,6 +41,11 @@ public class TcdsCaseMaintenanceService {
     private static final int MAX_LOG_PAYLOAD_LENGTH = 8 * 1024;
     private static final int LOG_DIGEST_LENGTH = 16;
     private static final String REDACTED = "[REDACTED]";
+    private static final int MAX_CLIENT_BUSINESS_MESSAGE_LENGTH = 200;
+    private static final String INTERNAL_ERROR_MESSAGE = "系统内部异常，请联系系统管理员";
+    private static final String DUPLICATE_CASE_MESSAGE = "案例名称重复";
+    private static final String DUPLICATE_CASE_MESSAGE_PREFIX = DUPLICATE_CASE_MESSAGE + "：";
+    private static final String DEFAULT_BUSINESS_FAILURE_MESSAGE = "TCDS 案例维护失败";
     private final TcdsHttpRequestFactory requestFactory;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -202,9 +207,17 @@ public class TcdsCaseMaintenanceService {
 
     private void verifyMaintenanceResponse(int statusCode, byte[] responseBody) throws IOException {
         JsonNode root = readResponseRoot(statusCode, responseBody, "TCDS 案例维护");
-        if (root.path("code").intValue() != 0) {
-            throw new PlatformException(ErrorCode.CONFLICT, safeBusinessMessage(root.path("msg").asText("")));
+        int businessCode = root.path("code").intValue();
+        if (businessCode == 0) {
+            return;
         }
+        // 下游 msg 可能包含实现细节，只按已约定业务码生成可控的前端提示。
+        String clientMessage = switch (businessCode) {
+            case 2 -> INTERNAL_ERROR_MESSAGE;
+            case 3 -> duplicateCaseMessage(root.path("data").path("values"));
+            default -> DEFAULT_BUSINESS_FAILURE_MESSAGE;
+        };
+        throw new PlatformException(ErrorCode.CONFLICT, clientMessage);
     }
 
     /** 对两个 TCDS 接口统一执行 HTTP、响应体大小、JSON 根节点和业务码字段校验。 */
@@ -427,12 +440,33 @@ public class TcdsCaseMaintenanceService {
         return value;
     }
 
-    private static String safeBusinessMessage(String value) {
-        String normalized = value == null ? "" : value.replaceAll("[\\p{Cntrl}]", " ").trim();
-        if (normalized.isBlank()) {
-            return "TCDS 案例维护失败";
+    /** 仅从 code=3 的 data.values 提取重复案例名，忽略下游 msg 和其它 data 字段。 */
+    private static String duplicateCaseMessage(JsonNode values) {
+        if (!values.isArray()) {
+            return DUPLICATE_CASE_MESSAGE;
         }
-        return normalized.length() <= 200 ? normalized : normalized.substring(0, 200);
+        StringBuilder duplicateNames = new StringBuilder();
+        for (JsonNode value : values) {
+            if (!value.isTextual()) {
+                continue;
+            }
+            String normalized = value.textValue().replaceAll("[\\p{Cntrl}]", " ").trim();
+            if (normalized.isBlank()) {
+                continue;
+            }
+            if (!duplicateNames.isEmpty()) {
+                duplicateNames.append('、');
+            }
+            duplicateNames.append(normalized);
+        }
+        if (duplicateNames.isEmpty()) {
+            return DUPLICATE_CASE_MESSAGE;
+        }
+        String message = DUPLICATE_CASE_MESSAGE_PREFIX + duplicateNames;
+        if (message.length() <= MAX_CLIENT_BUSINESS_MESSAGE_LENGTH) {
+            return message;
+        }
+        return message.substring(0, MAX_CLIENT_BUSINESS_MESSAGE_LENGTH - 1) + "…";
     }
 
     private static String requireText(String value, String message) {
