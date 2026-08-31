@@ -173,7 +173,7 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 2. 任务类型与案例维护地址必须相对统一 `TEST_AGENT_TCDS_BASE_URL` 解析，所有 TCDS 同源请求的 `toolId` 必须由 `test-agent-integration` 共享请求构造器注入；设计方法和其它固定业务字段由服务端组装，不接受 URL、请求头、固定字段或 `userId` 客户端覆盖，禁止复用旧 `/api/proxy/call` 形成 SSRF/任意代理。
 3. 任务类型查询只向浏览器返回经过数量、长度、控制字符、分隔符和重复值校验的 `subItemTypes.name/value`，不得透传完整上游响应，也不得在失败时降级为可能过期的前端快照、代码内固定输出或简称映射；所有 Spring profile（包括 `local`）都必须真实调用任务类型接口。
 4. `userId` 只取当前 `AuthPrincipal.unifiedAuthId`；案例提交前必须再次实时查询 TCDS，逐项校验并原样使用当前返回的完整 `name`，多值只接受英文逗号分隔。`createGraphCase` 上游请求日志必须把 `userId` 完全删除且不得记录固定 `toolId`；案例 `name/step/data/expect/dataDependencies` 只允许记录长度和 SHA-256 短摘要，安全枚举和固定字段可保留。响应日志只允许记录 HTTP 状态、有界业务 `code/msg` 及 `data` 类型、数量和摘要，禁止记录 `data` 原值、未知响应正文或非法 JSON 原文。请求预览最多 20 条案例，单条安全报文日志最大 8 KiB；所有日志携带 traceId。
-5. 后端 HTTP client 禁止跟随重定向，并设置连接/请求超时与响应体上限；案例维护上游非零业务码只允许返回受限安全消息，任务类型查询和网络、协议、解析错误统一收敛为平台错误，不暴露地址、响应正文或异常堆栈。
+5. 后端 HTTP client 禁止跟随重定向，并设置连接/请求超时与响应体上限；案例维护上游 `msg` 不得进入浏览器响应，`code=2` 只返回固定系统异常提示，`code=3` 只允许从 `data.values` 提取经控制字符清理和总长度限制的重复案例名，其它非零业务码返回固定失败提示。任务类型查询和网络、协议、解析错误统一收敛为平台错误，不暴露地址、响应正文或异常堆栈。
 
 1. `/api/external/v1/**` 必须由独立外部认证过滤器强制认证；只有精确 `/api/external/v1` 根及其 `/` 子路径可以绕过旧用户 JWT 和静态 `TEST_AGENT_API_TOKEN` 过滤器，相邻路径不得继承。用户 Bearer Token、Cookie、静态 Token 或前端菜单都不能替代 `X-Test-Agent-Tool-Code` 与 `X-Test-Agent-Api-Key`。
 2. API Key 只能由平台使用 32 字节安全随机数生成，格式固定为 `taak_v1_` 加无填充 Base64URL。数据库只保存 RSA-OAEP/SHA-256 密文、SHA-256 指纹和掩码提示；认证在 JVM 不可变快照中按 `toolCode` O(1) 查询，并用 `MessageDigest.isEqual` 常量时间比较。未知、停用和错误 Key 必须统一为 `UNAUTHENTICATED`，禁止泄露工具存在性或启用状态。

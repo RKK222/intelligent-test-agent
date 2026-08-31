@@ -123,15 +123,85 @@ class TcdsCaseMaintenanceServiceTest {
     }
 
     @Test
-    void mapsTcdsBusinessFailureToSafeConflict() {
+    void mapsCodeTwoToFixedInternalErrorWithoutExposingUpstreamMessage() {
         TcdsCaseMaintenanceService service = service(
-                new RecordingHttpClient(200, TASK_TYPES_RESPONSE, "{\"code\":3,\"msg\":\"业务异常\"}"));
+                new RecordingHttpClient(
+                        200,
+                        TASK_TYPES_RESPONSE,
+                        "{\"code\":2,\"msg\":\"数据库异常 token=secret-value\"}"));
 
         assertThatThrownBy(() -> service.maintain(
                 "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
                 .isInstanceOfSatisfying(PlatformException.class, error -> {
                     assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
-                    assertThat(error.getMessage()).isEqualTo("业务异常");
+                    assertThat(error.getMessage()).isEqualTo("系统内部异常，请联系系统管理员");
+                    assertThat(error.getMessage()).doesNotContain("数据库异常", "secret-value");
+                });
+    }
+
+    @Test
+    void mapsCodeThreeDataValuesToDuplicateCaseMessageWithoutExposingUpstreamMessage() {
+        TcdsCaseMaintenanceService service = service(new RecordingHttpClient(
+                200,
+                TASK_TYPES_RESPONSE,
+                """
+                {"code":3,"msg":"业务异常 token=secret-value","data":{"prop":"name","values":["案例一","案例二\\n补充"],"errorCode":"1"}}
+                """));
+
+        assertThatThrownBy(() -> service.maintain(
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
+                .isInstanceOfSatisfying(PlatformException.class, error -> {
+                    assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(error.getMessage()).isEqualTo("案例名称重复：案例一、案例二 补充");
+                    assertThat(error.getMessage()).doesNotContain("业务异常", "secret-value");
+                });
+    }
+
+    @Test
+    void usesSafeFallbackWhenDuplicateValuesAreMissing() {
+        TcdsCaseMaintenanceService service = service(new RecordingHttpClient(
+                200,
+                TASK_TYPES_RESPONSE,
+                "{\"code\":3,\"msg\":\"敏感重复错误\",\"data\":{}}"));
+
+        assertThatThrownBy(() -> service.maintain(
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
+                .isInstanceOfSatisfying(PlatformException.class, error -> {
+                    assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(error.getMessage()).isEqualTo("案例名称重复");
+                    assertThat(error.getMessage()).doesNotContain("敏感");
+                });
+    }
+
+    @Test
+    void usesSafeFallbackWhenBusinessCodeIsUnknown() {
+        TcdsCaseMaintenanceService service = service(new RecordingHttpClient(
+                200,
+                TASK_TYPES_RESPONSE,
+                "{\"code\":4,\"msg\":\"敏感未知错误\"}"));
+
+        assertThatThrownBy(() -> service.maintain(
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
+                .isInstanceOfSatisfying(PlatformException.class, error -> {
+                    assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(error.getMessage()).isEqualTo("TCDS 案例维护失败");
+                    assertThat(error.getMessage()).doesNotContain("敏感");
+                });
+    }
+
+    @Test
+    void limitsDuplicateCaseMessageLength() {
+        String duplicateName = "重复案例".repeat(100);
+        TcdsCaseMaintenanceService service = service(new RecordingHttpClient(
+                200,
+                TASK_TYPES_RESPONSE,
+                "{\"code\":3,\"msg\":\"业务异常\",\"data\":{\"values\":[\"" + duplicateName + "\"]}}"));
+
+        assertThatThrownBy(() -> service.maintain(
+                "S20260703-000081", "555033606", List.of(input("案例一", "准入测试任务")), "trace_tcds_case"))
+                .isInstanceOfSatisfying(PlatformException.class, error -> {
+                    assertThat(error.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(error.getMessage()).hasSize(200).startsWith("案例名称重复：").endsWith("…");
                 });
     }
 
