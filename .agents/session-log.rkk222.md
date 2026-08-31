@@ -16185,3 +16185,68 @@
 - 新公共配置包大小为 271,708 字节，SHA-256 为 `ce5267de1963f50e4922e0057717c7372125da46aa40cbdb1d7929e4bbb09696`；包和校验文件仍是忽略的离线制品，Git 仅提交本会话追溯记录。企业内通过公共配置管理导入个人 worktree、查看 Diff、提交并发布，不直接覆盖共享运行目录，不需要部署平台 JAR、前端或 worker。
 - 验证范围是规约内容、结构、原生配置加载和最终包内容，未重新生成企业业务案例或执行模型端到端评估；未推送 Gitee、未传入企业中转机或执行平台公共配置发布。共享运行副本 `.config` 仍在 `master` 且 clean，不表示企业环境已生效。
 - 不新增部署节点，不变更 HTTP API、RunEvent/SSE、数据库、SQL/Flyway、性能实现、安全协议、兼容性接口、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-08-31 - 拉取 release 并重新交付企业增量包
+
+### Why
+
+- 用户要求“拉一下最新代码，重新打包”。起点为干净的本地 `release`，HEAD `4eccbb59f988ff077516f07690793841aade8dc5`；
+  不能用上次构建但未确认部署的候选替代现场基线，也不能因平台重打包而递增客户端版本。
+- 首次 Gitee SSH fetch 被关闭；限时重试后成功取得 `78f5fb9ee9ec3a46a603755e4118a7fc95721904`。本地领先共同基线
+  29 个提交、远程领先 1 个提交，采用原生 merge 保留双方内容，没有 reset、stash、切分支或强推。
+
+### What
+
+- 合并提交为 `33d0aa2dabc11fbb18f09d1b8fc058ec8ae66d83`（`合并远程 release 案例维护异常提示修正`）。
+  新增远程变更只涉及既有 `TcdsCaseMaintenanceService`、测试和 API/安全/模块文档：系统错误固定提示，重复案例
+  从 `data.values` 有界提取名称，不向浏览器透传下游 `msg`。
+- 相对最后确认部署的 `363e1b6babe291018800e76e0cb2c1034cfc230f`（外包
+  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`），继续包含公共 Agent 并行排空、
+  缺少应用配置目录时的对话保护、整体/嵌套 spec 引用、测试设计导航和维护失败不弹空白页。上次外包
+  `6019802c985a1283bf467a1ff75d295be8f958595ef254a82457e5a0e21311f2` 未确认部署，由本包替代。
+- 在 `deploy/internal/MULTI-BACKEND.md` 增补本批差异与验收范围，修正 XXL 旧句“本轮只允许新增”的矛盾表述；
+  外包 `START-HERE.md` 与该文件逐字一致。未改业务实现、环境配置、OpenCode 源码、模型灰度或组织密钥。
+- 保持客户端 `20260827222702` 与公共能力基线 `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+  worker/toolbox/client 均为 `reuse`，LobeHub 和独立 memory 制品为 `disabled`；不携带客户端、programs、Docker 镜像、
+  toolbox source 或 trace 归档。不把独立公共配置 `7bc4161` 的 ZIP 塞入平台包，也不替企业执行公共配置发布。
+
+### How
+
+- 执行既有 `package-release.sh --component-plan-only`，然后正式构建（不是用 zip-only 代替新代码编译），再执行
+  `package-two-backend-complete.sh`。复用固定输出目录、组织签名输入和既有三节点配置来源，未操作企业服务器或 Jenkins。
+- JDK 25 下运行 `mvn -q -pl test-agent-app -am -Dtest=TcdsCaseMaintenanceServiceTest,TcdsHttpGatewayTest,TcdsIntegrationConfigTest,PublicAgentConfigRolloutServiceTest,AgentConfigApplicationServiceTest,ApplicationAutomationReferenceWorkspaceReconciliationServiceTest,AutomationReferenceWorkspaceJsoncReconcilerTest,ReferenceRepositoryApplicationServiceTest,WorkspaceViewApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`，9 个类共 217 项通过；正式构建额外的 `SpringBeanConstructorWiringTest` 1/1 通过。
+- `corepack pnpm test`：158 文件通过、2269 passed / 1 skipped；正式 `agent-web` 的 `vue-tsc`、Vite 和内置手册构建通过。
+  `verify-internal-two-backend-complete-package.sh`、`verify-internal-incremental-components.sh` 均通过。
+- 所有 PostgreSQL/XXL/ClickHouse 迁移资源、Java migration 和 Maven POM 与已部署基线无变化。最终 persistence JAR
+  151 份资源、XXL JAR 16 份资源逐文件字节等于源码，既有 Java migration class 与本批编译输出一致；完整迁移门禁通过。
+  本轮未连接真实企业数据库或新建临时 PostgreSQL；结论限于历史不可变和制品核验，不冒充现场升级验证。
+- 最终内外包 CRC/SHA、内嵌内包逐字节一致、三份节点 SHA、归档路径和排除项均通过；最终 TCDS class 确认包含新提示。
+  两后台 TCDS=`http://tcds-prod.sdc.icbc:9080`、AAM=`http://zfw.sdc.cs.icbc`、CK=`.147:8123`、Mem0=`.160:18888`
+  及域名 CORS 正确；SkillHub/CK 密钥使用保留现场值标记，不回显。`.2` 保持 80 与 9996 双监听，后端下载地址仍为
+  `http://122.233.30.2/downloads/local-opencode-client/`。JAR 内 SSH RSA 与上个候选逐字一致。
+- 组织私钥仍被 Git 忽略且权限 0600，公私钥派生公钥 DER SHA 均为
+  `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`；保留客户端 catalog/manifest 签名均 `Verified OK`。
+  构建缓存 catalog SHA=`c98e7a6fad95a85c22596d450c34188a223e567b011cb93b1d3fcb9b63605c08`，manifest SHA=
+  `bbb84ac76808935c87a545725f5bda251b4b3f8c599819583702b52832812368`，用户包 SHA=
+  `95a8b5d661cd25b55d51d1a3002ec3ac1e44fcc3d6c6453471aba32be9c7f961`；客户端不在本次 ZIP 中。
+- 构建和核验日志留在 `/tmp/enterprise-release-20260831.MYU9gm/`；提交前回顾全部 `.agents/session-log*.md` 近期记录，
+  差异空白/冲突标记检查和 `tools/verify-ai-docs.sh` 均通过，仅提交本次部署文档和本机追溯记录，不覆盖其它工作。
+
+### Result
+
+- 最终外包 155,480,018 字节（约 148.28 MiB），SHA-256：
+  `38a5c4d3b5e2793b710c9fd093d0edad1f5cb5d977752c32ecbded6bd47485ce`。
+  内包及外层内嵌内包 SHA-256：`d65ecddfddc724a8de4dfa6de7a1faf1b0054c7d88a81731c3f750a8587b8d9d`。
+- 最终 app JAR SHA=`2e5f4c73ff2fe7d43f31bbf897ba837bc93bbe7abfe7c9d242b0286d3a007211`；persistence JAR SHA=
+  `35b423859dff40b21718664ae8d2d5a669c3ca1f1ebc2b12be3e494f0ca35140`；XXL JAR SHA=
+  `656f255aff25d35fd593118ab78b7fa8d2e9193c1e6f9ca79898eff5828b7b2a`；前端归档 SHA=
+  `e1811baa2edcefac1215ee9077dc2252aac787a3feed6022263a2746a8e6397e`。
+- 最终三节点包 SHA：`.4=743e805ac275e41ad3bfee365b25d38ad66483bb8df213d167735058f4fb6b19`，
+  `.114=e3a542b9dc43222d53a9193b6afb875e0639249c1e2be4311e4a82e48a11dfcd`，
+  `.2=7b1d5e649115401aa828251ca0ac9e9f125bb47c6d279578cbef6971bccd3784`。
+- 已替换 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip` 及 `.sha256`，权限 0600；
+  文件名、节点目标 `/data/0709` 与 `.4 → .114 → .2` 顺序不变。本批业务二进制源于 `33d0aa2da`，构建时唯一未提交
+  输入为上述部署文档。本条最终摘要在封包后写入 Git，不回写 ZIP 自引用其摘要；后续提交只记录文档和追溯，不改二进制。
+- 本轮 API 路径/DTO、RunEvent、数据库、部署节点和客户端协议不变；TCDS 错误语义收敛涉及安全展示。没有推送远端。
+  企业真实启动、TCDS 请求、跨节点对话/公共发布/嵌套引用、批量任务和现有客户端下载仍待现场验收；已完成的是拉取合并、
+  构建与离线制品核验，不宣称企业部署完成。worker/manager、工具容器、`.4` models、CK/Mem0/BGE/pgvector 无升级动作。

@@ -18,6 +18,24 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
+## 当前增量说明（2026-08-31）
+
+- 构建业务源码为本地 `release` 合并提交 `33d0aa2dabc11fbb18f09d1b8fc058ec8ae66d83`，已包含远程
+  `78f5fb9ee` 的 TCDS 案例维护异常提示修正，并保留原有本地提交；没有合入 `dev` 或新增部署节点。
+- 最后已确认部署基线仍是 `363e1b6babe291018800e76e0cb2c1034cfc230f`，外层包摘要
+  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。后续未确认部署的候选包不是新基线，
+  本包直接替代这些候选，无需逐个安装。
+- 相对该基线，重点验收公共 Agent 发布并行排空、应用配置目录缺失时的对话、应用资产库整体 `spec` 与精确
+  `ai-agent/spec` 引用、测试设计纸飞机导航、案例维护失败不弹空白页，以及重复案例名/系统异常的安全提示。
+  嵌套目录须在企业通用参数 `REFERENCES_SDD_FOLDER_NAMES` 中保留已有配置并加入 `ai-agent/spec`；本包不替企业改库。
+- PostgreSQL、XXL MySQL、ClickHouse 迁移资源与已部署基线一致，本轮三套历史均不应新增记录；仍须执行下文历史与
+  最终 persistence JAR 校验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
+- worker runtime、toolbox、客户端均为 `reuse`；客户端保持 `20260827222702`。不携带这三个组件的大文件，
+  不重启 worker/manager、工具容器，不替换客户端，不覆盖 `.4` models 灰度，也不重复部署或同步 CK/Mem0/BGE/pgvector。
+  前后端及其完整依赖仍是基本发布单元；包含历史 Flyway SQL 不代表重复执行迁移。
+- 本机另行制作的公共 Agent/Skill 配置 ZIP 不并入本平台包，也不自动替换客户端公共能力基线；企业正式发布的公共 Git
+  commit 仍是权威源。Jenkins 测试环境改动不触发企业节点或客户端更新。
+
 ## 1. 正式拓扑
 
 ```text
@@ -660,7 +678,7 @@ XXL MySQL 使用独立的 `flyway_schema_history`。上一轮部署完成后的�
 V12 选择兼容 location 并由更高版本前向 migration 补齐另一任务。失败记录、未知 checksum、未知更高版本或未登记的 V12
 分叉都必须停止发布。V13 文件 SHA-256 为
 `d7627696bcabc9f170f7709e298b46e28ba306a38f2251572c99b6b8175ff96a`，V14 文件 SHA-256 为
-`551d90547b21440b614a40502c852b303b22a41d93ab4060acc962b7ae411718`。本轮只允许新增
+`551d90547b21440b614a40502c852b303b22a41d93ab4060acc962b7ae411718`。已部署的
 `V20260824100401__xxl_job_info_update_inactive_cleanup_description.sql`，源码 SHA-256 固定为
 `4eda1bf4168f097f83357d097714cc66d83156f7a2e88d3dd60adc56c218be3a`；它只把平台初始化的闲置清理任务说明从十五天改为十天，
 且属于上一轮已部署基线，本轮 XXL MySQL 不应新增 history。
