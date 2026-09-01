@@ -215,7 +215,9 @@ execution node 另保存 `OFFLINE/local-client-anchor` 外键锚点，仅供旧�
 再次选择。某个目录已删除或身份变化时只跳过该项，不阻断其它有效目录；也保留从新客户端重新选择目录的兜底。所有入口都只在旧实例离线且
 `rootDigest + fileSystemIdentity` 唯一命中历史绑定后执行接管。接管保留 workspaceId，并在同一事务内 CAS 更新工作区
 绑定、Session 冻结目标和 `SCHEDULED` 夜间任务；`DISPATCHING` attempt 与历史 Run 保持原冻结目标。旧实例已无工作区时
-写入替换关系，使设置页健康统计忽略旧行但仍保留历史外键；仅凭 hostname/clientName 不允许接管。
+写入替换关系，使设置页健康统计忽略旧行但仍保留历史外键；仅凭 hostname/clientName 不允许接管。目录校验和根注册使用
+30 秒有界 RPC，并在数据库事务及用户注册锁之外完成；随后短事务重新核对 binding、持有 Java 和 generation 后才保存，
+避免用户行锁与同一 WSS 的 `FILE_RESPONSE` 形成循环等待。
 
 ## 受保护 Agent/Skill 运行
 

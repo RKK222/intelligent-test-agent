@@ -18,7 +18,9 @@
   Redis 或可信网关补齐。所有认证失败保持同一安全消息，不泄露 Key、统一认证号或账号状态。
 - `LocalClientConnectionWebSocketHandler` 仅允许持久化注册能力为 `SELF_UPDATE_V1` 的连接收发版本帧。终态
   `UPDATE_STATUS` 由协调器完成关系库幂等提交后才返回 `UPDATE_STATUS_ACK`；ACK 绑定原命令的实例、generation
-  和数据库实际终态，不能由一次 WebSocket 写入代替持久化确认；冲突终态返回错误且不发 ACK。
+  和数据库实际终态，不能由一次 WebSocket 写入代替持久化确认；冲突终态返回错误且不发 ACK。版本、更新和公共能力
+  数据库通知使用每连接 64 项有界串行队列，`FILE_RESPONSE/LIFECYCLE_RESULT` 等 requestId 回包直接完成 pending request；
+  Redis 心跳独立刷新 TTL，三者都不占住 WebSocket 入站 `concatMap`。
 - `LocalClientConnectionWebSocketHandler` 完成认证注册时由 runtime 在同一用户行锁内发布新 route，并通过
   `LocalClientConnectionRevoker` 删除其它实例 route/grant、跨 Java 关闭物理连接，保证每用户至多一个实时本地实例。
   `REGISTERED` 入队后异步调用 runtime，优先恢复全局最近项并逐个验真该用户全部历史本地工作区；单个目录校验失败只记录

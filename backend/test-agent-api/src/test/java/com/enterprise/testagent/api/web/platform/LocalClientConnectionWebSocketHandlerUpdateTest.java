@@ -3,6 +3,7 @@ package com.enterprise.testagent.api.web.platform;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -27,6 +28,8 @@ import java.time.Instant;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
@@ -78,8 +81,57 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
                         state))
                 .verifyComplete();
 
-        verify(updates).handleVersionCheck(userId, instanceId, 7, payload, "trace-update");
+        verify(updates, timeout(1000)).handleVersionCheck(userId, instanceId, 7, payload, "trace-update");
         verifyNoInteractions(tunnel);
+    }
+
+    @Test
+    void blockedVersionCheckDoesNotDelayFileOrLifecycleResponseAcceptance() throws Exception {
+        LocalClientPayloads.VersionCheck payload = new LocalClientPayloads.VersionCheck(
+                instanceId.value(), "20260820180000", "1", "1.18.4",
+                List.of("SELF_UPDATE_V1"), Instant.parse("2026-08-20T10:00:00Z"));
+        CountDownLatch versionCheckEntered = new CountDownLatch(1);
+        CountDownLatch releaseVersionCheck = new CountDownLatch(1);
+        doAnswer(invocation -> {
+                    versionCheckEntered.countDown();
+                    assertThat(releaseVersionCheck.await(3, TimeUnit.SECONDS)).isTrue();
+                    return null;
+                })
+                .when(updates).handleVersionCheck(userId, instanceId, 7, payload, "trace-update");
+
+        StepVerifier.create(handler.handleAuthenticated(
+                        frame(LocalClientFrameType.VERSION_CHECK, "req-blocked-version", payload),
+                        Sinks.many().unicast().onBackpressureBuffer(),
+                        Sinks.one(),
+                        state))
+                .verifyComplete();
+        assertThat(versionCheckEntered.await(1, TimeUnit.SECONDS)).isTrue();
+
+        LocalClientFrame fileResponse = frame(
+                LocalClientFrameType.FILE_RESPONSE,
+                "req-file-response",
+                new LocalClientPayloads.FileResponse(true, codec.payload(java.util.Map.of("ok", true))));
+        StepVerifier.create(handler.handleAuthenticated(
+                        fileResponse,
+                        Sinks.many().unicast().onBackpressureBuffer(),
+                        Sinks.one(),
+                        state))
+                .verifyComplete();
+
+        LocalClientFrame lifecycleResult = frame(
+                LocalClientFrameType.LIFECYCLE_RESULT,
+                "req-lifecycle-result",
+                java.util.Map.of("success", true));
+        StepVerifier.create(handler.handleAuthenticated(
+                        lifecycleResult,
+                        Sinks.many().unicast().onBackpressureBuffer(),
+                        Sinks.one(),
+                        state))
+                .verifyComplete();
+
+        verify(tunnel).accept(instanceId, fileResponse);
+        verify(tunnel).accept(instanceId, lifecycleResult);
+        releaseVersionCheck.countDown();
     }
 
     @Test
@@ -106,15 +158,17 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
         LocalClientPayloads.VersionCheck payload = new LocalClientPayloads.VersionCheck(
                 instanceId.value(), "0.1.0", null, "1.18.4", List.of(), Instant.now());
 
+        Sinks.One<String> closeSignal = Sinks.one();
         StepVerifier.create(handler.handleAuthenticated(
                         frame(LocalClientFrameType.VERSION_CHECK, "req-legacy-version", payload),
                         Sinks.many().unicast().onBackpressureBuffer(),
-                        Sinks.one(),
+                        closeSignal,
                         legacyState))
-                .expectErrorSatisfies(error -> assertThat(error)
-                        .isInstanceOf(PlatformException.class)
-                        .hasMessageContaining("SELF_UPDATE_V1"))
-                .verify();
+                .verifyComplete();
+
+        StepVerifier.create(closeSignal.asMono())
+                .expectNext("PROTOCOL_ERROR")
+                .verifyComplete();
 
         verifyNoInteractions(updates, tunnel);
     }
@@ -136,7 +190,6 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
                         state))
                 .verifyComplete();
 
-        verify(updates).handleStatus(userId, instanceId, 7, payload, "trace-update");
         StepVerifier.create(outbound.asFlux().take(1))
                 .assertNext(ackFrame -> {
                     assertThat(ackFrame.type()).isEqualTo(LocalClientFrameType.UPDATE_STATUS_ACK);
@@ -148,6 +201,7 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
                     assertThat(ack.status()).isEqualTo("SUCCEEDED");
                 })
                 .verifyComplete();
+        verify(updates).handleStatus(userId, instanceId, 7, payload, "trace-update");
     }
 
     @Test
@@ -210,18 +264,20 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
                 })
                 .when(updates).handleStatus(userId, instanceId, 7, payload, "trace-update");
 
+        Sinks.One<String> closeSignal = Sinks.one();
         StepVerifier.create(handler.handleAuthenticated(
                         frame(LocalClientFrameType.UPDATE_STATUS, "cmd-conflict", payload),
                         outbound,
-                        Sinks.one(),
+                        closeSignal,
                         state))
-                .expectErrorSatisfies(error -> assertThat(error)
-                        .isInstanceOf(PlatformException.class)
-                        .hasMessageContaining("冲突"))
-                .verify();
+                .verifyComplete();
 
-        assertThat(outbound.tryEmitComplete()).isEqualTo(Sinks.EmitResult.OK);
-        StepVerifier.create(outbound.asFlux()).verifyComplete();
+        StepVerifier.create(outbound.asFlux().take(1))
+                .assertNext(errorFrame -> assertThat(errorFrame.type()).isEqualTo(LocalClientFrameType.ERROR))
+                .verifyComplete();
+        StepVerifier.create(closeSignal.asMono())
+                .expectNext("PROTOCOL_ERROR")
+                .verifyComplete();
     }
 
     private LocalClientFrame frame(LocalClientFrameType type, String requestId, Object payload) {

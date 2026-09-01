@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -34,8 +34,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 class LocalWorkspaceApplicationServiceTest {
 
@@ -118,16 +120,16 @@ class LocalWorkspaceApplicationServiceTest {
         when(instances.findById(clientId)).thenReturn(Optional.of(instance));
         when(connections.find(clientId)).thenReturn(Optional.of(route));
         when(routes.isCurrent(backendProcessId)).thenReturn(true);
-        when(files.invoke(
-                eq(clientId.value()), eq(7L), eq(null), eq(null),
+        when(files.invokeRootRegistration(
+                eq(clientId.value()), eq(7L), eq(null),
                 eq("workspace.validateRoot"), any(), eq("trace_new")))
                 .thenReturn(registration);
         when(bindings.findByOwnerClientAndRootDigest(userId, clientId, "root-digest"))
                 .thenReturn(Optional.of(binding));
         when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(binding));
         when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
-        when(files.invoke(
-                eq(clientId.value()), eq(7L), eq(workspaceId.value()), eq(null),
+        when(files.invokeRootRegistration(
+                eq(clientId.value()), eq(7L), eq(workspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_new")))
                 .thenReturn(registration);
 
@@ -192,8 +194,8 @@ class LocalWorkspaceApplicationServiceTest {
         when(instances.findById(newClientId)).thenReturn(Optional.of(newInstance));
         when(connections.find(newClientId)).thenReturn(Optional.of(newRoute));
         when(routes.isCurrent(backendProcessId)).thenReturn(true);
-        when(files.invoke(
-                eq(newClientId.value()), eq(11L), eq(null), eq(null),
+        when(files.invokeRootRegistration(
+                eq(newClientId.value()), eq(11L), eq(null),
                 eq("workspace.validateRoot"), any(), eq("trace_reclaim")))
                 .thenReturn(registration);
         when(bindings.findByOwnerClientAndRootDigest(userId, newClientId, "same-root-digest"))
@@ -201,8 +203,8 @@ class LocalWorkspaceApplicationServiceTest {
         when(bindings.findByOwnerRootIdentity(userId, "same-root-digest", "same-file-system"))
                 .thenReturn(List.of(oldBinding));
         when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
-        when(files.invoke(
-                eq(newClientId.value()), eq(11L), eq(workspaceId.value()), eq(null),
+        when(files.invokeRootRegistration(
+                eq(newClientId.value()), eq(11L), eq(workspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_reclaim")))
                 .thenReturn(registration);
         when(bindings.rebind(any(LocalClientWorkspaceBinding.class), eq(oldClientId))).thenReturn(true);
@@ -274,6 +276,8 @@ class LocalWorkspaceApplicationServiceTest {
         when(bindings.findByWorkspaceId(workspaceId)).thenReturn(Optional.of(oldBinding));
         when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
         when(newInstance.clientInstanceId()).thenReturn(newClientId);
+        when(newInstance.userId()).thenReturn(userId);
+        when(instances.findById(newClientId)).thenReturn(Optional.of(newInstance));
         when(instances.findByUserId(userId)).thenReturn(List.of(newInstance));
         when(connections.find(oldClientId)).thenReturn(Optional.empty());
         when(connections.find(newClientId)).thenReturn(Optional.of(newRoute));
@@ -282,12 +286,12 @@ class LocalWorkspaceApplicationServiceTest {
         when(newRoute.connectionGeneration()).thenReturn(21L);
         when(newRoute.backendProcessId()).thenReturn(backendProcessId);
         when(routes.isCurrent(backendProcessId)).thenReturn(true);
-        when(files.invoke(
-                eq(newClientId.value()), eq(21L), eq(null), eq(null),
+        when(files.invokeRootRegistration(
+                eq(newClientId.value()), eq(21L), eq(null),
                 eq("workspace.validateRoot"), any(), eq("trace_activate_history")))
                 .thenReturn(registration);
-        when(files.invoke(
-                eq(newClientId.value()), eq(21L), eq(workspaceId.value()), eq(null),
+        when(files.invokeRootRegistration(
+                eq(newClientId.value()), eq(21L), eq(workspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_activate_history")))
                 .thenReturn(registration);
         when(bindings.rebind(any(LocalClientWorkspaceBinding.class), eq(oldClientId))).thenReturn(true);
@@ -350,12 +354,12 @@ class LocalWorkspaceApplicationServiceTest {
         when(route.backendProcessId()).thenReturn(backendProcessId);
         when(routes.isCurrent(backendProcessId)).thenReturn(true);
         when(workspaces.findById(workspaceId)).thenReturn(Optional.of(workspace));
-        when(files.invoke(
-                eq(clientId.value()), eq(31L), eq(null), eq(null),
+        when(files.invokeRootRegistration(
+                eq(clientId.value()), eq(31L), eq(null),
                 eq("workspace.validateRoot"), any(), eq("trace_reconnect")))
                 .thenReturn(registration);
-        when(files.invoke(
-                eq(clientId.value()), eq(31L), eq(workspaceId.value()), eq(null),
+        when(files.invokeRootRegistration(
+                eq(clientId.value()), eq(31L), eq(workspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_reconnect")))
                 .thenReturn(registration);
 
@@ -366,8 +370,8 @@ class LocalWorkspaceApplicationServiceTest {
         assertThat(restored.orElseThrow().workspaceId()).isEqualTo(workspaceId.value());
         assertThat(restored.orElseThrow().online()).isTrue();
         verify(bindings).lockRegistration(userId, clientId);
-        verify(files).invoke(
-                eq(clientId.value()), eq(31L), eq(workspaceId.value()), eq(null),
+        verify(files).invokeRootRegistration(
+                eq(clientId.value()), eq(31L), eq(workspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_reconnect"));
         verify(recentWorkspaces, never()).savePreference(any(UserWorkspacePreference.class));
     }
@@ -385,6 +389,22 @@ class LocalWorkspaceApplicationServiceTest {
         BackendJavaRouteResolver routes = mock(BackendJavaRouteResolver.class);
         ObjectMapper objectMapper = new ObjectMapper();
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        TransactionStatus transactionStatus = mock(TransactionStatus.class);
+        AtomicBoolean transactionActive = new AtomicBoolean();
+        when(transactionManager.getTransaction(any())).thenAnswer(invocation -> {
+            assertThat(transactionActive.compareAndSet(false, true)).isTrue();
+            return transactionStatus;
+        });
+        doAnswer(invocation -> {
+                    assertThat(transactionActive.compareAndSet(true, false)).isTrue();
+                    return null;
+                })
+                .when(transactionManager).commit(transactionStatus);
+        doAnswer(invocation -> {
+                    transactionActive.set(false);
+                    return null;
+                })
+                .when(transactionManager).rollback(transactionStatus);
         LocalWorkspaceApplicationService service = new LocalWorkspaceApplicationService(
                 workspaces, recentWorkspaces, bindings, instances, connections, files,
                 sessionTargets, nightTasks, routes, objectMapper, transactionManager);
@@ -432,20 +452,34 @@ class LocalWorkspaceApplicationServiceTest {
         when(currentRoute.backendProcessId()).thenReturn(backendProcessId);
         when(routes.isCurrent(backendProcessId)).thenReturn(true);
         when(workspaces.findById(availableWorkspaceId)).thenReturn(Optional.of(availableWorkspace));
-        when(files.invoke(
-                eq(currentClientId.value()), eq(41L), eq(null), eq(null),
+        when(files.invokeRootRegistration(
+                eq(currentClientId.value()), eq(41L), eq(null),
                 eq("workspace.validateRoot"), argThat(node ->
                         "/home/user/available".equals(node.path("absolutePath").asText())), eq("trace_restore_all")))
-                .thenReturn(registration);
-        when(files.invoke(
-                eq(currentClientId.value()), eq(41L), eq(availableWorkspaceId.value()), eq(null),
+                .thenAnswer(invocation -> {
+                    assertThat(transactionActive).isFalse();
+                    return registration;
+                });
+        when(files.invokeRootRegistration(
+                eq(currentClientId.value()), eq(41L), eq(availableWorkspaceId.value()),
                 eq("workspace.registerRoot"), any(), eq("trace_restore_all")))
-                .thenReturn(registration);
-        when(files.invoke(
-                eq(currentClientId.value()), eq(41L), eq(null), eq(null),
+                .thenAnswer(invocation -> {
+                    assertThat(transactionActive).isFalse();
+                    return registration;
+                });
+        when(files.invokeRootRegistration(
+                eq(currentClientId.value()), eq(41L), eq(null),
                 eq("workspace.validateRoot"), argThat(node ->
                         "/home/user/missing".equals(node.path("absolutePath").asText())), eq("trace_restore_all")))
-                .thenThrow(new IllegalStateException("directory missing"));
+                .thenAnswer(invocation -> {
+                    assertThat(transactionActive).isFalse();
+                    throw new IllegalStateException("directory missing");
+                });
+        doAnswer(invocation -> {
+                    assertThat(transactionActive).isTrue();
+                    return null;
+                })
+                .when(bindings).lockRegistration(userId, currentClientId);
         when(bindings.rebind(any(LocalClientWorkspaceBinding.class), eq(historicalClientId))).thenReturn(true);
         LocalWorkspaceApplicationService.ReconnectRestoreResult result = service.restoreAvailableOnReconnect(
                 userId, currentClientId, 41L, "trace_restore_all");
@@ -456,7 +490,8 @@ class LocalWorkspaceApplicationServiceTest {
                         && binding.clientInstanceId().equals(currentClientId)), eq(historicalClientId));
         verify(bindings, never()).rebind(argThat(binding ->
                 binding.workspaceId().equals(missingWorkspaceId)), eq(historicalClientId));
-        verify(transactionManager).commit(isNull());
-        verify(transactionManager).rollback(isNull());
+        verify(transactionManager).commit(transactionStatus);
+        verify(transactionManager, never()).rollback(any());
+        assertThat(transactionActive).isFalse();
     }
 }

@@ -367,6 +367,9 @@ Get-Content "$env:LOCALAPPDATA\TestAgent\local-opencode-client\state\logs\client
 当前唯一在线客户端上保留原 workspaceId 接管每个有效绑定；某个目录已删除或身份变化时只跳过该项，不影响其它目录恢复。
 目录已经移动时再从客户端托盘重新选择原目录。
 旧实例在线、身份不一致、同目录存在多个历史 Workspace 或该用户出现多个在线 route 时必须先停止并人工消除歧义。
+恢复链路的 `workspace.validateRoot/registerRoot` 最长等待 30 秒，且等待期间不持有数据库用户行锁；版本检查、公共能力通知
+在独立有界串行队列处理，Redis 心跳独立刷新，均不能阻塞同连接的 `FILE_RESPONSE/LIFECYCLE_RESULT`。若仍观察到数据库会话长期同时等待
+用户行锁和客户端 RPC，应判定后端尚未升级到本修复版本，不能把反复重连或终止事务作为正式运行方案。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认有且只有一个实例，且
 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。新实例完成认证后，后台会在同一用户

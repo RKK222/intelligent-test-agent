@@ -122,13 +122,18 @@ HTTP 代理。
 目录名作为默认工作区名称，并通过已认证反向连接发送 `WORKSPACE_REGISTER`。后台从连接状态取得 owner、实例 ID
 和 generation，异步调用既有 `LocalWorkspaceApplicationService`；该服务仍通过 `FILE_REQUEST` 完成真实路径、
 权限、符号链接和文件系统身份校验与根注册，再事务性持久化。WSS 入站处理必须先释放当前 `concatMap`，避免等待
-根校验时阻塞同一连接的 `FILE_RESPONSE`。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
+根校验时阻塞同一连接的 `FILE_RESPONSE`。`VERSION_CHECK`、更新状态和公共能力通知等数据库型帧进入每连接
+独立的 64 项有界串行队列，保持通知顺序但不占用隧道响应入站通道；`FILE_RESPONSE`、`LIFECYCLE_RESULT` 和其它
+requestId 关联回包仍由当前入站流立即交给 pending request registry，Redis 心跳也独立调度以免被数据库通知拖到 TTL
+过期。网页仅保留 `directory.list` 逐层浏览和 HTTP 注册兜底，单击目录表示
 选中、双击才进入下一级。注册按用户行串行化；同一用户、客户端实例和 root digest 命中时复用既有 Workspace ID，
 并重新下发 `workspace.registerRoot` 恢复客户端状态，不再创建可能触发唯一约束的临时 Workspace。若重装导致
 `clientInstanceId` 变化时，用户从工作台选择历史工作区即可触发恢复：后台把已保存的规范路径交给当前唯一在线客户端
 重新校验，只有旧实例离线且客户端返回的
 `rootDigest + fileSystemIdentity` 与唯一历史绑定完全一致时才保留 workspaceId 并切换绑定；多个候选或旧实例在线均
-失败关闭。用户从托盘重新选择同一目录仍作为目录位置变化时的人工兜底。接管事务同步迁移该工作区的 Session 冻结目标和尚未投递的夜间任务；旧实例的全部工作区都接管完成后写入
+失败关闭。自动恢复和手工激活先在事务外用 30 秒有界 `workspace.validateRoot/registerRoot` 完成客户端 RPC，再进入
+短事务取得用户注册锁、复核 binding 与 connection generation 并落库；24 小时超时只保留给大文件传输，数据库锁内
+不得等待客户端回包。用户从托盘重新选择同一目录仍作为目录位置变化时的人工兜底。接管事务同步迁移该工作区的 Session 冻结目标和尚未投递的夜间任务；旧实例的全部工作区都接管完成后写入
 替换关系，但保留旧实例、Run 和终态任务历史外键。用户活动实例列表本身只消费实时连接，因此旧实例离线后即不展示；
 旧实例若真实重新认证则清除替换标记并重新进入活动列表，其目录仍需逐个重新校验，不能仅凭客户端名称自动抢占。
 

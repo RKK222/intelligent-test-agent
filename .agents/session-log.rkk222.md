@@ -15529,3 +15529,29 @@
 - U 盘传输包为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260901162846_arm64.tar.gz{,.sha256}`，外层 SHA-256 为 `c83f4eadac5a9fbc229734c153d1319ec67d122ad69530a25481e22d877c6f53`；旧 `0826` 正式 release 和 `20260828094319` 候选均未覆盖。
 - 没有修改 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK、OpenCode 只读源码、企业平台状态或企业权威公共 Git，也没有新增部署节点或合并回 `release`。包内公共能力仍来自隔离候选提交，只可用于单机测试。
 - 修复包仍需在当前企业麒麟机器重新完成托盘自检和对话 Tool 全链路复测，当前不能把浏览器操作能力表述为企业真机验收通过。
+
+## 2026-09-01 - 修复本地客户端重连时工作区恢复循环等待
+
+### Why
+
+- 企业现场确认断线并非网络丢包：客户端注册后发送 `VERSION_CHECK`，同时后端自动恢复工作区并在持有用户数据库行锁时等待 `FILE_RESPONSE`；同一 WebSocket 的串行入站队列先处理版本通知，版本通知等待该用户锁，导致后续 `FILE_RESPONSE/LIFECYCLE_RESULT` 无法进入 pending request，最终 30 秒后 `local_client_auto_start_failed`。
+- 终止数据库事务只能临时释放积压帧，反复重连会重新触发同一锁等待，必须同时拆开工作区恢复事务和 WebSocket 通知调度。
+
+### What
+
+- 自动恢复和手工激活工作区先在事务外执行 `workspace.validateRoot/registerRoot`，完成客户端 RPC 后再进入短事务，加用户注册锁并重新校验 binding、持有 Java、connection generation 和历史实例在线状态；短事务只执行 CAS 绑定、Session/夜间任务目标迁移及投影保存，不再等待客户端回包。
+- `VERSION_CHECK`、更新回执和公共能力数据库通知进入每连接 64 项有界后台串行队列；`FILE_RESPONSE`、`LIFECYCLE_RESULT`、HTTP/流响应仍由 WebSocket 入站流立即关联 pending request，Redis 心跳独立刷新 TTL。后台通知失败或队列溢出继续发送安全 `ERROR` 并关闭连接。
+- 根目录校验/注册新增专用入口，固定使用协议 30 秒超时；24 小时超时只保留给普通大文件传输。同步 API、runtime、事件协议、架构和企业部署文档，并新增循环等待、事务边界和超时回归测试。
+
+### How
+
+- JDK 25 下运行 runtime/API 定向测试：`LocalWorkspaceApplicationServiceTest`、`LocalClientWorkspaceFileGatewayTest` 和全部 `LocalClientConnectionWebSocketHandler*Test` 共 20 项通过。
+- `mvn clean package -DskipTests` 完整 26 模块构建通过；随后从当前 worktree 使用主仓库现有 `.env.test` 和 `test` profile 执行 `./restart-dev-services.sh`，没有修改环境文件。
+- 真实运行验收中后端 health/readiness 均为 `UP`，前端 `127.0.0.1:3000` 返回 200，登录 CORS 预检正确返回允许源，manager WebSocket 已连接。启动初期共享 Redis 曾出现一次 1 秒超时并导致 manager 自动重连，随后恢复且未持续出现；工作区测试数据缺目录的既有告警不属于本次变更。
+- 提交前执行 `git diff --check`，并回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次文件冲突或会被覆盖的并行成果。
+
+### Result
+
+- Mac 侧代码、回归、完整构建和真实启动已验证；数据库通知无法再占住隧道响应入口，工作区恢复也不再持锁等待客户端 RPC，已覆盖现场确认的循环等待链路。
+- 本次修改的是承载本地客户端连接的 Java 后端，不需要重新安装或重新绑定现有麒麟客户端；企业环境仍需升级对应后端节点后，以原客户端重新打开原工作区并完成浏览器 Tool 全链路复测，当前未部署企业环境，不能表述为企业验收通过。
+- 不新增部署节点，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置、generated SDK 或 OpenCode 只读源码；WebSocket 帧结构保持兼容。改动继续保留在 `codex/local-browser-360`，未合并回 `release`。
