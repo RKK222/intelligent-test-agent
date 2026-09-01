@@ -54,8 +54,10 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - 新客户端声明 `LOCAL_BROWSER_V1`。该能力只由本地 OpenCode Tool 使用，不新增平台 HTTP、RunEvent、数据库或文件代理，
   也不开放给服务器受保护 Agent。客户端从麒麟常见安装路径和 360/Qihoo desktop entry 自动发现浏览器；发现失败时用户可在
   托盘“浏览器设置与自检”中选择绝对可执行文件，配置以当前用户私有权限保存。
-- `LocalBrowserSupervisor` 始终使用独立持久 profile、可见窗口、随机 loopback CDP 端口和精确 PID/启动时间/命令身份监管；
-  不读取或接管用户日常 profile。CDP 仅在协议 `1.3`、Chromium `108..149` 且调试地址为 loopback 时通过自检。
+- `LocalBrowserSupervisor` 始终使用独立持久 profile、可见窗口、随机 loopback CDP 端口和精确 PID/权威启动时间身份监管；
+  兼容企业 360 启动器以同一 PID `exec` 为真实内核进程时命令路径从 `browser360ent-cn` 切换为 `browser360ent`，
+  不把会变化的命令路径作为 PID fencing。客户端不读取或接管用户日常 profile；CDP 仅在协议 `1.3`、
+  Chromium `108..149` 且调试地址为 loopback 时通过自检。
   浏览器 stdout/stderr 直接丢弃，避免页面 URL 或站点诊断信息进入客户端日志。
 - `LocalBrowserRelay` 只绑定 `127.0.0.1`，使用每次客户端启动随机生成的 bearer token；OpenCode 子进程只收到 relay URL/token，
   不直接收到 Cookie、profile 路径或页面数据。停止 OpenCode、退出客户端或显式关闭浏览器时同步停止受管浏览器。

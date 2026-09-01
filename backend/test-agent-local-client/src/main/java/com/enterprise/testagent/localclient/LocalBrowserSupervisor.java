@@ -66,7 +66,7 @@ final class LocalBrowserSupervisor implements AutoCloseable {
             Instant startedAt = process.info().startInstant()
                     .orElseThrow(() -> new IllegalStateException("浏览器进程缺少启动时间"));
             ManagedProcess pending = new ManagedProcess(
-                    process.toHandle(), process.pid(), startedAt, executable, profile, null);
+                    process.toHandle(), process.pid(), startedAt, profile, null);
             managed = pending;
             CdpEndpoint endpoint = awaitEndpoint(pending);
             managed = pending.withEndpoint(endpoint);
@@ -196,13 +196,19 @@ final class LocalBrowserSupervisor implements AutoCloseable {
     }
 
     private boolean identityMatches(ManagedProcess current) {
-        if (!current.process().isAlive()) {
+        return sameProcessIdentity(current.process(), current.pid(), current.startedAt());
+    }
+
+    /**
+     * 浏览器启动器允许通过 exec 原地切换为真实内核进程；此时 PID 和权威启动时间不变，但 command 会从
+     * browser360ent-cn 变为 browser360ent。进程身份因此只使用不可跨 PID 复用的 PID + 启动时间，CDP
+     * 端点及版本仍由 status 单独校验，不能把不稳定的启动器路径当作身份字段。
+     */
+    static boolean sameProcessIdentity(ProcessHandle process, long expectedPid, Instant expectedStartedAt) {
+        if (!process.isAlive() || process.pid() != expectedPid) {
             return false;
         }
-        ProcessHandle.Info info = current.process().info();
-        return info.startInstant().map(current.startedAt()::equals).orElse(false)
-                && info.command().map(Path::of).map(Path::toAbsolutePath).map(Path::normalize)
-                        .map(current.executable()::equals).orElse(false);
+        return process.info().startInstant().map(expectedStartedAt::equals).orElse(false);
     }
 
     private void cleanupFailedStart() {
@@ -244,11 +250,10 @@ final class LocalBrowserSupervisor implements AutoCloseable {
             ProcessHandle process,
             long pid,
             Instant startedAt,
-            Path executable,
             Path profile,
             CdpEndpoint endpoint) {
         ManagedProcess withEndpoint(CdpEndpoint value) {
-            return new ManagedProcess(process, pid, startedAt, executable, profile, value);
+            return new ManagedProcess(process, pid, startedAt, profile, value);
         }
     }
 }

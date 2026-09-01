@@ -15500,3 +15500,27 @@
 
 - Mac 侧单机测试候选包已构建并完成离线完整性、签名、安装器模拟和回归验证；未修改 `backend.env`、`docker.env`、Nginx、数据库、worker、manager、企业公共 Git 或企业平台状态。
 - Mac 无法运行麒麟 ARM64 桌面程序；真实企业 360 启动、CDP 1.3、逐 origin 授权、高风险确认、四 Session、文件产物和退出回收仍需由专用麒麟 ARM64 测试账号完成，当前只能表述为“Mac 构建验证通过”，不能表述为企业验收通过。
+
+## 2026-09-01 - 兼容企业 360 启动器的同 PID 内核切换
+
+### Why
+
+- 企业麒麟 ARM64 真机已证明 `browser360ent-cn` 能用动态 loopback 端口提供 CDP `1.3`，内核为 Chromium `108.0.5359.95`，但客户端自检仍返回 `STOPPED`。
+- 现场进一步证明启动器保留同一 PID 和启动时间，却通过 `exec` 把进程命令从 `/opt/browser360ent/browser360ent-cn` 切换为 `/opt/browser360ent/browser360ent`；原监管器把 command 路径当作稳定身份字段，因而误清理受管状态并输出不兼容提示。
+
+### What
+
+- 本地浏览器进程 fencing 改为精确校验 `ProcessHandle` 的存活状态、PID 和权威 `startInstant`；不再把 Linux `exec` 后会变化的 command 路径作为身份字段。
+- 浏览器能力仍独立校验专用 profile 的 `DevToolsActivePort`、loopback WebSocket、CDP `1.3` 和 Chromium `108..149`，没有放宽可控制浏览器范围。
+- 新增回归测试覆盖同 PID/同启动时间的启动器切换，以及退出、PID 复用和启动时间变化的拒绝；同步模块 README 与企业客户端部署说明。
+
+### How
+
+- `mvn -pl test-agent-local-client -am -Dtest=LocalBrowserSupervisorTest,LocalBrowserSettingsTest,LocalBrowserRelayTest -Dsurefire.failIfNoSpecifiedTests=false test`：7/7 通过。
+- `mvn -pl test-agent-local-client -am test`：common 110、protocol 11、local client 117，合计 237 passed / 1 个既有真实 OpenCode 条件跳过。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次四个业务/文档文件冲突的未完成事项。
+
+### Result
+
+- Mac 自动化已验证同 PID `exec` 回归路径；没有修改 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或 OpenCode 只读源码，也没有新增部署节点或合并回 `release`。
+- 修复后的新不可变麒麟候选包及企业 360 对话全链路复测仍待完成，当前不能把浏览器操作能力表述为企业真机验收通过。
