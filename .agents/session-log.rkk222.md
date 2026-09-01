@@ -16398,3 +16398,32 @@
 - Mac 侧代码、回归、完整构建和真实启动已验证；数据库通知无法再占住隧道响应入口，工作区恢复也不再持锁等待客户端 RPC，已覆盖现场确认的循环等待链路。
 - 本次修改的是承载本地客户端连接的 Java 后端，不需要重新安装或重新绑定现有麒麟客户端；企业环境仍需升级对应后端节点后，以原客户端重新打开原工作区并完成浏览器 Tool 全链路复测，当前未部署企业环境，不能表述为企业验收通过。
 - 不新增部署节点，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置、generated SDK 或 OpenCode 只读源码；WebSocket 帧结构保持兼容。改动继续保留在 `codex/local-browser-360`，未合并回 `release`。
+
+## 2026-09-01 - 将 360 浏览器能力合入 release 并重打企业增量包
+
+### Why
+
+- 用户明确要求把 `codex/local-browser-360` 合入当前本地 `release` 后重新打企业包；现场最后确认部署基线仍为 `363e1b6babe291018800e76e0cb2c1034cfc230f`，外层包 SHA-256 为 `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。
+- 360 分支同时修改麒麟 ARM64 客户端、服务端重连恢复和 worker Node 运行时，因此客户端与 worker 必须作为不可拆分组件重新交付；toolbox、CK、Mem0、BGE、pgvector、`.4` 灰度 models、LobeHub、独立 memory 包和 trace 数据均不应重复打包。
+
+### What
+
+- 将 `codex/local-browser-360@5cc79210f651037942551fc098133f52dd22d944` 的 6 个提交通过 merge commit `d6bc22e89ac5a9c7d567c366560d494a313e2a6b` 合入本地 `release`，只解决 `.agents/session-log.rkk222.md` 内容冲突并保留双方记录；未合并 `dev`，未新增部署节点。
+- 发布说明同步记录 360 可见浏览器控制、同 PID `exec` 识别、工作区重连死锁修复、worker `playwright-core@1.61.0`、客户端正式版本 `20260901203844`、企业域名和公共配置 Git 后续发布闸门。
+- 内层组件清单为 worker `included`、本地客户端 `included`、toolbox `reuse`、LobeHub/memory `disabled`；worker 部署脚本保持 `--privileged`，两台后台需重建 worker/manager，CK/Mem0/BGE/pgvector 不重启、不重部署、不重同步。
+- 客户端继续使用固定组织 RSA 密钥和企业域名 `http://mimo.sdc.cs.icbc:9996`，签名公共能力基线仍为企业已发布 commit `81605f245d1512e1ab0dd73812391f6da7d008b5`。`deploy/internal/local_browser.ts` 只作为受控模板交付，未冒充企业已发布公共 Tool；正式使用前仍须提交并发布到企业公共配置 Git。
+
+### How
+
+- 合并后后端 reactor 测试 2999 passed、0 failed、0 errors、1 个既有条件跳过；前端全量 Vitest 158/158 文件、2269 passed、1 skipped，生产构建通过；OpenCode Tool 运行时依赖门禁、增量组件回归、双后台完整包回归和本地客户端离线包回归均通过。
+- 第一次客户端构建误把上一正式客户端归一化后的 JDK 制品 SHA 当作上游源码包 SHA，下载后被 SHA 门禁正确阻断；随后先用组织公钥验证上一正式客户端 `20260827222702` 的 manifest/JDK/OpenCode 三项签名，再将其固定制品作为离线输入重新归一化，未放宽或替换哈希门禁。
+- 默认并发 Docker build 在 5 GiB Docker Desktop 内存下执行 amd64 OpenCode 自检时 OOM 并导致 daemon 退出；重启 Docker 后使用临时 `mimoagent-serial` builder 将 BuildKit `max-parallelism` 固定为 1，保留 OpenCode/Codex/Python/白盒自检并成功构建，未修改 Dockerfile 或跳过校验。
+- 最终 worker 白盒验证通过 OpenCode `1.18.4`、Codex `0.145.0`、Python `3.13.14`、bwrap 摘要、MCP 路由和回复契约；构建机为 arm64，原生 amd64 sandbox E2E 按既有脚本留给 `.4/.114` 现场执行。
+- 所有 persistence/XXL/ClickHouse Flyway 资源由发布脚本逐项核对源码和最终 JAR 字节；没有新增 migration，已部署 `V20260825091459` SHA 保持 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`，`V20260827183737` SHA 保持 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。
+- 独立制品审计通过外层/内层 CRC、嵌套 ZIP 一致性、三节点配置、TCDS/AAM/PostgreSQL/ClickHouse/Mem0 地址、客户端单一版本与域名、组织签名、`playwright-core` 离线依赖、`--privileged`、未发布 Tool 隔离和排除项；后端内嵌 RSA 私钥 SHA 与上一已部署包同为 `fc822548f39de102b42a5fed69bba3ef1b8945a1a71afb0535295d7de5f51799`。
+
+### Result
+
+- 内外层包均已生成，外层大小约 925 MiB；固定交付路径 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}` 已覆盖并复验 `OK`。最终摘要在把本条会话日志重新封入制品后写入校验文件和后续 Git 追溯记录，避免在归档内部自引用一个会因日志内容变化而失效的摘要。
+- 包体增大来自本轮真实变化的完整 worker 镜像和不可变麒麟客户端离线链，不包含未变化的 toolbox 或独立数据面；企业服务器尚未部署，360 真机、原生 amd64 sandbox、公共 Tool 发布和全业务验收仍是现场验证项。
+- 本次变更涉及本地客户端 WebSocket 内部调度与本地浏览器安全边界，但不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、部署节点、generated SDK 或 OpenCode 只读源码；未修改 `.env*`，未推送远程。
