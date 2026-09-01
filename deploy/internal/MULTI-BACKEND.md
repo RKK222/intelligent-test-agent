@@ -31,7 +31,7 @@
 - worker runtime 因增加锁定的 `playwright-core@1.61.0` 和 `local_browser.ts` 支持而为 `included`；两台后台会替换
   programs 和 worker 镜像，并按企业 Docker 基线以 `--privileged` 重建 worker/manager 容器。toolbox 仍为 `reuse`。
   `.4` models 灰度不由标准包覆盖；CK/Mem0/BGE/pgvector 不重新部署或同步。
-- 本地客户端为 `included`，目标版本 `20260901201912`；`.2` 会发布组织密钥签名的完整麒麟 ARM64 用户包，现有客户端
+- 本地客户端为 `included`，目标版本 `20260901203844`；`.2` 会发布组织密钥签名的完整麒麟 ARM64 用户包，现有客户端
   `20260827222702` 需按版本管理策略或用户从前端重新下载升级。客户端仍使用企业入口
   `http://mimo.sdc.cs.icbc:9996`，JDK/OpenCode 和公共能力基线复用既有受控输入。
 - `deploy/internal/local_browser.ts` 只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置。正式可用前仍须由管理员
