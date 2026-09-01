@@ -183,6 +183,33 @@ describe("FigmaFileExplorer", () => {
     }
   });
 
+  it("returns to the expanded file tree and scrolls the active row when revealing an opened file", async () => {
+    const wrapper = shallowMount(FigmaFileExplorer, {
+      props: {
+        workspaceId: "wrk_personal",
+        activePath: "src/example.ts",
+        entriesByDirectory: { "": [] },
+        expandedDirectories: new Set<string>(),
+        changedFiles: []
+      }
+    });
+
+    await wrapper.get('button[aria-label="搜索"]').trigger("click");
+    await wrapper.get(".figma-fe-section-header-trigger").trigger("click");
+
+    const activeRow = document.createElement("div");
+    activeRow.className = "ta-file-tree-row is-active";
+    const scrollIntoView = vi.fn();
+    activeRow.scrollIntoView = scrollIntoView;
+    wrapper.get(".figma-fe-section-workspace").element.appendChild(activeRow);
+
+    await (wrapper.vm as unknown as { revealWorkspaceFile: () => Promise<void> }).revealWorkspaceFile();
+
+    expect(wrapper.get('button[aria-label="文件树"]').classes()).toContain("is-active");
+    expect(wrapper.get(".figma-fe-section-workspace").classes()).toContain("is-expanded");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
+  });
+
   it("keeps Agents collapsed at the bottom when entering the file view", () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {

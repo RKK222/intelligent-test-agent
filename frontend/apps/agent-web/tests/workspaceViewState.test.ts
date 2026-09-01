@@ -105,12 +105,20 @@ describe("workspace view state", () => {
     })).toBeUndefined();
   });
 
-  it("routes reference tab location through stable node expansion before scrolling", () => {
+  it("automatically reveals the active workspace file through stable scoped tree location", () => {
     expect(agentWorkbenchSource).toMatch(
-      /if \(isReferenceFilePath\(path\)\) \{\s*await expandWorkspaceViewNodeToFile\(path\);\s*\} else \{\s*await expandPathToFile\(path\);/
+      /watch\(activePath, \(path\) => \{[\s\S]*void revealActiveWorkspaceFile\(path\);[\s\S]*\}\);/
+    );
+    expect(agentWorkbenchSource).toMatch(
+      /async function revealActiveWorkspaceFile\(path\?: string\)[\s\S]*if \(!path \|\| isAgentFilePath\(path\)\) return;[\s\S]*if \(isReferenceFilePath\(path\)\) \{\s*await expandWorkspaceViewNodeToFile\(path\);\s*\} else \{\s*await expandPathToFile\(path\);/
     );
     expect(agentWorkbenchSource).toMatch(
       /async function expandWorkspaceViewNodeToFile\(tabPath: string\)[\s\S]*workspaceViewAncestorDirectoryIds\(nodeId, entriesByDirectory\.value\)/
+    );
+    expect(agentWorkbenchSource).toContain("fileExplorerRef.value?.revealWorkspaceFile()");
+    expect(agentWorkbenchSource).toContain("sequence !== activeFileRevealSequence || activePath.value !== path");
+    expect(agentWorkbenchSource).not.toContain(
+      'document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active")'
     );
   });
 

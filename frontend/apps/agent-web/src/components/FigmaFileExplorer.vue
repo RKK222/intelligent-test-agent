@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type {
   AppSourceRepositorySummary,
@@ -192,6 +192,7 @@ let dragStartHeight = 0;
 const iframeDialogVisible = ref(false);
 const iframeRef = ref<HTMLIFrameElement | null>(null);
 const iframeRequestId = ref("");
+const rootRef = ref<HTMLElement | null>(null);
 const fileExplorerRef = ref<InstanceType<typeof FileExplorer> | null>(null);
 const workspaceMoreMenuRef = ref<HTMLDetailsElement | null>(null);
 
@@ -389,6 +390,22 @@ function refreshAll() {
   refreshChanges();
 }
 
+/** 仅在当前文件树实例内滚动活动行，避免同页其它文件树被误定位。 */
+function scrollToActiveWorkspaceFile() {
+  const activeRow = rootRef.value?.querySelector<HTMLElement>(
+    ".figma-fe-section-workspace .ta-file-tree-row.is-active"
+  );
+  activeRow?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+/** 编辑器活动文件变化时回到项目文件树，并确保工作空间区域展开可见。 */
+async function revealWorkspaceFile() {
+  tab.value = "explorer";
+  workspaceExpanded.value = true;
+  await nextTick();
+  scrollToActiveWorkspaceFile();
+}
+
 function handleChangesRefreshed(payload?: {
   paths?: string[];
   reloadOpenFiles?: boolean;
@@ -412,12 +429,14 @@ watch(
 defineExpose({
   refreshAll,
   refreshChanges,
-  completeRequirementImportRefresh
+  completeRequirementImportRefresh,
+  revealWorkspaceFile,
+  scrollToActiveWorkspaceFile
 });
 </script>
 
 <template>
-  <div class="figma-file-explorer">
+  <div ref="rootRef" class="figma-file-explorer">
     <!-- Tabbar is at the very top of the entire sidebar pane -->
     <div class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
       <button

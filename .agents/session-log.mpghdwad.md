@@ -441,3 +441,25 @@
 
 - `createGraphCase` 成功且缓存接口返回 `jumpUrl` 后才直接打开目标页；成功路径不再出现空白 tab，任一前置调用失败也不会创建新标签页。
 - 使用 `release`，不新增部署节点；不变更 HTTP API 路径/DTO、RunEvent/SSE、数据库、Flyway、后端、安全、环境配置、generated SDK 或 OpenCode 只读源码，未调用真实 TCDS。
+
+## 2026-09-01 - 重新启用 Workspace 活动文件自动定位
+
+### Why
+
+- 用户在整体回退后明确要求重新提交首轮功能，但暂不处理 Agent 配置树，只保证 Workspace 项目文件树能跟随当前打开文件。
+
+### What
+
+- 重新启用编辑器活动 Workspace/Reference 文件变化时的自动定位：切回文件视图、展开工作空间与祖先目录，并在当前文件树实例内高亮滚动目标文件。
+- 快速切换标签时继续使用定位代次校验，阻止旧异步请求覆盖新活动文件；Agent 标签由 `isAgentFilePath` 明确跳过，不新增 Agent 树展开或定位逻辑。
+- 恢复文件树与工作台回归测试，并在保留当前 `release` 后续文档内容的前提下同步 agent-web README 和前端规范。
+
+### How
+
+- 定向 Vitest 运行 `figma-file-explorer.test.ts`、`workspaceViewState.test.ts`、`FigmaEditorArea.test.ts`，3 个文件、45 项全部通过。
+- `@test-agent/agent-web` typecheck 与 lint 通过；执行任务文件差异检查，并用隔离索引避免提交现有 TCDS、生成声明、启动脚本和此前已暂存的 Windows 本地启动记录。
+
+### Result
+
+- 打开或切换 Workspace/Reference 文件后，左侧项目文件树会自动展开并选中当前文件；Agent 文件仍不触发 Workspace 文件树定位，也未实现 Agent 配置树自动展开。
+- 使用 `release`，不新增部署节点；不涉及 HTTP API、RunEvent/SSE、WebSocket 契约、数据库、Flyway、后端、部署、安全、环境配置、generated SDK 或 OpenCode 只读源码。

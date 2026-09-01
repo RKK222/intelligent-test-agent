@@ -1637,6 +1637,7 @@ const activePath = computed(() => workbench.activePath);
 const activeWorkspaceViewNodeId = computed(() =>
   workbench.activePath ? workspaceViewNodeIdByTabPath.get(workbench.activePath) ?? workbench.activePath : undefined
 );
+let activeFileRevealSequence = 0;
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
 const mindMapStatusByPath = ref<Record<string, MindMapDocumentStatus>>({});
@@ -4153,10 +4154,11 @@ watch(selectedWorkspace, (sw) => {
     selectedWorkspaceId.value = sw.workspaceId;
   }
 });
-watch(activePath, () => {
+watch(activePath, (path) => {
   editorSelection.value = undefined;
   // 切换文件或新打开文件时均重置预览状态为关闭，默认以编辑模式打开
   markdownPreviewMode.value = "off";
+  void revealActiveWorkspaceFile(path);
 });
 watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {
@@ -11423,19 +11425,41 @@ async function expandWorkspaceViewNodeToFile(tabPath: string): Promise<boolean> 
   return true;
 }
 
-// 编辑器定位：引用文件按稳定节点展开，普通文件沿用相对路径；完成后再滚动。
-async function handleLocateFile(path: string) {
-  if (!path) return;
-  workbench.setActivePath(path);
+/**
+ * 编辑器活动文件变化时自动展开并定位项目树。异步展开使用代次校验，避免快速切换标签时旧请求覆盖新文件。
+ */
+async function revealActiveWorkspaceFile(path?: string) {
+  const sequence = ++activeFileRevealSequence;
+  if (!path || isAgentFilePath(path)) return;
+
   if (isReferenceFilePath(path)) {
     await expandWorkspaceViewNodeToFile(path);
   } else {
     await expandPathToFile(path);
   }
+
+  if (sequence !== activeFileRevealSequence || activePath.value !== path) return;
   await nextTick();
-  scrollToActiveFileTreeRow();
-  setTimeout(scrollToActiveFileTreeRow, 100);
-  setTimeout(scrollToActiveFileTreeRow, 300);
+  await fileExplorerRef.value?.revealWorkspaceFile();
+
+  // 目录展开动画和异步布局完成后再次校正滚动位置。
+  for (const delay of [100, 300]) {
+    window.setTimeout(() => {
+      if (sequence === activeFileRevealSequence && activePath.value === path) {
+        fileExplorerRef.value?.scrollToActiveWorkspaceFile();
+      }
+    }, delay);
+  }
+}
+
+// 双击标签或点击页脚定位时，活动文件未变化也允许再次执行定位。
+async function handleLocateFile(path: string) {
+  if (!path) return;
+  if (activePath.value === path) {
+    await revealActiveWorkspaceFile(path);
+    return;
+  }
+  workbench.setActivePath(path);
 }
 
 const MermaidEditorDialog = defineAsyncComponent(
@@ -11512,13 +11536,6 @@ async function handleApplyMmdVisualEditor(diagram: MermaidEditableDiagram) {
       model: diagram,
       error: error instanceof Error ? error.message : String(error)
     };
-  }
-}
-
-function scrollToActiveFileTreeRow() {
-  const activeRowEl = document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active") as HTMLElement | null;
-  if (activeRowEl) {
-    activeRowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
 }
 
