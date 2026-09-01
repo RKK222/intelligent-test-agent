@@ -48,6 +48,28 @@ public class LocalClientWorkspaceFileGateway {
                 FILE_TIMEOUT);
     }
 
+    /** 根目录校验和注册只允许短时等待，不能继承大文件传输的 24 小时超时。 */
+    public JsonNode invokeRootRegistration(
+            String clientInstanceId,
+            long connectionGeneration,
+            String workspaceId,
+            String operation,
+            JsonNode parameters,
+            String traceId) {
+        if (!"workspace.validateRoot".equals(operation) && !"workspace.registerRoot".equals(operation)) {
+            throw new IllegalArgumentException("unsupported root registration operation: " + operation);
+        }
+        return invoke(
+                clientInstanceId,
+                connectionGeneration,
+                workspaceId,
+                null,
+                operation,
+                parameters,
+                traceId,
+                LocalClientProtocol.REQUEST_TIMEOUT);
+    }
+
     /** 本地 Git 权限巡检使用独立有界超时，避免后台任务继承长文件传输等待时间。 */
     public JsonNode checkGitAccess(
             String clientInstanceId,

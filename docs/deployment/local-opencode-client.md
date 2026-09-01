@@ -367,6 +367,9 @@ Get-Content "$env:LOCALAPPDATA\TestAgent\local-opencode-client\state\logs\client
 当前唯一在线客户端上保留原 workspaceId 接管每个有效绑定；某个目录已删除或身份变化时只跳过该项，不影响其它目录恢复。
 目录已经移动时再从客户端托盘重新选择原目录。
 旧实例在线、身份不一致、同目录存在多个历史 Workspace 或该用户出现多个在线 route 时必须先停止并人工消除歧义。
+恢复链路的 `workspace.validateRoot/registerRoot` 最长等待 30 秒，且等待期间不持有数据库用户行锁；版本检查、公共能力通知
+在独立有界串行队列处理，Redis 心跳独立刷新，均不能阻塞同连接的 `FILE_RESPONSE/LIFECYCLE_RESULT`。若仍观察到数据库会话长期同时等待
+用户行锁和客户端 RPC，应判定后端尚未升级到本修复版本，不能把反复重连或终止事务作为正式运行方案。
 
 **机器：同一普通用户的已登录平台页面**。打开个人设置中的本地客户端实例列表，确认有且只有一个实例，且
 online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_UPDATE_V1 能力。新实例完成认证后，后台会在同一用户
@@ -398,6 +401,21 @@ Observability 现场验收还必须确认用户包引用的受控 release 包含
 缺失依赖快速失败，不会放宽 `/experimental/tool/ids`、`/agent`、`/command` 验收。若现场日志持续出现
 `local_opencode_catalog_check_failed` 约 30 秒超时、`public_capability_activation_validation_failed` 后反复重启，先核对
 客户端版本是否包含该离线运行约束及 release 是否携带完整能力包，不要重新索取或传递已经接入成功的 Client key。
+
+本地浏览器 Tool 上线时，在权威公共配置 Git 的 `tools/local_browser.ts` 使用仓库
+`deploy/internal/local_browser.ts` 同步模板并形成明确提交，再由现有公共能力包流程构建、签名和下发；禁止直接修改客户端
+不可变能力目录。外网构建的 programs 必须包含锁定的 `playwright-core@1.61.0`，内网目标机不下载 Chromium，也不执行 npm。
+目标麒麟 ARM64 用户桌面必须已安装企业 360 浏览器；客户端默认首先检查系统稳定入口
+`/usr/bin/browser360ent-cn-stable`，不存在或不可执行时才检查其它受控候选和 desktop entry，全部失败后再由用户从
+托盘“浏览器设置与自检”选择浏览器可执行文件。稳定入口仍存在时，360 升级不要求用户重新选择。
+企业 360 的 `browser360ent-cn` 启动器可能以同一 PID 和启动时间 `exec` 为 `browser360ent` 内核；客户端按
+PID + `ProcessHandle.startInstant` 监管该受管进程，并继续以独立 profile、loopback `DevToolsActivePort`、CDP `1.3`
+和 Chromium 已验证范围确认浏览器能力。现场不得用启动前后 command 路径变化判定 PID 被复用。
+
+真实现场发布闸门必须以同一普通用户完成：启动本地 OpenCode，调用 Tool 打开测试站点并确认出现逐 origin 授权；验证语义点击、
+输入、多标签、最多 4 个 Session、跨 origin 阻断，以及提交/上传/下载逐次确认；截图和下载分别落入当前工作区
+`browser-artifacts/<session-id>/`、`browser-downloads/<session-id>/`。同时确认浏览器使用独立 profile 且窗口可见，退出客户端后
+受管浏览器停止。Mac 开发机的类型检查和 relay 测试不能替代麒麟 ARM64 + 企业 360 的这道闸门。
 
 首次启动从安装 release 自动初始化该基线。后续公共版本只生成完整包并发送通知；用户必须在托盘或网页确认，平台不能
 自动确认。Agent/Skill-only 变化热加载，Tool/依赖变化重启本地 OpenCode；Tool 始终使用当前登录用户权限，不提权。

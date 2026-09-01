@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Base64;
@@ -345,100 +346,107 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         }
         if (frame.type() == LocalClientFrameType.HEARTBEAT) {
             LocalClientPayloads.Heartbeat heartbeat = codec.payload(frame, LocalClientPayloads.Heartbeat.class);
-            return Mono.fromCallable(() -> registrationService.heartbeat(
+            // 心跳只刷新 Redis TTL，独立调度避免被版本/公共能力数据库事务拖到连接过期。
+            return executeInboundOperation(frame, outbound, closeSignal, state, () -> {
+                registrationService.heartbeat(
+                        state.clientInstanceId(),
+                        state.generation(),
+                        routeResolver.currentBackendProcessId(),
+                        state.modelGrantFingerprint(),
+                        heartbeat);
+                emit(outbound, new LocalClientFrame(
+                        LocalClientProtocol.VERSION,
+                        LocalClientFrameType.HEARTBEAT_ACK,
+                        frame.requestId(),
+                        frame.traceId(),
+                        state.generation(),
+                        codec.payload(new LocalClientPayloads.HeartbeatAck(
+                                Instant.now(),
+                                Instant.now().plus(LocalClientProtocol.CONNECTION_TTL)))), closeSignal);
+            });
+        }
+        return switch (frame.type()) {
+            case VERSION_CHECK -> enqueueInboundOperation(frame, outbound, closeSignal, state,
+                    () -> updateCoordinator.handleVersionCheck(
+                            requireSelfUpdate(state),
                             state.clientInstanceId(),
                             state.generation(),
-                            routeResolver.currentBackendProcessId(),
-                            state.modelGrantFingerprint(),
-                            heartbeat))
-                    .subscribeOn(Schedulers.boundedElastic())
-                    .doOnNext(route -> emit(outbound, new LocalClientFrame(
+                            codec.payload(frame, LocalClientPayloads.VersionCheck.class),
+                            frame.traceId()));
+            case UPDATE_PREPARED -> enqueueInboundOperation(frame, outbound, closeSignal, state,
+                    () -> updateCoordinator.handlePrepared(
+                            requireSelfUpdate(state),
+                            state.clientInstanceId(),
+                            state.generation(),
+                            codec.payload(frame, LocalClientPayloads.UpdatePrepared.class),
+                            frame.traceId()));
+            case UPDATE_STATUS -> {
+                LocalClientPayloads.UpdateStatus status = codec.payload(frame, LocalClientPayloads.UpdateStatus.class);
+                yield enqueueInboundOperation(frame, outbound, closeSignal, state, () -> {
+                    LocalClientPayloads.UpdateStatusAck persistedAck = updateCoordinator.handleStatus(
+                            requireSelfUpdate(state),
+                            state.clientInstanceId(),
+                            state.generation(),
+                            status,
+                            frame.traceId());
+                    emit(outbound, new LocalClientFrame(
                             LocalClientProtocol.VERSION,
-                            LocalClientFrameType.HEARTBEAT_ACK,
+                            LocalClientFrameType.UPDATE_STATUS_ACK,
                             frame.requestId(),
                             frame.traceId(),
                             state.generation(),
-                            codec.payload(new LocalClientPayloads.HeartbeatAck(
-                                    Instant.now(),
-                                    Instant.now().plus(LocalClientProtocol.CONNECTION_TTL)))), closeSignal))
-                    .then();
-        }
-        return switch (frame.type()) {
-            case VERSION_CHECK -> blockingUpdate(() -> updateCoordinator.handleVersionCheck(
-                    requireSelfUpdate(state),
-                    state.clientInstanceId(),
-                    state.generation(),
-                    codec.payload(frame, LocalClientPayloads.VersionCheck.class),
-                    frame.traceId()));
-            case UPDATE_PREPARED -> blockingUpdate(() -> updateCoordinator.handlePrepared(
-                    requireSelfUpdate(state),
-                    state.clientInstanceId(),
-                    state.generation(),
-                    codec.payload(frame, LocalClientPayloads.UpdatePrepared.class),
-                    frame.traceId()));
-            case UPDATE_STATUS -> {
-                LocalClientPayloads.UpdateStatus status = codec.payload(frame, LocalClientPayloads.UpdateStatus.class);
-                yield Mono.fromCallable(() -> updateCoordinator.handleStatus(
-                                requireSelfUpdate(state),
-                                state.clientInstanceId(),
-                                state.generation(),
-                                status,
-                                frame.traceId()))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .doOnNext(persistedAck -> emit(outbound, new LocalClientFrame(
-                                LocalClientProtocol.VERSION,
-                                LocalClientFrameType.UPDATE_STATUS_ACK,
-                                frame.requestId(),
-                                frame.traceId(),
-                                state.generation(),
-                                codec.payload(persistedAck)), closeSignal))
-                        .then();
+                            codec.payload(persistedAck)), closeSignal);
+                });
             }
-            case PUBLIC_CAPABILITY_VERSION -> blockingUpdate(() -> requirePublicCapabilities(state).handleVersion(
-                    state.userId(),
-                    state.clientInstanceId(),
-                    state.generation(),
-                    codec.payload(frame, LocalClientPayloads.PublicCapabilityVersion.class),
-                    frame.traceId()));
-            case PUBLIC_CAPABILITY_UPDATE_REQUEST -> blockingUpdate(() -> {
-                LocalClientPayloads.PublicCapabilityUpdateRequest request = codec.payload(
-                        frame, LocalClientPayloads.PublicCapabilityUpdateRequest.class);
-                if (!state.clientInstanceId().value().equals(request.clientInstanceId())
-                        || state.generation() != request.connectionGeneration()) {
-                    throw new PlatformException(ErrorCode.CONFLICT, "公共能力更新确认 generation 已失效");
-                }
-                requirePublicCapabilities(state).requestUpdate(
-                        state.userId(), state.clientInstanceId(), request.expectedBundleDigest(), frame.traceId());
-            });
+            case PUBLIC_CAPABILITY_VERSION -> enqueueInboundOperation(frame, outbound, closeSignal, state,
+                    () -> requirePublicCapabilities(state).handleVersion(
+                            state.userId(),
+                            state.clientInstanceId(),
+                            state.generation(),
+                            codec.payload(frame, LocalClientPayloads.PublicCapabilityVersion.class),
+                            frame.traceId()));
+            case PUBLIC_CAPABILITY_UPDATE_REQUEST -> enqueueInboundOperation(
+                    frame, outbound, closeSignal, state, () -> {
+                        LocalClientPayloads.PublicCapabilityUpdateRequest request = codec.payload(
+                                frame, LocalClientPayloads.PublicCapabilityUpdateRequest.class);
+                        if (!state.clientInstanceId().value().equals(request.clientInstanceId())
+                                || state.generation() != request.connectionGeneration()) {
+                            throw new PlatformException(ErrorCode.CONFLICT, "公共能力更新确认 generation 已失效");
+                        }
+                        requirePublicCapabilities(state).requestUpdate(
+                                state.userId(), state.clientInstanceId(),
+                                request.expectedBundleDigest(), frame.traceId());
+                    });
             case PUBLIC_CAPABILITY_CHUNK_REQUEST -> {
                 LocalClientPayloads.PublicCapabilityChunkRequest request = codec.payload(
                         frame, LocalClientPayloads.PublicCapabilityChunkRequest.class);
-                yield Mono.fromCallable(() -> requirePublicCapabilities(state).handleChunkRequest(
-                                state.userId(), state.clientInstanceId(), state.generation(), request, frame.traceId()))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .doOnNext(chunk -> emit(outbound, new LocalClientFrame(
-                                LocalClientProtocol.VERSION,
-                                LocalClientFrameType.BINARY_CHUNK,
-                                request.commandId(),
-                                frame.traceId(),
-                                state.generation(),
-                                codec.payload(chunk)), closeSignal))
-                        .then();
+                yield enqueueInboundOperation(frame, outbound, closeSignal, state, () -> {
+                    LocalClientPayloads.BinaryChunk chunk = requirePublicCapabilities(state).handleChunkRequest(
+                            state.userId(), state.clientInstanceId(), state.generation(), request, frame.traceId());
+                    emit(outbound, new LocalClientFrame(
+                            LocalClientProtocol.VERSION,
+                            LocalClientFrameType.BINARY_CHUNK,
+                            request.commandId(),
+                            frame.traceId(),
+                            state.generation(),
+                            codec.payload(chunk)), closeSignal);
+                });
             }
             case PUBLIC_CAPABILITY_UPDATE_STATUS -> {
                 LocalClientPayloads.PublicCapabilityUpdateStatus status = codec.payload(
                         frame, LocalClientPayloads.PublicCapabilityUpdateStatus.class);
-                yield Mono.fromCallable(() -> requirePublicCapabilities(state).handleStatus(
-                                state.userId(), state.clientInstanceId(), state.generation(), status, frame.traceId()))
-                        .subscribeOn(Schedulers.boundedElastic())
-                        .doOnNext(ack -> emit(outbound, new LocalClientFrame(
-                                LocalClientProtocol.VERSION,
-                                LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_STATUS_ACK,
-                                frame.requestId(),
-                                frame.traceId(),
-                                state.generation(),
-                                codec.payload(ack)), closeSignal))
-                        .then();
+                yield enqueueInboundOperation(frame, outbound, closeSignal, state, () -> {
+                    LocalClientPayloads.PublicCapabilityUpdateStatusAck ack =
+                            requirePublicCapabilities(state).handleStatus(
+                                    state.userId(), state.clientInstanceId(), state.generation(), status, frame.traceId());
+                    emit(outbound, new LocalClientFrame(
+                            LocalClientProtocol.VERSION,
+                            LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_STATUS_ACK,
+                            frame.requestId(),
+                            frame.traceId(),
+                            state.generation(),
+                            codec.payload(ack)), closeSignal);
+                });
             }
             case WORKSPACE_REGISTER -> registerWorkspace(frame, outbound, closeSignal, state);
             case OBSERVABILITY_BATCH -> declareObservabilityBatch(frame, state);
@@ -682,8 +690,60 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
-    private Mono<Void> blockingUpdate(Runnable action) {
-        return Mono.fromRunnable(action).subscribeOn(Schedulers.boundedElastic()).then();
+    /**
+     * 数据库型通知在每条连接自己的后台串行队列中执行，当前入站 concatMap 立即释放给 RPC 回包。
+     * 后台队列仍保持通知顺序；失败沿用协议错误帧和关闭语义，不能静默吞掉状态机错误。
+     */
+    private Mono<Void> enqueueInboundOperation(
+            LocalClientFrame frame,
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state,
+            Runnable operation) {
+        boolean accepted = state.inboundOperations().submit(
+                () -> runInboundOperation(frame, outbound, closeSignal, state, operation));
+        if (!accepted) {
+            PlatformException error = new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY, "本地客户端通知处理队列不可用");
+            emitError(outbound, closeSignal, state, frame.traceId(), error);
+            closeSignal.tryEmitValue("INBOUND_BACKPRESSURE");
+        }
+        return Mono.empty();
+    }
+
+    /** Redis 心跳独立于数据库通知队列执行，仍立即释放 WebSocket 入站流。 */
+    private Mono<Void> executeInboundOperation(
+            LocalClientFrame frame,
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state,
+            Runnable operation) {
+        Mono.fromRunnable(() -> runInboundOperation(frame, outbound, closeSignal, state, operation))
+                .subscribeOn(Schedulers.boundedElastic())
+                .subscribe();
+        return Mono.empty();
+    }
+
+    private void runInboundOperation(
+            LocalClientFrame frame,
+            Sinks.Many<LocalClientFrame> outbound,
+            Sinks.One<String> closeSignal,
+            ConnectionState state,
+            Runnable operation) {
+        try {
+            operation.run();
+        } catch (Throwable error) {
+            LOGGER.warn(
+                    "local_client_async_inbound_failed clientInstanceId={} generation={} requestId={} type={} traceId={}",
+                    state.clientInstanceId().value(),
+                    state.generation(),
+                    frame.requestId(),
+                    frame.type(),
+                    frame.traceId(),
+                    error);
+            emitError(outbound, closeSignal, state, frame.traceId(), error);
+            closeSignal.tryEmitValue("PROTOCOL_ERROR");
+        }
     }
 
     private static UserId requireSelfUpdate(ConnectionState state) {
@@ -715,6 +775,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
         if (state == null) {
             return;
         }
+        state.inboundOperations().close();
         connectionRegistry.disconnect(state.clientInstanceId(), state.generation());
         tunnelGateway.failConnection(
                 state.clientInstanceId(),
@@ -827,7 +888,24 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
             boolean observabilitySupported,
             boolean publicCapabilitySupported,
             Set<String> workspaceRequestIds,
-            Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
+            Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations,
+            SerialInboundOperationQueue inboundOperations) {
+
+        ConnectionState(
+                UserId userId,
+                LocalClientInstanceId clientInstanceId,
+                long generation,
+                String modelGrantFingerprint,
+                String traceId,
+                boolean selfUpdateSupported,
+                boolean observabilitySupported,
+                boolean publicCapabilitySupported,
+                Set<String> workspaceRequestIds,
+                Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
+            this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
+                    selfUpdateSupported, observabilitySupported, publicCapabilitySupported,
+                    workspaceRequestIds, traceDeclarations, new SerialInboundOperationQueue());
+        }
 
         ConnectionState(
                 UserId userId,
@@ -838,7 +916,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                 boolean selfUpdateSupported,
                 Set<String> workspaceRequestIds) {
             this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
-                    selfUpdateSupported, false, false, workspaceRequestIds, new ConcurrentHashMap<>());
+                    selfUpdateSupported, false, false, workspaceRequestIds, new ConcurrentHashMap<>(),
+                    new SerialInboundOperationQueue());
         }
 
         ConnectionState(
@@ -852,7 +931,45 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                 Set<String> workspaceRequestIds,
                 Map<String, LocalClientPayloads.ObservabilityBatch> traceDeclarations) {
             this(userId, clientInstanceId, generation, modelGrantFingerprint, traceId,
-                    selfUpdateSupported, observabilitySupported, false, workspaceRequestIds, traceDeclarations);
+                    selfUpdateSupported, observabilitySupported, false, workspaceRequestIds, traceDeclarations,
+                    new SerialInboundOperationQueue());
+        }
+    }
+
+    /** 单连接后台任务保持原始帧顺序，同时不占用 WebSocket 响应帧的入站通道。 */
+    static final class SerialInboundOperationQueue {
+
+        private static final int MAX_PENDING_OPERATIONS = 64;
+
+        private CompletableFuture<Void> tail = CompletableFuture.completedFuture(null);
+        private boolean accepting = true;
+        private int pendingOperations;
+
+        synchronized boolean submit(Runnable operation) {
+            if (!accepting || pendingOperations >= MAX_PENDING_OPERATIONS) {
+                return false;
+            }
+            pendingOperations++;
+            tail = tail.handle((ignored, error) -> null)
+                    .thenRunAsync(() -> {
+                        if (isAccepting()) {
+                            operation.run();
+                        }
+                    }, command -> Schedulers.boundedElastic().schedule(command))
+                    .whenComplete((ignored, error) -> operationCompleted());
+            return true;
+        }
+
+        synchronized void close() {
+            accepting = false;
+        }
+
+        private synchronized boolean isAccepting() {
+            return accepting;
+        }
+
+        private synchronized void operationCompleted() {
+            pendingOperations--;
         }
     }
 }

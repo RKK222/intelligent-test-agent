@@ -16295,3 +16295,106 @@
 - 推荐首个切片仅做 `run-status.v1 + attention.v1` 双写投影，保留旧 `snapshot.events` 兼容路径并用长会话量化 reset 体积、首屏恢复时间、Redis 写放大和前后端一致性；在指标成立前不扩展到 conversation packed history。
 - 本次不新增部署节点，不修改产品代码、API、RunEvent、数据库、SQL/Flyway、性能实现、安全协议、环境配置、generated SDK 或 OpenCode 只读源码，也未启动或重启 TestAgent 服务。
 - 尚未执行投影原型或真实长会话基准；报告给出的是有源码证据的设计优先级，不宣称优化已经落地。
+## 2026-08-27 - 麒麟 ARM 本地客户端增加企业 360 浏览器控制
+
+### Why
+
+- 本地任务需要由当前用户的本地 OpenCode 启动并操作企业 360 浏览器，同时保持可见窗口、独立持久 profile、逐站点授权和离线交付；服务器受保护 Agent、用户日常浏览器 profile 与平台控制面不能获得浏览器控制权。
+- 用户明确要求从本地 `release` 当前提交创建独立 worktree/功能分支开发，完成后保留在功能分支，不自动合回 `release`。
+
+### What
+
+- 从 `release` 提交 `363e1b6babe291018800e76e0cb2c1034cfc230f` 创建 worktree `/Users/kaka/Desktop/intelligent-test-agent-local-browser-360` 和分支 `codex/local-browser-360`；未触碰主 worktree 中既有用户手册改动。
+- 麒麟 Linux ARM64 客户端新增系统 360 可执行文件自动发现/托盘选择、`0700` 独立 profile、可见进程与精确 PID 身份监管、随机 loopback CDP/relay token；只在协议 1.3、Chromium 108..149 和 loopback 调试地址通过自检，停止 OpenCode/客户端时同步停止受管浏览器。
+- 新增公共 Tool 模板 `deploy/internal/local_browser.ts`，通过 `playwright-core@1.61.0` 的 CDP 连接系统浏览器，支持导航、语义定位、输入、表单、多标签、截图、上传和下载；最多 4 个 Session，按 origin 授权，提交/上传/下载逐次确认，未知跨 origin 主导航预请求阻断。
+- 截图和下载只写当前工作区显式目录；模型输出移除 URL 查询、input value、常见 token/密码形态并限制可见文本/控件数量，不返回 Cookie、完整 HTML 或截图字节。运行时 manifest/lock 和归档依赖门禁同步锁定 Playwright Core；模块、架构、事件能力声明、安全、部署与内部交付文档已更新。
+
+### How
+
+- `mvn -pl test-agent-local-client -am test` 最终通过：common 110、protocol 11、local client 115，合计 236 passed / 1 个既有真实 OpenCode 条件跳过；新增设置、平台限制、Chromium 解析和 relay token 回归。
+- 从固定 manifest/lock 真实执行 npm 安装，使用 TypeScript 5.9.2 对 Tool 执行 `--strict` 类型检查通过；重新生成 lockfile 与仓库文件 SHA-256 一致。`tools/verify-opencode-tool-runtime-deploy.sh` 通过 root/archive 的 Playwright 离线依赖门禁。
+- `mvn -pl test-agent-local-client -am -DskipTests package` 成功生成 shaded JAR；实际执行 `java -jar backend/test-agent-local-client/target/test-agent-local-client.jar --version` 输出 `test-agent-local-client 0.1.0-dev`。`git diff --check` 通过，并在提交前回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- Mac 上已完成 Java、Tool 类型、离线依赖、打包和可执行 JAR 验证；功能只在 Linux ARM64 运行时声明 `LOCAL_BROWSER_V1` 并显示托盘入口，Windows/macOS 不启动 relay。
+- 企业麒麟 ARM64 + 实际 360 内核尚未部署，CDP 启动参数、窗口可见性、逐 origin/高风险确认、4 Session、文件产物和退出回收仍是正式发布前现场闸门，不能表述为企业验收通过。权威公共配置 Git 还需按文档把模板同步为 `tools/local_browser.ts` 的明确提交，再走既有签名公共能力包发布流程。
+- 本次不新增部署节点，不新增平台 HTTP、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置或后端文件代理；未修改 `.env*`、generated SDK 或 OpenCode 只读源码，也未合并回 `release`。
+
+## 2026-08-28 - 构建麒麟 360 浏览器单机测试候选包
+
+### Why
+
+- 用户只要求单独验证本地客户端包，并希望复用 Mac 上已有的上一版制品，不部署 `.4/.114/.2` 平台节点，也不覆盖既有候选包。
+
+### What
+
+- 从上一版 Linux ARM64 release `20260827222702` 复用已经签名链路验证过的 JDK 与官方 OpenCode 二进制输入；使用现有组织 RSA 密钥重新签署新的不可变客户端 release `20260828094319`，下载根固定为测试机回环 `http://127.0.0.1:18080/`。
+- 旧公共能力包 `81605f245d1512e1ab0dd73812391f6da7d008b5` 不含浏览器 Tool，因此从其能力文件创建未发布的隔离候选公共 Git 提交 `81977f9c6178f19e2ac2b613e203ade182b0e37e`，加入 `tools/local_browser.ts`，并复用生产 `PublicClientCapabilityPackageBuilder` 与锁文件生成完整能力包；该候选只用于单机测试，不是企业权威公共配置 release。
+- 最终 HTTP 分发目录为 `deploy/internal/dist-local-client-20260828094319/local-opencode-client/`；U 盘传输包和摘要已放到 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260828094319_arm64.tar.gz{,.sha256}`。所有旧包均保留，未覆盖无版本别名。
+
+### How
+
+- `mvn -pl test-agent-workspace-management -am -DskipTests package` 通过；客户端浏览器与版本定向 Maven 测试通过，`deploy/internal/tests/local-opencode-client-package-test.sh` 完整回归通过。
+- catalog、manifest 和 CLIENT_JAR/JDK/OPENCODE/PUBLIC_CAPABILITIES 四类制品使用固定组织公钥逐项 RSA 验签通过；`verify-local-opencode-client-distribution.sh` 通过，用户启动器确认为静态 `ELF 64-bit ARM aarch64`，JAR 包含 FlatLaf，能力包包含 `local_browser.ts` 和 `playwright-core@1.61.0`。
+- catalog、manifest、用户包和传输包 SHA-256 分别为 `046d34c849ebe672174a73bd09baf64bacbbbcab6bb5849111dd7a487c10004c`、`70aeccfc479d2137c86e5532e4320dce71780ae1bb1667860febd380bdb19542`、`b24f88e7e8958e5b475a5608948cac350dc474ae13d473f014cfaf80e80d1431`、`28a57a2163ae35901380f954b7aaa5bcf9e06bea1bd2eabadcc195b532bbba05`；中转目录复验输出 `OK`。
+
+### Result
+
+- Mac 侧单机测试候选包已构建并完成离线完整性、签名、安装器模拟和回归验证；未修改 `backend.env`、`docker.env`、Nginx、数据库、worker、manager、企业公共 Git 或企业平台状态。
+- Mac 无法运行麒麟 ARM64 桌面程序；真实企业 360 启动、CDP 1.3、逐 origin 授权、高风险确认、四 Session、文件产物和退出回收仍需由专用麒麟 ARM64 测试账号完成，当前只能表述为“Mac 构建验证通过”，不能表述为企业验收通过。
+
+## 2026-09-01 - 兼容企业 360 启动器的同 PID 内核切换
+
+### Why
+
+- 企业麒麟 ARM64 真机已证明 `browser360ent-cn` 能用动态 loopback 端口提供 CDP `1.3`，内核为 Chromium `108.0.5359.95`，但客户端自检仍返回 `STOPPED`。
+- 现场进一步证明启动器保留同一 PID 和启动时间，却通过 `exec` 把进程命令从 `/opt/browser360ent/browser360ent-cn` 切换为 `/opt/browser360ent/browser360ent`；原监管器把 command 路径当作稳定身份字段，因而误清理受管状态并输出不兼容提示。
+
+### What
+
+- 本地浏览器进程 fencing 改为精确校验 `ProcessHandle` 的存活状态、PID 和权威 `startInstant`；不再把 Linux `exec` 后会变化的 command 路径作为身份字段。
+- 麒麟自动发现把系统稳定入口 `/usr/bin/browser360ent-cn-stable` 置于第一候选；只有该入口不存在或不可执行时才检查其它受控路径和 desktop entry，避免企业 360 正常升级后要求用户重新选择。
+- 浏览器能力仍独立校验专用 profile 的 `DevToolsActivePort`、loopback WebSocket、CDP `1.3` 和 Chromium `108..149`，没有放宽可控制浏览器范围。
+- 新增回归测试覆盖同 PID/同启动时间的启动器切换，以及退出、PID 复用和启动时间变化的拒绝；同步模块 README 与企业客户端部署说明。
+
+### How
+
+- `mvn -pl test-agent-local-client -am -Dtest=LocalBrowserSettingsTest,LocalBrowserSupervisorTest -Dsurefire.failIfNoSpecifiedTests=false test`：7/7 通过。
+- `mvn -pl test-agent-local-client -am test`：common 110、protocol 11、local client 118，合计 238 passed / 1 个既有真实 OpenCode 条件跳过。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 完整回归通过；新 release 的 catalog、manifest 和四类制品共六项组织 RSA 验签通过，源码目录与外层传输包独立解包后的 `verify-local-opencode-client-distribution.sh` 均通过。
+- 最终 JAR 执行 `--version` 输出 `20260901162846`；`javap` 回读确认第一候选包含 `/usr/bin/browser360ent-cn-stable`，进程身份方法只校验存活、PID 与 `startInstant`，未残留 command 路径比较。
+- `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次四个业务/文档文件冲突的未完成事项。
+
+### Result
+
+- Mac 自动化已验证同 PID `exec` 回归路径；新的不可变候选 release 为 `20260901162846`，分发目录是 `deploy/internal/dist-local-client-20260901162846/local-opencode-client/`。
+- U 盘传输包为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260901162846_arm64.tar.gz{,.sha256}`，外层 SHA-256 为 `c83f4eadac5a9fbc229734c153d1319ec67d122ad69530a25481e22d877c6f53`；旧 `0826` 正式 release 和 `20260828094319` 候选均未覆盖。
+- 没有修改 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK、OpenCode 只读源码、企业平台状态或企业权威公共 Git，也没有新增部署节点或合并回 `release`。包内公共能力仍来自隔离候选提交，只可用于单机测试。
+- 修复包仍需在当前企业麒麟机器重新完成托盘自检和对话 Tool 全链路复测，当前不能把浏览器操作能力表述为企业真机验收通过。
+
+## 2026-09-01 - 修复本地客户端重连时工作区恢复循环等待
+
+### Why
+
+- 企业现场确认断线并非网络丢包：客户端注册后发送 `VERSION_CHECK`，同时后端自动恢复工作区并在持有用户数据库行锁时等待 `FILE_RESPONSE`；同一 WebSocket 的串行入站队列先处理版本通知，版本通知等待该用户锁，导致后续 `FILE_RESPONSE/LIFECYCLE_RESULT` 无法进入 pending request，最终 30 秒后 `local_client_auto_start_failed`。
+- 终止数据库事务只能临时释放积压帧，反复重连会重新触发同一锁等待，必须同时拆开工作区恢复事务和 WebSocket 通知调度。
+
+### What
+
+- 自动恢复和手工激活工作区先在事务外执行 `workspace.validateRoot/registerRoot`，完成客户端 RPC 后再进入短事务，加用户注册锁并重新校验 binding、持有 Java、connection generation 和历史实例在线状态；短事务只执行 CAS 绑定、Session/夜间任务目标迁移及投影保存，不再等待客户端回包。
+- `VERSION_CHECK`、更新回执和公共能力数据库通知进入每连接 64 项有界后台串行队列；`FILE_RESPONSE`、`LIFECYCLE_RESULT`、HTTP/流响应仍由 WebSocket 入站流立即关联 pending request，Redis 心跳独立刷新 TTL。后台通知失败或队列溢出继续发送安全 `ERROR` 并关闭连接。
+- 根目录校验/注册新增专用入口，固定使用协议 30 秒超时；24 小时超时只保留给普通大文件传输。同步 API、runtime、事件协议、架构和企业部署文档，并新增循环等待、事务边界和超时回归测试。
+
+### How
+
+- JDK 25 下运行 runtime/API 定向测试：`LocalWorkspaceApplicationServiceTest`、`LocalClientWorkspaceFileGatewayTest` 和全部 `LocalClientConnectionWebSocketHandler*Test` 共 20 项通过。
+- `mvn clean package -DskipTests` 完整 26 模块构建通过；随后从当前 worktree 使用主仓库现有 `.env.test` 和 `test` profile 执行 `./restart-dev-services.sh`，没有修改环境文件。
+- 真实运行验收中后端 health/readiness 均为 `UP`，前端 `127.0.0.1:3000` 返回 200，登录 CORS 预检正确返回允许源，manager WebSocket 已连接。启动初期共享 Redis 曾出现一次 1 秒超时并导致 manager 自动重连，随后恢复且未持续出现；工作区测试数据缺目录的既有告警不属于本次变更。
+- 提交前执行 `git diff --check`，并回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次文件冲突或会被覆盖的并行成果。
+
+### Result
+
+- Mac 侧代码、回归、完整构建和真实启动已验证；数据库通知无法再占住隧道响应入口，工作区恢复也不再持锁等待客户端 RPC，已覆盖现场确认的循环等待链路。
+- 本次修改的是承载本地客户端连接的 Java 后端，不需要重新安装或重新绑定现有麒麟客户端；企业环境仍需升级对应后端节点后，以原客户端重新打开原工作区并完成浏览器 Tool 全链路复测，当前未部署企业环境，不能表述为企业验收通过。
+- 不新增部署节点，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、强制环境配置、generated SDK 或 OpenCode 只读源码；WebSocket 帧结构保持兼容。改动继续保留在 `codex/local-browser-360`，未合并回 `release`。

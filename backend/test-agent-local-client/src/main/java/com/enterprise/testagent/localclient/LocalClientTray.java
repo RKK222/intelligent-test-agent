@@ -52,6 +52,7 @@ final class LocalClientTray implements AutoCloseable {
 
     private final LocalClientConfiguration configuration;
     private final LocalClientConnection connection;
+    private final LocalBrowserRelay browserRelay;
     private final SystemTray systemTray;
     private final TrayIcon trayIcon;
     private final LocalClientTrayPopup popup;
@@ -68,6 +69,7 @@ final class LocalClientTray implements AutoCloseable {
     private LocalClientTray(
             LocalClientConfiguration configuration,
             LocalClientConnection connection,
+            LocalBrowserRelay browserRelay,
             SystemTray systemTray,
             TrayIcon trayIcon,
             LocalClientTrayPopup popup,
@@ -76,6 +78,7 @@ final class LocalClientTray implements AutoCloseable {
             ExecutorService actions) {
         this.configuration = configuration;
         this.connection = connection;
+        this.browserRelay = browserRelay;
         this.systemTray = systemTray;
         this.trayIcon = trayIcon;
         this.popup = popup;
@@ -87,15 +90,22 @@ final class LocalClientTray implements AutoCloseable {
     static LocalClientTray install(
             LocalClientConfiguration configuration,
             LocalClientConnection connection) {
+        return install(configuration, connection, null);
+    }
+
+    static LocalClientTray install(
+            LocalClientConfiguration configuration,
+            LocalClientConnection connection,
+            LocalBrowserRelay browserRelay) {
         if (!SystemTray.isSupported()) {
             LOGGER.warn("local_client_tray_unavailable reason=system_tray_not_supported");
-            return inactive(configuration, connection);
+            return inactive(configuration, connection, browserRelay);
         }
         try {
             BufferedImage pet = loadPetImage();
             SystemTray tray = SystemTray.getSystemTray();
             Dimension size = tray.getTrayIconSize();
-            LocalClientTrayPopup popup = new LocalClientTrayPopup(pet);
+            LocalClientTrayPopup popup = new LocalClientTrayPopup(pet, browserRelay != null);
             TrayIcon icon = new TrayIcon(
                     renderIcon(
                             pet,
@@ -109,7 +119,7 @@ final class LocalClientTray implements AutoCloseable {
             ExecutorService actions = Executors.newCachedThreadPool(
                     Thread.ofPlatform().daemon().name("local-client-tray-action-", 0).factory());
             LocalClientTray result = new LocalClientTray(
-                    configuration, connection, tray, icon, popup, pet, updater, actions);
+                    configuration, connection, browserRelay, tray, icon, popup, pet, updater, actions);
             result.bindActions();
             result.bindTrayClick();
             tray.add(icon);
@@ -118,15 +128,16 @@ final class LocalClientTray implements AutoCloseable {
             return result;
         } catch (AWTException | IOException | RuntimeException exception) {
             LOGGER.warn("local_client_tray_unavailable reason={}", exception.getClass().getSimpleName());
-            return inactive(configuration, connection);
+            return inactive(configuration, connection, browserRelay);
         }
     }
 
     private static LocalClientTray inactive(
             LocalClientConfiguration configuration,
-            LocalClientConnection connection) {
+            LocalClientConnection connection,
+            LocalBrowserRelay browserRelay) {
         return new LocalClientTray(
-                configuration, connection, null, null, null, null, null, null);
+                configuration, connection, browserRelay, null, null, null, null, null, null);
     }
 
     private void bindActions() {
@@ -142,6 +153,10 @@ final class LocalClientTray implements AutoCloseable {
             connection.reconnect();
             displayMessage("TestAgent 客户端", "正在重新连接", TrayIcon.MessageType.INFO);
         });
+        if (browserRelay != null) {
+            popup.bind(LocalClientTrayPopup.Action.BROWSER_SETTINGS, () -> runAction(
+                    "browser_settings", this::configureBrowser, null));
+        }
         popup.bind(LocalClientTrayPopup.Action.UPDATE_PUBLIC_CAPABILITIES, () -> runAction(
                 "public_capability_update", this::confirmPublicCapabilityUpdate, null));
         popup.bind(LocalClientTrayPopup.Action.VIEW_LOGS, () -> runAction("view_logs", () ->
@@ -157,6 +172,27 @@ final class LocalClientTray implements AutoCloseable {
             LOGGER.info("local_client_exit_requested source=tray");
             connection.close();
         }));
+    }
+
+    /** 用户显式选择 360 可执行文件后立即执行真实 CDP 自检，不在日志或平台响应中记录路径。 */
+    private void configureBrowser() throws Exception {
+        Path selected = LocalClientDesktopActions.chooseExecutableFile(
+                LocalBrowserSettings.production().configuredExecutable());
+        if (selected == null) {
+            return;
+        }
+        LocalBrowserSettings.production().saveExecutable(selected);
+        if (browserRelay == null) {
+            throw new IllegalStateException("当前客户端版本未启用浏览器控制");
+        }
+        browserRelay.stopBrowser();
+        LocalBrowserSupervisor.BrowserStatus status = browserRelay.startBrowser();
+        JOptionPane.showMessageDialog(
+                null,
+                "360 浏览器自检通过\nChromium：" + status.chromiumMajor()
+                        + "\nCDP：" + status.protocolVersion(),
+                "TestAgent 浏览器设置",
+                JOptionPane.PLAIN_MESSAGE);
     }
 
     private void bindTrayClick() {

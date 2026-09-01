@@ -101,9 +101,13 @@ public final class LocalClientMain {
             logger.info("local_client_runtime_initializing observabilityEnabled={} clientInstanceId={}",
                     observabilitySettings.maxInFlight() > 0, stateStore.read().clientInstanceId());
             try (LocalModelRelay modelRelay = new LocalModelRelay(configuration);
-                 LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings)) {
+                 LocalObservabilityRelay observabilityRelay = new LocalObservabilityRelay(stateStore, observabilitySettings);
+                 LocalBrowserRelay browserRelay = LocalBrowserSettings.supportedPlatform(startupPlatform)
+                         ? new LocalBrowserRelay(
+                                 new LocalBrowserSupervisor(LocalBrowserSettings.production(), objectMapper), objectMapper)
+                         : null) {
                 OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
-                        configuration, stateStore, modelRelay, observabilityRelay, publicCapabilities);
+                        configuration, stateStore, modelRelay, observabilityRelay, publicCapabilities, browserRelay);
                 if (configuration.selfUpdateConfigured() && buildInfo.managedRelease()) {
                     LocalClientUpdateMarkerStore markerStore =
                             new LocalClientUpdateMarkerStore(stateStore.stateDirectory());
@@ -131,7 +135,7 @@ public final class LocalClientMain {
                         observabilityRelay,
                         observabilitySettings,
                         publicCapabilities);
-                LocalClientTray tray = LocalClientTray.install(configuration, connection);
+                LocalClientTray tray = LocalClientTray.install(configuration, connection, browserRelay);
                 try (connection; tray) {
                     Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                         logger.info("local_client_shutdown_hook_started");

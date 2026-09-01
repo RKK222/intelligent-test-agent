@@ -19,6 +19,7 @@ write_runtime_fixture() {
     '@opencode-ai/sdk|1.18.4|dist/index.js'
     'effect|4.0.0-beta.83|dist/index.js'
     'jsonc-parser|3.3.1|lib/esm/main.js'
+    'playwright-core|1.61.0|index.js'
     'zod|4.1.8|index.js'
   )
 
@@ -27,6 +28,7 @@ write_runtime_fixture() {
     "${runtime_root}/package.json"
   cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
     "${runtime_root}/package-lock.json"
+  printf 'export const fixture = true;\n' >"${runtime_root}/opencode-observability-plugin.mjs"
   for dependency_entry in "${dependencies[@]}"; do
     dependency="${dependency_entry%%|*}"
     version="${dependency_entry#*|}"
@@ -48,9 +50,9 @@ write_runtime_fixture "${RUNTIME_ROOT}"
 tar -C "${PROGRAMS_ROOT}" -czf "${PROGRAMS_ARCHIVE}" programs
 
 root_output="$(bash "${VERIFY_SCRIPT}" --root "${RUNTIME_ROOT}")"
-grep -Fq 'plugin/sdk/effect/zod are present' <<<"${root_output}"
+grep -Fq 'plugin/sdk/effect/playwright/zod are present' <<<"${root_output}"
 archive_output="$(bash "${VERIFY_SCRIPT}" --archive "${PROGRAMS_ARCHIVE}")"
-grep -Fq 'plugin/sdk/effect/zod are present' <<<"${archive_output}"
+grep -Fq 'plugin/sdk/effect/playwright/zod are present' <<<"${archive_output}"
 
 # `@opencode-ai/plugin` 是所有 TypeScript Tool 的定义入口，缺失时必须明确失败。
 rm -f "${RUNTIME_ROOT}/node_modules/@opencode-ai/plugin/package.json"

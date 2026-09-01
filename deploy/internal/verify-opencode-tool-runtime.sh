@@ -50,6 +50,7 @@ DEPENDENCIES=(
   '@opencode-ai/sdk|dist/index.js'
   'effect|dist/index.js'
   'jsonc-parser|lib/esm/main.js'
+  'playwright-core|index.js'
   'zod|index.js'
 )
 
@@ -156,5 +157,5 @@ for dependency_entry in "${DEPENDENCIES[@]}"; do
   }
 done
 
-printf 'OpenCode Tool runtime dependencies verified: %s; plugin/sdk/effect/zod are present\n' \
+printf 'OpenCode Tool runtime dependencies verified: %s; plugin/sdk/effect/playwright/zod are present\n' \
   "${SOURCE_LABEL}"
