@@ -15519,9 +15519,13 @@
 
 - `mvn -pl test-agent-local-client -am -Dtest=LocalBrowserSettingsTest,LocalBrowserSupervisorTest -Dsurefire.failIfNoSpecifiedTests=false test`：7/7 通过。
 - `mvn -pl test-agent-local-client -am test`：common 110、protocol 11、local client 118，合计 238 passed / 1 个既有真实 OpenCode 条件跳过。
+- `deploy/internal/tests/local-opencode-client-package-test.sh` 完整回归通过；新 release 的 catalog、manifest 和四类制品共六项组织 RSA 验签通过，源码目录与外层传输包独立解包后的 `verify-local-opencode-client-distribution.sh` 均通过。
+- 最终 JAR 执行 `--version` 输出 `20260901162846`；`javap` 回读确认第一候选包含 `/usr/bin/browser360ent-cn-stable`，进程身份方法只校验存活、PID 与 `startInstant`，未残留 command 路径比较。
 - `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次四个业务/文档文件冲突的未完成事项。
 
 ### Result
 
-- Mac 自动化已验证同 PID `exec` 回归路径；没有修改 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK 或 OpenCode 只读源码，也没有新增部署节点或合并回 `release`。
-- 修复后的新不可变麒麟候选包及企业 360 对话全链路复测仍待完成，当前不能把浏览器操作能力表述为企业真机验收通过。
+- Mac 自动化已验证同 PID `exec` 回归路径；新的不可变候选 release 为 `20260901162846`，分发目录是 `deploy/internal/dist-local-client-20260901162846/local-opencode-client/`。
+- U 盘传输包为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-local-opencode-client_20260901162846_arm64.tar.gz{,.sha256}`，外层 SHA-256 为 `c83f4eadac5a9fbc229734c153d1319ec67d122ad69530a25481e22d877c6f53`；旧 `0826` 正式 release 和 `20260828094319` 候选均未覆盖。
+- 没有修改 API、RunEvent/SSE、数据库、Flyway、环境配置、generated SDK、OpenCode 只读源码、企业平台状态或企业权威公共 Git，也没有新增部署节点或合并回 `release`。包内公共能力仍来自隔离候选提交，只可用于单机测试。
+- 修复包仍需在当前企业麒麟机器重新完成托盘自检和对话 Tool 全链路复测，当前不能把浏览器操作能力表述为企业真机验收通过。
