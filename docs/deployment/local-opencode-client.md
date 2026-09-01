@@ -402,7 +402,9 @@ Observability 现场验收还必须确认用户包引用的受控 release 包含
 本地浏览器 Tool 上线时，在权威公共配置 Git 的 `tools/local_browser.ts` 使用仓库
 `deploy/internal/local_browser.ts` 同步模板并形成明确提交，再由现有公共能力包流程构建、签名和下发；禁止直接修改客户端
 不可变能力目录。外网构建的 programs 必须包含锁定的 `playwright-core@1.61.0`，内网目标机不下载 Chromium，也不执行 npm。
-目标麒麟 ARM64 用户桌面必须已安装企业 360 浏览器；托盘“浏览器设置与自检”自动发现失败时由用户选择浏览器可执行文件。
+目标麒麟 ARM64 用户桌面必须已安装企业 360 浏览器；客户端默认首先检查系统稳定入口
+`/usr/bin/browser360ent-cn-stable`，不存在或不可执行时才检查其它受控候选和 desktop entry，全部失败后再由用户从
+托盘“浏览器设置与自检”选择浏览器可执行文件。稳定入口仍存在时，360 升级不要求用户重新选择。
 企业 360 的 `browser360ent-cn` 启动器可能以同一 PID 和启动时间 `exec` 为 `browser360ent` 内核；客户端按
 PID + `ProcessHandle.startInstant` 监管该受管进程，并继续以独立 profile、loopback `DevToolsActivePort`、CDP `1.3`
 和 Chromium 已验证范围确认浏览器能力。现场不得用启动前后 command 路径变化判定 PID 被复用。

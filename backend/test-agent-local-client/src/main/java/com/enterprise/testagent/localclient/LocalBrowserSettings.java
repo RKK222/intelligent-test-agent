@@ -27,7 +27,8 @@ final class LocalBrowserSettings {
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE,
             PosixFilePermission.OWNER_EXECUTE);
-    private static final List<Path> KYLIN_CANDIDATES = List.of(
+    static final List<Path> KYLIN_CANDIDATES = List.of(
+            Path.of("/usr/bin/browser360ent-cn-stable"),
             Path.of("/opt/apps/com.qihoo.browser/files/360browser"),
             Path.of("/opt/apps/com.qihoo.browser/files/360chrome"),
             Path.of("/opt/360browser/360browser"),

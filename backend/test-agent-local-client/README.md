@@ -54,6 +54,8 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - 新客户端声明 `LOCAL_BROWSER_V1`。该能力只由本地 OpenCode Tool 使用，不新增平台 HTTP、RunEvent、数据库或文件代理，
   也不开放给服务器受保护 Agent。客户端从麒麟常见安装路径和 360/Qihoo desktop entry 自动发现浏览器；发现失败时用户可在
   托盘“浏览器设置与自检”中选择绝对可执行文件，配置以当前用户私有权限保存。
+- 企业麒麟自动发现首先检查系统稳定入口 `/usr/bin/browser360ent-cn-stable`；该入口不存在或不可执行时，才继续检查其它
+  受控候选和 desktop entry。稳定入口仍存在时，360 升级不要求用户重新选择浏览器程序。
 - `LocalBrowserSupervisor` 始终使用独立持久 profile、可见窗口、随机 loopback CDP 端口和精确 PID/权威启动时间身份监管；
   兼容企业 360 启动器以同一 PID `exec` 为真实内核进程时命令路径从 `browser360ent-cn` 切换为 `browser360ent`，
   不把会变化的命令路径作为 PID fencing。客户端不读取或接管用户日常 profile；CDP 仅在协议 `1.3`、

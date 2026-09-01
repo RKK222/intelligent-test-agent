@@ -30,6 +30,12 @@ class LocalBrowserSettingsTest {
     }
 
     @Test
+    void prefersEnterprise360StableLauncherBeforeFallbackDiscovery() {
+        assertThat(LocalBrowserSettings.KYLIN_CANDIDATES.getFirst())
+                .isEqualTo(Path.of("/usr/bin/browser360ent-cn-stable"));
+    }
+
+    @Test
     void persistsCanonicalExecutableAndRejectsNonExecutableFile() throws Exception {
         Path executable = temporaryDirectory.resolve("360browser");
         Files.writeString(executable, "#!/bin/sh\nexit 0\n", StandardCharsets.UTF_8);

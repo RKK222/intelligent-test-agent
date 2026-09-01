@@ -15511,13 +15511,14 @@
 ### What
 
 - 本地浏览器进程 fencing 改为精确校验 `ProcessHandle` 的存活状态、PID 和权威 `startInstant`；不再把 Linux `exec` 后会变化的 command 路径作为身份字段。
+- 麒麟自动发现把系统稳定入口 `/usr/bin/browser360ent-cn-stable` 置于第一候选；只有该入口不存在或不可执行时才检查其它受控路径和 desktop entry，避免企业 360 正常升级后要求用户重新选择。
 - 浏览器能力仍独立校验专用 profile 的 `DevToolsActivePort`、loopback WebSocket、CDP `1.3` 和 Chromium `108..149`，没有放宽可控制浏览器范围。
 - 新增回归测试覆盖同 PID/同启动时间的启动器切换，以及退出、PID 复用和启动时间变化的拒绝；同步模块 README 与企业客户端部署说明。
 
 ### How
 
-- `mvn -pl test-agent-local-client -am -Dtest=LocalBrowserSupervisorTest,LocalBrowserSettingsTest,LocalBrowserRelayTest -Dsurefire.failIfNoSpecifiedTests=false test`：7/7 通过。
-- `mvn -pl test-agent-local-client -am test`：common 110、protocol 11、local client 117，合计 237 passed / 1 个既有真实 OpenCode 条件跳过。
+- `mvn -pl test-agent-local-client -am -Dtest=LocalBrowserSettingsTest,LocalBrowserSupervisorTest -Dsurefire.failIfNoSpecifiedTests=false test`：7/7 通过。
+- `mvn -pl test-agent-local-client -am test`：common 110、protocol 11、local client 118，合计 238 passed / 1 个既有真实 OpenCode 条件跳过。
 - `git diff --check` 通过；提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次四个业务/文档文件冲突的未完成事项。
 
 ### Result
