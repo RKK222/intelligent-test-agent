@@ -16271,3 +16271,27 @@
 
 - 本仓库只改技能与安全文档，不新增部署节点，不修改应用代码、API、事件、SQL、数据库、环境配置、generated SDK、OpenCode 源码或部署二进制，也未重启 TestAgent 服务或推送远端。
 - 企业真实 Linux 4.19 / Docker 18.09.7 的启动和跨机业务回验仍待现场执行；没有清空 MySQL 失败目录、修改宿主网络或重建离线 ZIP。后续企业部署任务应用此默认值，不表示现存所有脚本/容器已批量更新。
+
+## 2026-09-01 - 对标 DeepSeek Harness alpha.3 评估底层优化方向
+
+### Why
+
+- 用户要求参考“安装配置 DeepSeek Harness”对话，分析截至当前的最新 DSH，并评估 TestAgent 底层可优化方向。
+- DSH 仍处于 alpha，平台又已有企业鉴权、跨 Java 路由、进程生命周期、Redis Run 数据面和文件 WebSocket 等成熟边界，因此不能把框架替换和可复用设计混为一谈。
+
+### What
+
+- 核验 DSH 最新 tag 与 `master` 均为 `dsh-v0.1.2-alpha.3`，提交 `dd6322d604e00eec1ba5e0c8541159906a21094a`；结合官方架构、Session Projection、JSONL persistence 和 Connection 文档复核其 all-in-plugin、统一 launcher/profile、领域 Remote、投影和 packed history 设计。
+- 盘点本项目 `AgentRuntime`、OpenCode runtime/session/process/routing、Redis Run store、RunEvent/SSE、后端投影和前端 reducer/Workbench 链路。结论是继续保留 OpenCode 与现有企业数据面，优先建设版本化 Run Projection Kernel，并收口 `AgentRuntimeCommand` 的 HTTP 传输细节泄漏；其次补 Runtime Profile Manifest、RunEvent 单一目录和连接代次握手。
+- 在 `/Users/kaka/Desktop/open-source-research-reports/intelligent-test-agent-vs-deepseek-harness/` 生成 Word/Markdown 报告、研究摘要、证据卡、阅读路线，以及 1 张架构图和 3 张时序图；这些调研制品位于仓库外，不纳入产品提交。
+
+### How
+
+- 复用参考对话中的版本差异证据，再以官方仓库固定提交和本地源码逐项复核；统计当前生产代码中 13 处 `AgentRuntimeCommand` 构造、10 处默认 Agent、46 类 RunEvent，并核对 Redis TTL/owner fencing/outbox、SSE reset 及前端多重事件投影实现。
+- `report.docx` 通过文档结构校验，并在配置系统中文字体后渲染 11 页逐页检查；4 张 PNG 图均完成视觉检查。提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次单文件追溯更新冲突的未完成事项。
+
+### Result
+
+- 推荐首个切片仅做 `run-status.v1 + attention.v1` 双写投影，保留旧 `snapshot.events` 兼容路径并用长会话量化 reset 体积、首屏恢复时间、Redis 写放大和前后端一致性；在指标成立前不扩展到 conversation packed history。
+- 本次不新增部署节点，不修改产品代码、API、RunEvent、数据库、SQL/Flyway、性能实现、安全协议、环境配置、generated SDK 或 OpenCode 只读源码，也未启动或重启 TestAgent 服务。
+- 尚未执行投影原型或真实长会话基准；报告给出的是有源码证据的设计优先级，不宣称优化已经落地。
