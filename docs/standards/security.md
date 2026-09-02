@@ -217,6 +217,11 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 本地客户端托盘不得展示 prompt、绝对路径、请求体、client key 或模型 grant。日志下载只能由用户本机
   主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
   OpenCode 日志及工作区内容；导出失败不得退化为打包整个 state 或 config 目录。
+- 本地浏览器只能由当前用户的本地客户端监管：使用独立持久 profile、可见窗口、随机 loopback CDP 端口和随机本地 relay token，
+  禁止连接用户日常浏览器 profile、绑定非 loopback 地址或把 CDP/token 发送到平台。Tool 按 HTTP(S) origin 授权，未知跨 origin
+  主文档跳转在发出请求前阻断；提交、上传、下载不得使用永久授权。上传只允许当前工作区内不超过 100 MiB 的非符号链接普通
+  文件；下载和截图只写入当前工作区的显式产物目录。模型输出不得包含 Cookie、认证 token、密码/input value、完整 HTML 或
+  截图字节；浏览器 stdout/stderr 不写入可导出日志。
 - 受保护 Agent/Skill 正文、系统提示词和编排只允许在服务器不可变制品与单 Run 模型上下文中出现，不得进入
   Agent 目录响应、本地客户端配置目录、WSS 注册/心跳、RunEvent、审计正文或浏览器缓存。只要向用户电脑
   下载完整正文，就不能声称用户不可读取；签名只能检出篡改，不能提供保密性。
@@ -341,11 +346,11 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 
 ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 
-## 企业旧 Docker 的中间件 seccomp 兼容例外
+## 企业 Docker 运行权限基线
 
-1. 当前 Linux 4.19 / Docker 18.09.7 节点运行 ClickHouse 26.3、Bookworm Python/pgvector 或 Alpine 3.20 镜像时，旧默认 seccomp 可能把新系统调用返回为 `EPERM`，导致时区解析、线程创建或镜像入口失败。经现场负责人明确批准，交付脚本使用 `--privileged` 启动 ClickHouse、独立记忆 pgvector、Alembic、Mem0、CPU BGE 和记忆 VIP 容器。
-2. 该例外不得写入 Docker daemon 全局默认，不得扩大到共置平台 PostgreSQL、克隆机遗留容器或其它业务容器。非 root、只读根、最小 mount、端口 ACL 和密钥文件权限继续保留，但不得宣称它们抵消了 privileged 带来的设备、capability、seccomp/AppArmor 隔离放宽；这些容器必须按高权限工作负载限制宿主访问和运维人员范围。ClickHouse 继续由官方入口降权为 UID/GID `101:101`，其 `0600` 用户配置和持久目录必须归同一 UID/GID 所有；禁止通过 `CLICKHOUSE_RUN_AS_ROOT=1` 绕过文件所有权，否则既扩大权限，又会触发 ClickHouse 的进程用户/数据所有者一致性保护。
-3. 外网 Mac 的现代 Docker 启动验证只能证明制品功能，不能替代每台旧 Docker 企业宿主验证。宿主 Docker、runc 和 libseccomp 完成受控升级后，必须逐镜像移除 `--privileged` 实启并通过 readiness，才能取消例外；不能只按版本号推断兼容。
+1. 当前 Linux 4.19 / Docker 18.09.7 的旧默认 seccomp 可能把新系统调用返回为 `EPERM`，导致线程创建或镜像入口失败。用户于 2026-08-31 明确批准：后续企业内网 Docker 部署默认以 `--privileged` 启动本次任务需要新建或重建的容器，包括服务、中间件和一次性任务，不再仅限于此前列举的 ClickHouse、记忆组件等。实际交付脚本必须包含该参数，不能仅修改本机验收命令；无需每个服务先复现一次失败才应用基线。
+2. 该基线不是所有 Docker 环境的通用要求，不得写入 Docker daemon 全局默认，也不授权重建本次任务之外的共置平台 PostgreSQL、克隆机遗留容器或其它业务容器；普通 Mac 开发环境不自动提权。非 root、只读根、最小 mount、端口 ACL 和密钥文件权限继续保留，但不得宣称它们抵消了 privileged 带来的设备、capability、seccomp/AppArmor 隔离放宽；这些容器必须按高权限工作负载限制宿主访问和运维人员范围。不因 privileged 而额外添加 host 网络、Docker socket 或宿主根目录挂载。ClickHouse 继续由官方入口降权为 UID/GID `101:101`，其 `0600` 用户配置和持久目录必须归同一 UID/GID 所有；禁止通过 `CLICKHOUSE_RUN_AS_ROOT=1` 绕过文件所有权，否则既扩大权限，又会触发 ClickHouse 的进程用户/数据所有者一致性保护。
+3. 修改创建参数后必须按已授权范围重建容器，`docker restart` 不会应用新权限；保留配置和持久化数据，初始化残留另行确认、备份和恢复，不自动清空。验收必须同时确认 `HostConfig.Privileged=true`、readiness 和实际业务链路。外网 Mac 的现代 Docker 启动只能证明本机功能，不能替代每台旧 Docker 企业宿主验证；IPv4 forwarding、防火墙和依赖问题也不能由 privileged 代替修复。宿主 Docker、runc 和 libseccomp 受控升级后，若拟取消该基线，须经用户确认并逐镜像移除参数、实启和完成 readiness/业务验收，不能仅按版本号推断兼容。
 
 ## 官方 Codex MCP 安全边界
 

@@ -90,12 +90,11 @@ public class LocalWorkspaceApplicationService {
      * 当前连接重新校验历史绝对路径：同实例恢复根映射；历史实例离线时，只允许唯一在线实例凭完全一致的
      * rootDigest + fileSystemIdentity 接管。校验成功后才保存最近工作区，避免页面先切换到不可读目录。</p>
      */
-    @Transactional
     public LocalWorkspaceView markRecent(UserId userId, WorkspaceId workspaceId, String traceId) {
         LocalClientConnectionRoute route = requireWorkspaceActivationRoute(userId, workspaceId);
         LocalWorkspaceView activated = activateWorkspace(userId, workspaceId, route, traceId);
-        managedWorkspaceRepository.savePreference(new UserWorkspacePreference(
-                userId, null, workspaceId, Instant.now()));
+        reconnectTransaction.executeWithoutResult(status -> managedWorkspaceRepository.savePreference(
+                new UserWorkspacePreference(userId, null, workspaceId, Instant.now())));
         return activated;
     }
 
@@ -105,7 +104,6 @@ public class LocalWorkspaceApplicationService {
      * <p>全局最近项也可能是服务器工作区；这种情况直接跳过。恢复仍执行客户端真实路径、摘要和文件系统身份校验，
      * 并用注册帧携带的 generation 限定当前物理连接，不能仅凭历史数据库路径自动接管。</p>
      */
-    @Transactional
     public Optional<LocalWorkspaceView> restoreRecentOnReconnect(
             UserId userId,
             LocalClientInstanceId clientInstanceId,
@@ -162,14 +160,12 @@ public class LocalWorkspaceApplicationService {
         int unavailable = 0;
         for (LocalClientWorkspaceBinding binding : candidates.values()) {
             try {
-                reconnectTransaction.execute(status -> {
-                    LocalClientConnectionRoute currentRoute = requireOwnedOnlineRoute(userId, clientInstanceId);
-                    if (currentRoute.connectionGeneration() != connectionGeneration) {
-                        throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
-                    }
-                    requireCurrentConnection(currentRoute);
-                    return activateWorkspace(userId, binding.workspaceId(), currentRoute, traceId);
-                });
+                LocalClientConnectionRoute currentRoute = requireOwnedOnlineRoute(userId, clientInstanceId);
+                if (currentRoute.connectionGeneration() != connectionGeneration) {
+                    throw new PlatformException(ErrorCode.CONFLICT, "本地客户端重连 generation 已失效");
+                }
+                requireCurrentConnection(currentRoute);
+                activateWorkspace(userId, binding.workspaceId(), currentRoute, traceId);
                 restored++;
             } catch (RuntimeException exception) {
                 unavailable++;
@@ -194,46 +190,68 @@ public class LocalWorkspaceApplicationService {
             WorkspaceId workspaceId,
             LocalClientConnectionRoute route,
             String traceId) {
-        LocalClientWorkspaceBinding binding = requireOwnedBinding(userId, workspaceId);
+        LocalClientWorkspaceBinding expectedBinding = requireOwnedBinding(userId, workspaceId);
         workspaceRepository.findById(workspaceId)
                 .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "本地工作区不可用"));
         requireCurrentConnection(route);
 
-        localWorkspaceRepository.lockRegistration(userId, route.clientInstanceId());
-        binding = requireOwnedBinding(userId, workspaceId);
         JsonNode input = objectMapper.createObjectNode()
-                .put("absolutePath", binding.normalizedRootPath());
-        RootRegistration validated = registration(fileGateway.invoke(
+                .put("absolutePath", expectedBinding.normalizedRootPath());
+        // 客户端 RPC 必须全部发生在数据库锁和事务之外；回包完成后再用短事务加锁复核快照。
+        RootRegistration validated = registration(fileGateway.invokeRootRegistration(
                 route.clientInstanceId().value(),
                 route.connectionGeneration(),
-                null,
                 null,
                 "workspace.validateRoot",
                 input,
                 traceId));
-        if (!binding.rootDigest().equals(validated.rootDigest())
-                || !binding.fileSystemIdentity().equals(validated.fileSystemIdentity())) {
+        if (!expectedBinding.rootDigest().equals(validated.rootDigest())
+                || !expectedBinding.fileSystemIdentity().equals(validated.fileSystemIdentity())) {
             throw new PlatformException(ErrorCode.CONFLICT, "历史本地工作区目录身份已变化，请重新选择目录注册");
         }
 
-        LocalWorkspaceView activated;
-        if (binding.clientInstanceId().equals(route.clientInstanceId())) {
-            activated = restoreExistingWorkspace(
-                    binding, validated, input, route.connectionGeneration(), traceId);
-        } else {
-            if (connectionStore.find(binding.clientInstanceId()).isPresent()) {
-                throw new PlatformException(ErrorCode.CONFLICT, "历史本地工作区绑定的客户端已经重新上线");
-            }
-            activated = reclaimExistingWorkspace(
-                    binding,
-                    route.clientInstanceId(),
-                    validated,
-                    input,
-                    route.connectionGeneration(),
-                    traceId);
+        RootRegistration registered = registerRoot(
+                route.clientInstanceId(), route.connectionGeneration(), workspaceId, input, traceId);
+        if (!validated.equals(registered)) {
+            bestEffortUnregister(route.clientInstanceId(), route.connectionGeneration(), workspaceId, traceId);
+            throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在恢复期间发生变化");
         }
-        return activated;
+
+        return reconnectTransaction.execute(status -> persistActivatedWorkspace(
+                userId, expectedBinding, route, registered, traceId));
+    }
+
+    /** 加锁后只复核并持久化恢复结果，不再等待任何客户端或网络 RPC。 */
+    private LocalWorkspaceView persistActivatedWorkspace(
+            UserId userId,
+            LocalClientWorkspaceBinding expectedBinding,
+            LocalClientConnectionRoute expectedRoute,
+            RootRegistration registered,
+            String traceId) {
+        LocalClientConnectionRoute currentRoute = requireOwnedOnlineRoute(userId, expectedRoute.clientInstanceId());
+        if (currentRoute.connectionGeneration() != expectedRoute.connectionGeneration()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地客户端恢复 generation 已失效");
+        }
+        requireCurrentConnection(currentRoute);
+        localWorkspaceRepository.lockRegistration(userId, currentRoute.clientInstanceId());
+
+        LocalClientWorkspaceBinding currentBinding = requireOwnedBinding(userId, expectedBinding.workspaceId());
+        if (!currentBinding.equals(expectedBinding)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "本地工作区绑定在恢复期间已变化");
+        }
+        if (currentBinding.clientInstanceId().equals(currentRoute.clientInstanceId())) {
+            return persistRestoredWorkspace(currentBinding, registered);
+        }
+        if (connectionStore.find(currentBinding.clientInstanceId()).isPresent()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "历史本地工作区绑定的客户端已经重新上线");
+        }
+        return persistReclaimedWorkspace(
+                currentBinding,
+                currentRoute.clientInstanceId(),
+                currentRoute.connectionGeneration(),
+                registered,
+                traceId);
     }
 
     public LocalClientConnectionRoute requireOwnedOnlineRoute(
@@ -296,8 +314,8 @@ public class LocalWorkspaceApplicationService {
         LocalClientConnectionRoute route = requireOwnedOnlineRoute(userId, clientInstanceId);
         requireCurrentConnection(route);
         JsonNode input = objectMapper.createObjectNode().put("absolutePath", normalizedInputRoot);
-        RootRegistration validated = registration(fileGateway.invoke(
-                clientInstanceId.value(), route.connectionGeneration(), null, null,
+        RootRegistration validated = registration(fileGateway.invokeRootRegistration(
+                clientInstanceId.value(), route.connectionGeneration(), null,
                 "workspace.validateRoot", input, traceId));
 
         // 校验发生在用户桌面，随后按用户串行查重；同一实例重复选择时恢复根映射，实例 ID 因重装变化时
@@ -371,10 +389,6 @@ public class LocalWorkspaceApplicationService {
             JsonNode input,
             long generation,
             String traceId) {
-        Workspace workspace = workspaceRepository.findById(historicalBinding.workspaceId())
-                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.CONFLICT, "本地工作区历史绑定存在，但 Workspace 已不可用"));
         RootRegistration registered = registerRoot(
                 replacementClientInstanceId,
                 generation,
@@ -386,6 +400,22 @@ public class LocalWorkspaceApplicationService {
                     replacementClientInstanceId, generation, historicalBinding.workspaceId(), traceId);
             throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在接管期间发生变化");
         }
+
+        return persistReclaimedWorkspace(
+                historicalBinding, replacementClientInstanceId, generation, registered, traceId);
+    }
+
+    /** 只保存已在事务外或既有调用点完成的根注册结果。 */
+    private LocalWorkspaceView persistReclaimedWorkspace(
+            LocalClientWorkspaceBinding historicalBinding,
+            LocalClientInstanceId replacementClientInstanceId,
+            long generation,
+            RootRegistration registered,
+            String traceId) {
+        Workspace workspace = workspaceRepository.findById(historicalBinding.workspaceId())
+                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT, "本地工作区历史绑定存在，但 Workspace 已不可用"));
 
         Instant now = Instant.now();
         LocalClientWorkspaceBinding replacementBinding = new LocalClientWorkspaceBinding(
@@ -429,16 +459,23 @@ public class LocalWorkspaceApplicationService {
             JsonNode input,
             long generation,
             String traceId) {
-        Workspace workspace = workspaceRepository.findById(binding.workspaceId())
-                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.CONFLICT, "本地工作区绑定存在，但 Workspace 已不可用"));
         RootRegistration registered = registerRoot(
                 binding.clientInstanceId(), generation, binding.workspaceId(), input, traceId);
         if (!validated.equals(registered)) {
             bestEffortRestoreRoot(binding, generation, traceId);
             throw new PlatformException(ErrorCode.CONFLICT, "本地工作区根目录在注册期间发生变化");
         }
+        return persistRestoredWorkspace(binding, registered);
+    }
+
+    /** 根注册完成后只刷新数据库投影，不再从事务内反向调用客户端。 */
+    private LocalWorkspaceView persistRestoredWorkspace(
+            LocalClientWorkspaceBinding binding,
+            RootRegistration registered) {
+        Workspace workspace = workspaceRepository.findById(binding.workspaceId())
+                .filter(candidate -> candidate.status() == WorkspaceStatus.ACTIVE)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT, "本地工作区绑定存在，但 Workspace 已不可用"));
         if (!binding.normalizedRootPath().equals(registered.normalizedRootPath())
                 || !binding.fileSystemIdentity().equals(registered.fileSystemIdentity())) {
             Instant now = Instant.now();
@@ -461,8 +498,8 @@ public class LocalWorkspaceApplicationService {
             WorkspaceId workspaceId,
             JsonNode input,
             String traceId) {
-        return registration(fileGateway.invoke(
-                clientInstanceId.value(), generation, workspaceId.value(), null,
+        return registration(fileGateway.invokeRootRegistration(
+                clientInstanceId.value(), generation, workspaceId.value(),
                 "workspace.registerRoot", input, traceId));
     }
 

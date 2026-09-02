@@ -49,6 +49,7 @@ final class LocalClientTrayPopup implements AutoCloseable {
         OPEN_WEB,
         REGISTER_WORKSPACE,
         RECONNECT,
+        BROWSER_SETTINGS,
         UPDATE_PUBLIC_CAPABILITIES,
         VIEW_LOGS,
         DOWNLOAD_LOGS,
@@ -63,6 +64,10 @@ final class LocalClientTrayPopup implements AutoCloseable {
     private boolean focusObserved;
 
     LocalClientTrayPopup(BufferedImage petImage) {
+        this(petImage, true);
+    }
+
+    LocalClientTrayPopup(BufferedImage petImage, boolean browserSupported) {
         content.setName("localClientTrayPopup");
         content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
         content.setBackground(color("PopupMenu.background", Color.WHITE));
@@ -74,6 +79,9 @@ final class LocalClientTrayPopup implements AutoCloseable {
         add(Action.OPEN_WEB, "打开网页");
         add(Action.REGISTER_WORKSPACE, "选择并注册工作区…").setEnabled(false);
         add(Action.RECONNECT, "重连");
+        if (browserSupported) {
+            add(Action.BROWSER_SETTINGS, "360 浏览器设置与自检…");
+        }
         addSeparator();
         add(Action.UPDATE_PUBLIC_CAPABILITIES, "公共能力 · 暂无更新").setEnabled(false);
         add(Action.VIEW_LOGS, "查看日志");

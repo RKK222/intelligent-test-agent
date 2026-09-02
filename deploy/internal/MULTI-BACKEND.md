@@ -18,23 +18,28 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
-## 当前增量说明（2026-08-31）
+## 当前增量说明（2026-09-01）
 
-- 构建业务源码为本地 `release` 合并提交 `33d0aa2dabc11fbb18f09d1b8fc058ec8ae66d83`，已包含远程
-  `78f5fb9ee` 的 TCDS 案例维护异常提示修正，并保留原有本地提交；没有合入 `dev` 或新增部署节点。
+- 当前本地 `release` 已合入 `codex/local-browser-360@5cc79210f651037942551fc098133f52dd22d944` 的 6 个提交，
+  同时保留 release 后续全部能力；没有整体合入 `dev`，也没有新增部署节点。
 - 最后已确认部署基线仍是 `363e1b6babe291018800e76e0cb2c1034cfc230f`，外层包摘要
-  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。后续未确认部署的候选包不是新基线，
-  本包直接替代这些候选，无需逐个安装。
-- 相对该基线，重点验收公共 Agent 发布并行排空、应用配置目录缺失时的对话、应用资产库整体 `spec` 与精确
-  `ai-agent/spec` 引用、测试设计纸飞机导航、案例维护失败不弹空白页，以及重复案例名/系统异常的安全提示。
-  嵌套目录须在企业通用参数 `REFERENCES_SDD_FOLDER_NAMES` 中保留已有配置并加入 `ai-agent/spec`；本包不替企业改库。
-- PostgreSQL、XXL MySQL、ClickHouse 迁移资源与已部署基线一致，本轮三套历史均不应新增记录；仍须执行下文历史与
-  最终 persistence JAR 校验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
-- worker runtime、toolbox、客户端均为 `reuse`；客户端保持 `20260827222702`。不携带这三个组件的大文件，
-  不重启 worker/manager、工具容器，不替换客户端，不覆盖 `.4` models 灰度，也不重复部署或同步 CK/Mem0/BGE/pgvector。
-  前后端及其完整依赖仍是基本发布单元；包含历史 Flyway SQL 不代表重复执行迁移。
-- 本机另行制作的公共 Agent/Skill 配置 ZIP 不并入本平台包，也不自动替换客户端公共能力基线；企业正式发布的公共 Git
-  commit 仍是权威源。Jenkins 测试环境改动不触发企业节点或客户端更新。
+  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。8 月 28 日及 31 日只打包但未确认部署的
+  候选不成为现场基线，本包直接替代这些候选，无需逐个安装。
+- 本轮新增麒麟 ARM 本地客户端 360 浏览器控制：独立受管 profile、loopback token 控制面、Chromium/CDP 版本门禁、
+  托盘选择与自检，并修复 360 启动器同 PID 切换真实内核后的进程识别；服务端重连恢复改为一次快照批量恢复，
+  单个失效本地工作区不会阻断同实例其它工作区，也不会形成循环请求。
+- worker runtime 因增加锁定的 `playwright-core@1.61.0` 和 `local_browser.ts` 支持而为 `included`；两台后台会替换
+  programs 和 worker 镜像，并按企业 Docker 基线以 `--privileged` 重建 worker/manager 容器。toolbox 仍为 `reuse`。
+  `.4` models 灰度不由标准包覆盖；CK/Mem0/BGE/pgvector 不重新部署或同步。
+- 本地客户端为 `included`，目标版本 `20260901203844`；`.2` 会发布组织密钥签名的完整麒麟 ARM64 用户包，现有客户端
+  `20260827222702` 需按版本管理策略或用户从前端重新下载升级。客户端仍使用企业入口
+  `http://mimo.sdc.cs.icbc:9996`，JDK/OpenCode 和公共能力基线复用既有受控输入。
+- `deploy/internal/local_browser.ts` 只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置。正式可用前仍须由管理员
+  将模板提交到企业公共配置 Git 的 `tools/local_browser.ts`，通过页面 Diff、提交和发布；企业已发布 commit 才是权威源。
+- PostgreSQL、XXL MySQL、ClickHouse migration 与已部署基线一致，本轮三套历史均不应新增记录；最终 persistence JAR
+  仍须按下文核验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
+- release 既有更新仍需一并验收：公共 Agent 发布并行排空、缺少可选配置目录时的对话、整体/嵌套 `spec` 引用、
+  测试设计导航、案例维护失败不弹空白页及安全错误提示。Workflow/LobeHub 与独立 memory 制品继续 `disabled`，trace 不打包。
 
 ## 1. 正式拓扑
 

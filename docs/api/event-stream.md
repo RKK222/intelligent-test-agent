@@ -1058,6 +1058,13 @@ manager WebSocket `command` 帧支持可选 `environment` 和 `configPath` 字�
 | `CANCEL` | 双向 | 按 targetRequestId 取消 HTTP/SSE、文件或生命周期请求。 |
 | `ERROR` | 双向 | 稳定 code、安全 message、retryable 和无敏感 details。 |
 
+服务端按连接维护 64 项有界的数据库通知串行队列。`VERSION_CHECK`、`UPDATE_*` 客户端回执及公共能力
+通知进入该队列，保持原始通知顺序但立即释放 WebSocket 入站 `concatMap`；`FILE_RESPONSE`、`LIFECYCLE_RESULT`、
+`HTTP_RESPONSE` 和流分片继续直接完成 requestId 关联，不得排在数据库事务之后。队列溢出或后台通知失败发送 `ERROR`
+并关闭连接，不能无界积压或静默丢帧。心跳只刷新 Redis route/grant TTL，独立调度且不排在数据库通知之后。
+`workspace.validateRoot/registerRoot` 统一使用 30 秒请求超时；普通大文件传输仍可
+使用 24 小时超时，两者不得混用。
+
 每帧上限 2 MiB，requestId/traceId 最长 128 字符。认证后缺 generation、generation 非正数、版本不匹配、
 重复 requestId、超大分片或未知帧都失败关闭。断连时客户端取消全部未完成任务、清理临时上传并清空模型
 grant；服务端完成的 Run 不自动切换到服务端实例或其它本地实例。
@@ -1098,6 +1105,13 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 客户端归一后的原因码和安全中文说明，不得包含本地路径、Git URL、命令、凭据或 stderr。非 Git 目录返回
 `UNKNOWN + NOT_GIT_REPOSITORY`，表示 Git 能力不适用但工作区本身可用；未声明能力的旧客户端不接收该操作，服务器也把其状态
 保守记录为 `UNKNOWN`。
+
+## `LOCAL_BROWSER_V1` 本地浏览器能力声明
+
+客户端在 `REGISTER.capabilities` 和 `VERSION_CHECK.capabilities` 中声明 `LOCAL_BROWSER_V1`，只表示该客户端可为自己的本地
+OpenCode 进程注入 loopback 浏览器 relay。该能力不新增 WSS 帧、不通过 `FILE_REQUEST` 代理浏览器操作，也不把 CDP 地址、
+relay token、Cookie、profile 或页面数据发送到平台。旧服务端可按既有 capability 列表兼容规则忽略该值；服务器受保护 Agent
+不得据此尝试调用用户浏览器。
 
 ## `PUBLIC_CAPABILITY_SYNC_V1` 公共能力扩展
 

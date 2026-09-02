@@ -44,6 +44,7 @@ final class OpencodeProcessSupervisor {
     private final LocalModelRelay modelRelay;
     private final LocalObservabilityRelay observabilityRelay;
     private final LocalClientPublicCapabilityStore publicCapabilityStore;
+    private final LocalBrowserRelay browserRelay;
     private final HttpClient httpClient = loopbackHttpClient();
     private volatile String managedModelConfigContent;
     private volatile boolean managedModelRestartRequired;
@@ -52,7 +53,7 @@ final class OpencodeProcessSupervisor {
             LocalClientConfiguration configuration,
             LocalClientStateStore stateStore,
             LocalModelRelay modelRelay) {
-        this(configuration, stateStore, modelRelay, null, null);
+        this(configuration, stateStore, modelRelay, null, null, null);
     }
 
     OpencodeProcessSupervisor(
@@ -60,7 +61,7 @@ final class OpencodeProcessSupervisor {
             LocalClientStateStore stateStore,
             LocalModelRelay modelRelay,
             LocalObservabilityRelay observabilityRelay) {
-        this(configuration, stateStore, modelRelay, observabilityRelay, null);
+        this(configuration, stateStore, modelRelay, observabilityRelay, null, null);
     }
 
     OpencodeProcessSupervisor(
@@ -69,11 +70,22 @@ final class OpencodeProcessSupervisor {
             LocalModelRelay modelRelay,
             LocalObservabilityRelay observabilityRelay,
             LocalClientPublicCapabilityStore publicCapabilityStore) {
+        this(configuration, stateStore, modelRelay, observabilityRelay, publicCapabilityStore, null);
+    }
+
+    OpencodeProcessSupervisor(
+            LocalClientConfiguration configuration,
+            LocalClientStateStore stateStore,
+            LocalModelRelay modelRelay,
+            LocalObservabilityRelay observabilityRelay,
+            LocalClientPublicCapabilityStore publicCapabilityStore,
+            LocalBrowserRelay browserRelay) {
         this.configuration = configuration;
         this.stateStore = stateStore;
         this.modelRelay = modelRelay;
         this.observabilityRelay = observabilityRelay;
         this.publicCapabilityStore = publicCapabilityStore;
+        this.browserRelay = browserRelay;
     }
 
     /**
@@ -161,6 +173,9 @@ final class OpencodeProcessSupervisor {
     synchronized LocalClientPayloads.LifecycleResult stop() {
         long startedNanos = System.nanoTime();
         LocalClientPersistentState.ProcessState recorded = stateStore.read().process();
+        if (browserRelay != null) {
+            browserRelay.stopBrowser();
+        }
         if (recorded == null) {
             LOGGER.info("local_opencode_stop_completed source=no_record durationMs={}",
                     LocalClientDiagnostics.elapsedMillis(startedNanos));
@@ -371,6 +386,10 @@ final class OpencodeProcessSupervisor {
             enforceOfflineRuntime(builder.environment());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_API_KEY", modelRelay.localToken());
+            if (browserRelay != null) {
+                builder.environment().put("TEST_AGENT_LOCAL_BROWSER_BASE_URL", browserRelay.baseUrl());
+                builder.environment().put("TEST_AGENT_LOCAL_BROWSER_TOKEN", browserRelay.localToken());
+            }
             String configContent = mergeManagedModelConfig(
                     builder.environment().get("OPENCODE_CONFIG_CONTENT"),
                     managedModelConfigContent);

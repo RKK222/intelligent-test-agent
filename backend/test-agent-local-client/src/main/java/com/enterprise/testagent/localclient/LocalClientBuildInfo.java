@@ -20,6 +20,7 @@ public record LocalClientBuildInfo(
     public static final String PUBLIC_CAPABILITY_SYNC = "PUBLIC_CAPABILITY_SYNC_V1";
     public static final String MANAGED_MODEL_CONFIG = "MANAGED_MODEL_CONFIG_V1";
     public static final String WORKSPACE_GIT_ACCESS = "WORKSPACE_GIT_ACCESS_V1";
+    public static final String LOCAL_BROWSER = "LOCAL_BROWSER_V1";
     private static final String DEVELOPMENT_VERSION = "0.1.0-dev";
     private static final String MANIFEST_VERSION_ATTRIBUTE = "Local-Client-Version";
 
@@ -29,7 +30,16 @@ public record LocalClientBuildInfo(
 
     public static LocalClientBuildInfo current() {
         String overridden = System.getProperty("test.agent.local.client.version");
-        return resolve(overridden == null || overridden.isBlank() ? readManifestVersion() : overridden);
+        LocalClientBuildInfo resolved = resolve(
+                overridden == null || overridden.isBlank() ? readManifestVersion() : overridden);
+        if (LocalBrowserSettings.supportedPlatform(LocalClientPlatform.current())) {
+            return resolved;
+        }
+        return new LocalClientBuildInfo(
+                resolved.clientVersion(),
+                resolved.launcherVersion(),
+                resolved.capabilities().stream().filter(capability -> !LOCAL_BROWSER.equals(capability)).toList(),
+                resolved.managedRelease());
     }
 
     static LocalClientBuildInfo resolve(String version) {
@@ -42,7 +52,8 @@ public record LocalClientBuildInfo(
                             OBSERVABILITY_CAPABILITY,
                             PUBLIC_CAPABILITY_SYNC,
                             MANAGED_MODEL_CONFIG,
-                            WORKSPACE_GIT_ACCESS),
+                            WORKSPACE_GIT_ACCESS,
+                            LOCAL_BROWSER),
                     false);
         }
         String managedVersion = LocalClientReleaseVersion.parse(version).value();
@@ -54,7 +65,8 @@ public record LocalClientBuildInfo(
                         OBSERVABILITY_CAPABILITY,
                         PUBLIC_CAPABILITY_SYNC,
                         MANAGED_MODEL_CONFIG,
-                        WORKSPACE_GIT_ACCESS),
+                        WORKSPACE_GIT_ACCESS,
+                        LOCAL_BROWSER),
                 true);
     }
 
