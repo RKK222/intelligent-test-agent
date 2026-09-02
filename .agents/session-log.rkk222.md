@@ -16651,3 +16651,34 @@
 - 后端部署后，现有失败/回滚的待更新版本可直接再次点击更新；无需重新发布公共配置或重装客户端，跳版本更新会重启本地 OpenCode 后切换，不再复用旧 Tool 路径。
 - 本机代码、测试、完整构建和服务启动已验证；企业麒麟客户端仍需在目标环境复测更新、OpenCode 重启及 `asset_case_list` Tool 列表/调用，不能表述为企业验收完成。
 - 使用长期 `release`，不新增部署节点；不涉及新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、性能模型、安全协议、generated SDK、环境配置或 OpenCode 只读源码，未推送远程。
+
+## 2026-09-02 - 重打公共能力跳版本修复企业增量包
+
+### Why
+
+- 用户确认上一批 Playwright 离线依赖投影修复包已完成企业部署，因此本轮以其内层
+  `b182ef212bb1b627b68512c81cde2596a867259f1fdcda5751bd2dfb1167079c`、外层
+  `000027eb8cdac6808445ac88c155f30ad5e00f84f3b063ed6c9d610029b93562` 作为已部署基线。
+- 当前 `release@99cfb4d909e7b672ad74a4195e6995fc2bfdadc9` 在该基线后只有本地客户端公共能力跳版本更新修复，不应重复交付已安装的 worker、客户端和数据面大制品。
+
+### What
+
+- 从当前干净 `release` 工作树重新构建后端、前端及标准内层包；组件清单为 worker runtime `reuse`、toolbox `reuse`、本地客户端 `reuse`、LobeHub/memory `disabled`。
+- 恢复已部署客户端 `20260901203844` 的受控域名、组织公钥、JDK/OpenCode 摘要和公共能力 commit 输入后，客户端指纹重新命中 `6f24c2f83e1e762354ada682b323402456255425f7d041704eead64943545440`；内层包不携带客户端目录。
+- 外层固定名双后台包复用上一已部署包的 `.4/.114/.2` 节点配置归档，不覆盖 `.4` Qwen 优先 models 灰度，不携带 trace、BGE、Mem0、pgvector 或 toolbox 大制品。
+- 更新 `MULTI-BACKEND.md` 当前增量说明，明确两台后台只更新 Java 和 `backend/lib/`，不重建/重启 worker/manager；`.2` 只更新前端，客户端无需重装。
+
+### How
+
+- `package-release.sh` 通过 Spring Bean 构造器门禁、完整后端构建、前端 `vue-tsc --noEmit` 与 Vite production build，并逐项核验 persistence、XXL 和 ClickHouse migration 在源码、JAR 及 ZIP 中的固定字节。
+- 本轮没有新增或修改 Flyway；PostgreSQL 最新两项 `V20260825091459` 与 `V20260827183737` SHA-256 仍为
+  `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`、
+  `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`，三套历史预期都不新增记录。
+- 后端 `LocalClientPublicCapabilityCoordinatorTest` 7/7、前端客户端设置定向测试 9/9 通过；前端生产构建通过。首次定向 Maven 测试被本机默认 Java 17 拒绝 Java 21 字节码，显式切换到 JDK 25 后同一测试通过，不是代码失败。
+- `verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh` 和 `verify-opencode-tool-runtime-deploy.sh` 的正反门禁全部通过。
+
+### Result
+
+- Mac 侧真实重建和候选封装已通过；本记录提交后将用同批已验证二进制执行 `--zip-only` 重封，再生成固定名双后台外层包和最终摘要。
+- 企业侧尚未部署本轮包；需按 `.4 → .114 → .2` 更新后端/前端，再用既有麒麟客户端重试当前待更新公共能力，验证跳版本会安全重启 OpenCode 并且 `asset_case_list` Tool 列表/调用成功。
+- 不涉及新增部署节点、HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、性能模型、安全协议、generated SDK、OpenCode 只读源码或 `.env*`；未推送远程。

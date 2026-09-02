@@ -20,22 +20,21 @@
 
 ## 当前增量说明（2026-09-02）
 
-- 用户已确认上一批 360 企业包完成部署；该现场基线的内层 SHA-256 为
-  `de590f81172f21ef975a980f1e77fed6bbab6278ac6b449897c2f6076efad6f9`，外层 SHA-256 为
-  `81027c0a7f7e301f3e51b9a5273db0ab03ddf6b6be8cd4a2c2b2cceae080aade`。本轮只基于其后的 `release` 变更生成增量包，
-  不把此前未部署候选再次作为基线。
-- 本轮唯一新增功能修复是公共浏览器 Tool 的离线依赖投影：worker programs 已锁定
-  `playwright-core@1.61.0`，official launcher 现在会和其它 Tool 依赖一起把它投影到公共配置及工作区祖先目录，
-  修复 `local_browser.ts` 扫描时报 `Cannot find package 'playwright-core'` 并导致对话空回复的问题。
-- worker runtime 为 `included`，两台后台会替换 programs 和 worker 镜像，并按企业 Docker 基线以 `--privileged`
-  重建 worker/manager 容器；受影响的用户 OpenCode 进程需在发布公共 Tool 后重启，才能重新完成依赖投影。
-  toolbox 为 `reuse`，`.4` models 灰度不由标准包覆盖；CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
+- 用户已确认上一批 Playwright 依赖投影修复包完成部署；该现场基线的内层 SHA-256 为
+  `b182ef212bb1b627b68512c81cde2596a867259f1fdcda5751bd2dfb1167079c`，外层 SHA-256 为
+  `000027eb8cdac6808445ac88c155f30ad5e00f84f3b063ed6c9d610029b93562`。本轮只基于其后的 `release` 变更生成增量包。
+- 本轮唯一功能修复是本地客户端跨公共能力版本更新：后端在 AVAILABLE 通知、网页确认和实际下发
+  UPDATE_COMMAND 前均校验客户端 `activeDigest` 与目标版本 `previousDigest` 是否连续。只有连续的 Agent/Skill
+  变更可以热加载；跳版本、摘要缺失/损坏或 Tool/依赖变化均保守重启本地 OpenCode，避免继续解析旧版本 Tool 路径。
+- worker runtime、toolbox 和本地客户端均为 `reuse`。两台后台只更新 Java 应用及 `backend/lib/`，不替换
+  programs/worker 镜像，不重建或重启 worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector
+  不重新部署、重启或同步。
 - 本地客户端为 `reuse`，沿用已部署版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996` 和既有组织签名；
   内层 ZIP 不携带 `dist/local-opencode-client/`，`.2` 部署只校验现有客户端分发，不替换制品，用户无需重新下载安装。
-- 后端、前端作为平台基础发布单元重新构建，但相对上一已部署包没有新的业务源码变更；AAM 地址继续为
-  `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包仍按 `.4 → .114 → .2` 顺序执行，`.2` 用于保持整包版本一致。
+- 前端同步将更新确认中的账号说明改为平台无关的“当前操作系统登录账号”，并明确跳版本或 Tool/依赖差异会安全重启。
+  AAM 地址继续为 `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包仍按 `.4 → .114 → .2` 顺序更新 Java 和前端。
 - `deploy/internal/local_browser.ts` 仍只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
-  的已发布版本才是权威源。部署 worker runtime 后，应确认已发布版本包含 `tools/local_browser.ts`，再重启受影响进程复测。
+  的已发布版本才是权威源；本轮不重新发布公共配置。客户端使用网页或托盘已有“更新公共能力”确认入口重试当前待更新版本。
 - PostgreSQL、XXL MySQL、ClickHouse migration 与已部署基线一致，本轮三套历史均不应新增记录；最终 persistence JAR
   仍须按下文核验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
 - Workflow/LobeHub、独立 memory 制品和 trace 继续 `disabled`；本轮没有新增部署节点、API、事件、数据库或客户端协议变更。
