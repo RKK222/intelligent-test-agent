@@ -16473,3 +16473,23 @@
 - 已生成新的固定名内外层候选包；本条提交后会再次重封，使本次追溯记录进入正式包，再生成最终 SHA-256 并覆盖 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`。
 - 当前只能表述为 Mac 侧重封和校验通过；企业 `.4/.114/.2` 尚未部署，360 真机、amd64 原生沙箱和公共 `local_browser.ts` 发布仍需现场验收。
 - 不涉及业务代码、HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、部署节点、环境配置、generated SDK 或 OpenCode 只读源码；未拉取、合并或推送远程。
+
+## 2026-09-02 - 固化当前企业重封包最终摘要
+
+### Why
+
+- 包内已包含本轮主重封记录，最终摘要需在包外独立留存，避免把摘要写回归档导致自引用变化。
+
+### What
+
+- 固定交付文件仍为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`，客户端版本和组件选择均未变化。
+
+### How
+
+- 最终外层 CRC、SHA 文件、组织公钥 catalog 验签、组件清单、单一客户端版本、排除项和包内主重封记录全部通过；内层文件与外层内嵌文件逐字节一致。
+
+### Result
+
+- 最终内层 SHA-256：`950dde7423068e51a9bf43797833ab0fe172d0f9bfb164959e6b92c8b4064cb2`。
+- 最终外层 SHA-256：`0ebb26e3ac80144c0bdc02021a5a752ff9dfb7e5197e9db518863872f01764bc`；文件大小约 925 MiB。
+- 本条只记录最终摘要，不改变已验证包内容；企业侧仍未部署，未推送远程。
