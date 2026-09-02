@@ -16538,3 +16538,26 @@
 - 最终内层 SHA-256：`de590f81172f21ef975a980f1e77fed6bbab6278ac6b449897c2f6076efad6f9`。
 - 最终外层 SHA-256：`81027c0a7f7e301f3e51b9a5273db0ab03ddf6b6be8cd4a2c2b2cceae080aade`；文件大小 `970337488` bytes（约 925 MiB）。
 - 本条只记录最终制品摘要，不改变已验证包内容；企业侧尚未部署，未推送远程。
+
+## 2026-09-02 - 修复公共浏览器 Tool 的 Playwright 依赖投影
+
+### Why
+
+- 用户确认上一批 360 企业发布包已经部署到企业内部；现场启用公共 `local_browser.ts` 后，OpenCode 在 Tool 扫描阶段持续报 `Cannot find package 'playwright-core'`，对话表现为空报文体，删除该 Tool 并重启后恢复。
+- programs 归档已经包含并锁定 `playwright-core@1.61.0`，但 official launcher 的固定 Tool 依赖清单漏掉该包，导致公共配置和工作区祖先没有建立可解析链接。
+
+### What
+
+- 直接在长期 `release` 扩展既有 `TOOL_DEPENDENCIES`，让 `prepareOfflineRuntime()` 和后台配置目录收敛继续通过同一非覆盖式机制投影 `playwright-core`；没有新增第二套安装、复制或现场特例。
+- 启动器测试 fixture 增加 Playwright 包、链接断言，并分别从深层工作区 Tool 和公共配置 `tools/` 目录执行真实 Node import；部署 README 和 OpenCode 1.18.4 升级说明同步明确投影与七项 runtime 门禁。
+
+### How
+
+- `node --test tools/test-opencode-official-launcher.mjs`：9/9 通过。
+- `bash tools/verify-opencode-tool-runtime-deploy.sh`：通过归档/安装依赖门禁。
+- `bash deploy/internal/verify-opencode-tool-runtime.sh --archive deploy/internal/dist/test-agent-programs.tar.gz`：确认当前已构建 programs 归档确实包含锁定的 Playwright；本次源码修复仍需重建 worker/programs 才会进入新的企业制品。
+
+### Result
+
+- 服务端公共/工作区 Tool 依赖投影缺口已在 `release` 源码修复并通过可执行回归；不修改 `local_browser.ts`、OpenCode 只读源码、客户端包、HTTP API、RunEvent、数据库、Flyway、前端、环境配置或部署节点。
+- 尚未重建新的企业 worker/programs 制品，也未在已部署的 `.4/.114` 复测；现有企业包不会因源码提交自动获得修复，后续发布必须同时替换 worker image 与 programs 并重启受影响的用户 OpenCode 进程。

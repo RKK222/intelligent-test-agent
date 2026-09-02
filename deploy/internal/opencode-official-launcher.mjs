@@ -6,7 +6,7 @@ import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
-const TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "zod"]
+const TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "playwright-core", "zod"]
 const PROJECT_CONFIG_RECONCILE_COMMAND = "__reconcile-project-config"
 const LEGACY_PROJECT_CONFIG_MAINTENANCE_COMMAND = "__maintain-project-config"
 const PROJECT_SCAN_IGNORED_DIRECTORIES = new Set([

@@ -20,6 +20,7 @@ async function createRuntime(root) {
   await mkdir(join(root, "node_modules", "@opencode-ai", "plugin"), { recursive: true })
   await mkdir(join(root, "node_modules", "@opencode-ai", "sdk"), { recursive: true })
   await mkdir(join(root, "node_modules", "effect"), { recursive: true })
+  await mkdir(join(root, "node_modules", "playwright-core"), { recursive: true })
   await mkdir(join(root, "node_modules", "zod"), { recursive: true })
   await writeFile(
     join(root, "node_modules", "@opencode-ai", "plugin", "package.json"),
@@ -28,6 +29,14 @@ async function createRuntime(root) {
   await writeFile(
     join(root, "node_modules", "@opencode-ai", "plugin", "index.js"),
     "export const loaded = true\n",
+  )
+  await writeFile(
+    join(root, "node_modules", "playwright-core", "package.json"),
+    '{"name":"playwright-core","type":"module","exports":"./index.js"}\n',
+  )
+  await writeFile(
+    join(root, "node_modules", "playwright-core", "index.js"),
+    "export const chromium = {}\n",
   )
   await writeFile(join(root, "package.json"), '{"private":true}\n')
   await writeFile(join(root, "package-lock.json"), '{"lockfileVersion":3}\n')
@@ -49,6 +58,10 @@ async function assertToolDependencyLinks(directory, runtimeRoot) {
     join(runtimeRoot, "node_modules", "@opencode-ai", "sdk"),
   )
   assert.equal(await readlink(join(directory, "node_modules", "effect")), join(runtimeRoot, "node_modules", "effect"))
+  assert.equal(
+    await readlink(join(directory, "node_modules", "playwright-core")),
+    join(runtimeRoot, "node_modules", "playwright-core"),
+  )
   assert.equal(await readlink(join(directory, "node_modules", "zod")), join(runtimeRoot, "node_modules", "zod"))
 }
 
@@ -129,9 +142,19 @@ test("keeps recursive project scanning out of user startup and prepares it throu
     await mkdir(nestedToolDirectory, { recursive: true })
     await writeFile(
       importProbe,
-      'import { loaded } from "@opencode-ai/plugin"; console.log(loaded ? "IMPORT_OK" : "IMPORT_FAILED")\n',
+      'import { loaded } from "@opencode-ai/plugin"; import { chromium } from "playwright-core"; console.log(loaded && chromium ? "IMPORT_OK" : "IMPORT_FAILED")\n',
     )
     assert.equal((await execFileAsync(process.execPath, [importProbe])).stdout, "IMPORT_OK\n")
+
+    // 公共 Tool 从独立配置根加载，必须能直接解析 programs 内置的 Playwright。
+    const publicToolDirectory = join(configDir, "tools")
+    const publicToolImportProbe = join(publicToolDirectory, "local-browser-import-probe.mjs")
+    await mkdir(publicToolDirectory, { recursive: true })
+    await writeFile(
+      publicToolImportProbe,
+      'import { chromium } from "playwright-core"; console.log(chromium ? "PLAYWRIGHT_IMPORT_OK" : "PLAYWRIGHT_IMPORT_FAILED")\n',
+    )
+    assert.equal((await execFileAsync(process.execPath, [publicToolImportProbe])).stdout, "PLAYWRIGHT_IMPORT_OK\n")
 
     const effectiveDirectories = [
       join(xdgConfigHome, "opencode"),
