@@ -876,7 +876,8 @@ bash /tmp/deploy-internal-frontend.sh \
 
 `opencode-models.json` 与公共 Agent 配置是两层不同输入。发布 ZIP 已固定携带 [opencode-models.json](opencode-models.json)，它使用 models.dev `api.json` 兼容结构，作为模型元数据快照放到后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`。OpenCode 1.18.4 的 `/api/model` 按其中 `release_date` 倒序返回；本次 `.4` 灰度使用的快照把 Qwen 排序日期设为 `2026-08-07`，高于 DeepSeek 的 `2026-08-06`，JSON 键顺序本身不参与排序。
 
-标准发布仍在 `.4` 和 `.114` 分别执行下面的替换；若执行已批准的 `.4` 单节点灰度，只在 `.4` 执行替换与 worker 重启，`.114` 仅记录现网 SHA 并保持文件和 worker 不变：
+只有本轮发布范围明确包含模型清单变更时，才在 `.4` 和 `.114` 分别执行下面的替换；若执行已批准的 `.4` 单节点灰度，只在 `.4` 执行替换与 worker 重启，`.114` 仅记录现网 SHA 并保持文件和 worker 不变。本轮 Playwright 投影修复包不包含模型变更，`.4/.114` 只在部署前后执行
+`sha256sum /data/testagent/config/opencode-models.json` 并确认各自摘要没有变化，禁止执行下面的 `install` 和额外 worker 重启：
 
 ```bash
 # 在 .4 和 .114 分别执行；使用本次已安装的同一发布 ZIP 内容。
@@ -898,7 +899,7 @@ docker inspect test-agent-opencode-worker --format '{{range .Config.Env}}{{print
   grep '^OPENCODE_MODELS_PATH=/etc/test-agent/opencode-models.json$'
 ```
 
-标准发布时 `.4` 与 `.114` 的 `sha256sum` 必须完全一致；`.4` 单节点灰度时必须明确保留两个不同 SHA，且不得在 `.114` 执行复制或 worker 重启。`validate-models` 在宿主机没有 `jq` 时会使用已经导入的 worker 镜像执行同一结构校验；它只读文件，不删除或重启现有容器。worker 对文件执行只读 bind mount；宿主脚本会在删除当前容器前校验 Provider/Model ID、能力布尔值、`release_date`、正数 `limit` 和可选模态，镜像入口在 manager 启动前再次执行同一校验；Mac 封包另由 `verify-opencode-model-priority.sh` 拒绝本次快照优先级倒置，但该文件不计入 worker 指纹。这样 `.4` 新快照能被发布门禁锁定，同时 `.114` 保留的旧快照不会被新部署脚本阻断后续正常 worker 重启。manager 子进程继承该环境，所以重启目标 worker 后新恢复的全部用户 OpenCode 进程统一读取；仅重启 Java、刷新页面或调用公共配置热加载均不足以替换这份全局快照。文件只允许模型元数据，不得写 provider token、UCID、Authorization 或平台内部代理 key。
+明确发布同一模型清单时，`.4` 与 `.114` 的 `sha256sum` 必须完全一致；`.4` 单节点灰度或本轮明确保持既有灰度时，必须保留两个已登记 SHA，且不得在 `.114` 执行复制或额外 worker 重启。`validate-models` 在宿主机没有 `jq` 时会使用已经导入的 worker 镜像执行同一结构校验；它只读文件，不删除或重启现有容器。worker 对文件执行只读 bind mount；宿主脚本会在删除当前容器前校验 Provider/Model ID、能力布尔值、`release_date`、正数 `limit` 和可选模态，镜像入口在 manager 启动前再次执行同一校验；Mac 封包另由 `verify-opencode-model-priority.sh` 拒绝本次快照优先级倒置，但该文件不计入 worker 指纹。这样 `.4` 新快照能被发布门禁锁定，同时 `.114` 保留的旧快照不会被新部署脚本阻断后续正常 worker 重启。manager 子进程继承该环境，所以重启目标 worker 后新恢复的全部用户 OpenCode 进程统一读取；仅重启 Java、刷新页面或调用公共配置热加载均不足以替换这份全局快照。文件只允许模型元数据，不得写 provider token、UCID、Authorization 或平台内部代理 key。
 
 超级管理员进入“系统管理 → 配置管理 → opencode 公共配置管理”，分别初始化：
 
