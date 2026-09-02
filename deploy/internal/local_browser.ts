@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto"
 import { appendFile, lstat, mkdir, readFile, realpath, stat } from "node:fs/promises"
 import path from "node:path"
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core"
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type ConnectOverCDPTransport,
+  type Locator,
+  type Page,
+} from "playwright-core"
 import { tool, type ToolContext } from "@opencode-ai/plugin"
 
 const MAX_SESSIONS = 4
@@ -9,6 +16,9 @@ const SESSION_IDLE_MS = 30 * 60_000
 const BROWSER_IDLE_MS = 5 * 60_000
 const SNAPSHOT_TEXT_LIMIT = 12_000
 const SNAPSHOT_CONTROLS_LIMIT = 200
+const CDP_CONNECT_TIMEOUT_MS = 30_000
+const CDP_VERSION_RESPONSE_LIMIT = 1024 * 1024
+const CDP_EARLY_MESSAGE_LIMIT = 64
 
 type RelayStatus = {
   running: boolean
@@ -297,10 +307,18 @@ async function ensureConnected(): Promise<void> {
   if (!status.compatible || !status.cdpEndpoint) {
     throw new Error("本地 360 浏览器未通过兼容性自检")
   }
-  runtime.browser = await chromium.connectOverCDP(status.cdpEndpoint, {
-    timeout: 30_000,
-    isLocal: true,
-  })
+  const transport = await connectNativeCdpTransport(status.cdpEndpoint, CDP_CONNECT_TIMEOUT_MS)
+  try {
+    // OpenCode 单文件程序运行在 Bun；使用其原生 WebSocket，避开 Playwright Node ws transport
+    // 在企业 360 完成 HTTP 101 后无法进入 open 的兼容问题。
+    runtime.browser = await chromium.connectOverCDP(transport, {
+      timeout: CDP_CONNECT_TIMEOUT_MS,
+      isLocal: true,
+    })
+  } catch (error) {
+    transport.close()
+    throw error
+  }
   runtime.context = runtime.browser.contexts()[0]
   if (!runtime.context) throw new Error("360 浏览器未提供默认自动化上下文")
   // 主文档导航在发出网络请求前校验 Session 已授权 origin；未知 JS 跳转和 popup 会被阻断。
@@ -325,6 +343,209 @@ async function ensureConnected(): Promise<void> {
     await route.continue()
   })
   runtime.browser.on("disconnected", () => resetRuntime())
+}
+
+/**
+ * 复用 Playwright 公开的 ConnectOverCDPTransport 扩展点，但由 Bun 原生 WebSocket 建立连接。
+ * 端点必须来自本地客户端已鉴权 Relay，并再次限制为同一 127.0.0.1 随机端口。
+ */
+export async function connectNativeCdpTransport(
+  cdpEndpoint: string,
+  timeoutMs = CDP_CONNECT_TIMEOUT_MS,
+): Promise<ConnectOverCDPTransport> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
+    throw new Error("浏览器 CDP 连接超时参数无效")
+  }
+  const webSocketUrl = await resolveBrowserWebSocketUrl(cdpEndpoint, timeoutMs)
+  return NativeCdpTransport.connect(webSocketUrl, timeoutMs)
+}
+
+/** 原生 WebSocket 与 Playwright transport 之间只传递 JSON 对象，不暴露页面或端点信息。 */
+class NativeCdpTransport implements ConnectOverCDPTransport {
+  private messageHandler: ((message: object) => void) | undefined
+  private closeHandler: ((reason?: string) => void) | undefined
+  private readonly queuedMessages: object[] = []
+  private closed = false
+  private closeReason = ""
+
+  private constructor(private readonly socket: WebSocket) {
+    socket.addEventListener("message", event => this.handleMessage(event))
+    socket.addEventListener("error", () => this.fail("浏览器 CDP WebSocket 异常"))
+    socket.addEventListener("close", event => this.notifyClosed(event.reason || this.closeReason))
+  }
+
+  static async connect(webSocketUrl: string, timeoutMs: number): Promise<NativeCdpTransport> {
+    let socket: WebSocket
+    try {
+      socket = new WebSocket(webSocketUrl)
+    } catch {
+      throw new Error("浏览器 CDP WebSocket 创建失败")
+    }
+    const transport = new NativeCdpTransport(socket)
+    await transport.waitForOpen(timeoutMs)
+    return transport
+  }
+
+  get onmessage(): ((message: object) => void) | undefined {
+    return this.messageHandler
+  }
+
+  set onmessage(handler: ((message: object) => void) | undefined) {
+    this.messageHandler = handler
+    if (!handler) return
+    for (const message of this.queuedMessages.splice(0)) this.deliverMessage(handler, message)
+  }
+
+  get onclose(): ((reason?: string) => void) | undefined {
+    return this.closeHandler
+  }
+
+  set onclose(handler: ((reason?: string) => void) | undefined) {
+    this.closeHandler = handler
+    if (handler && this.closed) handler(this.closeReason)
+  }
+
+  send(message: object): void {
+    if (this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error("浏览器 CDP WebSocket 未连接")
+    }
+    this.socket.send(JSON.stringify(message))
+  }
+
+  close(): void {
+    if (this.socket.readyState === WebSocket.CONNECTING || this.socket.readyState === WebSocket.OPEN) {
+      this.socket.close()
+      return
+    }
+    this.notifyClosed(this.closeReason)
+  }
+
+  private waitForOpen(timeoutMs: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let settled = false
+      const finish = (failure?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        if (failure) reject(failure)
+        else resolve()
+      }
+      const timer = setTimeout(() => {
+        this.closeReason = "浏览器 CDP WebSocket 连接超时"
+        this.close()
+        finish(new Error(this.closeReason))
+      }, timeoutMs)
+      this.socket.addEventListener("open", () => finish(), { once: true })
+      this.socket.addEventListener("error", () => finish(new Error("浏览器 CDP WebSocket 连接失败")), { once: true })
+      this.socket.addEventListener("close", () => finish(new Error("浏览器 CDP WebSocket 提前关闭")), { once: true })
+    })
+  }
+
+  private handleMessage(event: MessageEvent): void {
+    if (typeof event.data !== "string") {
+      this.fail("浏览器 CDP 返回了非文本消息")
+      return
+    }
+    try {
+      const message = JSON.parse(event.data) as object
+      if (!message || typeof message !== "object" || Array.isArray(message)) {
+        throw new Error("invalid CDP payload")
+      }
+      if (this.messageHandler) this.deliverMessage(this.messageHandler, message)
+      else if (this.queuedMessages.length < CDP_EARLY_MESSAGE_LIMIT) this.queuedMessages.push(message)
+      else this.fail("浏览器 CDP 提前消息超过上限")
+    } catch {
+      this.fail("浏览器 CDP 返回了无效消息")
+    }
+  }
+
+  private deliverMessage(handler: (message: object) => void, message: object): void {
+    try {
+      handler(message)
+    } catch {
+      this.fail("浏览器 CDP 消息处理失败")
+    }
+  }
+
+  private fail(reason: string): void {
+    this.closeReason = reason
+    if (this.socket.readyState === WebSocket.CONNECTING || this.socket.readyState === WebSocket.OPEN) {
+      this.socket.close()
+    } else {
+      this.notifyClosed(reason)
+    }
+  }
+
+  private notifyClosed(reason: string): void {
+    if (this.closed) return
+    this.closed = true
+    this.closeReason = reason
+    this.closeHandler?.(reason)
+  }
+}
+
+/** 从 360 的有界版本响应取得 browser WebSocket，并锁定为 Relay 已确认的同一 loopback 端口。 */
+async function resolveBrowserWebSocketUrl(cdpEndpoint: string, timeoutMs: number): Promise<string> {
+  let base: URL
+  try {
+    base = new URL(cdpEndpoint)
+  } catch {
+    throw new Error("浏览器 CDP 地址无效")
+  }
+  if (base.protocol !== "http:"
+    || base.hostname !== "127.0.0.1"
+    || !base.port
+    || base.username
+    || base.password
+    || base.pathname !== "/"
+    || base.search
+    || base.hash) {
+    throw new Error("浏览器 CDP 地址不在本机受控范围")
+  }
+
+  const versionUrl = new URL("/json/version", base)
+  let response: Response
+  let body: string
+  try {
+    response = await fetch(versionUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    body = await response.text()
+  } catch {
+    throw new Error("浏览器 CDP 版本请求失败")
+  }
+  if (!response.ok || body.length < 2 || body.length > CDP_VERSION_RESPONSE_LIMIT) {
+    throw new Error("浏览器 CDP 版本响应无效")
+  }
+
+  let rawWebSocketUrl: unknown
+  try {
+    rawWebSocketUrl = (JSON.parse(body) as Record<string, unknown>).webSocketDebuggerUrl
+  } catch {
+    throw new Error("浏览器 CDP 版本响应无效")
+  }
+  if (typeof rawWebSocketUrl !== "string") {
+    throw new Error("浏览器 CDP 未提供 WebSocket 地址")
+  }
+
+  let webSocketUrl: URL
+  try {
+    webSocketUrl = new URL(rawWebSocketUrl)
+  } catch {
+    throw new Error("浏览器 CDP WebSocket 地址无效")
+  }
+  if (webSocketUrl.protocol !== "ws:"
+    || webSocketUrl.hostname !== base.hostname
+    || webSocketUrl.port !== base.port
+    || webSocketUrl.username
+    || webSocketUrl.password
+    || webSocketUrl.search
+    || webSocketUrl.hash
+    || !/^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/.test(webSocketUrl.pathname)) {
+    throw new Error("浏览器 CDP WebSocket 地址不在本机受控范围")
+  }
+  return webSocketUrl.toString()
 }
 
 async function relay(action: "status" | "start" | "stop", method: "GET" | "POST"): Promise<RelayStatus> {

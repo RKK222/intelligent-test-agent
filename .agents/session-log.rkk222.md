@@ -16703,3 +16703,39 @@
 - 最终内层 SHA-256：`58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`。
 - 最终外层 SHA-256：`e5e0403803ed6dc670f26f2086049ed764041e72734fc1c6ece4df79a97eef74`；文件大小 `155511269` bytes（约 148 MiB）。
 - 本条只记录最终摘要，不改变已验证制品内容；企业侧尚未部署本轮包，未推送远程。
+
+## 2026-09-02 - 修复企业 360 浏览器 CDP 连接超时
+
+### Why
+
+- 企业麒麟现场的 360 企业浏览器已正常启动，`/json/version` 可返回 CDP WebSocket，手工握手也收到 HTTP 101；但
+  `local_browser.ts` 通过 Playwright 默认 Node `ws` transport 连接时一直等不到 open，30 秒后报浏览器连接超时，
+  因此导航栏没有后续输入或跳转动作。
+- 目标用户机器没有可用的新版本 Node，企业环境也不能联网安装 npm 依赖；修复不能把系统 Node 作为运行前提。
+
+### What
+
+- 公共 Tool 模板改为复用 Playwright 公开的 `ConnectOverCDPTransport` 扩展点，由 OpenCode 自带 Bun 的原生 WebSocket
+  建立 CDP 连接，页面、Locator、导航和授权逻辑继续复用既有 `playwright-core@1.61.0`。
+- `/json/version` 与 WebSocket 都重新限制为客户端 Relay 返回的同一 `127.0.0.1` 显式端口；拒绝跨端口、userinfo、
+  query/fragment、非 browser DevTools 路径和非 JSON 消息，并限制连接等待、版本响应与提前消息数量。
+- 新增 Bun transport 回归，覆盖 CDP JSON 收发和跨端口失败关闭；同步本地客户端、离线部署、架构与 OpenCode 升级说明。
+  企业公共 Git 仍是 Tool 权威源，部署包中的模板不会直接覆盖已发布公共配置。
+
+### How
+
+- `bun test ./tools/test-local-browser-native-transport.ts`：1/1 通过。
+- 使用实际 `playwright-core@1.61.0`、修正后的模板和隔离 Chrome 验证 `connectOverCDP`、`page.goto()`：通过，页面标题为
+  `transport-ok`；另确认 Bun 原生 WebSocket 不发送 `Origin`。
+- `node --test tools/test-opencode-official-launcher.mjs`：9/9 通过；`bash tools/verify-opencode-tool-runtime-deploy.sh`：通过。
+- `mvn -f backend/pom.xml -pl test-agent-local-client,test-agent-workspace-management -am -DskipTests=false test`：531 项通过，
+  0 失败、0 错误、0 跳过；`git diff --check` 通过。
+
+### Result
+
+- 修复不需要把 Node runtime 加入客户端，也不要求企业用户安装 Node；`playwright-core` 继续随签名完整公共能力包安装到
+  当前用户私有 revision 目录，企业现场不执行 npm。
+- Mac 侧代码与真实 Chrome 链路已验证；企业麒麟/360 最终验收仍需在新的公共 Tool commit 生成 `AVAILABLE` 能力包、
+  用户确认更新并重启 OpenCode 后执行，当前不能表述为企业侧已经修复。
+- 本次使用长期 `release`，不新增部署节点；不涉及 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、客户端协议、
+  generated SDK、环境配置或 OpenCode 只读源码。企业增量包将按既有固定名双后台流程重新构建，未推送远程。

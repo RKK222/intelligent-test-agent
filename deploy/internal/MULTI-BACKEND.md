@@ -20,21 +20,22 @@
 
 ## 当前增量说明（2026-09-02）
 
-- 用户已确认上一批 Playwright 依赖投影修复包完成部署；该现场基线的内层 SHA-256 为
-  `b182ef212bb1b627b68512c81cde2596a867259f1fdcda5751bd2dfb1167079c`，外层 SHA-256 为
-  `000027eb8cdac6808445ac88c155f30ad5e00f84f3b063ed6c9d610029b93562`。本轮只基于其后的 `release` 变更生成增量包。
-- 本轮唯一功能修复是本地客户端跨公共能力版本更新：后端在 AVAILABLE 通知、网页确认和实际下发
-  UPDATE_COMMAND 前均校验客户端 `activeDigest` 与目标版本 `previousDigest` 是否连续。只有连续的 Agent/Skill
-  变更可以热加载；跳版本、摘要缺失/损坏或 Tool/依赖变化均保守重启本地 OpenCode，避免继续解析旧版本 Tool 路径。
-- worker runtime、toolbox 和本地客户端均为 `reuse`。两台后台只更新 Java 应用及 `backend/lib/`，不替换
-  programs/worker 镜像，不重建或重启 worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector
-  不重新部署、重启或同步。
+- 用户已确认公共能力跳版本修复已部署到企业内部；对应候选基线的内层 SHA-256 为
+  `58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`，外层 SHA-256 为
+  `e5e0403803ed6dc670f26f2086049ed764041e72734fc1c6ece4df79a97eef74`。本轮只基于其后的 `release` 变更生成增量包。
+- 本轮唯一功能修复是公共 `local_browser.ts` 的企业 360 CDP 连接兼容：Tool 在 OpenCode/Bun 内使用原生
+  WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，避开 Node `ws` transport 已完成 HTTP 101 却不进入
+  connected 的现场问题。CDP 版本响应返回的 WebSocket 继续限制为客户端 Relay 已确认的同一 `127.0.0.1` 随机端口。
+- worker runtime、toolbox 和本地客户端均为 `reuse`。现有 programs 和签名公共能力依赖已经包含
+  `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
+  worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
 - 本地客户端为 `reuse`，沿用已部署版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996` 和既有组织签名；
   内层 ZIP 不携带 `dist/local-opencode-client/`，`.2` 部署只校验现有客户端分发，不替换制品，用户无需重新下载安装。
-- 前端同步将更新确认中的账号说明改为平台无关的“当前操作系统登录账号”，并明确跳版本或 Tool/依赖差异会安全重启。
-  AAM 地址继续为 `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包仍按 `.4 → .114 → .2` 顺序更新 Java 和前端。
-- `deploy/internal/local_browser.ts` 仍只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
-  的已发布版本才是权威源；本轮不重新发布公共配置。客户端使用网页或托盘已有“更新公共能力”确认入口重试当前待更新版本。
+- 后端和前端没有本轮业务源码变化，AAM 地址继续为 `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包按既有流程生成，
+  但浏览器修复生效不依赖重新安装客户端或更新系统 Node。
+- `deploy/internal/local_browser.ts` 是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
+  的已发布 commit 才是权威源。部署包到位后仍须把该模板同步为新的公共配置 commit，再由平台构建签名完整能力包，
+  用户确认“更新公共能力”并等待 OpenCode 重启；未完成该发布链路时，旧 Tool 不会自动获得修复。
 - PostgreSQL、XXL MySQL、ClickHouse migration 与已部署基线一致，本轮三套历史均不应新增记录；最终 persistence JAR
   仍须按下文核验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
 - Workflow/LobeHub、独立 memory 制品和 trace 继续 `disabled`；本轮没有新增部署节点、API、事件、数据库或客户端协议变更。

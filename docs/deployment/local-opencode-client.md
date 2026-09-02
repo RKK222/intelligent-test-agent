@@ -405,6 +405,9 @@ Observability 现场验收还必须确认用户包引用的受控 release 包含
 本地浏览器 Tool 上线时，在权威公共配置 Git 的 `tools/local_browser.ts` 使用仓库
 `deploy/internal/local_browser.ts` 同步模板并形成明确提交，再由现有公共能力包流程构建、签名和下发；禁止直接修改客户端
 不可变能力目录。外网构建的 programs 必须包含锁定的 `playwright-core@1.61.0`，内网目标机不下载 Chromium，也不执行 npm。
+本地 Tool 在 OpenCode/Bun 内使用原生 WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，避免 Node `ws` transport
+在部分企业 360 上完成 HTTP 101 后仍无法进入 connected。目标用户不需要安装 Node；`playwright-core` 依赖随完整签名能力包
+落在用户私有的公共能力 revision 目录。现场系统即使只有旧 Node 或完全没有 Node，也不得升级系统 Node 或联网补装依赖。
 目标麒麟 ARM64 用户桌面必须已安装企业 360 浏览器；客户端默认首先检查系统稳定入口
 `/usr/bin/browser360ent-cn-stable`，不存在或不可执行时才检查其它受控候选和 desktop entry，全部失败后再由用户从
 托盘“浏览器设置与自检”选择浏览器可执行文件。稳定入口仍存在时，360 升级不要求用户重新选择。

@@ -108,6 +108,9 @@ OpenCode 固定监听 `127.0.0.1`，端口在 4096–4195 的受控范围内选�
 旧配置和当前受管配置目录，并可能为缺少 `node_modules` 的目录启动后台依赖检查；该检查只能读取本机缓存和随签名
 公共能力包交付的完整依赖，不得访问公网 registry。非受管目录依赖缺失时快速失败，不能阻塞插件或 Tool 目录；受管
 能力包依赖不完整时仍由目录验收失败关闭并回切上一不可变版本。
+本地浏览器 Tool 的 `playwright-core` 同样来自签名能力包；目标用户不需要系统 Node。Tool 在 OpenCode/Bun 进程中以
+原生 WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，并把 `/json/version` 返回的 WebSocket 再次约束为
+客户端 Relay 已确认的同一 `127.0.0.1` 随机端口，不能借浏览器状态响应连接其它本机服务。
 
 注册工作区时，持有连接的客户端执行 `toRealPath`、目录/读写权限和文件系统身份校验，后台再事务性创建
 Workspace 与 `local_client_workspaces` 绑定。后续 RPC 只接收 workspaceId、root digest 和相对路径。

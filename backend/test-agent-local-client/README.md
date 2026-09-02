@@ -64,6 +64,8 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - `LocalBrowserRelay` 只绑定 `127.0.0.1`，使用每次客户端启动随机生成的 bearer token；OpenCode 子进程只收到 relay URL/token，
   不直接收到 Cookie、profile 路径或页面数据。停止 OpenCode、退出客户端或显式关闭浏览器时同步停止受管浏览器。
 - 公共 Tool 模板位于 `deploy/internal/local_browser.ts`，依赖离线锁定的 `playwright-core@1.61.0` 并通过 CDP 连接系统 360。
+  Tool 使用 OpenCode/Bun 原生 WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，不走 Playwright 的 Node `ws`
+  连接程序，也不依赖目标用户安装 Node。`playwright-core` 随签名公共能力包安装到当前用户私有目录，不在企业现场执行 npm。
   站点按 origin 授权；提交、上传和下载每次确认。最多 4 个并行 Session，30 分钟空闲回收；截图和下载分别写入当前工作区
   `browser-artifacts/<session-id>/`、`browser-downloads/<session-id>/`。模型只收到去查询参数 URL、有界可见文本和不含 input value
   的控件摘要，不返回 Cookie、token、密码值、完整 HTML 或截图字节。
@@ -132,7 +134,8 @@ mvn -pl test-agent-local-client -am -DskipTests package
 `deploy/internal/package-local-opencode-client.sh` 的 commit/manifest、签名和完整 artifact 校验；Windows 候选包还要执行
 `deploy/internal/tests/local-opencode-client-windows-package-test.sh`，正式包继续受 Authenticode 和 Win10 真机闸门约束。
 `OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalBrowserSettingsTest`/`LocalBrowserRelayTest` 覆盖受控发现、
-配置持久化、Chromium 版本解析和 loopback token，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
+配置持久化、Chromium 版本解析和 loopback token，`bun test ./tools/test-local-browser-native-transport.ts` 覆盖 Bun 原生 CDP
+transport 的 JSON 收发与同端口约束，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
 
 ## 依赖边界
 
