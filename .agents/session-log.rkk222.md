@@ -16493,3 +16493,28 @@
 - 最终内层 SHA-256：`950dde7423068e51a9bf43797833ab0fe172d0f9bfb164959e6b92c8b4064cb2`。
 - 最终外层 SHA-256：`0ebb26e3ac80144c0bdc02021a5a752ff9dfb7e5197e9db518863872f01764bc`；文件大小约 925 MiB。
 - 本条只记录最终摘要，不改变已验证包内容；企业侧仍未部署，未推送远程。
+
+## 2026-09-02 - 纳入最新 AAM 登录地址并重打未部署企业包
+
+### Why
+
+- 用户确认前两次生成的企业候选包均未部署，要求基于当前本地 `release` 重新打包；因此企业已部署基线仍是 `363e1b6babe291018800e76e0cb2c1034cfc230f`，不能按 Mac 本机构建状态省略 360 worker runtime 或客户端。
+- 当前 `release` 已包含远端提交 `c2775c280`，该提交把前端生产/开发环境的 AAM 登录地址从 `http://zfw.sdc.cs.icbc/aam/onlyLogin/` 更新为 `http://tcds-prod.sdc.icbc/aam/onlyLogin/`，上一候选的前端产物不再可直接复用。
+
+### What
+
+- 重新执行 agent-web 生产构建并生成前端归档；生产配置与运行参数使用新的 `tcds-prod` AAM 地址。源码中的旧地址仍只是 `aamLogin.js` 的兜底常量，本轮按当前 `release` 原样交付，未擅自扩大远端提交范围。
+- 以同一批已验证后端、worker 和客户端二进制重封内层包，保持 worker `included`、客户端 `included`、toolbox `reuse`、LobeHub/memory `disabled`；客户端继续使用版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996`、组织签名密钥和公共配置 commit `81605f245d1512e1ab0dd73812391f6da7d008b5`。
+- 使用既有 `.4/.114/.2` 节点配置重组固定名双后台外层包；不重新打包或重启已独立部署的 CK、Mem0、BGE、pgvector，不打入 trace，保留 `.4` Qwen 优先 models 灰度且不覆盖 `.114`。
+
+### How
+
+- agent-web 构建包含 `vue-tsc --noEmit` 和 Vite production build并成功；产物确认包含新的 `tcds-prod` AAM 地址。
+- 内层/外层封装逐项核对 persistence、XXL 与 ClickHouse migration 源码和 JAR 字节；本轮没有新增或修改 Flyway，PostgreSQL `V20260825091459` SHA 仍为 `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`，`V20260827183737` SHA 仍为 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。
+- 增量组件门禁、双后台固定名完整包门禁、OpenCode Tool runtime 门禁和麒麟 ARM64 客户端不可变签名/离线安装回归均通过。
+
+### Result
+
+- 新候选包已在 Mac 侧生成并通过自动校验；提交本记录后会再次重封，确保正式包内包含本轮追溯信息，再生成最终摘要并覆盖 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`。
+- 前两次未部署候选均被本包取代，不能再用于现场部署。企业 `.4/.114/.2` 仍未部署本轮包，360 麒麟真机、amd64 原生 sandbox、AAM 登录和公共 `local_browser.ts` 发布仍是现场验收项。
+- 本轮只新增 release 已有 AAM 环境配置对应的前端产物并重封既有二进制，不新增部署节点，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、generated SDK 或 OpenCode 只读源码；未修改 `.env.local`，未推送远程。
