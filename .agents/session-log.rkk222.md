@@ -16739,3 +16739,43 @@
   用户确认更新并重启 OpenCode 后执行，当前不能表述为企业侧已经修复。
 - 本次使用长期 `release`，不新增部署节点；不涉及 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、客户端协议、
   generated SDK、环境配置或 OpenCode 只读源码。企业增量包将按既有固定名双后台流程重新构建，未推送远程。
+
+## 2026-09-02 - 重打企业 360 CDP 连接修复增量包
+
+### Why
+
+- 用户要求修复完成后参考“【mimo】打包”的既有口径重新生成企业部署包；用户已确认上一轮公共能力跳版本修复进入企业内部，
+  因此以其内层 `58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`、外层
+  `e5e0403803ed6dc670f26f2086049ed764041e72734fc1c6ece4df79a97eef74` 作为本轮已部署基线。
+- 本轮只改变公共浏览器 Tool 受控模板和说明，现有客户端、worker runtime、toolbox、models 与独立数据面均不应重复交付。
+
+### What
+
+- 从 `release@e752e3de8` 真实重建标准后端、前端和内层 ZIP；恢复已部署客户端 `20260901203844` 的企业域名、组织公钥、
+  JDK/OpenCode 摘要、公共能力基线 commit 与 bundle 输入，使客户端指纹继续命中
+  `6f24c2f83e1e762354ada682b323402456255425f7d041704eead64943545440`。
+- 组件清单固定 worker runtime `reuse`、toolbox `reuse`、本地客户端 `reuse`、LobeHub/memory `disabled`；内层包不携带
+  客户端、programs、worker、toolbox、Node runtime、models、trace、BGE、Mem0 或 pgvector 大制品。
+- 复用上一已部署包的 `.4/.114/.2` 三节点受控配置，重组固定名双后台外层包；组织签名私钥仍只留在 Mac，不进入交付物。
+
+### How
+
+- `package-release.sh` 完成 Spring Bean 门禁、后端构建、前端 VitePress/`vue-tsc`/Vite production build，以及
+  persistence、XXL、ClickHouse 全部 migration 在源码、JAR 和 ZIP 中的字节校验。
+- `verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh`、
+  `verify-opencode-tool-runtime-deploy.sh` 全部通过；候选外层 ZIP CRC、SHA 文件和固定结构通过。
+- 候选内层与外层内嵌内层逐字节一致，SHA-256 均为
+  `864379c6755bfcaa9bcbb118931f1b6fd40ad4dc1a8583b6360d9dfc4826fc61`；候选外层为
+  `e9a64aa9ee6397d026394f46eb2b428ae429e04a8dcbe51fb4230db61c207a1c`。
+- 包内 `deploy/internal/local_browser.ts` 与当前源码逐字节一致，SHA-256 为
+  `ae7d9f58ece9037a5c811f579ea712edfee764c0682aa5e4b480552bef503604`；现有客户端 catalog、manifest、JAR、JDK、
+  OpenCode 和公共能力六项组织 RSA 签名全部验证为 `Verified OK`。
+
+### Result
+
+- Mac 侧完整重建和候选审计通过；本记录提交后使用同一批已验证二进制执行 `--zip-only` 重封，再重建固定名外层包，
+  以保证本轮追溯和部署说明进入最终交付物。
+- 客户端继续复用，不增加 Node runtime，也不要求用户重装；功能生效仍依赖把包内模板形成新的企业公共 Git commit，
+  生成 `AVAILABLE` 签名能力包并由用户确认更新、重启 OpenCode。
+- 本轮没有新增或修改数据库、SQL、Flyway、API、事件、客户端协议、部署节点或环境配置；企业侧尚未部署和真机复测，
+  未推送远程。
