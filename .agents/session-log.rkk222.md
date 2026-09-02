@@ -16448,3 +16448,28 @@
 - 最终内层 SHA-256：`c0fb8ab3411e423bace1ac8c19ae00fd98e370563443fee25464f170afe435d4`。
 - 最终外层 SHA-256：`a2aa7a48e6ece9bd41abd4c21f86501a4b3707b5465a4b28a70d66705e04bbe6`；交付文件大小约 925 MiB。
 - 本条仅记录最终制品摘要，不改变已构建和已审计的代码、配置或包内容；未部署企业服务器，未推送远程。
+
+## 2026-09-02 - 按当前 release 重封 360 企业包
+
+### Why
+
+- 用户再次要求基于当前代码打包；当前本地 `release` 仍为 `a3f0edc13432f4a7d06bf1965fd029a59a8df2a9`，与上一候选没有代码差异且工作树干净，用户也未确认上一份 360 包已经在企业环境部署。
+- Mac 组件状态只能证明制品已构建，不能冒充企业已安装状态；若按普通增量计划把 worker 和客户端改成 `reuse`，现场会缺少尚未部署的 360 runtime 与客户端，因此必须保留上一候选的组件选择。
+
+### What
+
+- 恢复上一批受控客户端输入：版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996`、组织签名公钥、JDK/OpenCode 固定摘要和企业公共能力 commit `81605f245d1512e1ab0dd73812391f6da7d008b5`；客户端指纹重新命中 `6f24c2f83e1e762354ada682b323402456255425f7d041704eead64943545440`。
+- 使用 `package-release.sh --zip-only` 对同一已验证二进制批次重封，保持 worker `included`、客户端 `included`、toolbox `reuse`、LobeHub/memory `disabled`，不生成新客户端版本，不重新构建未变化二进制。
+- 使用现有三台节点配置重新生成固定名双后台外层包；`.4` 模型灰度、CK/Mem0/BGE/pgvector、toolbox 和 trace 交付边界不变。
+
+### How
+
+- 客户端组织私钥和公钥配对摘要均为 `6d294535e5bf4c2a0ea2ba3ae8b1fc9502444de7639df3607d5e360846c9ca62`，私钥继续只保存在 Git 忽略的 `.secure/` 目录，没有进入 Git 或交付包。
+- 内层重封和外层封装逐项通过 persistence、XXL 与 ClickHouse migration 字节门禁；本轮没有新增 Flyway，`V20260825091459` 与 `V20260827183737` 的固定 SHA 均未变化。
+- 重新执行增量组件回归、双后台固定名完整包回归、OpenCode Tool runtime 门禁和麒麟 ARM64 客户端离线安装/签名回归，全部通过。
+
+### Result
+
+- 已生成新的固定名内外层候选包；本条提交后会再次重封，使本次追溯记录进入正式包，再生成最终 SHA-256 并覆盖 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`。
+- 当前只能表述为 Mac 侧重封和校验通过；企业 `.4/.114/.2` 尚未部署，360 真机、amd64 原生沙箱和公共 `local_browser.ts` 发布仍需现场验收。
+- 不涉及业务代码、HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、部署节点、环境配置、generated SDK 或 OpenCode 只读源码；未拉取、合并或推送远程。
