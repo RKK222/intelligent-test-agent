@@ -16779,3 +16779,27 @@
   生成 `AVAILABLE` 签名能力包并由用户确认更新、重启 OpenCode。
 - 本轮没有新增或修改数据库、SQL、Flyway、API、事件、客户端协议、部署节点或环境配置；企业侧尚未部署和真机复测，
   未推送远程。
+
+## 2026-09-02 - 固化企业 360 CDP 连接修复包最终摘要
+
+### Why
+
+- 主构建记录已由提交 `4b4f9e4ba` 纳入最终内层包；最终摘要需保留在包外，避免归档内容引用自身摘要后循环变化。
+
+### What
+
+- 固定交付路径已覆盖为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`；上一候选继续只作为本轮已部署比较基线。
+
+### How
+
+- 最终重新校验内层和外层 SHA 文件、外层 ZIP CRC、外层内嵌内层逐字节一致性、组件清单、包内 Tool 模板与主追溯记录；
+  三个节点归档均未携带 `models.json`，客户端、worker、programs、toolbox 和独立数据面大制品没有进入内层增量包。
+- 固定交付目录执行 `shasum -a 256 -c test-agent-two-backend-complete.zip.sha256` 返回 `OK`。
+
+### Result
+
+- 最终内层与外层内嵌内层 SHA-256 均为 `bbbe20688aa6a5541886b7afc383c6a8236468a08ea1c3a17cdcc00ef26224fa`。
+- 最终外层 SHA-256 为 `f6af13005352fa1f64dad4a9bd9fe762f10094ae0c3f87e85c0eae0ee92574f2`；文件大小
+  `155519271` bytes（约 148 MiB）。
+- 本条只记录最终制品摘要，不改变已经验证的包内容；企业侧尚未部署本轮包，公共 Tool 也尚未按企业权威 Git 流程发布，
+  未推送远程。
