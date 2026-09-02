@@ -16518,3 +16518,23 @@
 - 新候选包已在 Mac 侧生成并通过自动校验；提交本记录后会再次重封，确保正式包内包含本轮追溯信息，再生成最终摘要并覆盖 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`。
 - 前两次未部署候选均被本包取代，不能再用于现场部署。企业 `.4/.114/.2` 仍未部署本轮包，360 麒麟真机、amd64 原生 sandbox、AAM 登录和公共 `local_browser.ts` 发布仍是现场验收项。
 - 本轮只新增 release 已有 AAM 环境配置对应的前端产物并重封既有二进制，不新增部署节点，不新增或变更 HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、generated SDK 或 OpenCode 只读源码；未修改 `.env.local`，未推送远程。
+
+## 2026-09-02 - 固化最新 AAM 企业包最终摘要
+
+### Why
+
+- 本轮主追溯记录已经由提交 `5064e104d` 纳入正式内层包，最终摘要需留在包外记录，避免归档内容与自身摘要循环变化。
+
+### What
+
+- 固定交付文件已覆盖为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`；前两次未部署候选作废。
+
+### How
+
+- 复核外层 CRC、校验文件、内外层嵌套 ZIP 字节一致性、组件清单、单一客户端版本、组织公钥 catalog 签名、新 AAM 地址、包内主追溯记录、worker/客户端必需制品及 trace/toolbox 排除项；固定交付路径再次执行 SHA-256 校验并返回 `OK`。
+
+### Result
+
+- 最终内层 SHA-256：`de590f81172f21ef975a980f1e77fed6bbab6278ac6b449897c2f6076efad6f9`。
+- 最终外层 SHA-256：`81027c0a7f7e301f3e51b9a5273db0ab03ddf6b6be8cd4a2c2b2cceae080aade`；文件大小 `970337488` bytes（约 925 MiB）。
+- 本条只记录最终制品摘要，不改变已验证包内容；企业侧尚未部署，未推送远程。
