@@ -222,6 +222,7 @@ import {
   workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
+  workspaceViewNodeIdForWorkspacePath,
   workspaceFilesAsViewEntries,
   workspaceFileRefreshSettlements,
   workspaceViewRefreshTargets,
@@ -1634,9 +1635,13 @@ const chatMessagesForPanel = computed<AgentMessage[]>(() =>
 
 const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
-const activeWorkspaceViewNodeId = computed(() =>
-  workbench.activePath ? workspaceViewNodeIdByTabPath.get(workbench.activePath) ?? workbench.activePath : undefined
-);
+const activeWorkspaceViewNodeId = computed(() => {
+  const path = activePath.value;
+  if (!path) return undefined;
+  return workspaceViewNodeIdByTabPath.get(path)
+    ?? workspaceViewNodeIdForWorkspacePath(path, entriesByDirectory.value)
+    ?? path;
+});
 let activeFileRevealSequence = 0;
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));

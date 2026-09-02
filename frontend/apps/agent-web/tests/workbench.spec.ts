@@ -2842,6 +2842,10 @@ test("search results and conversation file entries reuse the workspace file load
   await page.getByPlaceholder("搜索工作区文件").fill("search-entry");
   await page.getByRole("button", { name: /search-entry.md/ }).click();
   await expect(page.locator(".monaco-editor")).toContainText("opened from search", { timeout: 10_000 });
+  await expect(page.getByRole("tablist", { name: "工作区面板" }).getByRole("button", { name: "文件树" }))
+    .toHaveClass(/is-active/);
+  await expect(page.locator(".figma-fe-section-workspace .ta-file-tree-row.is-active")
+    .filter({ hasText: "search-entry.md" })).toBeVisible();
 
   await page.getByRole("button", { name: "新建对话" }).click();
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("生成文件");

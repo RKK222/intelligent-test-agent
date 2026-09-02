@@ -463,3 +463,27 @@
 
 - 打开或切换 Workspace/Reference 文件后，左侧项目文件树会自动展开并选中当前文件；Agent 文件仍不触发 Workspace 文件树定位，也未实现 Agent 配置树自动展开。
 - 使用 `release`，不新增部署节点；不涉及 HTTP API、RunEvent/SSE、WebSocket 契约、数据库、Flyway、后端、部署、安全、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-09-02 - 修复搜索打开 Workspace 文件未选中
+
+### Why
+
+- 用户反馈从文件搜索结果打开文件后，页面会切回文件树并展开对应目录，但目标文件行没有被选中。
+- 搜索结果只提供 Workspace 物理相对路径，而组合文件树使用后端稳定节点 ID 判断活动行；目录懒加载完成后仍传原始路径，导致两种身份不相等。
+
+### What
+
+- 新增 Workspace 物理路径到已加载组合树稳定节点 ID 的精确映射，只匹配带 `workspacePath` 的文件节点，不会误选同展示路径的引用文件。
+- 活动文件节点计算同时依赖懒加载后的目录缓存；搜索打开文件时，叶子目录返回后立即用稳定 ID 驱动 `is-active`，保留既有目录展开、滚动和快速切换代次保护。
+- 增加路径映射单元测试和搜索打开后文件树活动行 E2E 断言，并同步 agent-web README 与前端规范；Agent 文件仍由原边界直接跳过。
+
+### How
+
+- 定向 Vitest 运行 `workspaceViewState.test.ts`、`figma-file-explorer.test.ts`、`FigmaEditorArea.test.ts`，3 个文件、46 项全部通过；`@test-agent/agent-web` typecheck 与 lint 通过。
+- 尝试运行搜索打开场景的单条 Chromium Playwright，但本机缺少 Playwright 1.61.0 对应的 `chromium_headless_shell-1228` 可执行文件，测试在浏览器启动前失败；没有下载外部浏览器，E2E 断言已保留待具备运行时后执行。
+- 执行任务文件 `git diff --check` 并回顾全部 `.agents/session-log*.md` 近期记录；提交继续使用隔离索引，不纳入现有 TCDS、生成声明、启动脚本和此前暂存日志。
+
+### Result
+
+- 从搜索结果打开 Workspace 文件后，文件树不再只展开目录，而会选中并滚动到对应文件；同路径引用节点不会被误选。
+- 使用 `release`，不新增部署节点；不涉及 HTTP API、RunEvent/SSE、WebSocket 契约、数据库、Flyway、后端、部署、安全、环境配置、generated SDK 或 OpenCode 只读源码。

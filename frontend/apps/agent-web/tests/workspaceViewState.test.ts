@@ -10,6 +10,7 @@ import {
   workspaceViewAncestorDirectoryIds,
   workspaceViewContextIsCurrent,
   workspaceViewEntries,
+  workspaceViewNodeIdForWorkspacePath,
   workspaceFilesAsViewEntries,
   workspaceViewRefreshTargets
 } from "../src/components/workspaceViewState";
@@ -91,6 +92,28 @@ describe("workspace view state", () => {
     ]);
   });
 
+  it("maps a file opened from search back to its stable workspace tree node", () => {
+    const entries = {
+      "mixed:docs": [
+        {
+          id: "reference:assets:docs/search-entry.md",
+          type: "file" as const,
+          workspacePath: undefined
+        },
+        {
+          id: "workspace:docs/search-entry.md",
+          type: "file" as const,
+          workspacePath: "docs/search-entry.md"
+        }
+      ]
+    };
+
+    expect(workspaceViewNodeIdForWorkspacePath("docs\\search-entry.md", entries)).toBe(
+      "workspace:docs/search-entry.md"
+    );
+    expect(workspaceViewNodeIdForWorkspacePath("docs/reference-only.md", entries)).toBeUndefined();
+  });
+
   it("rejects missing, incomplete and cyclic parent chains", () => {
     expect(workspaceViewAncestorDirectoryIds("missing", { "": [] })).toBeUndefined();
     expect(workspaceViewAncestorDirectoryIds("reference:file", {
@@ -116,6 +139,7 @@ describe("workspace view state", () => {
       /async function expandWorkspaceViewNodeToFile\(tabPath: string\)[\s\S]*workspaceViewAncestorDirectoryIds\(nodeId, entriesByDirectory\.value\)/
     );
     expect(agentWorkbenchSource).toContain("fileExplorerRef.value?.revealWorkspaceFile()");
+    expect(agentWorkbenchSource).toContain("workspaceViewNodeIdForWorkspacePath(path, entriesByDirectory.value)");
     expect(agentWorkbenchSource).toContain("sequence !== activeFileRevealSequence || activePath.value !== path");
     expect(agentWorkbenchSource).not.toContain(
       'document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active")'

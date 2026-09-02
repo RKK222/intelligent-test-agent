@@ -185,6 +185,33 @@ export function workspaceViewAncestorDirectoryIds(
   return undefined;
 }
 
+type WorkspaceViewWorkspacePathEntry = Pick<FileTreeEntry, "type"> & {
+  id?: string;
+  workspacePath?: string;
+};
+
+/**
+ * 搜索结果只携带工作区物理相对路径；目录懒加载完成后，必须把该路径重新映射成组合树稳定节点 ID，
+ * 否则目录虽然已展开，DirectoryRows 仍会拿节点 ID 与原始路径比较而无法高亮文件。
+ */
+export function workspaceViewNodeIdForWorkspacePath(
+  workspacePath: string,
+  entriesByDirectory: Readonly<Record<string, readonly WorkspaceViewWorkspacePathEntry[]>>
+): string | undefined {
+  const normalizedPath = normalizeWorkspacePath(workspacePath);
+  if (!normalizedPath) return undefined;
+  for (const entries of Object.values(entriesByDirectory)) {
+    const matched = entries.find((entry) =>
+      entry.type === "file"
+      && entry.id !== undefined
+      && entry.workspacePath !== undefined
+      && normalizeWorkspacePath(entry.workspacePath) === normalizedPath
+    );
+    if (matched) return matched.id;
+  }
+  return undefined;
+}
+
 function pathDepth(path: string): number {
   return path.split(/[\\/]+/).filter(Boolean).length;
 }
