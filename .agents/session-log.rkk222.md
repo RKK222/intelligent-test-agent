@@ -16603,3 +16603,25 @@
 - 本轮客户端版本仍为 `20260901203844`，用户无需重新下载安装；CK、Mem0、BGE、pgvector、toolbox、models 和 trace 均不重部署、不重启、不重同步。
 - 企业 `.4/.114/.2` 尚未部署本轮包，公共浏览器 Tool 对话、360/CDP、原生 amd64 sandbox 和双后台滚动发布仍需现场验收；当前不能表述为企业验证完成。
 - 不涉及新增或变更 HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、客户端协议、generated SDK、OpenCode 只读源码或 `.env*`；未推送远程。
+
+## 2026-09-02 - 固化 Playwright 投影修复包最终摘要
+
+### Why
+
+- 本轮主构建记录和修正后的现场说明已经由提交 `854f29539` 封入正式内层包；最终摘要需留在归档外，避免包内记录引用自身摘要后再次改变归档字节。
+
+### What
+
+- 固定交付路径已覆盖为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`；上一批已部署包继续只作为本轮增量基线，不再作为本次待部署文件。
+
+### How
+
+- 最终复核外层 SHA 文件、ZIP CRC、内外层嵌套 ZIP 字节一致性、组件清单、修正后的 `START-HERE.md`、AAM 地址、
+  programs 中的 `playwright-core@1.61.0` 和 launcher 投影项；确认客户端、toolbox、trace、BGE、Mem0、pgvector 交付大制品缺席，三台节点包不携带 `models.json`。
+- 固定交付路径执行 `shasum -a 256 -c test-agent-two-backend-complete.zip.sha256` 返回 `OK`。
+
+### Result
+
+- 最终内层 SHA-256：`96f2f64445e48fad28f1b807fea2420d6cd1380da0e42e483370a2067aa4983c`。
+- 最终外层 SHA-256：`9c6462a9c1fe1a3f88ac662f8d2cb657fb65975318bac85882cba790c0304b81`；文件大小 `681813982` bytes（约 650 MiB）。
+- 本条只记录最终摘要，不改变已经验证的制品内容；企业侧尚未部署本轮包，未推送远程。
