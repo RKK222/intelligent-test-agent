@@ -18,28 +18,27 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
-## 当前增量说明（2026-09-01）
+## 当前增量说明（2026-09-02）
 
-- 当前本地 `release` 已合入 `codex/local-browser-360@5cc79210f651037942551fc098133f52dd22d944` 的 6 个提交，
-  同时保留 release 后续全部能力；没有整体合入 `dev`，也没有新增部署节点。
-- 最后已确认部署基线仍是 `363e1b6babe291018800e76e0cb2c1034cfc230f`，外层包摘要
-  `3d1d30a29ab96c5e268fe4fec93c17552eebe003462db2a22e88c5ada166d770`。8 月 28 日及 31 日只打包但未确认部署的
-  候选不成为现场基线，本包直接替代这些候选，无需逐个安装。
-- 本轮新增麒麟 ARM 本地客户端 360 浏览器控制：独立受管 profile、loopback token 控制面、Chromium/CDP 版本门禁、
-  托盘选择与自检，并修复 360 启动器同 PID 切换真实内核后的进程识别；服务端重连恢复改为一次快照批量恢复，
-  单个失效本地工作区不会阻断同实例其它工作区，也不会形成循环请求。
-- worker runtime 因增加锁定的 `playwright-core@1.61.0` 和 `local_browser.ts` 支持而为 `included`；两台后台会替换
-  programs 和 worker 镜像，并按企业 Docker 基线以 `--privileged` 重建 worker/manager 容器。toolbox 仍为 `reuse`。
-  `.4` models 灰度不由标准包覆盖；CK/Mem0/BGE/pgvector 不重新部署或同步。
-- 本地客户端为 `included`，目标版本 `20260901203844`；`.2` 会发布组织密钥签名的完整麒麟 ARM64 用户包，现有客户端
-  `20260827222702` 需按版本管理策略或用户从前端重新下载升级。客户端仍使用企业入口
-  `http://mimo.sdc.cs.icbc:9996`，JDK/OpenCode 和公共能力基线复用既有受控输入。
-- `deploy/internal/local_browser.ts` 只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置。正式可用前仍须由管理员
-  将模板提交到企业公共配置 Git 的 `tools/local_browser.ts`，通过页面 Diff、提交和发布；企业已发布 commit 才是权威源。
+- 用户已确认上一批 360 企业包完成部署；该现场基线的内层 SHA-256 为
+  `de590f81172f21ef975a980f1e77fed6bbab6278ac6b449897c2f6076efad6f9`，外层 SHA-256 为
+  `81027c0a7f7e301f3e51b9a5273db0ab03ddf6b6be8cd4a2c2b2cceae080aade`。本轮只基于其后的 `release` 变更生成增量包，
+  不把此前未部署候选再次作为基线。
+- 本轮唯一新增功能修复是公共浏览器 Tool 的离线依赖投影：worker programs 已锁定
+  `playwright-core@1.61.0`，official launcher 现在会和其它 Tool 依赖一起把它投影到公共配置及工作区祖先目录，
+  修复 `local_browser.ts` 扫描时报 `Cannot find package 'playwright-core'` 并导致对话空回复的问题。
+- worker runtime 为 `included`，两台后台会替换 programs 和 worker 镜像，并按企业 Docker 基线以 `--privileged`
+  重建 worker/manager 容器；受影响的用户 OpenCode 进程需在发布公共 Tool 后重启，才能重新完成依赖投影。
+  toolbox 为 `reuse`，`.4` models 灰度不由标准包覆盖；CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
+- 本地客户端为 `reuse`，沿用已部署版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996` 和既有组织签名；
+  内层 ZIP 不携带 `dist/local-opencode-client/`，`.2` 部署只校验现有客户端分发，不替换制品，用户无需重新下载安装。
+- 后端、前端作为平台基础发布单元重新构建，但相对上一已部署包没有新的业务源码变更；AAM 地址继续为
+  `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包仍按 `.4 → .114 → .2` 顺序执行，`.2` 用于保持整包版本一致。
+- `deploy/internal/local_browser.ts` 仍只是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
+  的已发布版本才是权威源。部署 worker runtime 后，应确认已发布版本包含 `tools/local_browser.ts`，再重启受影响进程复测。
 - PostgreSQL、XXL MySQL、ClickHouse migration 与已部署基线一致，本轮三套历史均不应新增记录；最终 persistence JAR
   仍须按下文核验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
-- release 既有更新仍需一并验收：公共 Agent 发布并行排空、缺少可选配置目录时的对话、整体/嵌套 `spec` 引用、
-  测试设计导航、案例维护失败不弹空白页及安全错误提示。Workflow/LobeHub 与独立 memory 制品继续 `disabled`，trace 不打包。
+- Workflow/LobeHub、独立 memory 制品和 trace 继续 `disabled`；本轮没有新增部署节点、API、事件、数据库或客户端协议变更。
 
 ## 1. 正式拓扑
 

@@ -16561,3 +16561,45 @@
 
 - 服务端公共/工作区 Tool 依赖投影缺口已在 `release` 源码修复并通过可执行回归；不修改 `local_browser.ts`、OpenCode 只读源码、客户端包、HTTP API、RunEvent、数据库、Flyway、前端、环境配置或部署节点。
 - 尚未重建新的企业 worker/programs 制品，也未在已部署的 `.4/.114` 复测；现有企业包不会因源码提交自动获得修复，后续发布必须同时替换 worker image 与 programs 并重启受影响的用户 OpenCode 进程。
+
+## 2026-09-02 - 重打 Playwright 投影修复企业增量包
+
+### Why
+
+- 用户要求基于当前本地 `release` 重新打包；用户已确认上一批 360 企业包完成部署，因此本轮以外层
+  `81027c0a7f7e301f3e51b9a5273db0ab03ddf6b6be8cd4a2c2b2cceae080aade`、内层
+  `de590f81172f21ef975a980f1e77fed6bbab6278ac6b449897c2f6076efad6f9` 作为现场基线，只交付其后的浏览器 Tool
+  `playwright-core` 离线依赖投影修复。
+- 初次候选包内的 `START-HERE.md` 仍把客户端描述为上一轮的 `included`，与本轮组件清单 `reuse` 冲突，必须在正式交付前修正，避免现场误重装客户端。
+
+### What
+
+- 对当前 release 执行真实后端、前端、worker 和 programs 重建；组件清单为 worker `included`、toolbox `reuse`、
+  本地客户端 `reuse`、LobeHub/memory `disabled`。内层包不携带 `dist/local-opencode-client/`、toolbox、trace、BGE、
+  Mem0 或 pgvector 大制品，`.4` 的 Qwen 优先 `models.json` 和 `.114` 既有模型清单均不由标准包覆盖。
+- worker programs 与镜像同时交付 `opencode-official-launcher.mjs` 和锁定的 `playwright-core@1.61.0`；两台后台需重建
+  worker/manager，并在企业公共 `local_browser.ts` 发布后重启受影响的用户 OpenCode 进程以重新投影依赖。
+- 更新 `deploy/internal/MULTI-BACKEND.md` 的当前增量段，记录已部署基线、唯一新增修复、客户端复用、数据面排除项、
+  AAM/TCDS 地址和 Flyway 不变结论；没有新增部署节点，也没有新建并行部署脚本或组件机制。
+
+### How
+
+- 完整 `package-release.sh` 已通过后端构建、前端 `vue-tsc --noEmit` 与 Vite production build、OpenCode 1.18.4、
+  Codex 0.145.0、Python 3.13.14、MCP 回复契约、最终 persistence/XXL/ClickHouse migration 字节门禁和内层 ZIP 生成。
+- 首次 worker 构建在 Buildx 已完成镜像层与 manifest 后导出会话超时；第二次重试遇到 `goproxy.cn` 瞬时 EOF。
+  最终只读暴露本机已有 Go module cache 给 Docker 完成同一 Dockerfile 构建，构建结束立即停止临时 HTTP 服务；
+  没有修改依赖版本、Dockerfile、校验规则或企业制品内容。
+- `node --test tools/test-opencode-official-launcher.mjs` 9/9 通过；`verify-opencode-tool-runtime-deploy.sh`、
+  `verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh` 全部通过。解包审计确认 launcher
+  包含 `playwright-core` 投影项、programs 内实际版本为 `1.61.0`、worker/programs 存在、客户端与其它复用/禁用大制品缺席。
+- Mac 构建机为 arm64，原生 linux/amd64 Codex sandbox 检查按既有门禁留给 `.4/.114` 目标机；本轮没有新增或修改 Flyway，
+  `V20260825091459` 与 `V20260827183737` 的固定 SHA 分别保持
+  `6a8802dd4483df98c7289c22e30cd4d4091a7600e8faaf8649315007286c61d3`、
+  `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。
+
+### Result
+
+- Mac 侧真实重建和候选包审计通过；本条提交后将用同一已验证二进制执行 zip-only 重封，再生成最终固定名双后台包及摘要，确保本记录和修正后的现场说明进入正式归档。
+- 本轮客户端版本仍为 `20260901203844`，用户无需重新下载安装；CK、Mem0、BGE、pgvector、toolbox、models 和 trace 均不重部署、不重启、不重同步。
+- 企业 `.4/.114/.2` 尚未部署本轮包，公共浏览器 Tool 对话、360/CDP、原生 amd64 sandbox 和双后台滚动发布仍需现场验收；当前不能表述为企业验证完成。
+- 不涉及新增或变更 HTTP API、DTO、RunEvent/SSE、数据库结构、SQL、Flyway、客户端协议、generated SDK、OpenCode 只读源码或 `.env*`；未推送远程。
