@@ -2333,7 +2333,9 @@ async function handleOpenNotification(notification: UserNotification) {
       }
       await ElMessageBox.confirm(
         `Agent ${capability.agentCount ?? 0} / Skill ${capability.skillCount ?? 0} / Tool ${capability.toolCount ?? 0}。`
-          + (capability.requiresRestart ? "包含 Tool 或依赖变化，将重启本地 OpenCode。" : "仅 Agent/Skill 变化，将热加载。")
+          + (capability.requiresRestart
+            ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
+            : "连续的 Agent/Skill 更新将热加载；检测到跨版本或 Tool/依赖差异时将安全重启本地 OpenCode。")
           + "公共 Tool 使用本机当前登录账号权限运行，不会提权。",
         "更新本地公共能力",
         { confirmButtonText: "确认更新", cancelButtonText: "暂不更新", type: "warning" }

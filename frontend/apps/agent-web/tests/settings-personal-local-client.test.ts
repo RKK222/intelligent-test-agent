@@ -162,7 +162,7 @@ describe("SettingsPersonalPanel local-client version state", () => {
         agentCount: 2,
         skillCount: 3,
         toolCount: 1,
-        requiresRestart: true
+        requiresRestart: false
       }
     });
     const view = renderPanel(client, true);
@@ -172,10 +172,13 @@ describe("SettingsPersonalPanel local-client version state", () => {
     await fireEvent.click(view.getByRole("button", { name: "更新公共能力" }));
 
     await waitFor(() => expect(ElMessageBox.confirm).toHaveBeenCalledWith(
-      expect.stringContaining("当前 macOS 登录账号的本机权限"),
+      expect.stringContaining("当前操作系统登录账号的本机权限"),
       "更新本地公共能力",
       expect.any(Object)
     ));
+    const confirmation = vi.mocked(ElMessageBox.confirm).mock.calls[0]?.[0];
+    expect(confirmation).toContain("检测到跨版本或 Tool/依赖差异时将安全重启本地 OpenCode");
+    expect(confirmation).not.toContain("macOS");
     await waitFor(() => expect(client.requestLocalClientPublicCapabilityUpdate)
       .toHaveBeenCalledWith("lci_device", digest));
   });

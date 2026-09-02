@@ -16626,3 +16626,28 @@
 - 最终内层 SHA-256：`b182ef212bb1b627b68512c81cde2596a867259f1fdcda5751bd2dfb1167079c`。
 - 最终外层 SHA-256：`000027eb8cdac6808445ac88c155f30ad5e00f84f3b063ed6c9d610029b93562`；文件大小 `681814816` bytes（约 650 MiB）。
 - 本条只记录最终摘要，不改变已经验证的制品内容；企业侧尚未部署本轮包，未推送远程。
+
+## 2026-09-02 - 修复本地客户端跨公共能力版本误热加载
+
+### Why
+
+- 企业麒麟客户端从活动摘要 `a1aa92a9...` 更新到 `33f2562d...` 时，目标 release 只记录了它相对全局上一摘要 `a494...` 的 Agent-only 差异，因此错误下发 `requiresRestart=false`。
+- 客户端热加载后，OpenCode 继续从旧不可变版本目录解析新增 Tool `asset_case_list.ts`，`/experimental/tool/ids` 返回 500 并触发安全回滚；确认框还把 Tool 权限账号写死为 macOS，与麒麟现场不符。
+
+### What
+
+- `LocalClientPublicCapabilityCoordinator` 在 AVAILABLE 通知、网页通知和实际 UPDATE_COMMAND 下发前，均按实例 `activeDigest` 核对目标 release 的 `changeSummary.previousDigest`：只有精确连续且 release 本身允许时才热加载；跳版本、摘要缺失或损坏统一保守重启。
+- 前端个人设置和通知中心改为平台无关的“当前操作系统登录账号”，并明确连续 Agent/Skill 更新可热加载，跨版本或 Tool/依赖差异会安全重启。
+- 同步 runtime、agent-web README 和本地客户端部署文档；没有修改客户端协议字段、公共能力包内容或 OpenCode 源码。
+
+### How
+
+- 后端 `LocalClientPublicCapabilityCoordinatorTest` 7/7 通过，新增跳版本强制重启、连续 Agent-only 保持热加载、摘要异常失败关闭回归。
+- 前端 `settings-personal-local-client.test.ts` 9/9 通过，agent-web typecheck 和 production build 通过；后端 26 模块 `mvn clean package -Dmaven.test.skip=true` 通过。
+- 首次直接调用 Vitest 未加载根配置，因缺少 jsdom 失败；改用 frontend 根项目统一入口后通过。首次整套启动由脚本选到旧 JDK 而在 Java 21 编译门禁失败，旧服务未停止；显式指定 JDK 25 后按 `.env.test`/`test` profile 完整重启成功，backend readiness、manager 和 frontend 3000 均正常。
+
+### Result
+
+- 后端部署后，现有失败/回滚的待更新版本可直接再次点击更新；无需重新发布公共配置或重装客户端，跳版本更新会重启本地 OpenCode 后切换，不再复用旧 Tool 路径。
+- 本机代码、测试、完整构建和服务启动已验证；企业麒麟客户端仍需在目标环境复测更新、OpenCode 重启及 `asset_case_list` Tool 列表/调用，不能表述为企业验收完成。
+- 使用长期 `release`，不新增部署节点；不涉及新增或变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、性能模型、安全协议、generated SDK、环境配置或 OpenCode 只读源码，未推送远程。

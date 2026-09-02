@@ -38,6 +38,7 @@ class LocalClientPublicCapabilityCoordinatorTest {
             new LocalClientInstanceId("lci_public_capability_coordinator");
     private static final String COMMIT = "c".repeat(40);
     private static final String DIGEST = "d".repeat(64);
+    private static final String PREVIOUS_DIGEST = "a".repeat(64);
 
     private LocalClientPublicCapabilityRepository repository;
     private LocalClientInstanceRepository instanceRepository;
@@ -159,6 +160,43 @@ class LocalClientPublicCapabilityCoordinatorTest {
                 anyString(), anyString(), anyString(), anyString(), org.mockito.ArgumentMatchers.any());
     }
 
+    @Test
+    void skippedPublicCapabilityVersionForcesRestartWhenDispatchingUpdate() {
+        RecordingSender sender = new RecordingSender();
+        connectionRegistry.register(INSTANCE_ID, USER_ID, 9L, "model-grant", sender);
+        LocalClientPublicCapabilityModels.Attempt attempt = new LocalClientPublicCapabilityModels.Attempt(
+                "lcpc_" + "c".repeat(32), INSTANCE_ID, USER_ID, 9L, COMMIT, DIGEST,
+                LocalClientPublicCapabilityModels.AttemptStatus.PENDING, null, NOW, NOW, null);
+        when(repository.findUpdateAvailableStates(anyInt())).thenReturn(List.of());
+        when(repository.findDispatchableAttempts(anyInt())).thenReturn(List.of(attempt));
+        when(repository.findReleaseByDigest(DIGEST)).thenReturn(Optional.of(agentOnlyRelease()));
+        when(repository.findInstanceState(INSTANCE_ID)).thenReturn(Optional.of(updateAvailableState("b".repeat(64))));
+        when(repository.transitionAttempt(attempt.commandId(), "PENDING", "SENT", null, NOW)).thenReturn(true);
+
+        coordinator.reconcile();
+
+        assertThat(sender.frames).singleElement().satisfies(frame -> {
+            LocalClientPayloads.PublicCapabilityUpdateCommand command = new LocalClientFrameCodec().payload(
+                    frame, LocalClientPayloads.PublicCapabilityUpdateCommand.class);
+            assertThat(command.requiresRestart()).isTrue();
+        });
+    }
+
+    @Test
+    void contiguousAgentOnlyUpdateKeepsHotReload() {
+        assertThat(LocalClientPublicCapabilityCoordinator.requiresRestart(
+                PREVIOUS_DIGEST, agentOnlyRelease())).isFalse();
+    }
+
+    @Test
+    void invalidOrMissingPreviousDigestFailsClosedToRestart() {
+        LocalClientPublicCapabilityModels.Release malformed = release(
+                false, "{\"initial\":false,\"previousDigest\":\"invalid\"}");
+
+        assertThat(LocalClientPublicCapabilityCoordinator.requiresRestart(PREVIOUS_DIGEST, malformed)).isTrue();
+        assertThat(LocalClientPublicCapabilityCoordinator.requiresRestart(null, agentOnlyRelease())).isTrue();
+    }
+
     private static LocalClientInstance instance() {
         return new LocalClientInstance(
                 INSTANCE_ID, USER_ID, "Mac", "darwin", "arm64", "0.1.0", "1.18.4", "1",
@@ -167,19 +205,34 @@ class LocalClientPublicCapabilityCoordinatorTest {
     }
 
     private static LocalClientPublicCapabilityModels.InstanceState updateAvailableState() {
+        return updateAvailableState(null);
+    }
+
+    private static LocalClientPublicCapabilityModels.InstanceState updateAvailableState(String activeDigest) {
         return new LocalClientPublicCapabilityModels.InstanceState(
-                INSTANCE_ID, null, null, COMMIT, DIGEST,
+                INSTANCE_ID, null, activeDigest, COMMIT, DIGEST,
                 LocalClientPublicCapabilityModels.InstanceStatus.UPDATE_AVAILABLE,
                 null, NOW, NOW);
     }
 
     private static LocalClientPublicCapabilityModels.Release release() {
+        return release(true, "{\"initial\":true}");
+    }
+
+    private static LocalClientPublicCapabilityModels.Release agentOnlyRelease() {
+        return release(false, "{\"initial\":false,\"previousDigest\":\"" + PREVIOUS_DIGEST
+                + "\",\"toolsChanged\":false,\"dependenciesChanged\":false}");
+    }
+
+    private static LocalClientPublicCapabilityModels.Release release(
+            boolean requiresRestart,
+            String changeSummaryJson) {
         byte[] artifact = new byte[] {1, 2, 3};
         return new LocalClientPublicCapabilityModels.Release(
                 COMMIT, DIGEST, "e".repeat(64),
                 LocalClientPublicCapabilityModels.Compatibility.AVAILABLE, null,
-                "{\"schemaVersion\":1}", "{\"initial\":true}",
-                new LocalClientPublicCapabilityModels.Counts(1, 1, 1), true,
+                "{\"schemaVersion\":1}", changeSummaryJson,
+                new LocalClientPublicCapabilityModels.Counts(1, 1, 1), requiresRestart,
                 artifact, artifact.length, artifact.length, 4, NOW);
     }
 

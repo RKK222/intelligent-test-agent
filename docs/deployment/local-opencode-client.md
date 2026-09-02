@@ -419,6 +419,8 @@ PID + `ProcessHandle.startInstant` 监管该受管进程，并继续以独立 pr
 
 首次启动从安装 release 自动初始化该基线。后续公共版本只生成完整包并发送通知；用户必须在托盘或网页确认，平台不能
 自动确认。Agent/Skill-only 变化热加载，Tool/依赖变化重启本地 OpenCode；Tool 始终使用当前登录用户权限，不提权。
+`requiresRestart` 的发布摘要只对连续版本成立；实例当前摘要与目标 `previousDigest` 不一致、缺失或不可读时按跳版本升级
+处理并强制重启，不能用全局上一版本的 Agent/Skill-only 结论热加载旧 Tool 路径。
 候选包经安全解压、文件/内容摘要、目录接口和 OpenCode 健康校验后才原子切换，失败回到上一不可变版本。公共版本
 `SERVER_ONLY` 时不下发，客户端继续使用上一 `AVAILABLE` 版本。
 

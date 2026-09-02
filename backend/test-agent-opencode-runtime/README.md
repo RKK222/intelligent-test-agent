@@ -265,3 +265,7 @@ generation 0 持久化；持有连接的 Java 在重连后 CAS 绑定新 generat
 `BINARY_CHUNK` 上限，但由客户端一次只拉一片以保持出站队列背压。终态先落关系库并投影实例状态，再返回 ACK；成功
 关闭该实例能力通知，失败或回滚保留待更新版本以便用户重试。`OpencodeRuntimeApplicationService` 对已经激活公共包的
 本地客户端过滤 `source=PUBLIC_GIT` 的服务器受保护 Agent，`APPLICATION_HUB` 不受影响。
+
+release 的 `requiresRestart` 只描述相对发布时上一全局能力版本的差异。Coordinator 下发通知和安装命令时还必须核对该实例
+`activeDigest` 与 release `changeSummary.previousDigest`：只有两者精确一致才允许沿用 Agent/Skill-only 热加载；客户端跳过
+中间版本、首次摘要缺失或历史摘要不可读时统一保守重启，避免 OpenCode 热加载继续引用旧不可变版本中的 Tool 绝对路径。

@@ -16,6 +16,8 @@ import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import com.enterprise.testagent.localclient.protocol.LocalClientProtocol;
 import com.enterprise.testagent.notification.UserNotificationApplicationService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
@@ -37,6 +39,7 @@ public class LocalClientPublicCapabilityCoordinator {
     public static final String PROTOCOL_CAPABILITY = "PUBLIC_CAPABILITY_SYNC_V1";
     private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientPublicCapabilityCoordinator.class);
     private static final int DISPATCH_LIMIT = 200;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final LocalClientPublicCapabilityRepository repository;
     private final LocalClientInstanceRepository instanceRepository;
     private final LocalClientConnectionStore connectionStore;
@@ -108,8 +111,9 @@ public class LocalClientPublicCapabilityCoordinator {
             notifications.invalidateLocalClientPublicCapability(
                     userId, instanceId.value(), "CAPABILITY_CURRENT", traceId);
         } else if (latest != null) {
-            notifyAvailable(instance, latest, traceId);
-            sendAvailable(instanceId, generation, latest, traceId);
+            boolean requiresRestart = requiresRestart(activeDigest, latest);
+            notifyAvailable(instance, latest, requiresRestart, traceId);
+            sendAvailable(instanceId, generation, latest, requiresRestart, traceId);
         }
         dispatchFor(instanceId, traceId);
     }
@@ -245,10 +249,11 @@ public class LocalClientPublicCapabilityCoordinator {
                 LocalClientPublicCapabilityModels.Release release = state.pendingDigest() == null ? null
                         : repository.findReleaseByDigest(state.pendingDigest()).orElse(null);
                 if (instance != null && release != null && supports(instance)) {
-                    notifyAvailable(instance, release, traceId);
+                    boolean requiresRestart = requiresRestart(state.activeDigest(), release);
+                    notifyAvailable(instance, release, requiresRestart, traceId);
                     // 能力包可能在客户端完成版本上报后才生成；定时收敛必须同时补发桌面通知，
                     // 不能只刷新网页通知，否则在线客户端会一直显示“当前版本”。
-                    sendAvailableToCurrentConnection(instance, release, traceId);
+                    sendAvailableToCurrentConnection(instance, release, requiresRestart, traceId);
                 }
             }
             for (LocalClientPublicCapabilityModels.Attempt attempt : repository.findDispatchableAttempts(DISPATCH_LIMIT)) {
@@ -294,6 +299,10 @@ public class LocalClientPublicCapabilityCoordinator {
         }
         int chunks = Math.toIntExact((release.compressedSize() + LocalClientProtocol.BINARY_CHUNK_BYTES - 1)
                 / LocalClientProtocol.BINARY_CHUNK_BYTES);
+        String activeDigest = repository.findInstanceState(attempt.clientInstanceId())
+                .map(LocalClientPublicCapabilityModels.InstanceState::activeDigest)
+                .orElse(null);
+        boolean requiresRestart = requiresRestart(activeDigest, release);
         connectionRegistry.send(attempt.clientInstanceId(), generation, new LocalClientFrame(
                 LocalClientProtocol.VERSION,
                 LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_COMMAND,
@@ -303,13 +312,14 @@ public class LocalClientPublicCapabilityCoordinator {
                 codec.payload(new LocalClientPayloads.PublicCapabilityUpdateCommand(
                         attempt.commandId(), attempt.clientInstanceId().value(), generation,
                         release.sourceCommit(), release.bundleDigest(), release.artifactSha256(),
-                        release.compressedSize(), chunks, release.requiresRestart(), release.manifestJson()))));
+                        release.compressedSize(), chunks, requiresRestart, release.manifestJson()))));
     }
 
     private void sendAvailable(
             LocalClientInstanceId instanceId,
             long generation,
             LocalClientPublicCapabilityModels.Release release,
+            boolean requiresRestart,
             String traceId) {
         if (connectionRegistry.find(instanceId).filter(value -> value.generation() == generation).isEmpty()) {
             return;
@@ -323,12 +333,13 @@ public class LocalClientPublicCapabilityCoordinator {
                 codec.payload(new LocalClientPayloads.PublicCapabilityAvailable(
                         instanceId.value(), generation, release.sourceCommit(), release.bundleDigest(),
                         release.counts().agents(), release.counts().skills(), release.counts().tools(),
-                        release.requiresRestart(), release.changeSummaryJson()))));
+                        requiresRestart, release.changeSummaryJson()))));
     }
 
     private void sendAvailableToCurrentConnection(
             LocalClientInstance instance,
             LocalClientPublicCapabilityModels.Release release,
+            boolean requiresRestart,
             String traceId) {
         LocalClientConnectionRegistry.ConnectionSnapshot connection =
                 connectionRegistry.find(instance.clientInstanceId()).orElse(null);
@@ -336,7 +347,7 @@ public class LocalClientPublicCapabilityCoordinator {
             return;
         }
         try {
-            sendAvailable(instance.clientInstanceId(), connection.generation(), release, traceId);
+            sendAvailable(instance.clientInstanceId(), connection.generation(), release, requiresRestart, traceId);
         } catch (PlatformException exception) {
             if (exception.errorCode() != ErrorCode.LOCAL_CLIENT_DISCONNECTED) {
                 throw exception;
@@ -352,11 +363,40 @@ public class LocalClientPublicCapabilityCoordinator {
     private void notifyAvailable(
             LocalClientInstance instance,
             LocalClientPublicCapabilityModels.Release release,
+            boolean requiresRestart,
             String traceId) {
         notifications.syncLocalClientPublicCapabilityAvailable(
                 instance.userId(), instance.clientInstanceId().value(), instance.clientName(), release.bundleDigest(),
                 release.counts().agents(), release.counts().skills(), release.counts().tools(),
-                release.requiresRestart(), traceId);
+                requiresRestart, traceId);
+    }
+
+    /**
+     * release 的变更摘要只描述它相对发布时上一全局版本的差异；客户端跳过中间版本时不能直接复用该结论。
+     * 只有实例当前摘要与 previousDigest 精确一致，才允许沿用 Agent/Skill-only 的热加载判断；未知或非连续升级失败关闭为重启。
+     */
+    static boolean requiresRestart(
+            String activeDigest,
+            LocalClientPublicCapabilityModels.Release release) {
+        if (release.requiresRestart()) {
+            return true;
+        }
+        String previousDigest = previousDigest(release.changeSummaryJson());
+        return activeDigest == null || previousDigest == null || !activeDigest.equals(previousDigest);
+    }
+
+    private static String previousDigest(String changeSummaryJson) {
+        if (changeSummaryJson == null || changeSummaryJson.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode value = OBJECT_MAPPER.readTree(changeSummaryJson).path("previousDigest");
+            String digest = value.isTextual() ? value.asText() : null;
+            return digest != null && digest.matches("[0-9a-f]{64}") ? digest : null;
+        } catch (Exception ignored) {
+            // 历史或损坏摘要不能证明升级连续，调用方会保守重启，不能因此阻断能力更新。
+            return null;
+        }
     }
 
     private LocalClientInstance requireCapableOwned(UserId userId, LocalClientInstanceId instanceId) {
