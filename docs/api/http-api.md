@@ -1643,7 +1643,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/workspace-versions/{versionId}/git-access` | 版本选择前以当前用户身份只读探测关联 Git 版本库，不创建或修改本地工作区。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区；要求当前用户 TestAgent 进程 READY。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/git-pull` | 只为当前登录用户拥有的个人 worktree 拉取并合并远端版本；不更新共享版本目标，不影响其他用户，也不提交或推送。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/git-pull` | 只为当前登录用户拥有的个人 worktree 拉取并合并远端版本；可在 Git 已返回精确冲突路径后，以确认参数仅放弃这些路径的本地修改并采用远端版本；不更新共享版本目标，不影响其他用户，也不提交或推送。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用且当前仍可见的托管运行态 Workspace；关联应用已撤权、停用或删除时返回 `null`。 |
 | `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
 | `POST` | `/workspaces/{workspaceId}/recent` | 标记某个托管运行态 Workspace 为最近使用。 |
@@ -1803,7 +1803,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `accessible=true` 时 `reason=null`；缺少当前用户 SSH key 时返回 `accessible=false, reason=SSH_KEY_MISSING`；Git 认证失败或仓库不可访问时返回 `accessible=false, reason=REPOSITORY_PERMISSION_REQUIRED`，供前端展示对应版本库权限申请提示。网络、DNS、SSH 端口故障和超时仍返回统一 `GIT_UNAVAILABLE` / `GIT_TIMEOUT`，不得误报为用户没有版本库权限。应用成员校验与其它版本接口一致。
 
-`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/runtimeReloadStatus/runtimeReloadId/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
+`POST /personal-workspaces/{personalWorkspaceId}/git-pull` 默认无请求体，只允许个人工作区 owner 调用。后端在当前用户位于该应用的整棵个人 worktree 中显式 fetch `origin/{branch}` 并执行原生 merge；应用 workspace 文件和应用 Agent 文件使用相同规则。未完成 merge 会直接返回 `CONFLICT`；普通 unstaged、staged 或 untracked 改动不再先行阻止，Git 能安全合并时保留原改动并完成拉取。只有 Git 判定本地文件会被覆盖时返回 `CONFLICT`、`details.reason=LOCAL_CHANGES`，并在 `files/blockingFiles` 中列出实际阻塞文件。
+
+前端仅当 `MERGE_CONFLICT`、`MERGE_IN_PROGRESS`，或 `LOCAL_CHANGES.forceFiles` 含有 Git 明确识别的路径时，才可在二次确认后发送 `{"discardConflictingChanges":true}`。请求体不接受文件路径：后端重新从 Git 状态获取白名单，对未完成 merge 先 `merge --abort`，随后只回退这些冲突/覆盖路径并再次 merge 远端；其它本地文件不会被回退、暂存或提交。Git 未提供精确路径时不会使用“全部本地改动”回退，也不会执行强制拉取。未确认时全程不 stash、reset 或覆盖本地内容。成功响应返回 `personalWorkspaceId/versionId/remoteBranch/commitHash/updated/agentConfigChanged/runtimeReloadStatus/runtimeReloadId/changedFiles`。该动作不更新版本 `targetCommitHash` 或共享副本，不广播，不扫描或同步其他成员的 worktree，也不执行 commit/push；前端入口与“刷新文件树”一起收纳在当前 workspace 标题栏的“…”菜单中。
 
 拉取或发布遇到网络、仓库或权限异常时，统一错误继续返回稳定 `code/message/traceId`；Git details 只允许返回后端脱敏的 `gitFailureHint`、失败阶段及可恢复状态，不返回 Git URL、命令、stderr 或密钥。前端拉取结果弹框必须同时展示错误码、脱敏提示和 traceId，用户关闭后可原地重新发起拉取；已有个人提交、未完成 merge 和已解决的 index 均不得因展示错误而自动 reset。
 

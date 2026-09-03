@@ -262,6 +262,7 @@ import type {
   WorkspaceGitDiff,
   WorkspaceGitMergeCompletion,
   WorkspaceGitConflict,
+  PersonalWorkspaceGitPullPayload,
   PersonalWorkspaceGitPullResult,
   PublishPersonalWorkspacePreview,
   WorkspaceSyncResult,
@@ -1520,10 +1521,10 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         body: JSON.stringify(payload)
       }),
     /** 只拉取当前登录用户拥有的个人 worktree，不更新共享版本或其它成员。 */
-    gitPullPersonalWorkspace: (personalWorkspaceId: string) =>
+    gitPullPersonalWorkspace: (personalWorkspaceId: string, payload?: PersonalWorkspaceGitPullPayload) =>
       routedRequest<PersonalWorkspaceGitPullResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/git-pull`,
-        { method: "POST" }
+        payload ? { method: "POST", body: JSON.stringify(payload) } : { method: "POST" }
       ),
     /** 超级管理员只读查询每个应用将刷新的工作空间、版本和 feature 分支。 */
     listApplicationGitRefreshScopes: () =>

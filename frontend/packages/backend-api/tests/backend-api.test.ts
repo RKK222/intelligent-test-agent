@@ -2746,6 +2746,15 @@ describe("backend-api", () => {
       "http://api/api/internal/platform/workspace-management/personal-workspaces/pws_1/git-pull"
     );
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+
+    await expect(client.gitPullPersonalWorkspace("pws_1", { discardConflictingChanges: true })).resolves.toMatchObject({
+      personalWorkspaceId: "pws_1",
+      updated: true
+    });
+    expect(fetcher.mock.calls[2]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/personal-workspaces/pws_1/git-pull"
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[2]?.[1]?.body))).toEqual({ discardConflictingChanges: true });
   });
 
   it("loads shared automation configuration without user process routing", async () => {

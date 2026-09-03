@@ -170,6 +170,34 @@ class ManagedWorkspaceControllerTest {
     }
 
     @Test
+    void gitPullPersonalWorkspacePassesConfirmedConflictDiscardOnly() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.gitPullPersonalWorkspace(eq("pws_123"), eq(USER_ID), eq(TRACE_ID), eq(true)))
+                .thenReturn(new PersonalWorkspaceGitPullResponse(
+                        "pws_123",
+                        "awv_123",
+                        "feature_testagent_20260707",
+                        "commit_remote",
+                        true,
+                        false,
+                        "NOT_REQUIRED",
+                        null,
+                        List.of("F-GCMS/workspace/.opencode/opencode.jsonc")));
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/pws_123/git-pull")
+                .header("X-Trace-Id", TRACE_ID)
+                .header("Content-Type", "application/json")
+                .bodyValue(Map.of("discardConflictingChanges", true))
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.updated").isEqualTo(true);
+
+        verify(service).gitPullPersonalWorkspace("pws_123", USER_ID, TRACE_ID, true);
+    }
+
+    @Test
     void superAdministratorCanRefreshAllApplicationGitGroupsWithoutAssignedOpencodeProcess() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
         when(service.refreshApplicationGit("app_gcms", USER_ID, true, TRACE_ID))

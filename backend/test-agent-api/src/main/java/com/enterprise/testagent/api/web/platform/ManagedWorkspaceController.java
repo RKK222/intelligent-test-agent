@@ -147,7 +147,15 @@ public class ManagedWorkspaceController {
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/git-pull")
     public ApiResponse<Object> gitPullPersonalWorkspace(
             @PathVariable String personalWorkspaceId,
+            @RequestBody(required = false) ManagedWorkspaceDtos.PersonalWorkspaceGitPullRequest request,
             ServerWebExchange exchange) {
+        if (request != null && Boolean.TRUE.equals(request.discardConflictingChanges())) {
+            return ok(exchange, service.gitPullPersonalWorkspace(
+                    personalWorkspaceId,
+                    userId(exchange),
+                    RuntimeApiSupport.traceId(exchange),
+                    true));
+        }
         return ok(exchange, service.gitPullPersonalWorkspace(
                 personalWorkspaceId,
                 userId(exchange),

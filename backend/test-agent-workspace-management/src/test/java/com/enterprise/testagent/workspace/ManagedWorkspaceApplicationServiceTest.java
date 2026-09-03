@@ -3377,6 +3377,63 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void gitPullPersonalWorkspaceForcePullDiscardsOnlyNativeBlockingFiles() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "127.0.0.1", "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(), "default", new UserId("usr_1"), "trace_personal");
+        String blockingFile = "F-GCMS/workspace/.opencode/opencode.jsonc";
+        git.nextRepoStatusPorcelain = " M " + blockingFile + "\n?? F-GCMS/workspace/local-note.txt\n";
+        git.nextRemoteCommit = "commit_after_pull";
+        git.nextNameStatus = "M\t" + blockingFile + "\n";
+        git.targetContainedInHead = false;
+        git.mergeFailure = new PlatformException(
+                ErrorCode.GIT_UNAVAILABLE,
+                "本地改动会被远程更新覆盖",
+                Map.of("gitFailureType", "LOCAL_CHANGES", "gitBlockingFiles", List.of(blockingFile)));
+
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(), new UserId("usr_1"), "trace_force_pull", true);
+
+        assertThat(response.updated()).isTrue();
+        assertThat(git.discardedFiles).containsExactly(blockingFile);
+        assertThat(git.discardedFiles).doesNotContain("F-GCMS/workspace/local-note.txt");
+        assertThat(git.mergedCommit).isEqualTo("commit_after_pull");
+    }
+
+    @Test
+    void gitPullPersonalWorkspaceForcePullAbortsExistingMergeAndUsesRemoteConflictFile() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "127.0.0.1", "trace_version");
+        ManagedWorkspaceResponses.PersonalWorkspaceResponse personal = service.createPersonalWorkspace(
+                version.versionId(), "default", new UserId("usr_1"), "trace_personal");
+        String conflictFile = "F-GCMS/workspace/.opencode/opencode.jsonc";
+        git.mergeInProgress = true;
+        git.nextConflictPaths = List.of(conflictFile);
+        git.nextRemoteCommit = "commit_after_pull";
+        git.nextNameStatus = "M\t" + conflictFile + "\n";
+        git.targetContainedInHead = false;
+
+        ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse response = service.gitPullPersonalWorkspace(
+                personal.personalWorkspaceId(), new UserId("usr_1"), "trace_force_conflict", true);
+
+        assertThat(response.updated()).isTrue();
+        assertThat(git.abortedMergeRepoRoot).isEqualTo(Path.of(personal.repoRootPath()));
+        assertThat(git.discardedFiles).containsExactly(conflictFile);
+        assertThat(git.mergedCommit).isEqualTo("commit_after_pull");
+    }
+
+    @Test
     void persistsRecentBranchPreferenceAndReadsItBack() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -4340,6 +4397,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private PlatformException mergeFailure;
         private List<String> nextConflictPaths = List.of();
         private Path abortedMergeRepoRoot;
+        private List<String> discardedFiles = List.of();
         private Path pushedRepoRoot;
         private Path headCommitRepoRoot;
         private Path resetIndexRepoRoot;
@@ -4599,7 +4657,9 @@ class ManagedWorkspaceApplicationServiceTest {
             this.mergedCommitRepoRoot = repoRoot;
             this.mergedCommit = targetCommit;
             if (mergeFailure != null) {
-                throw mergeFailure;
+                PlatformException failure = mergeFailure;
+                mergeFailure = null;
+                throw failure;
             }
             if (failMergeWithConflict) {
                 this.mergeInProgress = true;
@@ -4619,6 +4679,13 @@ class ManagedWorkspaceApplicationServiceTest {
         public void abortMerge(Path repoRoot, String privateKey) {
             calls.add("abort:" + repoRoot);
             this.abortedMergeRepoRoot = repoRoot;
+            this.mergeInProgress = false;
+        }
+
+        @Override
+        public void discardFiles(Path repoRoot, List<String> files, String privateKey) {
+            this.discardedFiles = List.copyOf(files);
+            super.discardFiles(repoRoot, files, privateKey);
         }
 
         @Override

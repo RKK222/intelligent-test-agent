@@ -3891,19 +3891,40 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String personalWorkspaceId,
             UserId userId,
             String traceId) {
+        return gitPullPersonalWorkspace(personalWorkspaceId, userId, traceId, false);
+    }
+
+    /**
+     * 拉取当前 owner 的个人 worktree；只有用户对 Git 已返回的阻塞路径作出二次确认后，
+     * 才允许丢弃这些路径的本地状态并再次 merge。调用方不能传入文件名，避免借此覆盖任意文件。
+     */
+    public ManagedWorkspaceResponses.PersonalWorkspaceGitPullResponse gitPullPersonalWorkspace(
+            String personalWorkspaceId,
+            UserId userId,
+            String traceId,
+            boolean discardConflictingChanges) {
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         String privateKey = privateKeyFor(repository, userId);
         Path repoRoot = pathResolver.resolve(personal.repoRootPath());
+        boolean forceDiscardAppliedToExistingMerge = false;
         if (gitWorkspaceService.isMergeInProgress(repoRoot)) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "个人工作区存在未完成合并，请先在变更区解决冲突",
-                    Map.of(
-                            "reason", "MERGE_IN_PROGRESS",
-                            "files", gitWorkspaceService.conflictPaths(repoRoot)));
+            List<String> conflictFiles = normalizedGitPaths(gitWorkspaceService.conflictPaths(repoRoot));
+            if (discardConflictingChanges && !conflictFiles.isEmpty()) {
+                // 先取消未完成 merge，恢复原来的本地状态后才可对精确冲突路径定点回退。
+                gitWorkspaceService.abortMerge(repoRoot, privateKey);
+                gitWorkspaceService.discardFiles(repoRoot, conflictFiles, privateKey);
+                forceDiscardAppliedToExistingMerge = true;
+            } else {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "个人工作区存在未完成合并，请先在变更区解决冲突",
+                        Map.of(
+                                "reason", "MERGE_IN_PROGRESS",
+                                "files", conflictFiles));
+            }
         }
         ensureInternalOrigin(repository, userId, repoRoot, privateKey);
         gitWorkspaceService.fetchBranch(repoRoot, version.branch(), privateKey);
@@ -3931,32 +3952,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 repoRoot,
                 changedPaths);
-        try {
-            gitWorkspaceService.mergeCommit(
-                    repoRoot,
-                    remoteCommit,
-                    privateKey,
-                    gitCommitIdentity(userId));
-        } catch (PlatformException exception) {
-            List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
-            if (!conflictFiles.isEmpty()) {
-                throw new PlatformException(
-                        ErrorCode.CONFLICT,
-                        "远程更新与个人提交存在冲突，请在变更区解决冲突",
-                        Map.of(
-                                "reason", "MERGE_CONFLICT",
-                                "files", conflictFiles),
-                        exception);
-            }
-            if ("LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))) {
-                throw personalPullLocalChanges(
-                        personal.runtimeWorkspaceId().value(),
-                        repoRoot,
-                        mergeBlockingFiles(exception, repositoryStatusEntries(repoRoot)),
-                        exception);
-            }
-            throw exception;
-        }
+        mergePersonalWorkspacePull(
+                personal.runtimeWorkspaceId().value(),
+                repoRoot,
+                remoteCommit,
+                privateKey,
+                userId,
+                discardConflictingChanges && !forceDiscardAppliedToExistingMerge);
         String currentCommit = gitWorkspaceService.headCommit(repoRoot);
         PersonalPullRuntimeReload runtimeReload = schedulePersonalPullRuntimeReload(
                 personal,
@@ -3975,6 +3977,93 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 runtimeReload.status(),
                 runtimeReload.rolloutId(),
                 changedPaths);
+    }
+
+    /**
+     * 保持 Git 原生 merge 作为唯一合并器。确认强制拉取时至多定点回退一次：普通本地阻塞直接回退，
+     * 三方冲突则先 abort，再回退 Git 列出的 unmerged 路径，随后重试同一远端提交。
+     */
+    private void mergePersonalWorkspacePull(
+            String workspaceId,
+            Path repoRoot,
+            String remoteCommit,
+            String privateKey,
+            UserId userId,
+            boolean discardConflictingChanges) {
+        try {
+            gitWorkspaceService.mergeCommit(
+                    repoRoot,
+                    remoteCommit,
+                    privateKey,
+                    gitCommitIdentity(userId));
+        } catch (PlatformException exception) {
+            List<String> forceDiscardFiles = forcePullDiscardFiles(exception, repoRoot);
+            if (!discardConflictingChanges || forceDiscardFiles.isEmpty()) {
+                throw personalPullMergeFailure(workspaceId, repoRoot, exception);
+            }
+            if (!normalizedGitPaths(gitWorkspaceService.conflictPaths(repoRoot)).isEmpty()) {
+                // Git index 含 stage 1/2/3 时 discardFiles 会拒绝，必须先由 Git abort 恢复。
+                gitWorkspaceService.abortMerge(repoRoot, privateKey);
+            }
+            gitWorkspaceService.discardFiles(repoRoot, forceDiscardFiles, privateKey);
+            try {
+                gitWorkspaceService.mergeCommit(
+                        repoRoot,
+                        remoteCommit,
+                        privateKey,
+                        gitCommitIdentity(userId));
+            } catch (PlatformException retryException) {
+                throw personalPullMergeFailure(workspaceId, repoRoot, retryException);
+            }
+        }
+    }
+
+    /** 仅使用 Git 已明确返回且仍为本地变更的路径，解析不到时拒绝强制拉取而不是扩大回退范围。 */
+    private List<String> forcePullDiscardFiles(PlatformException exception, Path repoRoot) {
+        List<String> conflictFiles = normalizedGitPaths(gitWorkspaceService.conflictPaths(repoRoot));
+        if (!conflictFiles.isEmpty()) {
+            return conflictFiles;
+        }
+        if (!"LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))) {
+            return List.of();
+        }
+        return strictMergeBlockingFiles(exception, repositoryStatusEntries(repoRoot));
+    }
+
+    /** 统一转换 Git 路径，防止不同平台的分隔符造成回退白名单不匹配。 */
+    private List<String> normalizedGitPaths(List<String> paths) {
+        return paths.stream()
+                .filter(path -> path != null && !path.isBlank())
+                .map(path -> path.replace('\\', '/'))
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toCollection(LinkedHashSet::new),
+                        List::copyOf));
+    }
+
+    /** 将失败统一映射为原有可恢复错误；常规展示仍保留兼容旧 Git 错误的安全回退。 */
+    private PlatformException personalPullMergeFailure(
+            String workspaceId,
+            Path repoRoot,
+            PlatformException exception) {
+        List<String> conflictFiles = normalizedGitPaths(gitWorkspaceService.conflictPaths(repoRoot));
+        if (!conflictFiles.isEmpty()) {
+            return new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "远程更新与个人提交存在冲突，请在变更区解决冲突",
+                    Map.of(
+                            "reason", "MERGE_CONFLICT",
+                            "files", conflictFiles),
+                    exception);
+        }
+        if ("LOCAL_CHANGES".equals(exception.details().get("gitFailureType"))) {
+            return personalPullLocalChanges(
+                    workspaceId,
+                    repoRoot,
+                    mergeBlockingFiles(exception, repositoryStatusEntries(repoRoot)),
+                    strictMergeBlockingFiles(exception, repositoryStatusEntries(repoRoot)),
+                    exception);
+        }
+        return exception;
     }
 
     /** Git 已成功合并后登记后台单用户排空；登记失败不能把已经落盘的 merge 误报为整体失败。 */
@@ -4021,9 +4110,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             Path repoRoot,
             List<String> blockingFiles,
             PlatformException cause) {
-        LinkedHashSet<String> normalizedFiles = blockingFiles.stream()
-                .map(path -> path.replace('\\', '/'))
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return personalPullLocalChanges(workspaceId, repoRoot, blockingFiles, List.of(), cause);
+    }
+
+    /**
+     * {@code forceFiles} 只包含 Git 明确报告的覆盖路径；展示用 files 可为兼容旧 Git 输出而回退，
+     * 但绝不能拿回退列表执行强制丢弃。
+     */
+    private PlatformException personalPullLocalChanges(
+            String workspaceId,
+            Path repoRoot,
+            List<String> blockingFiles,
+            List<String> forceFiles,
+            PlatformException cause) {
+        List<String> normalizedFiles = normalizedGitPaths(blockingFiles);
         List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> blockingDetails =
                 applicationUpdateBlockingFiles(
                                 workspaceId,
@@ -4036,8 +4136,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 "无法更新到远程最新提交，请先提交或回退下列文件",
                 Map.of(
                         "reason", "LOCAL_CHANGES",
-                        "files", List.copyOf(normalizedFiles),
-                        "blockingFiles", blockingDetails),
+                        "files", normalizedFiles,
+                        "blockingFiles", blockingDetails,
+                        "forceFiles", normalizedGitPaths(forceFiles)),
                 cause);
     }
 
@@ -4045,10 +4146,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private List<String> mergeBlockingFiles(
             PlatformException exception,
             List<GitStatusEntry> localChanges) {
-        LinkedHashSet<String> localPaths = localChanges.stream()
-                .map(GitStatusEntry::path)
-                .map(path -> path.replace('\\', '/'))
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<String> strictBlockingFiles = strictMergeBlockingFiles(exception, localChanges);
+        if (!strictBlockingFiles.isEmpty()) {
+            return strictBlockingFiles;
+        }
+        return normalizedGitPaths(localChanges.stream().map(GitStatusEntry::path).toList());
+    }
+
+    /** Git 错误给出 path 白名单且该路径仍是本地 dirty 时，才允许用于强制拉取。 */
+    private List<String> strictMergeBlockingFiles(
+            PlatformException exception,
+            List<GitStatusEntry> localChanges) {
+        LinkedHashSet<String> localPaths = new LinkedHashSet<>(
+                normalizedGitPaths(localChanges.stream().map(GitStatusEntry::path).toList()));
         LinkedHashSet<String> parsedPaths = new LinkedHashSet<>();
         Object rawBlockingFiles = exception.details().get("gitBlockingFiles");
         if (rawBlockingFiles instanceof List<?> values) {
@@ -4059,7 +4169,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     .filter(localPaths::contains)
                     .forEach(parsedPaths::add);
         }
-        return parsedPaths.isEmpty() ? List.copyOf(localPaths) : List.copyOf(parsedPaths);
+        return List.copyOf(parsedPaths);
     }
 
     private boolean containsRepositoryGroupApplicationAgentConfig(

@@ -7,6 +7,7 @@ import { Button } from "@test-agent/ui-kit";
 
 export type PersonalWorkspacePullDialogPhase =
   | "CONFIRM"
+  | "FORCE_CONFIRM"
   | "PULLING"
   | "FINALIZING"
   | "SUCCEEDED"
@@ -31,6 +32,7 @@ const props = defineProps<{
   branch?: string;
   pullResult?: PersonalWorkspaceGitPullResult | null;
   result?: PersonalWorkspacePullDialogResult | null;
+  conflictingFiles?: string[];
   errorTitle?: string;
   errorDescription?: string;
   errorTraceId?: string;
@@ -38,6 +40,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   confirm: [doNotShowAgain: boolean];
+  confirmForce: [];
   cancel: [];
   close: [];
 }>();
@@ -47,6 +50,7 @@ const busy = computed(() => props.phase === "PULLING" || props.phase === "FINALI
 const visiblePullResult = computed(() => props.result ?? props.pullResult ?? null);
 const shortCommit = computed(() => visiblePullResult.value?.commitHash?.slice(0, 8) || "");
 const changedFiles = computed(() => props.result?.changedFiles ?? []);
+const conflictingFiles = computed(() => (props.conflictingFiles ?? []).filter((file) => file.trim()));
 
 watch(
   () => props.open,
@@ -116,7 +120,7 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
       <div class="personal-pull-header">
         <span class="personal-pull-icon" aria-hidden="true"><GitMerge :size="17" /></span>
         <div>
-          <h3>{{ phase === "CONFIRM" ? "确认拉取远程更新" : "拉取远程更新" }}</h3>
+          <h3>{{ phase === "CONFIRM" ? "确认拉取远程更新" : phase === "FORCE_CONFIRM" ? "确认采用远端冲突文件" : "拉取远程更新" }}</h3>
           <p>{{ appName || "当前应用" }}<template v-if="branch"> · {{ branch }}</template></p>
         </div>
       </div>
@@ -132,6 +136,16 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
         <p>不冲突的本地改动会保留；如果 Git 判断文件会被覆盖或产生冲突，请到“变更”中处理。</p>
       </div>
       <ElCheckbox v-model="doNotShowAgain">以后不再显示此确认</ElCheckbox>
+    </section>
+
+    <section v-else-if="phase === 'FORCE_CONFIRM'" class="personal-pull-force-confirm" aria-label="强制拉取确认">
+      <div>
+        <strong>这些文件的本地修改将被放弃</strong>
+        <p>确认后只处理 Git 本次明确列出的冲突或覆盖文件，并采用远端版本；其它本地文件不会被回退、暂存或提交。</p>
+      </div>
+      <ul v-if="conflictingFiles.length > 0" aria-label="将采用远端版本的文件">
+        <li v-for="file in conflictingFiles" :key="file"><code :title="file">{{ file }}</code></li>
+      </ul>
     </section>
 
     <section v-else class="personal-pull-progress" aria-live="polite">
@@ -201,6 +215,10 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
           <Button type="button" variant="ghost" @click="emit('cancel')">取消</Button>
           <Button type="button" variant="primary" @click="emit('confirm', doNotShowAgain)">开始拉取</Button>
         </template>
+        <template v-else-if="phase === 'FORCE_CONFIRM'">
+          <Button type="button" variant="ghost" @click="emit('cancel')">取消</Button>
+          <Button type="button" variant="primary" @click="emit('confirmForce')">放弃这些本地修改并拉取远程</Button>
+        </template>
         <Button v-else-if="!busy" type="button" variant="primary" @click="emit('close')">关闭</Button>
         <span v-else>拉取和 merge 完成前不能关闭</span>
       </div>
@@ -252,7 +270,8 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
   gap: 12px;
 }
 
-.personal-pull-confirm > div {
+.personal-pull-confirm > div,
+.personal-pull-force-confirm > div {
   border: 1px solid var(--ta-border);
   border-radius: 8px;
   padding: 12px;
@@ -260,6 +279,7 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
 }
 
 .personal-pull-confirm strong,
+.personal-pull-force-confirm strong,
 .personal-pull-result strong,
 .personal-pull-error strong {
   color: var(--ta-text);
@@ -267,11 +287,41 @@ function stepIcon(step: "FETCH" | "MERGE" | "REFRESH" | "RUNTIME") {
 }
 
 .personal-pull-confirm p,
+.personal-pull-force-confirm p,
 .personal-pull-error p {
   margin-top: 5px;
   color: var(--ta-muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.personal-pull-force-confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.personal-pull-force-confirm ul {
+  max-height: 180px;
+  margin: 0;
+  padding: 6px 12px 8px 30px;
+  overflow-y: auto;
+  border: 1px solid var(--ta-border);
+  border-radius: 8px;
+  background: var(--ta-surface);
+}
+
+.personal-pull-force-confirm li {
+  padding: 3px 0;
+}
+
+.personal-pull-force-confirm code {
+  display: block;
+  overflow: hidden;
+  color: var(--ta-text);
+  font-family: "Geist Mono", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .personal-pull-progress {

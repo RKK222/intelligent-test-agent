@@ -3745,6 +3745,13 @@ export type PersonalWorkspace = {
   updatedAt: string;
 };
 
+/**
+ * 个人 worktree 拉取的二次确认参数。后端不接收文件路径，只会丢弃 Git 在上一轮明确识别的冲突路径。
+ */
+export type PersonalWorkspaceGitPullPayload = {
+  discardConflictingChanges?: boolean;
+};
+
 /** 个人 worktree 拉取结果；该操作不会更新应用共享版本或其它用户。 */
 export type PersonalWorkspaceGitPullResult = {
   personalWorkspaceId: string;

@@ -7414,6 +7414,7 @@ type PersonalPullDialogState = {
   personalWorkspaceId: string | null;
   pullResult: PersonalWorkspaceGitPullResult | null;
   result: PersonalWorkspacePullDialogResult | null;
+  conflictingFiles: string[];
   errorTitle: string;
   errorDescription: string;
   errorTraceId: string;
@@ -7425,6 +7426,7 @@ const personalPullDialog = ref<PersonalPullDialogState>({
   personalWorkspaceId: null,
   pullResult: null,
   result: null,
+  conflictingFiles: [],
   errorTitle: "",
   errorDescription: "",
   errorTraceId: ""
@@ -7437,6 +7439,7 @@ function resetPersonalPullDialog() {
     personalWorkspaceId: null,
     pullResult: null,
     result: null,
+    conflictingFiles: [],
     errorTitle: "",
     errorDescription: "",
     errorTraceId: ""
@@ -7462,6 +7465,21 @@ function personalPullBlockers(error: unknown): WorkspaceGitUpdateBlocker[] {
       directoryPath: typeof candidate.directoryPath === "string" ? candidate.directoryPath : undefined
     }];
   });
+}
+
+/**
+ * 强制拉取只接受后端从 Git 失败结果中提取的精确路径；绝不根据前端文件树猜测或扩大范围。
+ */
+function personalPullForceFiles(error: unknown): string[] {
+  if (!(error instanceof BackendApiError)) return [];
+  const reason = error.details.reason;
+  const files = reason === "LOCAL_CHANGES" ? error.details.forceFiles : error.details.files;
+  if (![
+    "LOCAL_CHANGES",
+    "MERGE_CONFLICT",
+    "MERGE_IN_PROGRESS"
+  ].includes(String(reason)) || !Array.isArray(files)) return [];
+  return [...new Set(files.filter((file): file is string => typeof file === "string" && Boolean(file.trim())))];
 }
 
 function personalPullDisposeResult(
@@ -7526,7 +7544,10 @@ function closePersonalPullDialog() {
 }
 
 function cancelPersonalPullDialog() {
-  if (personalPullDialog.value.phase !== "CONFIRM") return;
+  if (![
+    "CONFIRM",
+    "FORCE_CONFIRM"
+  ].includes(personalPullDialog.value.phase)) return;
   personalPullDialog.value.open = false;
 }
 
@@ -7540,6 +7561,18 @@ function confirmPersonalPull(doNotShowAgain: boolean) {
   if (doNotShowAgain) dismissPersonalPullConfirm(authStore.currentUser?.userId);
   personalPullDialog.value.phase = "PULLING";
   void executePersonalWorkspacePull(personalWorkspaceId);
+}
+
+/** 用户已确认仅丢弃 Git 列出的冲突路径；路径不由浏览器回传，后端重新从 Git 状态校验。 */
+function confirmForcePersonalPull() {
+  const personalWorkspaceId = personalPullDialog.value.personalWorkspaceId;
+  if (
+    !appSourceCapabilities.value.canUseGitPublication
+    || !personalWorkspaceId
+    || personalPullDialog.value.phase !== "FORCE_CONFIRM"
+  ) return;
+  personalPullDialog.value.phase = "PULLING";
+  void executePersonalWorkspacePull(personalWorkspaceId, true);
 }
 
 /**
@@ -7560,6 +7593,7 @@ function handlePullPersonalWorkspace(personalWorkspaceId: string) {
     personalWorkspaceId,
     pullResult: null,
     result: null,
+    conflictingFiles: [],
     errorTitle: "",
     errorDescription: "",
     errorTraceId: ""
@@ -7567,7 +7601,7 @@ function handlePullPersonalWorkspace(personalWorkspaceId: string) {
   if (skipConfirm) void executePersonalWorkspacePull(personalWorkspaceId);
 }
 
-async function executePersonalWorkspacePull(personalWorkspaceId: string) {
+async function executePersonalWorkspacePull(personalWorkspaceId: string, discardConflictingChanges = false) {
   if (pullingPersonalWorkspace.value) return;
   if (
     personalWorkspaceId !== currentPersonalWorkspaceId.value
@@ -7581,7 +7615,10 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
   }
   pullingPersonalWorkspace.value = true;
   try {
-    const response = await api.gitPullPersonalWorkspace(personalWorkspaceId);
+    const response = await api.gitPullPersonalWorkspace(
+      personalWorkspaceId,
+      discardConflictingChanges ? { discardConflictingChanges: true } : undefined
+    );
     personalPullDialog.value.pullResult = response;
     personalPullDialog.value.phase = "FINALIZING";
     if (personalPullBlockState.value?.personalWorkspaceId === personalWorkspaceId) {
@@ -7616,17 +7653,31 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string) {
     };
   } catch (error) {
     const blockers = personalPullBlockers(error);
+    const forceFiles = discardConflictingChanges ? [] : personalPullForceFiles(error);
     if (blockers.length > 0) {
       personalPullBlockState.value = { personalWorkspaceId, files: blockers };
     }
     fileExplorerRef.value?.refreshChanges();
     refreshCurrentWorkspacePanels();
-    const failure = errorFeedback("拉取远程失败", error);
-    personalPullDialog.value.phase = "FAILED";
-    personalPullDialog.value.errorTitle = failure.title;
-    personalPullDialog.value.errorDescription = failure.description ?? "请检查提示后重试。";
-    personalPullDialog.value.errorTraceId = failure.traceId ?? "";
-    feedback.value = failure;
+    if (forceFiles.length > 0) {
+      personalPullDialog.value.phase = "FORCE_CONFIRM";
+      personalPullDialog.value.conflictingFiles = forceFiles;
+      personalPullDialog.value.errorTitle = "";
+      personalPullDialog.value.errorDescription = "";
+      personalPullDialog.value.errorTraceId = "";
+      feedback.value = {
+        kind: "info",
+        title: "发现需要采用远端版本的文件",
+        description: "请在弹框中确认是否只放弃这些文件的本地修改。"
+      };
+    } else {
+      const failure = errorFeedback("拉取远程失败", error);
+      personalPullDialog.value.phase = "FAILED";
+      personalPullDialog.value.errorTitle = failure.title;
+      personalPullDialog.value.errorDescription = failure.description ?? "请检查提示后重试。";
+      personalPullDialog.value.errorTraceId = failure.traceId ?? "";
+      feedback.value = failure;
+    }
   } finally {
     pullingPersonalWorkspace.value = false;
   }
@@ -13464,10 +13515,12 @@ async function handleLogout() {
     :branch="currentPersonalWorkspaceBranch"
     :pull-result="personalPullDialog.pullResult"
     :result="personalPullDialog.result"
+    :conflicting-files="personalPullDialog.conflictingFiles"
     :error-title="personalPullDialog.errorTitle"
     :error-description="personalPullDialog.errorDescription"
     :error-trace-id="personalPullDialog.errorTraceId"
     @confirm="confirmPersonalPull"
+    @confirm-force="confirmForcePersonalPull"
     @cancel="cancelPersonalPullDialog"
     @close="closePersonalPullDialog"
   />

@@ -63,6 +63,21 @@ describe("PersonalWorkspacePullDialog", () => {
     expect(wrapper.emitted("confirm")).toEqual([[true]]);
   });
 
+  it("confirms force pull only for Git-listed conflicting files", async () => {
+    const wrapper = mountDialog({
+      phase: "FORCE_CONFIRM",
+      conflictingFiles: ["F-GCMS/workspace/.opencode/opencode.jsonc"]
+    });
+
+    expect(wrapper.text()).toContain("这些文件的本地修改将被放弃");
+    expect(wrapper.text()).toContain(".opencode/opencode.jsonc");
+    expect(wrapper.text()).toContain("其它本地文件不会被回退、暂存或提交");
+
+    await wrapper.get("button:last-child").trigger("click");
+
+    expect(wrapper.emitted("confirmForce")).toEqual([[]]);
+  });
+
   it("shows the fetch to merge execution order while the request is running", () => {
     const wrapper = mountDialog({ phase: "PULLING" });
 

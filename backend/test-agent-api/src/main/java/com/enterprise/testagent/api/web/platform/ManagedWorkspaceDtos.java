@@ -16,6 +16,13 @@ final class ManagedWorkspaceDtos {
     record CreatePersonalWorkspaceRequest(String workspaceName) {
     }
 
+    /**
+     * 仅在上一轮 pull 已由 Git 返回精确冲突/覆盖路径后使用；文件白名单始终由后端从 Git 获取，
+     * 客户端只能确认是否采用远端版本。
+     */
+    record PersonalWorkspaceGitPullRequest(Boolean discardConflictingChanges) {
+    }
+
     /** 精确选择一个“版本库 + 版本 + 分支”物理 feature 仓库组。 */
     record RefreshApplicationGitGroupRequest(String repositoryId, String version, String branch) {
     }
