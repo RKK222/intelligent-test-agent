@@ -2186,6 +2186,44 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void regularMemberDiscardUsesOwnedPersonalWorkspaceGitContext() {
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+        ManagedWorkspaceApplicationService managedWorkspaceService = mock(ManagedWorkspaceApplicationService.class);
+        service.setManagedWorkspaceApplicationService(managedWorkspaceService);
+
+        service.workspaceDiscardForPersonalMember(
+                "wrk_personal", List.of("agents/review.md"), null, ADMIN, "trace_discard");
+
+        verify(managedWorkspaceService).discardWorkspaceGitFiles(
+                "wrk_personal", List.of(".opencode/agents/review.md"), ADMIN, "trace_discard");
+    }
+
+    @Test
+    void regularMemberCannotSelectSharedWorkspaceWorktreeWhenDiscardingAgentFiles() {
+        AgentConfigApplicationService service = service(Map.of(
+                "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()));
+        ManagedWorkspaceApplicationService managedWorkspaceService = mock(ManagedWorkspaceApplicationService.class);
+        service.setManagedWorkspaceApplicationService(managedWorkspaceService);
+
+        assertThatThrownBy(() -> service.workspaceDiscardForPersonalMember(
+                        "wrk_personal", List.of("agents/review.md"), "agw_shared", ADMIN, "trace_discard"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+
+        verifyNoInteractions(managedWorkspaceService);
+    }
+
+    @Test
     void workspaceDiffMergesStagedAndUnstagedPatchAfterFilteringAgentFiles() {
         Path workspaceRoot = root.resolve("project/F-COSS/workspace");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();

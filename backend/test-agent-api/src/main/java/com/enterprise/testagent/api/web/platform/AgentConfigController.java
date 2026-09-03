@@ -405,7 +405,8 @@ public class AgentConfigController {
 
     @GetMapping("/public/diff")
     public ApiResponse<Object> publicDiff(@RequestParam(required = false) String worktreeId, ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        // 回退入口允许普通用户读取本人公共个人 worktree 的差异；服务层仍会校验 worktree 所有权。
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         var target = routingService.forwardTargetForPublicWorktree(worktreeId);
         if (target.isPresent()) {
             return routingService.forward(
@@ -449,7 +450,8 @@ public class AgentConfigController {
 
     @PostMapping("/public/discard")
     public ApiResponse<Void> publicDiscard(@RequestBody AgentConfigDtos.StageRequest request, ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        // 回退只作用于当前用户自己的公共个人 worktree，不授予公共配置提交或发布权限。
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         var target = routingService.forwardTargetForPublicWorktree(request.worktreeId());
         if (target.isPresent()) {
             return routingService.forward(
@@ -553,9 +555,18 @@ public class AgentConfigController {
             @PathVariable String workspaceId,
             @RequestBody AgentConfigDtos.StageRequest request,
             ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_APP_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         requireWorkspaceAgentConfigSupported(workspaceId);
-        service.workspaceDiscard(workspaceId, request.files(), request.worktreeId(), principal.userId());
+        if (AuthWebSupport.hasRole(principal, Dictionary.ROLE_APP_ADMIN)) {
+            service.workspaceDiscard(workspaceId, request.files(), request.worktreeId(), principal.userId());
+        } else {
+            service.workspaceDiscardForPersonalMember(
+                    workspaceId,
+                    request.files(),
+                    request.worktreeId(),
+                    principal.userId(),
+                    RuntimeApiSupport.traceId(exchange));
+        }
         return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
     }
 

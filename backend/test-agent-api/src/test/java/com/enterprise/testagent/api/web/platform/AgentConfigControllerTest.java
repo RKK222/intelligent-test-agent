@@ -21,6 +21,7 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTar
 import com.enterprise.testagent.domain.opencodeprocess.BackendInstanceIdentity;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.workspace.AgentConfigApplicationService;
+import com.enterprise.testagent.workspace.AgentConfigResponses;
 import com.enterprise.testagent.workspace.AgentConfigResponses.AgentConfigWorktreeOptionResponse;
 import com.enterprise.testagent.workspace.AgentConfigResponses.AgentConfigWorktreeResponse;
 import com.enterprise.testagent.workspace.AgentConfigResponses.PublicRepositoryStatusResponse;
@@ -668,6 +669,45 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void regularUserCanDiscardOwnedPublicAgentFiles() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of());
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/discard")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"files":["opencode/agents/review.md"],"worktreeId":"agw_public"}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).publicDiscard(List.of("opencode/agents/review.md"), "agw_public", USER_ID);
+    }
+
+    @Test
+    void regularUserCanReadOwnedPublicAgentDiff() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.publicDiff("agw_public", USER_ID))
+                .thenReturn(new AgentConfigResponses.AgentConfigDiffResponse(List.of(), false));
+        WebTestClient client = client(service, List.of());
+
+        client.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/workspace-management/agent-config/public/diff")
+                        .queryParam("worktreeId", "agw_public")
+                        .build())
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.files").isEmpty();
+
+        verify(service).publicDiff("agw_public", USER_ID);
+    }
+
+    @Test
     void appAdminCanDiscardWorkspaceAgentFiles() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
@@ -683,6 +723,29 @@ class AgentConfigControllerTest {
                 .expectStatus().isOk();
 
         verify(service).workspaceDiscard("wrk_project", List.of("agents/review.md"), null, USER_ID);
+    }
+
+    @Test
+    void regularMemberCanDiscardOwnWorkspaceAgentFiles() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of());
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/workspaces/wrk_project/discard")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"files":["agents/review.md"],"worktreeId":null}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).workspaceDiscardForPersonalMember(
+                "wrk_project",
+                List.of("agents/review.md"),
+                null,
+                USER_ID,
+                TRACE_ID);
     }
 
     @Test

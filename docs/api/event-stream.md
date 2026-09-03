@@ -1143,3 +1143,5 @@ relay token、Cookie、profile 或页面数据发送到平台。旧服务端可�
 能力可用通知复用既有用户通知实时信号，不新增 RunEvent：通知类型为
 `LOCAL_CLIENT_PUBLIC_CAPABILITY_AVAILABLE`，操作为 `LOCAL_CLIENT_PUBLIC_CAPABILITY_UPDATE`。网页收到通知后重新读取
 实例状态，不能从事件正文安装制品。
+
+Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅允许 `SUPER_ADMIN`；公共 `diff/discard` 仅允许已登录用户操作本人公共个人 worktree。应用级 Agent/Skill 的暂存、提交和发布仍由 `APP_ADMIN`（含 `SUPER_ADMIN`）执行，普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动；该权限变化不新增 RunEvent/SSE 类型。

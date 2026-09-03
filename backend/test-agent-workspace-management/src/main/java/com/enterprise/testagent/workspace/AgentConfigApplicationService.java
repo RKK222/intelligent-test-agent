@@ -1731,6 +1731,32 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 decryptSingleSshKey(userId));
     }
 
+    /** 普通应用成员只能回退本人个人 worktree 的 Agent 文件，不能借 worktreeId 操作共享副本。 */
+    public void workspaceDiscardForPersonalMember(
+            String workspaceId,
+            List<String> files,
+            String worktreeId,
+            UserId userId,
+            String traceId) {
+        if (worktreeId != null && !worktreeId.isBlank()) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "普通用户只能回退本人个人工作区中的应用 Agent 文件",
+                    Map.of("workspaceId", workspaceId));
+        }
+        if (managedWorkspaceApplicationService == null) {
+            throw new PlatformException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "应用 Agent 回退服务未初始化",
+                    Map.of("workspaceId", workspaceId));
+        }
+        managedWorkspaceApplicationService.discardWorkspaceGitFiles(
+                workspaceId,
+                normalizeWorkspaceAgentFiles(files),
+                userId,
+                traceId);
+    }
+
     public AgentConfigResponses.AgentConfigOperationResponse publicCommit(
             String message,
             String worktreeId,

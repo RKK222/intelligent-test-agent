@@ -1,5 +1,7 @@
 # test-agent-api
 
+Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅允许 `SUPER_ADMIN`；公共 `diff/discard` 仅允许已登录用户操作本人公共个人 worktree。应用级 Agent/Skill 的暂存、提交和发布仍由 `APP_ADMIN`（含 `SUPER_ADMIN`）执行，普通成员仅可回退本人个人 worktree 的应用 Agent 本地改动。
+
 外部调用使用独立 `/api/external/v1/**` 命名空间：`ExternalApiKeyWebFilter` 强制校验工具编码/API Key 并建立外部主体，`ExternalUserSshKeyController` 只返回 TAEK1 信封；管理端 `ExternalApiCredentialController` 仅允许 `SUPER_ADMIN`。旧用户 JWT 与静态 API Token 都不能旁路外部认证，API 日志把 actor 记为 `external:{toolCode}` 并脱敏 API Key、私钥和密文。
 
 ## 工程定位

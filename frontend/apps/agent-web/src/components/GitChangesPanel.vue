@@ -870,6 +870,16 @@ function canWriteAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
     : (props.canManageAgentConfig ?? canMutateWorkspaceGit.value);
 }
 
+/**
+ * 回退只影响当前个人 worktree 的本地文件和 index，不会把配置提交或发布到共享分支。
+ * 因此它与 Agent 配置的暂存、提交和发布权限分开判断，允许普通用户清理自己的本地改动。
+ */
+function canDiscardAgentScope(scope: "PUBLIC" | "WORKSPACE"): boolean {
+  if (!includeAgentScopes.value) return false;
+  // 两个 Agent 作用域都只允许回退当前用户的本地 worktree，提交权限仍由各自 scope 的管理权限控制。
+  return (scope === "PUBLIC" || scope === "WORKSPACE") && canMutateWorkspaceGit.value;
+}
+
 const hasWritableStagedChanges = computed(() =>
   activeDiffScope.value === "WORKSPACE"
     ? canMutateWorkspaceGit.value && (workspaceStaged.value.length > 0 || activeWorkspacePublishPending.value)
@@ -1805,7 +1815,7 @@ async function unstageAgentFile(file: AgentPanelDiffFile) {
 async function discardAgentFiles(files: AgentPanelDiffFile[]): Promise<boolean> {
   const scope = activeDiffScope.value === "PUBLIC" ? "PUBLIC" : "WORKSPACE";
   if (
-    !canWriteAgentScope(scope)
+    !canDiscardAgentScope(scope)
     || files.length === 0
     || activeAgentConflicts.value.length > 0
     || (scope === "WORKSPACE" && !effectiveAgentConfigWorkspaceId.value)
@@ -2543,7 +2553,7 @@ defineExpose({
                 class="git-bulk-action"
                 :aria-label="`丢弃全部${activeScopeItem.label}改动`"
                 :title="activeAgentConflicts.length > 0 ? '存在未解决冲突，请先处理或取消合并' : `丢弃全部${activeScopeItem.label}改动`"
-                :disabled="!canWriteAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending || activeWorkspaceAgentPublishPending"
+                :disabled="!canDiscardAgentScope(activeDiffScope === 'PUBLIC' ? 'PUBLIC' : 'WORKSPACE') || activeAgentConflicts.length > 0 || (activeAgentUnstaged.length === 0 && activeAgentStaged.length === 0) || agentGitMutationPending || activeWorkspaceAgentPublishPending"
                 @click.stop="discardAllAgentChanges"
               >
                 <Loader2 v-if="discardingAllAgentFiles" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
@@ -2829,7 +2839,7 @@ defineExpose({
                 ><Tag class="h-3 w-3" :stroke-width="1.8" aria-hidden="true" /></span>
                 
                 <button
-                  v-if="canWriteAgentScope(file.scope)"
+                  v-if="canDiscardAgentScope(file.scope)"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -2989,7 +2999,7 @@ defineExpose({
                 <Badge v-if="file.pendingPublish" tone="warning" class="ml-1 py-0 px-1 text-[9px]">待推送</Badge>
                 
                 <button
-                  v-if="canWriteAgentScope(file.scope) && activeAgentConflicts.length === 0 && !file.pendingPublish"
+                  v-if="canDiscardAgentScope(file.scope) && activeAgentConflicts.length === 0 && !file.pendingPublish"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"

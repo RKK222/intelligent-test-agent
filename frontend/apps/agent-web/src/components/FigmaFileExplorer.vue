@@ -39,7 +39,7 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   pullingPersonalWorkspace?: boolean;
   /** 是否允许当前个人工作区执行普通文件写操作 */
   canWrite?: boolean;
-  /** 是否允许修改 Git index、回退、提交或发布；体验区与普通文件写权限分离。 */
+  /** 是否允许普通 workspace 执行 Git index、回退、提交或发布；Agent 配置暂存/提交/发布另行鉴权。 */
   canMutateGit?: boolean;
   /** 是否允许编辑应用级 Agent/Skill/Rules/Templates 配置 */
   canManageAgentConfig?: boolean;

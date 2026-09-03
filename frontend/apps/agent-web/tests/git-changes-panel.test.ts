@@ -1269,7 +1269,7 @@ describe("GitChangesPanel", () => {
         workspaceId: "wrk_personal_runtime",
         apiBaseUrl: "http://api",
         canWrite: true,
-        canManagePublicConfig: true
+        canManagePublicConfig: false
       },
       global: { plugins: [pinia] }
     });
@@ -1842,10 +1842,12 @@ describe("GitChangesPanel", () => {
     expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
   });
 
-  it("shows application agent changes as readonly to a regular member", async () => {
-    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
-      files: [{ path: fixture.files.applicationAgent, status: "M", staged: false, patch: "" }]
-    });
+  it("allows a regular member to discard application Agent changes without staging or committing", async () => {
+    apiClientMock.getWorkspaceAgentDiff
+      .mockResolvedValueOnce({
+        files: [{ path: fixture.files.applicationAgent, status: "M", staged: false, patch: "" }]
+      })
+      .mockResolvedValue({ files: [] });
 
     const view = render(GitChangesPanel, {
       props: {
@@ -1864,6 +1866,13 @@ describe("GitChangesPanel", () => {
     expect((view.getByRole("button", { name: "全部暂存应用 Agent 变更" }) as HTMLButtonElement).disabled).toBe(true);
     expect((view.getByRole("button", { name: "提交" }) as HTMLButtonElement).disabled).toBe(true);
     expect(apiClientMock.stageWorkspaceAgentFiles).not.toHaveBeenCalled();
+
+    await fireEvent.click(within(row).getByTitle("回退文件改动"));
+    await waitFor(() => expect(apiClientMock.discardWorkspaceAgentFiles).toHaveBeenCalledWith(
+      fixture.application.personalRuntimeWorkspaceId,
+      [fixture.files.applicationAgent]
+    ));
+    await waitFor(() => expect(view.queryByLabelText(fixture.files.applicationAgent)).toBeNull());
   });
 
   it("commits application Agent config in the current version personal worktree", async () => {

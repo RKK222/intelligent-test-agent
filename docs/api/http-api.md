@@ -352,12 +352,12 @@ Git 命令返回 `GIT_UNAVAILABLE` 或 `GIT_TIMEOUT` 时，错误 `details` 可�
 
 Base URL：`/api/internal/platform/workspace-management/agent-config`。该能力管理工作台左侧 Agent 栏目中的“公共级”和“工作空间级”opencode 配置文件。公共级 Git 根目录来自通用参数 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，opencode 运行时配置目录来自 `OPENCODE_PUBLIC_CONFIG_DIR`，文件树根为 Git 根目录下 `opencode/`；工作空间级文件树根为 `{workspace.rootPath}/.opencode/`。前端在该根下管理 `agents/` Agent Markdown 和 `skills/<skill-name>/SKILL.md` 技能包，写入路径必须显式带 `agents/` 或 `skills/` 前缀。
 
-工作空间级 Diff、暂存和回退以完整 `.opencode/**` 安全命名空间为边界，使 JSON/JSONC、agent、skill、command、plugin、tool、旧 mode 别名及辅助源码都进入“应用 Agent”提交/发布链路；文件仍通过 workspace/agent-config 文件 WebSocket 写入。运行依赖生成的 `node_modules`、package/lockfile 等应由 `.gitignore` 排除，但一旦已跟踪或实际出现在 Git status 中就必须进入应用 Agent Diff，不能形成不可见脏状态。
+工作空间级 Diff、暂存和回退以完整 `.opencode/**` 安全命名空间为边界，使 JSON/JSONC、agent、skill、command、plugin、tool、旧 mode 别名及辅助源码都进入“应用 Agent”提交/发布链路；文件仍通过 workspace/agent-config 文件 WebSocket 写入。运行依赖生成的 `node_modules`、package/lockfile 等应由 `.gitignore` 排除，但一旦已跟踪或实际出现在 Git status 中就必须进入应用 Agent Diff，不能形成不可见脏状态。普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动，不能指定共享 worktree。
 
 鉴权：
 
 - `GET status` 和文件 WebSocket 读取：任意已登录用户可读。
-- 公共级写入、worktree、diff、stage、commit、publish 要求 `SUPER_ADMIN`，且必须操作当前用户自己的公共 worktree；共享公共 Git 根目录只用于初始化和运行时同步，不接受前端直接写入。工作空间级权限保持原有口径。
+- 公共级 worktree 管理、写入、stage、commit、publish 要求 `SUPER_ADMIN`，且必须操作当前用户自己的公共 worktree；公共 `diff` 和 `discard` 允许已登录用户操作本人公共个人 worktree，服务层继续校验 worktree 所有权。共享公共 Git 根目录只用于初始化和运行时同步，不接受前端直接写入。工作空间级 `stage`、`unstage`、`commit`、`publish` 仍要求 `APP_ADMIN`（`SUPER_ADMIN` 继承），普通成员的 `discard` 仅允许本人个人 worktree。
 - 所有 SSH Git 操作使用当前登录 `SUPER_ADMIN` 保存的唯一 SSH key；未配置或配置多把时返回 `VALIDATION_ERROR`。
 - Agent 配置文件的目录列表、读取、写入、上传、改名和删除前端必须走平台文件 WebSocket；旧 HTTP `public/files*` 和 `workspaces/{workspaceId}/files*` 入口已作废，返回 `410 API_GONE`。
 
@@ -1967,7 +1967,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 后端执行流程：
 
-1. API 入口先按规范化相对路径检查目录权限；`.opencode/**` 仅 `APP_ADMIN` 或 `SUPER_ADMIN` 可提交/发布，避免绕过 Agent 配置接口。随后 `commit` 在个人 worktree 隔离 index，只 stage `files` 白名单并提交；不推送、不广播。
+1. API 入口先按规范化相对路径检查目录权限；`.opencode/**` 仅 `APP_ADMIN` 或 `SUPER_ADMIN` 可暂存、提交/发布，避免绕过 Agent 配置接口；普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动。随后 `commit` 在个人 worktree 隔离 index，只 stage `files` 白名单并提交；不推送、不广播。
 2. `publish` 校验个人 worktree 未处于 merge 状态，且 `files` 在个人 worktree 没有未提交变更；未先本地提交时返回 `CONFLICT`。
 3. 确保当前服务器的应用 feature worktree clean，`git fetch` + `git pull --ff-only {appVersionBranch}`，并校验可选 `expectedApplicationHead`。
 4. 读取个人仓库 `HEAD`，将 `files` 映射为 feature worktree 的仓库相对路径；存在的文件执行 checkout 投影，不存在的文件执行定点删除。
