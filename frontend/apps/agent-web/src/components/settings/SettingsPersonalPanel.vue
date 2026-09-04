@@ -101,6 +101,8 @@ async function addSshKey() {
       encryptionNonce: encrypted.encryptionNonce,
       fingerprint: encrypted.fingerprint,
     });
+    // SSH 身份变化会影响工作空间 Git 巡检投影；保存成功即通知工作台失效缓存，不能等设置弹窗关闭。
+    emit("workspace-catalog-changed");
     sshKeyName.value = "";
     sshPrivateKey.value = "";
     selectedSshKeyFileName.value = "";
@@ -155,6 +157,8 @@ function readFileAsUtf8(file: File): Promise<string> {
 async function deleteSshKey(sshKeyId: string) {
   await run(async () => {
     await api.deletePersonalSshKey(sshKeyId);
+    // 删除后同样立即刷新，避免仍把旧 key 对应的可访问状态保留到定时刷新。
+    emit("workspace-catalog-changed");
     await loadSshKeys();
   });
 }

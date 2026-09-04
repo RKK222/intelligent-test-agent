@@ -5876,9 +5876,11 @@ test("toolbox category tags stay on one narrow viewport row and support keyboard
 });
 
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
-  await mockBackendApi(page);
+  const workspaceTemplateRequests: string[] = [];
+  await mockBackendApi(page, { workspaceTemplateRequests });
 
   await gotoWorkbench(page);
+  await expect.poll(() => workspaceTemplateRequests.length).toBeGreaterThan(0);
 
   await page.getByRole("button", { name: "系统设置" }).click();
   const dialog = page.getByRole("dialog");
@@ -5891,11 +5893,18 @@ test("settings dialog manages application context and SSH key metadata", async (
   await page.getByRole("button", { name: "个人设置" }).click();
   await page.getByPlaceholder("SSH key 名称").fill("work");
   await page.getByPlaceholder("-----BEGIN OPENSSH PRIVATE KEY-----").fill("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----");
+  const requestCountBeforeAdd = workspaceTemplateRequests.length;
   await page.getByRole("button", { name: "添加 SSH key" }).click();
 
   await expect(dialog.getByText("SHA256:abc")).toBeVisible();
   await expect(dialog.getByText("secret")).toHaveCount(0);
   await expect(dialog.locator("textarea")).toHaveCount(0);
+  await expect.poll(() => workspaceTemplateRequests.length).toBeGreaterThan(requestCountBeforeAdd);
+
+  const requestCountBeforeDelete = workspaceTemplateRequests.length;
+  await dialog.getByRole("button", { name: "删除" }).click();
+  await expect(page.getByRole("button", { name: "添加 SSH key" })).toBeVisible();
+  await expect.poll(() => workspaceTemplateRequests.length).toBeGreaterThan(requestCountBeforeDelete);
 });
 
 test("settings dialog grants application context to super admin", async ({ page }) => {
@@ -6007,7 +6016,7 @@ test("application without recent version does not fallback to first template ver
   expect(fileRequests).toEqual([]);
 });
 
-test("version selection checks git access and prompts for repository permission before creating worktree", async ({ page }) => {
+test("version selection ignores a stale inaccessible projection and performs a live Git access check", async ({ page }) => {
   const gitAccessRequests: string[] = [];
   const defaultPersonalRequests: string[] = [];
   await page.addInitScript(() => {
@@ -6040,6 +6049,10 @@ test("version selection checks git access and prompts for repository permission 
         branch: "main",
         standard: true,
         directoryPath: "F-GCMS/workspace",
+        gitAccessStatus: "INACCESSIBLE",
+        gitAccessReason: "REPOSITORY_PERMISSION_REQUIRED",
+        gitAccessMessage: "上次巡检未通过",
+        gitAccessCheckedAt: "2026-09-04T00:00:00Z",
         createdAt: "2026-06-24T00:00:00Z",
         updatedAt: "2026-06-24T00:00:00Z"
       }]
@@ -6063,7 +6076,9 @@ test("version selection checks git access and prompts for repository permission 
 
   await gotoWorkbench(page);
   await page.locator(".ta-workbench-footer-branch").click();
-  await page.getByRole("menuitem", { name: /本地-测试/ }).hover();
+  const templateItem = page.getByRole("menuitem", { name: /本地-测试/ });
+  await expect(templateItem).toContainText("上次巡检：上次巡检未通过");
+  await templateItem.hover();
   await page.getByRole("menuitem", { name: /20260715/ }).click();
 
   await expect(page.getByText("需要申请版本库权限")).toBeVisible();
@@ -11129,6 +11144,8 @@ async function mockBackendApi(
     createVersionRequests?: string[];
     /** 自定义 /applications/{appId}/workspace-templates 返回；不传则用默认空数组。 */
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
+    /** 记录工作空间模板查询，用于验证设置内凭据变化会立即失效并重拉目录。 */
+    workspaceTemplateRequests?: string[];
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
     /** 工具盒子目录；滚动布局用例注入足量工具，普通用例保留最小目录。 */
@@ -12512,6 +12529,7 @@ async function mockBackendApi(
       const workspaceTemplatesMatch = url.pathname.match(/^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/workspace-templates$/);
       if (method === "GET" && workspaceTemplatesMatch) {
         const appId = workspaceTemplatesMatch[1] ?? "";
+        capture.workspaceTemplateRequests?.push(appId);
         await route.fulfill(json(capture.workspaceTemplates?.[appId] ?? []));
         return;
       }

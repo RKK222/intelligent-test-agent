@@ -16911,3 +16911,27 @@
   `155524587` bytes（约 148 MiB）；包内 `local_browser.ts` SHA-256 为
   `7c55108ed67bb722188298d085fb0c8c7d233129cb37b8499db39bba2cce97c6`。
 - 本条只记录最终制品摘要，不改变已验证包内容；尚未推送远程，也尚未在企业麒麟 360 上完成最终验收。
+
+## 2026-09-04 - SSH Key 变更即时刷新工作空间并允许实时复检
+
+### Why
+
+- 企业用户更新个人 SSH Key 后，工作台仍可能持有两小时缓存的 `INACCESSIBLE` Git 巡检投影；顶部和底部选择器又把该历史状态作为硬门禁，导致用户无法触发现有的实时 Git 访问预检。
+- 版本预检请求只携带 `versionId`，服务端读取数据库中的当前 SSH Key；前端不会把旧私钥配置随请求发送，因此修复应集中在目录缓存失效和历史投影门禁。
+
+### What
+
+- 个人 SSH Key 新增或删除接口成功后立即复用 `workspace-catalog-changed`，失效并重拉工作空间模板，不再等待设置弹窗关闭或定时刷新。
+- 顶栏与左下角服务器测试工作空间保留上次巡检提示，但允许展开和选择已有版本；父组件不再因模板 `INACCESSIBLE` 提前返回，统一进入当前凭据的实时 Git 预检。本地工作空间和新增版本仍保留原门禁。
+- 同步 agent-web README，并补充组件及 Chromium 集成回归，覆盖 SSH Key 新增/删除后的即时重拉和历史失败投影下的实时预检。
+
+### How
+
+- 前端全量 Vitest 159 个文件通过，2273 passed / 1 skipped；两条定向 Chromium Playwright 集成测试通过；`@test-agent/agent-web` typecheck 和 production build 通过。
+- 按 JDK 25、`.env.test`、`test` profile 执行统一重启脚本；后端 26 模块与前端构建成功，但固定 PostgreSQL `192.168.8.100:15432/testagent_dev` 连接超时，后端 readiness 和前端常驻启动未完成。脚本退出后确认未残留 backend/frontend/restart 进程。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，未发现与本次文件冲突的未完成事项；工作区原有未跟踪企业浏览器客户端基线文件不纳入本次提交。
+
+### Result
+
+- 用户保存或删除 SSH Key 后，当前页面会立即刷新工作空间巡检投影；即使刷新前仍看到历史失败提示，也可以选择已有版本并以数据库当前 Key 获取实时结果。
+- 使用 `release`，不新增部署节点；不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、后端、安全、环境配置、generated SDK 或 OpenCode 只读源码。本机全栈健康检查仍受共享 PostgreSQL 不可达阻断，企业现场的真实 Git 认证结果仍以版本预检日志为准。

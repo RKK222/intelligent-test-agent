@@ -184,12 +184,13 @@ const testTemplates = templates;
 // 当前应用关联的版本库全部在菜单中直列：已下载项打开快照，未下载项以灰色入口进入管理页。
 const visibleAppSourceRepositories = computed(() => props.appSourceRepositories ?? []);
 
-function workspaceGitAccessBlocked(template: AppWorkspaceTemplate) {
+function workspaceGitAccessNeedsRecheck(template: AppWorkspaceTemplate) {
   return template.gitAccessStatus === "INACCESSIBLE";
 }
 
-function workspaceGitAccessMessage(template: AppWorkspaceTemplate) {
-  return template.gitAccessMessage || "Git 权限已失效";
+function workspaceGitAccessHint(template: AppWorkspaceTemplate) {
+  const message = template.gitAccessMessage || "Git 权限巡检未通过";
+  return `上次巡检：${message}；选择版本时将使用当前 SSH key 重新校验`;
 }
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
@@ -230,7 +231,7 @@ const createVersionTarget = ref<AppWorkspaceTemplate | null>(null);
 const createVersionOpen = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
-  if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || workspaceGitAccessBlocked(template)) return;
+  if ((props.workspaceKind && props.workspaceKind !== "MANAGED") || workspaceGitAccessNeedsRecheck(template)) return;
   createVersionTarget.value = template;
   // 关闭两级菜单，避免弹窗被外层 click outside 监听立即关掉。
   closeMenu();
@@ -464,13 +465,6 @@ onBeforeUnmount(() => {
 });
 
 function onTemplateEnter(template: AppWorkspaceTemplate, event: MouseEvent) {
-  if (workspaceGitAccessBlocked(template)) {
-    hoveredTemplateId.value = null;
-    hoveredTemplateEl.value = null;
-    cascadeSubmenuPos.value = null;
-    clearCascadeSubmenuCloseTimer();
-    return;
-  }
   hoveredTemplateId.value = template.workspaceId;
   // 记录当前 hover 行的 DOM 引用，用于子菜单 fixed 定位 + scroll/resize 期间重算。
   hoveredTemplateEl.value = event.currentTarget as HTMLElement;
@@ -501,7 +495,7 @@ function onCascadeSubmenuLeave() {
 }
 
 function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVersion) {
-  if (workspaceGitAccessBlocked(template)) return;
+  // 列表状态来自上次巡检，只作提示；父组件会对当前版本执行实时 Git 访问预检。
   emit("select-version", { template, version });
   closeMenu();
 }
@@ -670,14 +664,12 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 :key="template.workspaceId"
                 :class="[
                   'ta-workbench-cascade-item',
-                  workspaceGitAccessBlocked(template) && 'is-disabled',
                   hoveredTemplateId === template.workspaceId && 'is-hovered',
                   template.versions?.some((v) => v.versionId === selectedVersionId) && 'is-selected'
                 ]"
                 role="menuitem"
-                :aria-haspopup="!workspaceGitAccessBlocked(template)"
-                :aria-disabled="workspaceGitAccessBlocked(template)"
-                :title="workspaceGitAccessBlocked(template) ? workspaceGitAccessMessage(template) : template.branch"
+                aria-haspopup="true"
+                :title="workspaceGitAccessNeedsRecheck(template) ? workspaceGitAccessHint(template) : template.branch"
                 @mouseenter="onTemplateEnter(template, $event)"
                 @mouseleave="onTemplateLeave"
               >
@@ -687,11 +679,11 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
                 />
                 <div class="ta-workbench-cascade-item-main">
                   <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
-                  <span v-if="workspaceGitAccessBlocked(template)" class="ta-workbench-cascade-item-desc">
-                    {{ workspaceGitAccessMessage(template) }}
+                  <span v-if="workspaceGitAccessNeedsRecheck(template)" class="ta-workbench-cascade-item-desc">
+                    {{ workspaceGitAccessHint(template) }}
                   </span>
                 </div>
-                <span v-if="!workspaceGitAccessBlocked(template)" class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
+                <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
               </li>
             </ul>
             <div v-if="workspaceKind === 'APP_SOURCE'" class="ta-workbench-cascade-mode-entry">
@@ -759,9 +751,15 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
               没版本时在「暂无版本」下面；有版本时在 ul 列表下方。
             -->
             <div
-              class="ta-workbench-cascade-submenu-create"
+              :class="[
+                'ta-workbench-cascade-submenu-create',
+                workspaceGitAccessNeedsRecheck(hoveredTemplate) && 'is-disabled'
+              ]"
               role="menuitem"
-              :title="`为「${hoveredTemplate.workspaceName}」新增版本`"
+              :aria-disabled="workspaceGitAccessNeedsRecheck(hoveredTemplate)"
+              :title="workspaceGitAccessNeedsRecheck(hoveredTemplate)
+                ? '请先选择已有版本完成实时 Git 校验，再新增版本'
+                : `为「${hoveredTemplate.workspaceName}」新增版本`"
               @click.stop="openCreateVersionDialog(hoveredTemplate)"
             >
               <Plus class="ta-workbench-cascade-submenu-item-icon" />
@@ -1643,6 +1641,15 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 
 .ta-workbench-cascade-submenu-create:hover {
   background: #eef3ff;
+}
+
+.ta-workbench-cascade-submenu-create.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.ta-workbench-cascade-submenu-create.is-disabled:hover {
+  background: transparent;
 }
 
 .ta-workbench-cascade-submenu-item-icon {

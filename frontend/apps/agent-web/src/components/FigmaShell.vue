@@ -406,9 +406,14 @@ const headerWorkspaceVersion = computed(() => {
   return versions.find((version) => version.versionId === props.selectedVersionId)
     ?? null;
 });
-const headerWorkspaceGitAccessBlocked = computed(() =>
-  headerWorkspaceTemplate.value?.gitAccessStatus === "INACCESSIBLE"
-);
+
+function managedWorkspaceGitAccessHint(template?: AppWorkspaceTemplate | null) {
+  if (template?.gitAccessStatus !== "INACCESSIBLE") return null;
+  const message = template.gitAccessMessage || "Git 权限巡检未通过";
+  return `上次巡检：${message}；选择版本时将使用当前 SSH key 重新校验`;
+}
+
+const headerWorkspaceGitAccessHint = computed(() => managedWorkspaceGitAccessHint(headerWorkspaceTemplate.value));
 const headerWorkspaceLabel = computed(() => {
   if (props.workspaceKind === "EXPERIENCE") return "体验工作区";
   if (props.workspaceKind === "LOCAL_CLIENT") return props.workspaceName ?? "本地工作区";
@@ -450,7 +455,6 @@ watch(availableWorkspaceTemplates, (templates) => {
 }, { deep: true });
 
 function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
-  if (template.gitAccessStatus === "INACCESSIBLE") return;
   closeWorkspaceMenu();
   if (!template.versions) {
     pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
@@ -464,7 +468,8 @@ function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
 
 function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: AppWorkspaceTemplate) {
   const template = explicitTemplate ?? headerWorkspaceTemplate.value;
-  if (!template || template.gitAccessStatus === "INACCESSIBLE") return;
+  if (!template) return;
+  // 历史巡检仅提示风险，真正的准入由父组件使用当前 SSH key 实时预检。
   emit("select-version", { template, version });
   closeVersionMenu();
 }
@@ -2546,16 +2551,12 @@ function submitJoinApp() {
                 :class="[
                   'figma-app-menu-item',
                   'figma-workspace-menu-item',
-                  template.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible',
                   template.workspaceId === headerWorkspaceTemplate?.workspaceId && 'is-active'
                 ]"
                 role="option"
                 :aria-selected="template.workspaceId === headerWorkspaceTemplate?.workspaceId"
                 :aria-label="`打开测试工作空间${template.workspaceName}`"
-                :title="template.gitAccessStatus === 'INACCESSIBLE'
-                  ? (template.gitAccessMessage || 'Git 权限已失效')
-                  : `打开${template.workspaceName}`"
-                :disabled="template.gitAccessStatus === 'INACCESSIBLE'"
+                :title="managedWorkspaceGitAccessHint(template) || `打开${template.workspaceName}`"
                 @mousedown.prevent="selectHeaderWorkspace(template)"
               >
                 <FlaskConical class="figma-context-menu-type-icon" aria-hidden="true" />
@@ -2566,9 +2567,7 @@ function submitJoinApp() {
                     template.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible'
                   ]"
                 >
-                  服务器 · {{ template.gitAccessStatus === 'INACCESSIBLE'
-                    ? (template.gitAccessMessage || 'Git 权限已失效')
-                    : template.branch }}
+                  服务器 · {{ managedWorkspaceGitAccessHint(template) || template.branch }}
                 </span>
                 <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
               </button>
@@ -2594,10 +2593,8 @@ function submitJoinApp() {
             aria-haspopup="listbox"
             :aria-expanded="versionMenuOpen"
             :aria-label="`版本：${headerVersionLabel}`"
-            :disabled="workspaceKind !== 'MANAGED' || headerWorkspaceGitAccessBlocked"
-            :title="headerWorkspaceGitAccessBlocked
-              ? (headerWorkspaceTemplate?.gitAccessMessage || 'Git 权限已失效')
-              : `版本：${headerVersionLabel}`"
+            :disabled="workspaceKind !== 'MANAGED'"
+            :title="headerWorkspaceGitAccessHint || `版本：${headerVersionLabel}`"
             @click="toggleVersionMenu"
             @blur="onVersionMenuBlur"
           >

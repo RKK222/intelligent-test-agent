@@ -1403,7 +1403,7 @@ describe("FigmaShell", () => {
     expect(other.classes()).not.toContain("is-active");
   });
 
-  it("grays out Git-inaccessible local and server workspaces with a safe reason", async () => {
+  it("keeps local Git failures blocked but lets stale server projections enter live recheck", async () => {
     const deniedServer = {
       workspaceId: "workspace-denied",
       workspaceName: "无权限服务器空间",
@@ -1434,17 +1434,24 @@ describe("FigmaShell", () => {
     const local = wrapper.get('[aria-label="打开本地工作区无权限本地空间"]');
     const server = wrapper.get('[aria-label="打开测试工作空间无权限服务器空间"]');
     expect(local.attributes("disabled")).toBe("");
-    expect(server.attributes("disabled")).toBe("");
+    expect(server.attributes("disabled")).toBeUndefined();
     expect(local.classes()).toContain("is-git-inaccessible");
-    expect(server.classes()).toContain("is-git-inaccessible");
+    expect(server.classes()).not.toContain("is-git-inaccessible");
     expect(local.attributes("title")).toBe("Git 仓库读取权限已失效");
-    expect(server.attributes("title")).toBe("Git 仓库读取权限已失效");
+    expect(server.attributes("title")).toContain("上次巡检：Git 仓库读取权限已失效");
+    expect(server.attributes("title")).toContain("当前 SSH key 重新校验");
     expect(local.text()).toContain("Git 仓库读取权限已失效");
-    expect(server.text()).toContain("Git 仓库读取权限已失效");
+    expect(server.text()).toContain("上次巡检：Git 仓库读取权限已失效");
+    const versionSelector = wrapper.get('[data-testid="header-version-selector"]');
+    expect(versionSelector.attributes("disabled")).toBeUndefined();
+    expect(versionSelector.attributes("title")).toContain("当前 SSH key 重新校验");
     await local.trigger("mousedown");
     await server.trigger("mousedown");
     expect(wrapper.emitted("select-local-workspace")).toBeUndefined();
-    expect(wrapper.emitted("select-version")).toBeUndefined();
+    expect(wrapper.emitted("select-version")?.[0]).toEqual([{
+      template: deniedServer,
+      version: deniedServer.versions[0]
+    }]);
   });
 
   it("shows process status with server name and resolved address", async () => {

@@ -7134,14 +7134,7 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
 // 切换到某个应用版本：先只读校验当前用户对关联 Git 版本库的访问权限，再通过
 // ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
-  if (payload.template.gitAccessStatus === "INACCESSIBLE") {
-    feedback.value = {
-      kind: "info",
-      title: "工作空间 Git 权限已失效",
-      description: payload.template.gitAccessMessage || "请恢复关联版本库读取权限，等待下次巡检后再选择。"
-    };
-    return;
-  }
+  // 模板状态是定时巡检投影，可能早于用户刚更新的 SSH key；点击版本必须继续进入当前凭据的实时预检。
   // 顶部显式选择托管工作空间代表“离开源码快照”，不是在 APP_SOURCE 内执行版本操作；
   // 后续 managed intent 与 switchWorkspace 会统一失效源码请求、清理 recent 并切回 MANAGED。
   if (!await confirmProcessInitializationBeforeWorkspaceAction("切换应用版本")) {
@@ -10790,7 +10783,7 @@ async function hideLocalClientWorkspaceProjection(reason: LocalClientProjectionH
 }
 
 function refreshManagedWorkspaceCatalog(reason?: "LOCAL_CLIENT_REVOKED") {
-  // 异步创建操作真正成功时立即刷新底部选择器；不能只依赖关闭设置时可能过早的刷新。
+  // 工作空间变更和个人 SSH key 变更成功时立即刷新；不能只依赖关闭设置或两小时定时刷新。
   void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "app-templates"] });
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
   if (reason !== "LOCAL_CLIENT_REVOKED") return;

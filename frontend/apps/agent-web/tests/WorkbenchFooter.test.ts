@@ -321,7 +321,12 @@ describe("WorkbenchFooter", () => {
     expect(document.body.textContent).not.toContain("已停用工作空间");
   });
 
-  it("keeps Git-inaccessible templates visible but disables their version submenu", async () => {
+  it("keeps a stale Git-inaccessible projection visible and lets the user recheck a version", async () => {
+    const deniedVersion = {
+      versionId: "version-denied",
+      version: "20260823",
+      branch: "feature_testagent_20260823"
+    };
     const deniedTemplate = {
       ...template,
       workspaceId: "wks_denied",
@@ -329,7 +334,8 @@ describe("WorkbenchFooter", () => {
       gitAccessStatus: "INACCESSIBLE",
       gitAccessReason: "REPOSITORY_PERMISSION_REQUIRED",
       gitAccessMessage: "Git 仓库读取权限已失效",
-      gitAccessCheckedAt: "2026-08-23T12:00:00Z"
+      gitAccessCheckedAt: "2026-08-23T12:00:00Z",
+      versions: [deniedVersion]
     };
     const wrapper = mount(WorkbenchFooter, {
       attachTo: document.body,
@@ -342,13 +348,19 @@ describe("WorkbenchFooter", () => {
 
     await wrapper.find(".ta-workbench-footer-branch").trigger("click");
     const item = document.body.querySelector(".ta-workbench-cascade-item") as HTMLElement;
-    expect(item.classList).toContain("is-disabled");
-    expect(item.getAttribute("aria-disabled")).toBe("true");
-    expect(item.title).toBe("Git 仓库读取权限已失效");
-    expect(item.textContent).toContain("Git 仓库读取权限已失效");
+    expect(item.classList).not.toContain("is-disabled");
+    expect(item.getAttribute("aria-disabled")).toBeNull();
+    expect(item.getAttribute("aria-haspopup")).toBe("true");
+    expect(item.title).toContain("上次巡检：Git 仓库读取权限已失效");
+    expect(item.title).toContain("当前 SSH key 重新校验");
+    expect(item.textContent).toContain("上次巡检：Git 仓库读取权限已失效");
     item.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     await wrapper.vm.$nextTick();
-    expect(document.body.querySelector(".ta-workbench-cascade-submenu")).toBeNull();
+    const versionItem = document.body.querySelector(".ta-workbench-cascade-submenu-item") as HTMLElement;
+    expect(versionItem).not.toBeNull();
+    versionItem.click();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("select-version")?.[0]).toEqual([{ template: deniedTemplate, version: deniedVersion }]);
     expect(wrapper.emitted("load-versions")).toBeUndefined();
   });
 
