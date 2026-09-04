@@ -45,7 +45,6 @@ type SessionBrowser = {
   pages: Map<string, Page>
   activeTabId: string
   lastActivity: number
-  allowedOrigins: Set<string>
 }
 
 type BrowserRuntime = {
@@ -66,7 +65,6 @@ const runtime: BrowserRuntime = runtimeHost[RUNTIME_KEY] ?? {
   browserIdleSince: null,
 }
 runtimeHost[RUNTIME_KEY] = runtime
-const pageSessions = new WeakMap<Page, SessionBrowser>()
 
 const args = {
   action: tool.schema.enum([
@@ -125,7 +123,6 @@ export default tool({
       case "open":
       case "navigate": {
         const url = requiredUrl(input.url)
-        await authorizeOrigin(context, session, url)
         await page.goto(url, { waitUntil: "domcontentloaded", timeout })
         return pageResult(page, session, true)
       }
@@ -135,29 +132,27 @@ export default tool({
         session.activeTabId = tabId
         if (input.url) {
           const url = requiredUrl(input.url)
-          await authorizeOrigin(context, session, url)
           await next.goto(url, { waitUntil: "domcontentloaded", timeout })
         }
         return pageResult(next, session, true)
       }
       case "back":
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await page.goBack({ waitUntil: "domcontentloaded", timeout })
         return pageResult(page, session, true)
       case "forward":
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await page.goForward({ waitUntil: "domcontentloaded", timeout })
         return pageResult(page, session, true)
       case "reload":
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await page.reload({ waitUntil: "domcontentloaded", timeout })
         return pageResult(page, session, true)
       case "snapshot":
         return pageResult(page, session, true)
       case "click": {
         const locator = locate(page, input.target)
-        await authorizeCurrentOrigin(context, session, page)
-        await authorizeLinkTarget(context, session, page, locator)
+        requireCurrentHttpPage(page)
         await authorizeSubmit(context, page, locator)
         await locator.click({ timeout })
         await page.waitForLoadState("domcontentloaded", { timeout: Math.min(timeout, 10_000) }).catch(() => undefined)
@@ -165,29 +160,29 @@ export default tool({
       }
       case "type": {
         const locator = locate(page, input.target)
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await locator.fill(requiredValue(input.value), { timeout })
         return pageResult(page, session, false)
       }
       case "select": {
         const locator = locate(page, input.target)
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await locator.selectOption(requiredValue(input.value), { timeout })
         return pageResult(page, session, false)
       }
       case "check": {
         const locator = locate(page, input.target)
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         if (input.checked === false) await locator.uncheck({ timeout })
         else await locator.check({ timeout })
         return pageResult(page, session, false)
       }
       case "hover":
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await locate(page, input.target).hover({ timeout })
         return pageResult(page, session, false)
       case "press":
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         {
           const locator = locate(page, input.target)
           const key = requiredValue(input.value)
@@ -200,13 +195,13 @@ export default tool({
         else await page.waitForLoadState("networkidle", { timeout })
         return pageResult(page, session, true)
       case "screenshot": {
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         const relative = await artifactPath(context.directory, "browser-artifacts", context.sessionID, "png")
         await page.screenshot({ path: path.join(context.directory, relative), fullPage: true })
         return result({ tabId: session.activeTabId, artifact: relative, url: safeUrl(page.url()) })
       }
       case "upload": {
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         const relative = requiredRelativePath(input.relativePath)
         const upload = await workspaceFile(context.directory, relative)
         await context.ask({
@@ -219,7 +214,7 @@ export default tool({
         return result({ tabId: session.activeTabId, uploaded: relative, url: safeUrl(page.url()) })
       }
       case "download": {
-        await authorizeCurrentOrigin(context, session, page)
+        requireCurrentHttpPage(page)
         await context.ask({
           permission: "local_browser_download",
           patterns: [origin(page.url())],
@@ -279,7 +274,6 @@ async function ensureSession(sessionId: string): Promise<SessionBrowser> {
     pages: new Map(),
     activeTabId: "",
     lastActivity: Date.now(),
-    allowedOrigins: new Set(),
   }
   runtime.sessions.set(sessionId, session)
   const tabId = registerPage(sessionId, session, page)
@@ -291,7 +285,6 @@ async function ensureSession(sessionId: string): Promise<SessionBrowser> {
 function registerPage(sessionId: string, session: SessionBrowser, page: Page): string {
   const id = nextTabId()
   session.pages.set(id, page)
-  pageSessions.set(page, session)
   page.on("popup", popup => {
     const popupId = registerPage(sessionId, session, popup)
     session.activeTabId = popupId
@@ -321,22 +314,14 @@ async function ensureConnected(): Promise<void> {
   }
   runtime.context = runtime.browser.contexts()[0]
   if (!runtime.context) throw new Error("360 浏览器未提供默认自动化上下文")
-  // 主文档导航在发出网络请求前校验 Session 已授权 origin；未知 JS 跳转和 popup 会被阻断。
+  // 用户明确要求企业内 HTTP(S) 全量放行；仍在请求发出前阻断本地文件、浏览器内部页和脚本协议。
   await runtime.context.route("**/*", async route => {
     const request = route.request()
     if (!request.isNavigationRequest() || request.frame() !== request.frame().page().mainFrame()) {
       await route.continue()
       return
     }
-    const page = request.frame().page()
-    let session = pageSessions.get(page)
-    if (!session) {
-      const opener = await page.opener().catch(() => null)
-      if (opener) session = pageSessions.get(opener)
-      if (session) pageSessions.set(page, session)
-    }
-    const targetOrigin = httpOrigin(request.url())
-    if (session && targetOrigin && !session.allowedOrigins.has(targetOrigin)) {
+    if (!isAllowedMainFrameNavigation(request.url())) {
       await route.abort("blockedbyclient")
       return
     }
@@ -579,29 +564,8 @@ function locate(page: Page, target?: Target): Locator {
   return locator.first()
 }
 
-async function authorizeOrigin(context: ToolContext, session: SessionBrowser, rawUrl: string) {
-  const allowedOrigin = origin(rawUrl)
-  await context.ask({
-    permission: "local_browser_site",
-    patterns: [allowedOrigin],
-    always: [allowedOrigin],
-    metadata: { origin: allowedOrigin },
-  })
-  session.allowedOrigins.add(allowedOrigin)
-}
-
-async function authorizeCurrentOrigin(context: ToolContext, session: SessionBrowser, page: Page) {
-  if (page.url() === "about:blank") throw new Error("请先打开 HTTP(S) 页面")
-  await authorizeOrigin(context, session, page.url())
-}
-
-async function authorizeLinkTarget(
-  context: ToolContext, session: SessionBrowser, page: Page, locator: Locator,
-) {
-  const href = await locator.getAttribute("href").catch(() => null)
-  if (!href) return
-  const target = new URL(href, page.url())
-  if (target.origin !== origin(page.url())) await authorizeOrigin(context, session, target.toString())
+function requireCurrentHttpPage(page: Page) {
+  if (!isAllowedMainFrameNavigation(page.url())) throw new Error("请先打开 HTTP(S) 页面")
 }
 
 async function authorizeSubmit(
@@ -773,7 +737,15 @@ function requiredUrl(value?: string) {
   return parsed.toString()
 }
 function origin(value: string) { return new URL(value).origin }
-function httpOrigin(value: string) { try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) ? url.origin : null } catch { return null } }
+/** 企业浏览器允许跨全部 HTTP(S) origin 导航，但禁止内嵌凭据及本地/内部/脚本协议。 */
+export function isAllowedMainFrameNavigation(value: string) {
+  try {
+    const url = new URL(value)
+    return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
 function safeUrl(value: string) { const url = new URL(value); url.username = ""; url.password = ""; url.search = ""; url.hash = ""; return url.toString() }
 function cleanText(value: string, limit: number) {
   return value

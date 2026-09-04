@@ -218,8 +218,10 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
   主动触发，只允许读取 state 日志目录中受控命名的客户端日志，限制文件数和单文件字节数，并排除配置、
   OpenCode 日志及工作区内容；导出失败不得退化为打包整个 state 或 config 目录。
 - 本地浏览器只能由当前用户的本地客户端监管：使用独立持久 profile、可见窗口、随机 loopback CDP 端口和随机本地 relay token，
-  禁止连接用户日常浏览器 profile、绑定非 loopback 地址或把 CDP/token 发送到平台。Tool 按 HTTP(S) origin 授权，未知跨 origin
-  主文档跳转在发出请求前阻断；提交、上传、下载不得使用永久授权。上传只允许当前工作区内不超过 100 MiB 的非符号链接普通
+  禁止连接用户日常浏览器 profile、绑定非 loopback 地址或把 CDP/token 发送到平台。经企业使用方确认，Tool 对全部 HTTP(S)
+  origin 的主文档导航全量放行，不做逐站点授权；跨 origin 重定向、链接、JS 跳转和 popup 可继续，因此受控页面可能横向进入
+  其它内网 Web 系统并让模型读取其可见文本。`file:`、`chrome:`、`data:`、`javascript:` 等非 Web 协议和内嵌凭据 URL
+  必须在请求前阻断。提交、上传、下载不得使用永久授权。上传只允许当前工作区内不超过 100 MiB 的非符号链接普通
   文件；下载和截图只写入当前工作区的显式产物目录。模型输出不得包含 Cookie、认证 token、密码/input value、完整 HTML 或
   截图字节；浏览器 stdout/stderr 不写入可导出日志。
 - 受保护 Agent/Skill 正文、系统提示词和编排只允许在服务器不可变制品与单 Run 模型上下文中出现，不得进入

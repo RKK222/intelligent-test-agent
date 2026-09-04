@@ -408,6 +408,9 @@ Observability 现场验收还必须确认用户包引用的受控 release 包含
 本地 Tool 在 OpenCode/Bun 内使用原生 WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，避免 Node `ws` transport
 在部分企业 360 上完成 HTTP 101 后仍无法进入 connected。目标用户不需要安装 Node；`playwright-core` 依赖随完整签名能力包
 落在用户私有的公共能力 revision 目录。现场系统即使只有旧 Node 或完全没有 Node，也不得升级系统 Node 或联网补装依赖。
+企业现场明确选择对所有 HTTP(S) origin 的主页面导航全量放行，不再显示站点授权；跨 origin 的 AAM/SSO 重定向、链接、
+JS 跳转和 popup 均可继续。Tool 仍必须在请求发出前阻断 `file:`、`chrome:`、`data:`、`javascript:` 等非 Web 协议和
+内嵌凭据 URL；提交、上传和下载继续逐次确认，完整 URL/query、Cookie、Token 与密码值不得进入输出或日志。
 目标麒麟 ARM64 用户桌面必须已安装企业 360 浏览器；客户端默认首先检查系统稳定入口
 `/usr/bin/browser360ent-cn-stable`，不存在或不可执行时才检查其它受控候选和 desktop entry，全部失败后再由用户从
 托盘“浏览器设置与自检”选择浏览器可执行文件。稳定入口仍存在时，360 升级不要求用户重新选择。

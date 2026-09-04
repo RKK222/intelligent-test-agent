@@ -16826,3 +16826,31 @@
 
 - 麒麟用户无需复制私钥正文，可从显示隐藏目录后的 `.ssh` 直接选择无扩展名私钥，再确认名称并保存；粘贴方式保持兼容。
 - 使用 `release`，不新增部署节点；不涉及 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、后端、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-09-04 - 企业浏览器主页面导航全量放行 HTTP(S)
+
+### Why
+
+- 企业麒麟现场已确认 360 与本地 Relay/CDP 可以连接，但从 `mimo.sdc.cs.icbc:9996` 跳转 AAM 登录页时出现
+  `ERR_BLOCKED_BY_CLIENT`；根因是旧公共 Tool 只授权初始 origin，并在跨 origin 主页面请求发出前主动中止。
+- 企业使用方明确选择对所有 HTTP(S) origin 全量放行，以适配数量较多且事先无法完整枚举的内网域名。
+
+### What
+
+- `local_browser.ts` 删除 Session 级 origin 白名单与站点授权提示，放行跨 origin 重定向、链接、JS 跳转和 popup。
+- 主页面仍只允许 HTTP/HTTPS，继续在请求前阻断 `file:`、`chrome:`、`data:`、`javascript:` 等非 Web 协议、非法 URL
+  和内嵌用户名/密码的 URL；提交、上传、下载仍逐次确认，输出与日志脱敏边界不变。
+- 增加可独立执行的导航策略回归测试，并同步本地客户端、企业部署与安全规范文档，显式记录全量放行的内网横向访问风险。
+
+### How
+
+- `bun test ./tools/test-local-browser-native-transport.ts` 通过，2 tests / 7 expects，覆盖原生 Bun CDP transport 及 HTTP(S)
+  全量放行/危险协议拒绝策略。
+- `bash tools/verify-opencode-tool-runtime-deploy.sh` 与 `git diff --check` 通过；提交前回顾全部
+  `.agents/session-log*.md` 近期记录，未发现会被本次修改覆盖的并行成果或冲突标记。
+
+### Result
+
+- 公共 Tool 不再因为 AAM/SSO 使用不同 origin 而生成 `ERR_BLOCKED_BY_CLIENT`，同时保留非 Web 协议、内嵌凭据和敏感动作边界。
+- 本次使用 `release`，不新增部署节点；不涉及 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、客户端协议、Node 运行时、
+  generated SDK 或 OpenCode 只读源码。企业 360 的最终行为仍需在公共 Agent Git 更新、用户确认“更新公共能力”后现场验证。

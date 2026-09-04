@@ -111,6 +111,49 @@ test("Bun 原生 transport 传递 CDP JSON，并拒绝跨端口 WebSocket", asyn
   expect(versionRequests).toBe(2)
 })
 
+test("主页面导航全量放行 HTTP(S)，并拒绝本地、内部、脚本协议和内嵌凭据", async () => {
+  const sourceUrl = pathToFileURL(resolve("deploy/internal/local_browser.ts")).href
+  const childScript = `
+    import { isAllowedMainFrameNavigation } from ${JSON.stringify(sourceUrl)};
+    const allowed = [
+      "http://mimo.sdc.cs.icbc:9996/",
+      "http://tcds-prod.sdc.icbc/aam/onlyLogin?ticket=secret-value",
+      "https://10.0.0.8:9443/internal",
+    ];
+    const rejected = [
+      "file:///etc/passwd",
+      "chrome://policy/",
+      "data:text/html,secret",
+      "javascript:alert(1)",
+      "http://user:password@internal.test/",
+      "not a url",
+    ];
+    if (!allowed.every(isAllowedMainFrameNavigation)) throw new Error("HTTP(S) origin was not allowed");
+    if (!rejected.every(value => !isAllowedMainFrameNavigation(value))) {
+      throw new Error("unsafe main-frame navigation was allowed");
+    }
+    console.log("LOCAL_BROWSER_HTTP_NAVIGATION_POLICY_OK");
+  `
+  const child = Bun.spawn([process.execPath, "-e", childScript], {
+    cwd: resolve("."),
+    env: {
+      ...process.env,
+      NODE_PATH: join(fixtureRoot, "node_modules"),
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ])
+
+  expect(stderr).toBe("")
+  expect(exitCode).toBe(0)
+  expect(stdout).toContain("LOCAL_BROWSER_HTTP_NAVIGATION_POLICY_OK")
+})
+
 /** 测试只需要模块形状，不加载真实 Playwright；真实 Chrome 连通性由运行验收命令覆盖。 */
 async function writeFixturePackage(nodeModules: string, name: string, source: string): Promise<void> {
   const directory = join(nodeModules, ...name.split("/"))

@@ -23,9 +23,13 @@
 - 用户已确认公共能力跳版本修复已部署到企业内部；对应候选基线的内层 SHA-256 为
   `58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`，外层 SHA-256 为
   `e5e0403803ed6dc670f26f2086049ed764041e72734fc1c6ece4df79a97eef74`。本轮只基于其后的 `release` 变更生成增量包。
-- 本轮唯一功能修复是公共 `local_browser.ts` 的企业 360 CDP 连接兼容：Tool 在 OpenCode/Bun 内使用原生
+- 本轮公共 `local_browser.ts` 先完成企业 360 CDP 连接兼容：Tool 在 OpenCode/Bun 内使用原生
   WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，避开 Node `ws` transport 已完成 HTTP 101 却不进入
   connected 的现场问题。CDP 版本响应返回的 WebSocket 继续限制为客户端 Relay 已确认的同一 `127.0.0.1` 随机端口。
+- 企业现场随后确认 `mimo.sdc.cs.icbc:9996` 会跳转到不同 origin 的 AAM 登录页；旧 Tool 在目标请求发出前按安全策略阻断，
+  却把生成的 `ERR_BLOCKED_BY_CLIENT` 错误页作为成功结果返回。企业使用方明确选择全量放行所有 HTTP(S) origin，当前 Tool
+  不再申请站点授权，跨 origin 重定向、链接、JS 跳转和 popup 可继续；非 HTTP(S) 协议、内嵌凭据、提交、上传、下载及
+  模型输出脱敏边界保持不变。
 - worker runtime、toolbox 和本地客户端均为 `reuse`。现有 programs 和签名公共能力依赖已经包含
   `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
