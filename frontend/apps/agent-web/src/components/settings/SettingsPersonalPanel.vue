@@ -12,8 +12,8 @@ import type {
 } from "@test-agent/shared-types";
 import { copyTextToClipboard } from "@test-agent/ui-kit";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Delete, Folder, Key, Refresh, VideoPlay, VideoPause } from "@element-plus/icons-vue";
-import { encryptSshKey } from "../../utils/ssh-crypto";
+import { Delete, Folder, Key, Refresh, UploadFilled, VideoPlay, VideoPause } from "@element-plus/icons-vue";
+import { encryptSshKey, normalizePrivateKey } from "../../utils/ssh-crypto";
 
 // SettingsPanel 统一向所有面板传入 currentUser；个人设置面板目前不依赖该字段，
 // 但保留 prop 以避免 Vue 透传告警，类型与 SettingsAppWorkspacePanel 保持一致。
@@ -35,6 +35,9 @@ const api = inject<BackendApiClient>("api")!;
 const sshKeys = ref<SshKeyMetadata[]>([]);
 const sshKeyName = ref("");
 const sshPrivateKey = ref("");
+const sshKeyFileInput = ref<HTMLInputElement | null>(null);
+const selectedSshKeyFileName = ref("");
+const sshKeyFileReading = ref(false);
 const loading = ref(false);
 const errorMessage = ref("");
 const localClientLoading = ref(false);
@@ -55,6 +58,7 @@ const pickerSelectedPath = ref("");
 const pickerEntries = ref<LocalClientDirectoryEntry[]>([]);
 let localClientRefreshTimer: ReturnType<typeof setInterval> | undefined;
 let localClientRequestEpoch = 0;
+const MAX_SSH_PRIVATE_KEY_FILE_BYTES = 1024 * 1024;
 
 type LocalClientRequestContext = {
   ownerUserId: string | null;
@@ -99,7 +103,52 @@ async function addSshKey() {
     });
     sshKeyName.value = "";
     sshPrivateKey.value = "";
+    selectedSshKeyFileName.value = "";
     await loadSshKeys();
+  });
+}
+
+/**
+ * 使用原生文件选择器读取私钥，兼容麒麟 GTK 选择器中的 Ctrl+H 隐藏目录开关。
+ * 不设置 accept，确保 id_ed25519、id_rsa 等无扩展名文件也可以被选择。
+ */
+function openSshPrivateKeyFilePicker() {
+  if (!sshKeyFileInput.value) return;
+  sshKeyFileInput.value.value = "";
+  sshKeyFileInput.value.click();
+}
+
+/** 只在当前页面内存中读取 UTF-8 文本；真正保存时仍复用浏览器端混合加密链路。 */
+async function selectSshPrivateKeyFile(event: Event) {
+  const input = event.currentTarget as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  sshKeyFileReading.value = true;
+  errorMessage.value = "";
+  try {
+    if (file.size > MAX_SSH_PRIVATE_KEY_FILE_BYTES) {
+      throw new Error("SSH 私钥文件不能超过 1 MiB");
+    }
+    const normalizedPrivateKey = normalizePrivateKey(await readFileAsUtf8(file));
+    sshPrivateKey.value = normalizedPrivateKey;
+    selectedSshKeyFileName.value = file.name;
+    if (!sshKeyName.value.trim()) sshKeyName.value = file.name;
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "读取 SSH 私钥文件失败";
+  } finally {
+    sshKeyFileReading.value = false;
+    input.value = "";
+  }
+}
+
+function readFileAsUtf8(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === "string"
+      ? resolve(reader.result)
+      : reject(new Error("SSH 私钥文件不是文本文件"));
+    reader.onerror = () => reject(new Error("读取 SSH 私钥文件失败"));
+    reader.readAsText(file, "UTF-8");
   });
 }
 
@@ -656,16 +705,38 @@ function formatLocalClientTime(value?: string | null) {
           <el-input v-model="sshKeyName" placeholder="SSH key 名称" style="width: 320px" />
         </el-form-item>
         <el-form-item label="私钥内容">
-          <el-input
-            v-model="sshPrivateKey"
-            type="textarea"
-            :rows="8"
-            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-            style="width: 480px"
-          />
+          <div class="ta-ssh-key-input">
+            <div class="ta-ssh-key-source-actions">
+              <el-button :loading="sshKeyFileReading" :disabled="loading" @click="openSshPrivateKeyFilePicker">
+                <el-icon><UploadFilled /></el-icon>
+                选择本地私钥文件
+              </el-button>
+              <input
+                ref="sshKeyFileInput"
+                data-testid="ssh-private-key-file-input"
+                type="file"
+                hidden
+                @change="selectSshPrivateKeyFile"
+              />
+              <span v-if="selectedSshKeyFileName" class="ta-ssh-key-file-name">
+                已选择：{{ selectedSshKeyFileName }}
+              </span>
+            </div>
+            <p class="ta-ssh-key-picker-help">
+              麒麟系统若未显示隐藏目录，请在文件选择器中按 <kbd>Ctrl</kbd> + <kbd>H</kbd>，再进入 <code>.ssh</code> 选择
+              <code>id_ed25519</code>、<code>id_rsa</code> 等私钥文件。
+            </p>
+            <div class="ta-ssh-key-divider"><span>或粘贴私钥内容</span></div>
+            <el-input
+              v-model="sshPrivateKey"
+              type="textarea"
+              :rows="8"
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+            />
+          </div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :disabled="loading || !sshKeyName.trim() || !sshPrivateKey.trim()" @click="addSshKey">
+          <el-button type="primary" :disabled="loading || sshKeyFileReading || !sshKeyName.trim() || !sshPrivateKey.trim()" @click="addSshKey">
             添加 SSH key
           </el-button>
         </el-form-item>
@@ -808,6 +879,53 @@ function formatLocalClientTime(value?: string | null) {
 }
 .ta-settings-form {
   max-width: 520px;
+}
+.ta-ssh-key-input {
+  width: 480px;
+}
+.ta-ssh-key-source-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ta-ssh-key-file-name {
+  max-width: 270px;
+  overflow: hidden;
+  color: #606266;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-ssh-key-picker-help {
+  margin: 7px 0 0;
+  color: #606266;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ta-ssh-key-picker-help kbd,
+.ta-ssh-key-picker-help code {
+  padding: 1px 4px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  background: #f5f7fa;
+  color: #303133;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.ta-ssh-key-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  color: #909399;
+  font-size: 12px;
+}
+.ta-ssh-key-divider::before,
+.ta-ssh-key-divider::after {
+  height: 1px;
+  flex: 1;
+  background: #ebeef5;
+  content: "";
 }
 .ta-error {
   margin-bottom: 8px;

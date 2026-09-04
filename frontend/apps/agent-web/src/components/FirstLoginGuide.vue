@@ -229,7 +229,7 @@ defineExpose({ restart });
     >
       <template #header><div class="ta-onboarding-heading"><span>07</span><strong>SSH 配置</strong></div></template>
       <div class="ta-onboarding-settings-guide">
-        <p>面板已自动打开，点击“个人设置”。填写 SSH Key 名称，粘贴私钥内容，点击“添加 SSH key”；不再使用时点击对应 Key 的“删除”。</p>
+        <p>面板已自动打开，点击“个人设置”。可选择本地私钥文件或粘贴私钥内容；麒麟文件选择器未显示 <code>.ssh</code> 时按 Ctrl+H。确认 Key 名称后点击“添加 SSH key”，不再使用时点击对应 Key 的“删除”。</p>
       </div>
     </ElTourStep>
     <ElTourStep
