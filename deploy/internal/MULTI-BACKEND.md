@@ -18,7 +18,7 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
-## 当前增量说明（2026-09-02）
+## 当前增量说明（2026-09-04）
 
 - 用户已确认公共能力跳版本修复已部署到企业内部；对应候选基线的内层 SHA-256 为
   `58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`，外层 SHA-256 为
@@ -30,6 +30,8 @@
   却把生成的 `ERR_BLOCKED_BY_CLIENT` 错误页作为成功结果返回。企业使用方明确选择全量放行所有 HTTP(S) origin，当前 Tool
   不再申请站点授权，跨 origin 重定向、链接、JS 跳转和 popup 可继续；非 HTTP(S) 协议、内嵌凭据、提交、上传、下载及
   模型输出脱敏边界保持不变。
+- 当前 `release` 同时包含已提交的麒麟个人 SSH 私钥本地文件选择：只调整前端设置页、新手引导和用户手册，继续复用既有
+  浏览器端加密与 SSH Key 保存接口，不新增后端 API；文件选择器需要按 `Ctrl+H` 显示 `.ssh` 隐藏目录，不能选择 `.pub`。
 - worker runtime、toolbox 和本地客户端均为 `reuse`。现有 programs 和签名公共能力依赖已经包含
   `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。

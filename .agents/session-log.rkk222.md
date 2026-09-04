@@ -16854,3 +16854,36 @@
 - 公共 Tool 不再因为 AAM/SSO 使用不同 origin 而生成 `ERR_BLOCKED_BY_CLIENT`，同时保留非 Web 协议、内嵌凭据和敏感动作边界。
 - 本次使用 `release`，不新增部署节点；不涉及 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、客户端协议、Node 运行时、
   generated SDK 或 OpenCode 只读源码。企业 360 的最终行为仍需在公共 Agent Git 更新、用户确认“更新公共能力”后现场验证。
+
+## 2026-09-04 - 重打浏览器全量放行企业增量包
+
+### Why
+
+- 用户要求浏览器导航策略改为全量放行后重新生成企业部署包；当前 `release@cfd3daf70` 同时包含此前已提交的麒麟个人 SSH
+  私钥文件选择，完整包必须如实按当前分支重建并在部署说明中披露。
+- 本轮没有修改本地客户端、worker runtime 或 toolbox，不能因为打包环境缺失历史输入而误生成新客户端或重复携带大制品。
+
+### What
+
+- 恢复已部署客户端 `20260901203844` 的企业入口、明文内网例外、组织公钥、JDK/OpenCode 固定摘要、公共能力 commit
+  `81605f245d1512e1ab0dd73812391f6da7d008b5` 及 bundle 输入，客户端指纹精确命中
+  `6f24c2f83e1e762354ada682b323402456255425f7d041704eead64943545440`。
+- 从当前 `release` 真实重建后端、前端和标准内层包，复用上一包 `.4/.114/.2` 三节点受控配置生成固定名双后台外层候选。
+  组件清单为 worker runtime、toolbox、本地客户端全部 `reuse`，LobeHub/memory `disabled`。
+
+### How
+
+- `package-release.sh` 完成 Spring Bean 构造门禁、后端构建、VitePress/`vue-tsc`/Vite production build，以及 persistence、
+  XXL、ClickHouse migration 在源码、JAR 和 ZIP 中的固定字节校验。
+- `verify-internal-incremental-components.sh`、`verify-internal-two-backend-complete-package.sh`、
+  `verify-opencode-tool-runtime-deploy.sh` 全部通过；内外层 ZIP CRC、SHA 文件、外层内嵌内层逐字节一致性均通过。
+- 候选内层 SHA-256 为 `7f63770342f0493c66b215c1169b9bfc1955a8458e62117f6cea6c9d04a8f6cb`，候选外层为
+  `69706065027cca57e6ca2f53a518a4ce75e682ef8bb6b8257a16a4ed963b560d`；包内 Tool 与源码 SHA-256 均为
+  `7c55108ed67bb722188298d085fb0c8c7d233129cb37b8499db39bba2cce97c6`。
+
+### Result
+
+- 候选包未携带 `dist/local-opencode-client/`、programs、worker、toolbox、Node runtime、models、trace、BGE、Mem0 或 pgvector；
+  用户保留的未跟踪客户端基线文件也未进入包。记录提交后将执行 zip-only 最终重封并覆盖固定交付路径。
+- 浏览器全量放行仍需把包内 `local_browser.ts` 同步到企业公共 Agent Git，构建出 `AVAILABLE` 能力包并由用户确认更新；
+  Mac 构建成功不能替代企业麒麟 360 真机验收，未推送远程。
