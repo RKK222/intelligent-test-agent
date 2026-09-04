@@ -16960,3 +16960,24 @@
 - 标准应用新版本只需选择远程分支，版本由分支名唯一确定；三个入口均能明确找到“按分支新建版本”。
 - 本地 Docker 平台保持运行于前端 `http://127.0.0.1:3000`、后端 `http://127.0.0.1:8080`。本地库无用户、应用、仓库和工作空间模板，因此未执行真实登录后的三服务创建链路，未写入测试夹具；对应交互已由浏览器端到端自动化覆盖。
 - 使用 `release`，不新增部署节点；HTTP 请求字段仅做向后兼容扩展，不变更响应、RunEvent/SSE、数据库、SQL、Flyway、性能或安全协议，未修改 `.env*`、generated SDK 或 OpenCode 只读源码。`.env.local` 的 OpenCode 为 1.18.18、项目要求 1.18.4，属于本机环境残余风险。
+
+## 2026-09-04 - 初始化本地 Docker 超级管理员
+
+### Why
+
+- 本地 Docker PostgreSQL 在平台启动后没有用户，无法使用页面登录继续真实环境验收；用户明确要求构造一个超级管理员用户。
+
+### What
+
+- 在本地 Docker 数据库中幂等创建 `usr_local_super_admin`，用户名使用项目默认研发账号 `888888888`，密码按现有测试约定设为 `123456`，账号状态为 `ACTIVE`。
+- 复用现有 `ROLE/SUPER_ADMIN` 字典建立用户角色关系，不新增字典、migration、SQL 文件或环境配置。
+
+### How
+
+- 使用 BCrypt 生成密码摘要，通过单个 PostgreSQL 事务写入用户和角色；数据库查询确认角色为 `SUPER_ADMIN`。
+- 调用正在运行的平台 `POST /api/auth/login` 和携带返回 Token 的 `GET /api/auth/me`，两次请求均返回 HTTP 200，当前用户响应包含 `roles=[SUPER_ADMIN]` 和 `roleLabels=[超级管理员]`；验证输出未打印 Token。
+
+### Result
+
+- 本地平台现在可使用 `888888888 / 123456` 登录超级管理员账号，前后端与本地 Docker 服务继续保持运行。
+- 本次只改变本机 Docker 测试数据，不修改 API、RunEvent/SSE、数据库结构、Flyway、代码、环境文件、generated SDK 或 OpenCode 只读源码。
