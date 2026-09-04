@@ -16981,3 +16981,27 @@
 
 - 本地平台现在可使用 `888888888 / 123456` 登录超级管理员账号，前后端与本地 Docker 服务继续保持运行。
 - 本次只改变本机 Docker 测试数据，不修改 API、RunEvent/SSE、数据库结构、Flyway、代码、环境文件、generated SDK 或 OpenCode 只读源码。
+
+## 2026-09-04 - 构造应用数据并完成真实按分支新建版本 E2E
+
+### Why
+
+- 用户要求在已有本地超级管理员基础上继续构造必要数据，并以真实本地 Docker 平台完成“按分支新建版本”的端到端验证，不能再以 mock API 替代。
+
+### What
+
+- 通过现有平台 API 创建应用 `app_e2e_branch_version / E2EAPP`、当前用户成员关系和标准测试工作库 `repo_6ecd366c76d641bda827fbe8c6574d6d`；本地 Smart HTTPS Git 远端包含合法分支 `feature_testagent_20260801`、`feature_testagent_20260904`，以及用于过滤校验的非法日期分支 `feature_testagent_20260230` 和普通 `main`。
+- 修正本地 Docker 库 macOS `SYS_DATA_ROOT_DIR` 为当前项目 `.testagent`，使数据库通用参数与统一启动脚本、公用配置实际路径一致；通过 manager 初始化当前用户 OpenCode 进程到 `READY`。
+- 通过配置管理 API 创建标准模板“E2E主工作空间”和初始版本 `20260801`；再由真实浏览器从顶部常驻入口按分支创建 `20260904` 版本。
+
+### How
+
+- 初始工作空间异步操作六个步骤全部 `SUCCEEDED`，版本 `awv_92a033677f3543ae86a26973845a5b3a` 和运行态 Workspace 成功落地。
+- 使用原生 Python Playwright 登录 `http://127.0.0.1:3000`，确认弹窗没有日期输入，只列出两个真实合法分支且排除非法日期和 `main`；选择 `feature_testagent_20260904` 后捕获真实请求体精确为 `{"branch":"feature_testagent_20260904"}`。
+- 后端返回版本 `awv_b9e00bd80c7440ab9f760622ede7e9f6`、版本号 `20260904` 和运行态 Workspace `wrk_56312b71a317421a8b3e0249bd415c09`；页面自动切换到该版本并显示 `README.md`。最终 E2E 连续通过，失败 HTTP 响应 0、浏览器控制台错误 0。
+
+### Result
+
+- 本地库现有 1 个用户、1 个应用、1 个版本库、1 个工作空间模板、2 个应用版本；两个版本均为 `ACTIVE`，目标提交均为本地远端提交 `cf394518de553a4a611a0491d6244de1b521d7da`，副本和运行态 Workspace 均位于 `kakadeMacBook-Pro.local`。
+- 后端 readiness、前端和本地 Smart HTTPS Git 保持可用；后台 screen 包含 backend、frontend、opencode-manager 和 `test-agent-e2e-git`，用户可继续在页面复核。
+- 本次未修改产品代码、HTTP/RunEvent 契约、数据库结构、Flyway、环境文件、generated SDK 或 OpenCode 只读源码；测试证书、Git 远端和 Playwright 脚本只保留在被忽略的 `.tmp/e2e-version-data`。OpenCode 本机版本仍为 1.18.18，而项目要求 1.18.4。
