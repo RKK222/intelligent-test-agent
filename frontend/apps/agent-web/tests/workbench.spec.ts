@@ -10697,7 +10697,8 @@ test("workspace cascade menu teleports panel and submenu above all other UI", as
   await expect(page.getByRole("menuitem", { name: /2024年6月/ }).first()).toBeVisible();
 });
 
-test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label", async ({ page }) => {
+test("workspace cascade menu creates a version from an existing branch without a date picker", async ({ page }) => {
+  const createVersionRequests: Array<{ version?: string; branch?: string }> = [];
   await mockBackendApi(page, {
     workspaceTemplates: {
       app_gcms: [
@@ -10712,6 +10713,8 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
         }
       ]
     },
+    createVersionRequests,
+    repositoryBranches: { repo_1: ["main", "feature_testagent_20260824", "feature_testagent_20260715"] },
     workspaceVersions: { "app_gcms:awp_main": [] }
   });
 
@@ -10725,15 +10728,19 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
   const submenu = page.locator(".ta-workbench-cascade-submenu");
   await expect(submenu).toBeVisible();
 
-  // 点「+新增版本」打开 el-dialog
-  await page.getByRole("menuitem", { name: /新增版本/ }).first().click();
+  // 点“按分支新建版本”打开 el-dialog
+  await page.getByRole("menuitem", { name: /按分支新建版本/ }).first().click();
   const dialog = page.locator(".el-dialog");
   await expect(dialog).toBeVisible();
-  // 弹窗内标签明确告诉用户格式是 yyyy年M月
-  await expect(dialog.getByText("选择日期（格式 yyyyMMdd）")).toBeVisible();
-  await expect(dialog.locator(".el-date-editor input")).toHaveAttribute("placeholder", "请选择日期");
-  // 没选日期时确定按钮处于 disabled
-  await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+  await expect(dialog.getByText("选择远端分支")).toBeVisible();
+  await expect(dialog.getByText("版本号会从分支名自动识别，无需再选择月和日。")).toBeVisible();
+  await expect(dialog.locator(".el-date-editor")).toHaveCount(0);
+  await expect(dialog.locator(".el-select__placeholder")).toHaveText("feature_testagent_20260824");
+  const confirmButton = dialog.getByRole("button", { name: "确定" });
+  await expect(confirmButton).toBeEnabled();
+  await confirmButton.click();
+  await expect.poll(() => createVersionRequests.length).toBe(1);
+  expect(createVersionRequests[0]).toEqual({ branch: "feature_testagent_20260824" });
 });
 
 test("header version menu opens the shared new-version dialog", async ({ page }) => {
@@ -10752,6 +10759,7 @@ test("header version menu opens the shared new-version dialog", async ({ page })
         }
       ]
     },
+    repositoryBranches: { repo_1: ["feature_testagent_20260824", "feature_testagent_20260801"] },
     workspaceVersions: {
       "app_gcms:awp_main": [{
         versionId: "awv_existing",
@@ -10771,13 +10779,15 @@ test("header version menu opens the shared new-version dialog", async ({ page })
   await page.getByTestId("header-version-selector").click();
   const createEntry = page.getByTestId("header-create-version");
   await expect(createEntry).toBeVisible();
-  await expect(createEntry).toHaveAttribute("aria-label", "为F-GCMS 主服务新增版本");
+  await expect(createEntry).toHaveAttribute("aria-label", "按分支为F-GCMS 主服务新建版本");
+  await expect(createEntry).toContainText("按分支新建版本");
   await createEntry.click();
 
   const dialog = page.locator(".el-dialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("选择日期（格式 yyyyMMdd）")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+  await expect(dialog.getByText("选择远端分支")).toBeVisible();
+  await expect(dialog.locator(".el-date-editor")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "确定" })).toBeEnabled();
 
   // 顶栏使用 transform 做视觉居中；弹窗必须挂到 body，否则 fixed 遮罩会被限制在顶部上下文舱内。
   const overlayState = await dialog.evaluate((element) => {
@@ -11140,8 +11150,10 @@ async function mockBackendApi(
     personalWorkspaceRequests?: string[];
     /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
     vcsStatus?: { status?: string; branch?: string; defaultBranch?: string };
-    /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
-    createVersionRequests?: string[];
+    /** 收集“按分支新建版本”发出的 POST 请求，验证标准库不再提交额外日期。 */
+    createVersionRequests?: Array<{ version?: string; branch?: string }>;
+    /** 配置管理的远端分支列表，以 repositoryId 为键。 */
+    repositoryBranches?: Record<string, string[]>;
     /** 自定义 /applications/{appId}/workspace-templates 返回；不传则用默认空数组。 */
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 记录工作空间模板查询，用于验证设置内凭据变化会立即失效并重拉目录。 */
@@ -12181,6 +12193,14 @@ async function mockBackendApi(
         await route.fulfill(json(pageOf([])));
         return;
       }
+      const repositoryBranchesMatch = url.pathname.match(
+        /^\/api\/internal\/platform\/configuration-management\/repositories\/([^/]+)\/branches$/
+      );
+      if (method === "GET" && repositoryBranchesMatch) {
+        const repositoryId = decodeURIComponent(repositoryBranchesMatch[1] ?? "");
+        await route.fulfill(json(capture.repositoryBranches?.[repositoryId] ?? []));
+        return;
+      }
       if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications/app_gcms/repositories") {
         await route.fulfill(json([]));
         return;
@@ -12541,17 +12561,20 @@ async function mockBackendApi(
         return;
       }
       if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
-        // 拦截「+新增版本」请求：捕获 payload，返回一个伪 ApplicationWorkspaceVersion 供前端刷新菜单使用。
-        const body = JSON.parse(route.request().postData() ?? "{}") as { version?: string };
+        // 拦截“按分支新建版本”请求：捕获 payload，返回一个伪 ApplicationWorkspaceVersion 供前端刷新菜单使用。
+        const body = JSON.parse(route.request().postData() ?? "{}") as { version?: string; branch?: string };
+        const resolvedVersion = body.version
+          ?? /^feature_testagent_(\d{8})$/.exec(body.branch ?? "")?.[1]
+          ?? "20240101";
         capture.createVersionRequests ??= [];
-        capture.createVersionRequests.push(body.version ?? "");
+        capture.createVersionRequests.push(body);
         await route.fulfill(json({
           versionId: "awv_new",
           applicationWorkspaceId: "awp_1",
           appId: "app_gcms",
           repositoryId: "repo_1",
-          version: body.version ?? "2024年1月",
-          branch: "feature_testagent_" + (body.version ?? "2024年1月"),
+          version: resolvedVersion,
+          branch: body.branch ?? `feature_testagent_${resolvedVersion}`,
           repoRootPath: "/tmp/test-agent/appworkspace/new/repo_1",
           workspaceRootPath: "/tmp/test-agent/appworkspace/new/repo_1/F-GCMS/workspace",
           runtimeWorkspace: workspace(),

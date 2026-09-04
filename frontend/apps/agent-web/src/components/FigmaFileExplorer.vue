@@ -33,7 +33,7 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   loadingAppTemplates?: boolean;
   /** 工作空间版本加载中标记 */
   loadingAppVersions?: boolean;
-  /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
+  /** “按分支新建版本”提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
   /** 当前个人工作区正在拉取远端；与提交、推送及其它用户无关。 */
   pullingPersonalWorkspace?: boolean;
@@ -130,8 +130,8 @@ const emit = defineEmits<{
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
   // 要求按需懒加载某模板下的版本列表
   loadVersions: [templateId: string];
-  // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
-  createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
+  // “按分支新建版本”弹窗确认后由父组件调用 createWorkspaceVersion。
+  createVersion: [payload: { template: AppWorkspaceTemplate; version?: string; branch: string }];
   // 工作空间标题栏“更多操作”菜单中的拉取动作只处理当前用户的个人 worktree。
   pullPersonalWorkspace: [personalWorkspaceId: string];
   openAgentFile: [payload: AgentFileLoadRequest];

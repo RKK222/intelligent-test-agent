@@ -70,7 +70,7 @@ const props = defineProps<{
   loadingTemplates?: boolean;
   /** 工作空间版本是否仍在加载（按模板分组懒加载时使用） */
   loadingVersions?: boolean;
-  /** 「+新增版本」是否正在提交中（父组件控制禁用 & 展示 loading） */
+  /** “按分支新建版本”是否正在提交中（父组件控制禁用 & 展示 loading） */
   creatingVersion?: boolean;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
@@ -101,9 +101,8 @@ const emit = defineEmits<{
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
   (e: "load-versions", templateId: string): void;
-  // 「+新增版本」弹窗确认后回调：父组件负责调用 createWorkspaceVersion。
-  // version 字段为 yyyyMMdd 格式（日期选择器结果），非标准库同时传递 branch 分支名。
-  (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string; branch?: string }): void;
+  // “按分支新建版本”弹窗确认后回调：标准库只传 branch，兼容的非标准库仍附带 version。
+  (e: "create-version", payload: { template: AppWorkspaceTemplate; version?: string; branch: string }): void;
   // 超级管理员打开跨服务器工作空间选择器。
   (e: "open-server-workspace-picker"): void;
   // 打开当前应用引用配置；写操作权限由弹窗和后端分别校验。
@@ -224,7 +223,7 @@ const cascadeSubmenuPos = ref<{ top: number; left: number; maxHeight: number } |
 let cascadePosRafId: number | null = null;
 let cascadeSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
-// ===== 「+新增版本」弹窗状态 =====
+// ===== “按分支新建版本”弹窗状态 =====
 // 顶部与左下角共用 CreateWorkspaceVersionDialog；这里仅保存当前入口选中的模板和显隐状态。
 const api = inject<BackendApiClient>("api")!;
 const createVersionTarget = ref<AppWorkspaceTemplate | null>(null);
@@ -335,7 +334,7 @@ const selectedVersion = computed(() =>
   selectedTemplate.value?.versions?.find((version) => version.versionId === props.selectedVersionId)
 );
 
-// 当前 hover 的模板：二级菜单用它展示版本列表、提示文案和「+新增版本」入口。
+// 当前 hover 的模板：二级菜单用它展示版本列表、提示文案和“按分支新建版本”入口。
 // 从 hoveredTemplateId 反查 templates，避免每次 hover 重新构造对象。
 const hoveredTemplate = computed<AppWorkspaceTemplate | null>(() => {
   if (!hoveredTemplateId.value) return null;
@@ -747,7 +746,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
               </li>
             </ul>
             <!--
-              底部固定「+新增版本」：与是否有版本、是否加载完成解耦。
+              底部固定“按分支新建版本”：与是否有版本、是否加载完成解耦。
               没版本时在「暂无版本」下面；有版本时在 ul 列表下方。
             -->
             <div
@@ -758,12 +757,12 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
               role="menuitem"
               :aria-disabled="workspaceGitAccessNeedsRecheck(hoveredTemplate)"
               :title="workspaceGitAccessNeedsRecheck(hoveredTemplate)
-                ? '请先选择已有版本完成实时 Git 校验，再新增版本'
-                : `为「${hoveredTemplate.workspaceName}」新增版本`"
+                ? '请先选择已有版本完成实时 Git 校验，再按分支新建版本'
+                : `按分支为「${hoveredTemplate.workspaceName}」新建版本`"
               @click.stop="openCreateVersionDialog(hoveredTemplate)"
             >
               <Plus class="ta-workbench-cascade-submenu-item-icon" />
-              <span>新增版本</span>
+              <span>按分支新建版本</span>
             </div>
           </div>
         </Teleport>
@@ -1622,7 +1621,7 @@ function openAppSourceRepositoryFromMenu(repository: AppSourceRepositorySummary)
 }
 
 /*
-  子菜单底部「+新增版本」按钮：与子菜单上下边距隔开，虚线框 + 强调色 + Plus 图标。
+  子菜单底部“按分支新建版本”按钮：与子菜单上下边距隔开，虚线框 + 强调色 + Plus 图标。
   hover 时高亮，点击后由父组件弹 el-dialog 选 yyyy年M月。
 */
 .ta-workbench-cascade-submenu-create {

@@ -57,7 +57,7 @@ const emit = defineEmits<{
   save: [];
   "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
   "load-versions": [templateId: string];
-  "create-version": [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
+  "create-version": [payload: { template: AppWorkspaceTemplate; version?: string; branch: string }];
   "open-server-workspace-picker": [];
   "update:markdownPreview": [enabled: boolean];
   "update:markdownPreviewMode": [mode: PreviewMode];

@@ -367,7 +367,7 @@ describe("WorkbenchFooter", () => {
   it("closes an already-open create-version dialog when source mode disables version selection", async () => {
     const wrapper = mount(WorkbenchFooter, {
       attachTo: document.body,
-      global: { provide: { api: { listRepositoryBranches: vi.fn() } } },
+      global: { provide: { api: { listRepositoryBranches: vi.fn().mockResolvedValue(["feature_testagent_20260728"]) } } },
       props: {
         appName: "F-COSS",
         templates: [template],
@@ -385,10 +385,10 @@ describe("WorkbenchFooter", () => {
     expect(setupState.createVersionOpen).toBe(true);
     const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
     const dialogState = (dialog.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
-      versionValue: string;
+      branch: string;
       confirmCreateVersion: () => void;
     };
-    dialogState.versionValue = "20260728";
+    dialogState.branch = "feature_testagent_20260728";
     const staleConfirm = dialogState.confirmCreateVersion;
 
     await wrapper.setProps({ workspaceKind: "APP_SOURCE" });

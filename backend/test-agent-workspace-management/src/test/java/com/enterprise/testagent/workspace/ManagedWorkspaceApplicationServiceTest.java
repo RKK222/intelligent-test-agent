@@ -134,6 +134,79 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void createsStandardApplicationVersionDirectlyFromSelectedBranch() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = serviceWithBranches(
+                configuration,
+                managed,
+                workspaces,
+                git,
+                List.of("feature_testagent_20260824"));
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                null,
+                "feature_testagent_20260824",
+                new UserId("usr_1"),
+                "trace_branch_version");
+
+        assertThat(response.version()).isEqualTo("20260824");
+        assertThat(response.branch()).isEqualTo("feature_testagent_20260824");
+        assertThat(git.clonedBranch).isEqualTo("feature_testagent_20260824");
+        assertThat(managed.versions).singleElement()
+                .extracting(ApplicationWorkspaceVersion::version)
+                .isEqualTo("20260824");
+    }
+
+    @Test
+    void rejectsMismatchedVersionAndSelectedStandardBranch() {
+        ManagedWorkspaceApplicationService service = serviceWithBranches(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"),
+                List.of("feature_testagent_20260824"));
+
+        assertThatThrownBy(() -> service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260823",
+                "feature_testagent_20260824",
+                new UserId("usr_1"),
+                "trace_mismatched_branch_version"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).contains("版本与所选分支不一致");
+                });
+    }
+
+    @Test
+    void rejectsInvalidDateInSelectedStandardBranch() {
+        ManagedWorkspaceApplicationService service = serviceWithBranches(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"),
+                List.of("feature_testagent_20260230"));
+
+        assertThatThrownBy(() -> service.createVersion(
+                "app_gcms",
+                "awp_1",
+                null,
+                "feature_testagent_20260230",
+                new UserId("usr_1"),
+                "trace_invalid_branch_date"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).contains("分支日期无效");
+                });
+    }
+
+    @Test
     void versionGitAccessCheckReusesCurrentUserRepositoryIdentity() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

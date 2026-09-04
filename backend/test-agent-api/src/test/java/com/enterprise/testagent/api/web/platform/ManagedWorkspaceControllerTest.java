@@ -77,7 +77,7 @@ class ManagedWorkspaceControllerTest {
                 null,
                 null);
         UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
-        when(service.createVersion(eq("app_gcms"), eq("aws_123"), eq("20260707"), eq("feature_testagent_20260707"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
+        when(service.createVersion(eq("app_gcms"), eq("aws_123"), eq(null), eq("feature_testagent_20260707"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
                 .thenReturn(new ApplicationWorkspaceVersionResponse(
                         "awv_123",
                         "aws_123",
@@ -97,7 +97,7 @@ class ManagedWorkspaceControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"version":"20260707","branch":"feature_testagent_20260707"}
+                        {"branch":"feature_testagent_20260707"}
                         """)
                 .exchange()
                 .expectStatus().isOk()

@@ -16,6 +16,7 @@ import type {
 } from "@test-agent/shared-types";
 import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
 import RepositoryDirectoryTree from "../RepositoryDirectoryTree.vue";
+import { isValidStandardWorkspaceBranch } from "../standard-workspace-branch";
 
 const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
@@ -187,35 +188,11 @@ const canSaveWorkspace = computed(() => {
 });
 
 /**
- * 校验分支名是否符合标准库格式：feature_testagent_yyyyMMdd
- */
-function isValidStandardBranch(branch: string): boolean {
-  // 正则匹配：feature_testagent_ + 8位数字
-  const pattern = /^feature_testagent_\d{8}$/;
-  if (!pattern.test(branch)) return false;
-
-  // 提取并校验日期有效性
-  const dateStr = branch.slice(-8);
-  const year = parseInt(dateStr.slice(0, 4), 10);
-  const month = parseInt(dateStr.slice(4, 6), 10);
-  const day = parseInt(dateStr.slice(6, 8), 10);
-
-  // 范围校验
-  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
-
-  // 日期对象校验（自动处理2月30日等）
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year &&
-         date.getMonth() === month - 1 &&
-         date.getDate() === day;
-}
-
-/**
  * 判断分支是否应该被禁用
  */
 function isBranchDisabled(branch: string): boolean {
   if (!isTestWorkRepository(selectedWorkspaceRepository.value)) return false;
-  return !isValidStandardBranch(branch);
+  return !isValidStandardWorkspaceBranch(branch);
 }
 
 /**
@@ -225,7 +202,7 @@ function handleBranchChange(branch: string) {
   customBranchError.value = "";
 
   if (isTestWorkRepository(selectedWorkspaceRepository.value) && branch) {
-    if (!isValidStandardBranch(branch)) {
+    if (!isValidStandardWorkspaceBranch(branch)) {
       customBranchError.value = TEST_WORK_BRANCH_RULE_TOOLTIP;
       repositoryTree.value = [];
       workspaceDirectory.value = "";
@@ -249,7 +226,7 @@ const sortedBranches = computed(() => {
   const invalidBranches: string[] = [];
 
   branches.value.forEach(branch => {
-    if (isValidStandardBranch(branch)) {
+    if (isValidStandardWorkspaceBranch(branch)) {
       validBranches.push(branch);
     } else {
       invalidBranches.push(branch);
@@ -576,7 +553,7 @@ async function loadBranches(changedRepositoryId?: string) {
       if (selectedWorkspaceRepository.value?.standard) {
         // 标准库：先排序，再选择第一个（已按日期倒序，最新的在前）
         const sortedValid = branches.value
-          .filter(b => isValidStandardBranch(b))
+          .filter(b => isValidStandardWorkspaceBranch(b))
           .sort((a, b) => {
             const dateA = a.slice(-8);
             const dateB = b.slice(-8);

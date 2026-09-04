@@ -73,6 +73,9 @@ import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
@@ -720,16 +723,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         if (!template.appId().equals(application.appId())) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作空间不属于当前应用", Map.of("workspaceId", templateId));
         }
-        String normalizedVersion = normalizeVersion(version);
         CodeRepository repository = existingRepository(template.repositoryId());
         requireLegacyWorkspaceEntry(repository);
-        String resolvedBranch = resolveBranch(repository, normalizedVersion, branch, userId);
+        VersionBranchSelection selection = resolveVersionBranch(repository, version, branch, userId);
         return createVersionFromTemplate(
                 application,
                 template,
                 repository,
-                normalizedVersion,
-                resolvedBranch,
+                selection.version(),
+                selection.branch(),
                 userId,
                 targetLinuxServerId,
                 traceId,
@@ -4859,18 +4861,50 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return text.isEmpty() ? Optional.empty() : Optional.of(text);
     }
 
-    private String resolveBranch(CodeRepository repository, String version, String branch, UserId userId) {
+    /**
+     * 标准测试工作库以远端分支为创建入口，并从分支名提取版本号；旧客户端只传 version 时继续兼容。
+     * 兼容的非标准工作空间仍沿用“日期版本 + 任意已有分支”契约。
+     */
+    private VersionBranchSelection resolveVersionBranch(
+            CodeRepository repository,
+            String version,
+            String branch,
+            UserId userId) {
         if (!repository.standard()) {
-            return requireText(branch, "非标准代码库必须指定分支", "branch");
+            return new VersionBranchSelection(
+                    normalizeNonStandardWorkspaceCreateVersion(version),
+                    requireText(branch, "非标准代码库必须指定分支", "branch"));
         }
+        if (branch != null && !branch.isBlank()) {
+            String selectedBranch = requireText(branch, "标准代码库必须指定分支", "branch");
+            String selectedVersion = versionFromStandardBranch(selectedBranch);
+            if (version != null && !version.isBlank() && !normalizeVersion(version).equals(selectedVersion)) {
+                throw new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "版本与所选分支不一致",
+                        Map.of("version", version.trim(), "branch", selectedBranch));
+            }
+            requireRemoteBranch(repository, selectedBranch, userId);
+            return new VersionBranchSelection(selectedVersion, selectedBranch);
+        }
+        String normalizedVersion = normalizeVersion(version);
         // yyyy年M月 格式的版本在分支名里需转为 yyyy-MM，避免 git ref 中出现中文 / 年月字面量。
-        String branchFragment = sanitizeVersionForBranchAndPath(version);
+        String branchFragment = sanitizeVersionForBranchAndPath(normalizedVersion);
         String expected = "feature_testagent_" + branchFragment;
-        List<String> branches = gitRemoteService.listBranches(effectiveGitUrl(repository, userId), privateKeyFor(repository, userId));
-        if (!branches.contains(expected)) {
-            throw new PlatformException(ErrorCode.CONFLICT, repository.name() + "代码库无" + expected + "分支，请到开发者门户创建分支", Map.of("branch", expected));
+        requireRemoteBranch(repository, expected, userId);
+        return new VersionBranchSelection(normalizedVersion, expected);
+    }
+
+    private void requireRemoteBranch(CodeRepository repository, String branch, UserId userId) {
+        List<String> branches = gitRemoteService.listBranches(
+                effectiveGitUrl(repository, userId),
+                privateKeyFor(repository, userId));
+        if (!branches.contains(branch)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    repository.name() + "代码库无" + branch + "分支，请到开发者门户创建分支",
+                    Map.of("branch", branch));
         }
-        return expected;
     }
 
     private Workspace createRuntimeWorkspace(String name, Path workspaceRoot, String storedRootPath, String traceId) {
@@ -5776,7 +5810,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     "标准代码库分支必须为 feature_testagent_yyyyMMdd",
                     Map.of("branch", branch));
         }
-        return matcher.group(1);
+        String version = matcher.group(1);
+        try {
+            // 分支后缀会成为版本日期，不能只校验八位数字，否则 20260230 也会进入工作区目录和版本记录。
+            LocalDate.parse(version, DateTimeFormatter.BASIC_ISO_DATE);
+        } catch (DateTimeParseException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "标准代码库分支日期无效",
+                    Map.of("branch", branch));
+        }
+        return version;
     }
 
     /**
@@ -5832,6 +5876,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private static String sanitizeBranchPart(String value) {
         return sanitizePathPart(value);
+    }
+
+    private record VersionBranchSelection(String version, String branch) {
     }
 
     /** 成功缓存只保存非敏感身份摘要，不保存 SSH 私钥明文。 */

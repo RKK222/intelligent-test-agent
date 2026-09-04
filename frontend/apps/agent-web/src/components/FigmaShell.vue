@@ -207,7 +207,7 @@ const emit = defineEmits<{
   (e: "open-experience"): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
-  (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string; branch?: string }): void;
+  (e: "create-version", payload: { template: AppWorkspaceTemplate; version?: string; branch: string }): void;
   (e: "open-app-source"): void;
   (e: "load-app-source-repositories"): void;
   (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
@@ -2586,28 +2586,43 @@ function submitJoinApp() {
           </div>
 
           <div class="figma-version-menu-wrapper" @click.stop>
-          <button
-            type="button"
-            :class="['figma-context-menu-trigger', versionMenuOpen && 'is-open']"
-            data-testid="header-version-selector"
-            aria-haspopup="listbox"
-            :aria-expanded="versionMenuOpen"
-            :aria-label="`版本：${headerVersionLabel}`"
-            :disabled="workspaceKind !== 'MANAGED'"
-            :title="headerWorkspaceGitAccessHint || `版本：${headerVersionLabel}`"
-            @click="toggleVersionMenu"
-            @blur="onVersionMenuBlur"
-          >
-            <span class="figma-context-menu-key">版本</span>
-            <span class="figma-context-menu-value">
-              {{ headerVersionLabel }}
-            </span>
-            <ChevronDown
-              v-if="workspaceKind === 'MANAGED'"
-              class="figma-app-menu-chevron"
-              :class="{ 'is-open': versionMenuOpen }"
-            />
-          </button>
+            <button
+              type="button"
+              :class="['figma-context-menu-trigger', versionMenuOpen && 'is-open']"
+              data-testid="header-version-selector"
+              aria-haspopup="listbox"
+              :aria-expanded="versionMenuOpen"
+              :aria-label="`版本：${headerVersionLabel}`"
+              :disabled="workspaceKind !== 'MANAGED'"
+              :title="headerWorkspaceGitAccessHint || `版本：${headerVersionLabel}`"
+              @click="toggleVersionMenu"
+              @blur="onVersionMenuBlur"
+            >
+              <span class="figma-context-menu-key">版本</span>
+              <span class="figma-context-menu-value">
+                {{ headerVersionLabel }}
+              </span>
+              <ChevronDown
+                v-if="workspaceKind === 'MANAGED'"
+                class="figma-app-menu-chevron"
+                :class="{ 'is-open': versionMenuOpen }"
+              />
+            </button>
+            <button
+              v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate"
+              type="button"
+              class="figma-version-create-shortcut"
+              data-testid="header-create-version-shortcut"
+              :disabled="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'"
+              :aria-label="`按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
+              :title="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'
+                ? (headerWorkspaceGitAccessHint || 'Git 权限巡检未通过')
+                : `按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
+              @click="openHeaderCreateVersion"
+            >
+              <Plus :size="13" aria-hidden="true" />
+              <span>按分支新建</span>
+            </button>
           <ul v-if="versionMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
             <li v-if="loadingAppVersions && !headerWorkspaceTemplate?.versions" class="figma-context-menu-empty">版本加载中…</li>
             <li v-else-if="!headerWorkspaceTemplate?.versions?.length" class="figma-context-menu-empty">暂无版本</li>
@@ -2633,13 +2648,13 @@ function submitJoinApp() {
               data-testid="header-create-version"
               role="option"
               tabindex="0"
-              :aria-label="`为${headerWorkspaceTemplate.workspaceName}新增版本`"
+              :aria-label="`按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
               @mousedown.prevent="openHeaderCreateVersion"
               @keydown.enter.prevent="openHeaderCreateVersion"
               @keydown.space.prevent="openHeaderCreateVersion"
             >
               <Plus class="figma-context-menu-type-icon" aria-hidden="true" />
-              <span class="figma-app-menu-item-name">新增版本</span>
+              <span class="figma-app-menu-item-name">按分支新建版本</span>
             </li>
           </ul>
           <CreateWorkspaceVersionDialog
@@ -4333,6 +4348,41 @@ function submitJoinApp() {
   position: relative;
 }
 
+.figma-version-menu-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.figma-version-create-shortcut {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  margin-right: 3px;
+  padding: 0 6px;
+  border: 0;
+  border-left: 1px solid var(--ta-shell-border, #e5e7eb);
+  background: transparent;
+  color: var(--ta-shell-accent-strong, #991b1b);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.figma-version-create-shortcut:hover:not(:disabled),
+.figma-version-create-shortcut:focus-visible {
+  border-radius: 6px;
+  background: var(--ta-shell-accent-soft, #fdf2f2);
+  outline: none;
+}
+
+.figma-version-create-shortcut:disabled {
+  color: var(--ta-shell-muted, #6b7280);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .figma-context-rail {
   position: relative;
   display: flex;
@@ -5770,6 +5820,10 @@ function submitJoinApp() {
 
   .figma-version-menu-wrapper .figma-context-menu-trigger {
     max-width: 110px;
+  }
+
+  .figma-version-create-shortcut span {
+    display: none;
   }
 
   .figma-app-menu-trigger,

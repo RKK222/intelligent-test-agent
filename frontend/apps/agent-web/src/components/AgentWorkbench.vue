@@ -7398,7 +7398,7 @@ async function handleRequirementImportComplete(payload: {
   }
 }
 
-// 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
+// “按分支新建版本”流程：标准库只传 branch，由后端提取版本号；兼容的非标准库仍附带 version。
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
 const pullingPersonalWorkspace = ref(false);
@@ -7678,7 +7678,7 @@ async function executePersonalWorkspacePull(personalWorkspaceId: string, discard
   }
 }
 
-async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
+async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version?: string; branch: string }) {
   if (payload.template.gitAccessStatus === "INACCESSIBLE") {
     feedback.value = {
       kind: "info",

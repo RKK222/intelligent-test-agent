@@ -1158,7 +1158,11 @@ describe("FigmaShell", () => {
     };
     const wrapper = mountShell({
       attachTo: document.body,
-      global: { provide: { api: { listRepositoryBranches: vi.fn() } } },
+      global: {
+        provide: {
+          api: { listRepositoryBranches: vi.fn().mockResolvedValue(["feature_testagent_20260824"]) }
+        }
+      },
       props: {
         appTemplates: [template],
         selectedWorkspaceTemplateId: template.workspaceId,
@@ -1169,23 +1173,25 @@ describe("FigmaShell", () => {
 
     await wrapper.get('[data-testid="header-version-selector"]').trigger("click");
     const createEntry = wrapper.get('[data-testid="header-create-version"]');
-    expect(createEntry.attributes("aria-label")).toBe("为核心服务新增版本");
+    expect(createEntry.attributes("aria-label")).toBe("按分支为核心服务新建版本");
+    expect(createEntry.text()).toContain("按分支新建版本");
+    expect(wrapper.get('[data-testid="header-create-version-shortcut"]').text()).toContain("按分支新建");
     await createEntry.trigger("mousedown");
 
     const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
     expect(dialog.props("modelValue")).toBe(true);
     expect(dialog.props("template")).toEqual(template);
+    await wrapper.vm.$nextTick();
     const dialogState = (dialog.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
-      versionValue: string;
+      branch: string;
       confirmCreateVersion: () => void;
     };
-    dialogState.versionValue = "20260824";
+    dialogState.branch = "feature_testagent_20260824";
     dialogState.confirmCreateVersion();
 
     expect(wrapper.emitted("create-version")?.[0]?.[0]).toEqual({
       template,
-      version: "20260824",
-      branch: undefined
+      branch: "feature_testagent_20260824"
     });
   });
 

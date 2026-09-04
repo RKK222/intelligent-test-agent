@@ -23,7 +23,7 @@
 
 | 对象 | 分支/目录 | 用途 | 是否直接编辑 |
 | --- | --- | --- | --- |
-| 应用远程 feature | 标准库为 `feature_testagent_{version}`；非标准库为创建版本时所选分支 | 该应用版本的共享事实源 | 否 |
+| 应用远程 feature | 标准库直接选择已有 `feature_testagent_yyyyMMdd` 分支并从分支名识别版本；非标准库为创建版本时所选分支 | 该应用版本的共享事实源 | 否 |
 | 每服务器 feature 副本 | 同一 feature 的本地副本 | 发布投影目标、多服务器固定提交同步源；对所有角色只读 | 否 |
 | 用户个人 worktree | `{featureBranch}_{userId}_{workspaceName}` | 本人的普通文件、`docs/**`、`spec/**` 和 `.opencode/**` 编辑/调试分支 | 是，仅 owner |
 | 应用 Agent Diff 作用域 | 个人 worktree 中全部 Git 可见 `.opencode/**` 用户配置 | 只隔离展示、权限、暂存和发布路径；不枚举 OpenCode 子目录 | 不是独立分支 |

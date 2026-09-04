@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { inject, ref, watch } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import { ElDatePicker, ElDialog, ElOption, ElSelect } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { ApplicationWorkspaceTemplate } from "@test-agent/shared-types";
+import { isValidStandardWorkspaceBranch } from "./standard-workspace-branch";
 
 const props = withDefaults(defineProps<{
   modelValue: boolean;
@@ -17,7 +18,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "update:modelValue", value: boolean): void;
-  (e: "submit", payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }): void;
+  (e: "submit", payload: { template: ApplicationWorkspaceTemplate; version?: string; branch: string }): void;
 }>();
 
 const api = inject<BackendApiClient | null>("api", null);
@@ -25,30 +26,46 @@ const versionValue = ref("");
 const branch = ref("");
 const branches = ref<string[]>([]);
 const loadingBranches = ref(false);
+const branchLoadFailed = ref(false);
 let branchRequestGeneration = 0;
+
+const standardTemplate = computed(() => props.template?.standard !== false);
+const canSubmit = computed(() => Boolean(
+  branch.value
+  && !loadingBranches.value
+  && !branchLoadFailed.value
+  && (standardTemplate.value || versionValue.value)
+));
 
 const resetForm = () => {
   versionValue.value = "";
   branch.value = "";
   branches.value = [];
   loadingBranches.value = false;
+  branchLoadFailed.value = false;
 };
 
 /**
  * 顶部与左下角共用同一分支加载程序；代次校验阻止关闭或切换工作空间后的迟到响应污染下一次弹窗。
  */
 async function loadBranches(template: ApplicationWorkspaceTemplate, generation: number) {
-  if (template.standard !== false || !template.repositoryId || !api) return;
+  if (!template.repositoryId || !api) {
+    branchLoadFailed.value = true;
+    return;
+  }
   loadingBranches.value = true;
   try {
     const nextBranches = await api.listRepositoryBranches(template.repositoryId);
     if (generation !== branchRequestGeneration || !props.modelValue || props.template?.workspaceId !== template.workspaceId) return;
-    branches.value = nextBranches;
-    branch.value = nextBranches[0] ?? "";
+    branches.value = template.standard !== false
+      ? nextBranches.filter(isValidStandardWorkspaceBranch).sort((left, right) => right.localeCompare(left))
+      : nextBranches;
+    branch.value = branches.value[0] ?? "";
   } catch {
     if (generation !== branchRequestGeneration) return;
     branches.value = [];
     branch.value = "";
+    branchLoadFailed.value = true;
   } finally {
     if (generation === branchRequestGeneration) loadingBranches.value = false;
   }
@@ -71,14 +88,13 @@ watch(
 
 function confirmCreateVersion() {
   const template = props.template;
-  if (!template || props.disabled || !versionValue.value) return;
-  const nonStandard = template.standard === false;
-  if (nonStandard && !branch.value) return;
-  emit("submit", {
+  if (!template || props.disabled || !canSubmit.value) return;
+  const payload: { template: ApplicationWorkspaceTemplate; version?: string; branch: string } = {
     template,
-    version: versionValue.value.replaceAll("-", ""),
-    branch: nonStandard ? branch.value : undefined
-  });
+    branch: branch.value
+  };
+  if (template.standard === false) payload.version = versionValue.value.replaceAll("-", "");
+  emit("submit", payload);
   emit("update:modelValue", false);
 }
 </script>
@@ -87,32 +103,38 @@ function confirmCreateVersion() {
   <!-- 顶部入口位于 transform 定位的上下文舱内，必须挂到 body 才能让 fixed 遮罩覆盖完整视口。 -->
   <ElDialog
     :model-value="modelValue"
-    :title="`为「${template?.workspaceName ?? ''}」新增版本`"
+    :title="`按分支为「${template?.workspaceName ?? ''}」新建版本`"
     width="420px"
     append-to-body
     :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <div class="ta-workbench-create-version">
-      <template v-if="template?.standard === false">
-        <label class="ta-workbench-create-version-label">选择分支</label>
-        <ElSelect
-          v-model="branch"
-          :loading="loadingBranches"
-          placeholder="请先选择分支"
-          filterable
-          style="width: 100%"
-        >
-          <ElOption
-            v-for="item in branches"
-            :key="item"
-            :label="item"
-            :value="item"
-          />
-        </ElSelect>
-      </template>
-      <label class="ta-workbench-create-version-label">选择日期（格式 yyyyMMdd）</label>
+      <label class="ta-workbench-create-version-label">选择远端分支</label>
+      <ElSelect
+        v-model="branch"
+        :loading="loadingBranches"
+        placeholder="请选择用于新建版本的分支"
+        filterable
+        style="width: 100%"
+      >
+        <ElOption
+          v-for="item in branches"
+          :key="item"
+          :label="item"
+          :value="item"
+        />
+      </ElSelect>
+      <p v-if="branchLoadFailed" class="ta-workbench-create-version-hint is-error">分支加载失败，请关闭弹窗后重试。</p>
+      <p v-else-if="!loadingBranches && branches.length === 0" class="ta-workbench-create-version-hint is-error">
+        {{ standardTemplate ? "未找到符合 feature_testagent_yyyyMMdd 规则的分支。" : "未找到可用分支。" }}
+      </p>
+      <p v-else-if="standardTemplate" class="ta-workbench-create-version-hint">
+        版本号会从分支名自动识别，无需再选择月和日。
+      </p>
+      <label v-if="!standardTemplate" class="ta-workbench-create-version-label">兼容版本日期（格式 yyyyMMdd）</label>
       <ElDatePicker
+        v-if="!standardTemplate"
         v-model="versionValue"
         type="date"
         format="YYYY-MM-DD"
@@ -120,7 +142,7 @@ function confirmCreateVersion() {
         placeholder="请选择日期"
         style="width: 100%"
       />
-      <p class="ta-workbench-create-version-hint">提交后会在远端创建对应的工作空间版本。</p>
+      <p class="ta-workbench-create-version-hint">提交后会基于所选远端分支创建工作空间版本。</p>
     </div>
     <template #footer>
       <button
@@ -134,7 +156,7 @@ function confirmCreateVersion() {
       <button
         type="button"
         class="ta-workbench-create-version-confirm"
-        :disabled="!versionValue || creating || (template?.standard === false && !branch)"
+        :disabled="!canSubmit || creating"
         @click="confirmCreateVersion"
       >
         {{ creating ? "创建中…" : "确定" }}
@@ -159,6 +181,10 @@ function confirmCreateVersion() {
   margin: 0;
   color: #999;
   font-size: 11px;
+}
+
+.ta-workbench-create-version-hint.is-error {
+  color: #b42318;
 }
 
 .ta-workbench-create-version-cancel,

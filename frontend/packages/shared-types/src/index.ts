@@ -4048,7 +4048,8 @@ export type AddSshKeyPayload = {
 };
 
 export type CreateWorkspaceVersionPayload = {
-  version: string;
+  /** 标准测试工作库可只传 branch，由后端从分支名提取版本号；旧调用方仍可传 version。 */
+  version?: string;
   branch?: string;
 };
 
