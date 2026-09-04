@@ -16887,3 +16887,27 @@
   用户保留的未跟踪客户端基线文件也未进入包。记录提交后将执行 zip-only 最终重封并覆盖固定交付路径。
 - 浏览器全量放行仍需把包内 `local_browser.ts` 同步到企业公共 Agent Git，构建出 `AVAILABLE` 能力包并由用户确认更新；
   Mac 构建成功不能替代企业麒麟 360 真机验收，未推送远程。
+
+## 2026-09-04 - 固化浏览器全量放行企业包最终摘要
+
+### Why
+
+- 构建记录提交后需要重新封装，使追溯说明进入正式包；最终摘要单独留在包外，避免再次改变制品哈希形成自引用。
+
+### What
+
+- 固定交付路径已覆盖为 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip{,.sha256}`。
+
+### How
+
+- 最终内外层 ZIP CRC、各自 SHA 文件、外层内嵌内层逐字节一致性、包内 Tool 与源码逐字节一致性均通过；组件清单继续为
+  worker runtime、toolbox、本地客户端 `reuse`，LobeHub/memory `disabled`。
+- 固定交付目录执行 `shasum -a 256 -c test-agent-two-backend-complete.zip.sha256` 返回 `OK`。
+
+### Result
+
+- 最终内层及外层内嵌内层 SHA-256 均为 `aa2f26a42ee7ea35e8a54ca382a0de9a7d672f2ae1a66fddb7ba46f4721b5aa1`。
+- 最终外层 SHA-256 为 `7933e3509a996fc46aca993469614adb0a19c4190049122041b4d3cf83d1c613`，文件大小
+  `155524587` bytes（约 148 MiB）；包内 `local_browser.ts` SHA-256 为
+  `7c55108ed67bb722188298d085fb0c8c7d233129cb37b8499db39bba2cce97c6`。
+- 本条只记录最终制品摘要，不改变已验证包内容；尚未推送远程，也尚未在企业麒麟 360 上完成最终验收。
