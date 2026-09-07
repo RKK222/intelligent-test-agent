@@ -2641,21 +2641,6 @@ function submitJoinApp() {
               </div>
               <span v-if="version.versionId === selectedVersionId" class="figma-app-menu-item-check">✓</span>
             </li>
-            <li v-if="headerWorkspaceTemplate" class="figma-app-menu-divider" role="presentation" />
-            <li
-              v-if="headerWorkspaceTemplate"
-              class="figma-app-menu-item"
-              data-testid="header-create-version"
-              role="option"
-              tabindex="0"
-              :aria-label="`按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
-              @mousedown.prevent="openHeaderCreateVersion"
-              @keydown.enter.prevent="openHeaderCreateVersion"
-              @keydown.space.prevent="openHeaderCreateVersion"
-            >
-              <Plus class="figma-context-menu-type-icon" aria-hidden="true" />
-              <span class="figma-app-menu-item-name">按分支新建版本</span>
-            </li>
           </ul>
           <CreateWorkspaceVersionDialog
             v-model="headerCreateVersionOpen"

@@ -1141,7 +1141,7 @@ describe("FigmaShell", () => {
     expect(versionButton.text()).toContain("20260731");
   });
 
-  it("creates a version from the header through the shared workspace-version dialog", async () => {
+  it("creates a version from the single header shortcut through the shared workspace-version dialog", async () => {
     const template = {
       workspaceId: "workspace-a",
       appId: "app-a",
@@ -1172,11 +1172,11 @@ describe("FigmaShell", () => {
     });
 
     await wrapper.get('[data-testid="header-version-selector"]').trigger("click");
-    const createEntry = wrapper.get('[data-testid="header-create-version"]');
-    expect(createEntry.attributes("aria-label")).toBe("按分支为核心服务新建版本");
-    expect(createEntry.text()).toContain("按分支新建版本");
-    expect(wrapper.get('[data-testid="header-create-version-shortcut"]').text()).toContain("按分支新建");
-    await createEntry.trigger("mousedown");
+    expect(wrapper.find('[data-testid="header-create-version"]').exists()).toBe(false);
+    const createShortcut = wrapper.get('[data-testid="header-create-version-shortcut"]');
+    expect(createShortcut.attributes("aria-label")).toBe("按分支为核心服务新建版本");
+    expect(createShortcut.text()).toContain("按分支新建");
+    await createShortcut.trigger("click");
 
     const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
     expect(dialog.props("modelValue")).toBe(true);

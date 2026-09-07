@@ -10743,7 +10743,7 @@ test("workspace cascade menu creates a version from an existing branch without a
   expect(createVersionRequests[0]).toEqual({ branch: "feature_testagent_20260824" });
 });
 
-test("header version menu opens the shared new-version dialog", async ({ page }) => {
+test("header keeps one shortcut for opening the shared new-version dialog", async ({ page }) => {
   await mockBackendApi(page, {
     workspaceTemplates: {
       app_gcms: [
@@ -10777,11 +10777,12 @@ test("header version menu opens the shared new-version dialog", async ({ page })
 
   await gotoWorkbench(page);
   await page.getByTestId("header-version-selector").click();
-  const createEntry = page.getByTestId("header-create-version");
-  await expect(createEntry).toBeVisible();
-  await expect(createEntry).toHaveAttribute("aria-label", "按分支为F-GCMS 主服务新建版本");
-  await expect(createEntry).toContainText("按分支新建版本");
-  await createEntry.click();
+  await expect(page.getByTestId("header-create-version")).toHaveCount(0);
+  const createShortcut = page.getByTestId("header-create-version-shortcut");
+  await expect(createShortcut).toBeVisible();
+  await expect(createShortcut).toHaveAttribute("aria-label", "按分支为F-GCMS 主服务新建版本");
+  await expect(createShortcut).toContainText("按分支新建");
+  await createShortcut.click();
 
   const dialog = page.locator(".el-dialog");
   await expect(dialog).toBeVisible();

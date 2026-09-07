@@ -17051,3 +17051,25 @@
 - 最终固定名包和同目录 `.sha256` 位于 `/Users/kaka/Desktop/mimoagent/0709/`；`shasum -a 256 -c`、外层 ZIP CRC、
   内外层逐字节一致性、增量组件门禁、完整双后台包门禁及 OpenCode Tool runtime 门禁均再次通过。最终摘要在制品完成后
   单独提交，避免把会改变内层 ZIP 的自引用摘要再次混入制品。
+
+## 2026-09-07 - 移除顶部版本菜单的重复创建入口
+
+### Why
+
+- 顶部版本区域已经有常驻“按分支新建”快捷按钮，版本下拉中再放同名操作会让同一功能出现两个紧邻入口。
+
+### What
+
+- 移除 `FigmaShell.vue` 顶部版本下拉中的重复“按分支新建版本”菜单项；保留顶部常驻快捷按钮和左下角工作空间级菜单入口。
+- 两个保留入口继续复用既有 `openHeaderCreateVersion`、`CreateWorkspaceVersionDialog` 和 `AgentWorkbench.handleCreateVersion`，不增加接口、状态或权限链路。
+- 同步前端总览、组件说明、前端规范、模块图、HTTP 交互说明和用户手册，并把组件、Chromium 回归改为确认下拉中不存在重复项且常驻按钮仍可打开共享弹窗。
+
+### How
+
+- `FigmaShell.test.ts` 67/67 通过；前端全 workspace `typecheck` 通过。
+- Chromium Playwright 定向 2/2 通过：顶部唯一快捷入口和左下角按分支创建均通过，后者继续确认请求仅携带 `branch`、不显示日期选择。
+- 因用户随后指定共享 `192.168.8.100` 环境，本机 Docker 启动在其拉取 ClickHouse 镜像阶段主动停止，未修改 `.env*`、本地 Docker 数据或数据库结构；提交后改由 Jenkins 发布验收。
+
+### Result
+
+- `release` 不新增部署节点；本次只精简前端重复操作，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、性能、安全或兼容性边界。
