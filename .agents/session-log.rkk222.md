@@ -17073,3 +17073,24 @@
 ### Result
 
 - `release` 不新增部署节点；本次只精简前端重复操作，不变更 HTTP API、DTO、RunEvent/SSE、数据库、SQL、Flyway、性能、安全或兼容性边界。
+
+## 2026-09-07 - 100 测试环境发布验证失败记录
+
+### Why
+
+- 用户指定改用共享 `192.168.8.100` 环境验证本次“移除顶部重复新建版本入口”提交。
+
+### What
+
+- 将已提交的 `release` 同步到 Jenkins 受控 GitLab 远端；首次 #17 发现检出旧提交后已中止，避免将非目标代码当作验收结果。
+- Jenkins #18 以目标提交 `8dd3a2e7fd570a34915f7666d06e280c3ae00992` 和不可变标签 `release-18-8dd3a2e7` 执行 `ACTION=DEPLOY`。
+
+### How
+
+- #18 通过 Jenkins release contract、Flyway migration 命名/冻结字节检查、前端 workspace typecheck、用户手册构建和 agent-web production build；克隆数据库升级门禁结束后重建正式前后端容器。
+- 发布后后端 `http://192.168.8.100:18082/actuator/health/readiness` 在 240 秒窗口内始终无法连接，前端 `http://192.168.8.100:3000/` 返回 200 但 XXL 同源 readiness 为 502；Jenkins 以 `Backend did not become ready within the deployment window.` 失败退出。
+
+### Result
+
+- 100 测试环境未部署完成，未执行真实浏览器业务验收，也未将前端静态资源 200 误报为功能通过。
+- 仅做 Jenkins 受控发布与只读检查，没有 SSH/SCP 覆盖、手工 Compose、Flyway repair/outOfOrder 或测试机直接重启；后续需先取得测试机后端容器日志或修复其启动依赖，再重新通过 Jenkins 部署。
