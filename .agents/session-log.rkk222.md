@@ -17203,3 +17203,26 @@
 ### Result
 
 - 批量生成的局部文件上下文可在缺少 `Array.prototype.at()` 的浏览器中继续组装，不影响 Session/Run、API、事件、数据库、安全或部署契约；使用 `release`，未新增部署节点。
+
+## 2026-09-07 - 修正版本菜单内的按分支创建入口
+
+### Why
+
+- 用户通过工作台截图明确：顶部不需要常驻的“按分支新建版本”文字按钮，但展开“版本”下拉后必须能看到带“＋”的创建项；左下角工作空间菜单中的原有入口也应继续保留。
+
+### What
+
+- 在 `FigmaShell.vue` 的版本下拉菜单既有版本列表下加入带 `Plus` 图标的“按分支新建版本”，只在托管测试工作空间且模板可用时显示；Git 权限不可用时沿用已有禁用提示。
+- 顶部菜单项和左下角既有菜单都复用 `CreateWorkspaceVersionDialog`，提交事件统一交给 `AgentWorkbench.handleCreateVersion`；不新增接口、日期选择、状态链路或权限分支。
+- 移除顶部常驻文字快捷入口的遗留断言，并同步前端说明、HTTP 交互说明、模块图与用户手册。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/WorkbenchFooter.test.ts`：2 个文件、89 项通过。
+- `corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep 'workspace cascade menu creates a version from an existing branch without a date picker|header version menu exposes branch creation only after opening'`：2 项 Chromium 浏览器用例通过。
+- `corepack pnpm build`、`tools/verify-ai-docs.sh` 与 `git diff --check` 通过；提交前已回顾全部 `.agents/session-log*.md` 近期记录，未发现冲突、合并标记或需要纳入本次提交的并行成果。
+
+### Result
+
+- 版本菜单展开后显示“＋ 按分支新建版本”，左下角入口保留，顶部不再有常驻重复按钮；标准测试工作库继续只选择已有远端分支且不选择月/日。
+- 本次仅修改前端入口与说明，不变更 HTTP API、RunEvent/SSE、数据库、SQL、Flyway、部署节点、安全、兼容性、环境配置、generated SDK 或 OpenCode 只读源码；使用 `release`，未新增部署节点。

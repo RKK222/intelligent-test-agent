@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { DOMWrapper, mount } from "@vue/test-utils";
 import type { OpencodeEndpoint } from "@test-agent/shared-types";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import CreateWorkspaceVersionDialog from "../src/components/CreateWorkspaceVersionDialog.vue";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
 const figmaShellSource = readFileSync(resolve(process.cwd(), "apps/agent-web/src/components/FigmaShell.vue"), "utf8");
@@ -1140,7 +1141,7 @@ describe("FigmaShell", () => {
     expect(versionButton.text()).toContain("20260731");
   });
 
-  it("only exposes existing versions from the header", async () => {
+  it("exposes branch creation only after the header version menu opens", async () => {
     const template = {
       workspaceId: "workspace-a",
       appId: "app-a",
@@ -1156,6 +1157,12 @@ describe("FigmaShell", () => {
       versions: [{ versionId: "version-a", version: "20260801", branch: "feature_testagent_20260801" }]
     };
     const wrapper = mountShell({
+      attachTo: document.body,
+      global: {
+        provide: {
+          api: { listRepositoryBranches: vi.fn().mockResolvedValue(["feature_testagent_20260824"]) }
+        }
+      },
       props: {
         appTemplates: [template],
         selectedWorkspaceTemplateId: template.workspaceId,
@@ -1165,10 +1172,27 @@ describe("FigmaShell", () => {
     });
 
     await wrapper.get('[data-testid="header-version-selector"]').trigger("click");
-    expect(wrapper.find('[data-testid="header-create-version"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="header-create-version-shortcut"]').exists()).toBe(false);
+    const createVersion = wrapper.get('[data-testid="header-create-version"]');
+    expect(createVersion.text()).toContain("按分支新建版本");
     expect(wrapper.findAll('.figma-version-menu-wrapper .figma-app-menu-item')
       .some((item) => item.text().includes("20260801"))).toBe(true);
+    await createVersion.trigger("mousedown");
+
+    const dialog = wrapper.getComponent(CreateWorkspaceVersionDialog);
+    expect(dialog.props("modelValue")).toBe(true);
+    expect(dialog.props("template")).toEqual(template);
+    await wrapper.vm.$nextTick();
+    const dialogState = (dialog.vm.$ as unknown as { setupState: Record<string, unknown> }).setupState as {
+      branch: string;
+      confirmCreateVersion: () => void;
+    };
+    dialogState.branch = "feature_testagent_20260824";
+    dialogState.confirmCreateVersion();
+    expect(wrapper.emitted("create-version")?.[0]?.[0]).toEqual({
+      template,
+      branch: "feature_testagent_20260824"
+    });
   });
 
   it("keeps automation repositories out of the header primary workspace menu", async () => {

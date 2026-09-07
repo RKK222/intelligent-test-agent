@@ -10743,7 +10743,8 @@ test("workspace cascade menu creates a version from an existing branch without a
   expect(createVersionRequests[0]).toEqual({ branch: "feature_testagent_20260824" });
 });
 
-test("header version menu only selects existing versions", async ({ page }) => {
+test("header version menu exposes branch creation only after opening", async ({ page }) => {
+  const createVersionRequests: Array<{ version?: string; branch?: string }> = [];
   await mockBackendApi(page, {
     workspaceTemplates: {
       app_gcms: [
@@ -10771,14 +10772,24 @@ test("header version menu only selects existing versions", async ({ page }) => {
         createdAt: "2026-08-01T00:00:00Z",
         updatedAt: "2026-08-01T00:00:00Z"
       }]
-    }
+    },
+    createVersionRequests,
+    repositoryBranches: { repo_1: ["feature_testagent_20260824", "feature_testagent_20260801"] }
   });
 
   await gotoWorkbench(page);
   await page.getByTestId("header-version-selector").click();
-  await expect(page.getByTestId("header-create-version")).toHaveCount(0);
   await expect(page.getByTestId("header-create-version-shortcut")).toHaveCount(0);
   await expect(page.getByRole("option", { name: /20260801/ })).toBeVisible();
+  const createVersion = page.getByTestId("header-create-version");
+  await expect(createVersion).toBeVisible();
+  await createVersion.click();
+  const dialog = page.locator(".el-dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(".el-date-editor")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "确定" }).click();
+  await expect.poll(() => createVersionRequests.length).toBe(1);
+  expect(createVersionRequests[0]).toEqual({ branch: "feature_testagent_20260824" });
 });
 
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {

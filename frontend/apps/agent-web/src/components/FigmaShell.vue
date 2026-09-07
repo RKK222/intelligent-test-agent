@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, Plus, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
+import CreateWorkspaceVersionDialog from "./CreateWorkspaceVersionDialog.vue";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
 import UserNotificationCenter, { type UserNotificationFilter } from "./UserNotificationCenter.vue";
@@ -76,6 +77,8 @@ const props = withDefaults(
     selectedVersionId?: string;
     loadingAppTemplates?: boolean;
     loadingAppVersions?: boolean;
+    /** 顶部版本菜单中的创建项与工作台共用提交态。 */
+    creatingVersion?: boolean;
     /** 用户手册弹框是否打开，用于让入口保持与左侧活动按钮一致的选中态。 */
     helpCenterOpen?: boolean;
     notifications?: UserNotification[];
@@ -204,6 +207,7 @@ const emit = defineEmits<{
   (e: "open-experience"): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
+  (e: "create-version", payload: { template: AppWorkspaceTemplate; version?: string; branch: string }): void;
   (e: "open-app-source"): void;
   (e: "load-app-source-repositories"): void;
   (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
@@ -230,6 +234,8 @@ const workspaceMenuOpen = ref(false);
 const workspaceSearch = ref("");
 const workspaceSearchInput = ref<HTMLInputElement | null>(null);
 const versionMenuOpen = ref(false);
+const headerCreateVersionOpen = ref(false);
+const headerCreateVersionTarget = ref<AppWorkspaceTemplate | null>(null);
 const userMenuOpen = ref(false);
 const runtimeInventoryOpen = ref(false);
 const runtimeInventoryFullscreen = ref(false);
@@ -468,6 +474,15 @@ function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: Ap
   closeVersionMenu();
 }
 
+/** 创建只从展开的版本菜单进入，提交仍复用工作台的唯一编排器。 */
+function openHeaderCreateVersion() {
+  const template = headerWorkspaceTemplate.value;
+  if ((props.workspaceKind ?? "MANAGED") !== "MANAGED" || !template || template.gitAccessStatus === "INACCESSIBLE") return;
+  headerCreateVersionTarget.value = template;
+  headerCreateVersionOpen.value = true;
+  closeVersionMenu();
+}
+
 function openHeaderAppSourceManagement() {
   closeWorkspaceMenu();
   emit("open-app-source");
@@ -508,6 +523,12 @@ watch(() => props.workspaceKind, (kind) => {
     workspaceMenuOpen.value = false;
     versionMenuOpen.value = false;
   }
+  if (kind !== "MANAGED") headerCreateVersionOpen.value = false;
+});
+
+watch(() => props.selectedAppId, () => {
+  headerCreateVersionOpen.value = false;
+  headerCreateVersionTarget.value = null;
 });
 // 逐字段兼容旧调用方，避免新增 Tool 目录后旧快照缺字段导致详情面板失效。
 const runtimeInventory = computed<RuntimeInventorySummary>(() => ({
@@ -2605,7 +2626,37 @@ function submitJoinApp() {
               </div>
               <span v-if="version.versionId === selectedVersionId" class="figma-app-menu-item-check">✓</span>
             </li>
+            <li
+              v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate"
+              class="figma-app-menu-divider"
+              role="presentation"
+            />
+            <li v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate" role="presentation">
+              <button
+                type="button"
+                class="figma-app-menu-item is-add-app figma-version-menu-create"
+                data-testid="header-create-version"
+                :disabled="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'"
+                :aria-label="`按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
+                :title="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'
+                  ? (headerWorkspaceGitAccessHint || 'Git 权限巡检未通过')
+                  : `按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
+                @mousedown.prevent="openHeaderCreateVersion"
+              >
+                <span class="figma-app-menu-item-main figma-app-menu-add-item">
+                  <Plus :size="14" aria-hidden="true" />
+                  <span class="figma-app-menu-add-text">按分支新建版本</span>
+                </span>
+              </button>
+            </li>
           </ul>
+          <CreateWorkspaceVersionDialog
+            v-model="headerCreateVersionOpen"
+            :template="headerCreateVersionTarget"
+            :creating="creatingVersion"
+            :disabled="workspaceKind !== 'MANAGED'"
+            @submit="emit('create-version', $event)"
+          />
           </div>
         </div>
       </div>
