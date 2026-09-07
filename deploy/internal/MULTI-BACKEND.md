@@ -20,9 +20,10 @@
 
 ## 当前增量说明（2026-09-04）
 
-- 用户已确认公共能力跳版本修复已部署到企业内部；对应候选基线的内层 SHA-256 为
-  `58f7f634b45d62f9c0b1689ce9f18ab3732962215a25d553129e7245cf081962`，外层 SHA-256 为
-  `e5e0403803ed6dc670f26f2086049ed764041e72734fc1c6ece4df79a97eef74`。本轮只基于其后的 `release` 变更生成增量包。
+- 用户已确认企业实际部署的浏览器 CDP 修复包基线：内层 SHA-256 为
+  `bbbe20688aa6a5541886b7afc383c6a8236468a08ea1c3a17cdcc00ef26224fa`，外层 SHA-256 为
+  `f6af13005352fa1f64dad4a9bd9fe762f10094ae0c3f87e85c0eae0ee92574f2`。`7933e350…` 是未部署候选，
+  不能作为增量基线；本轮交付包含该候选及其后的 `release` 变更。
 - 本轮公共 `local_browser.ts` 先完成企业 360 CDP 连接兼容：Tool 在 OpenCode/Bun 内使用原生
   WebSocket 实现 Playwright 公开的 `ConnectOverCDPTransport`，避开 Node `ws` transport 已完成 HTTP 101 却不进入
   connected 的现场问题。CDP 版本响应返回的 WebSocket 继续限制为客户端 Relay 已确认的同一 `127.0.0.1` 随机端口。

@@ -17042,3 +17042,5 @@
   既有大 chunk 提示，没有编译错误。
 - 两台后台的 TCDS 地址均为 `http://tcds-prod.sdc.icbc:9080`，三节点归档不携带 `models.json`；`.4` 的 Qwen 灰度、
   客户端、worker、toolbox、CK/Mem0/BGE/pgvector、trace、Workflow/LobeHub 无部署动作。企业环境尚未部署或验收本包。
+- 用户随后再次确认外层 SHA 为 `7933e3509a996fc46aca993469614adb0a19c4190049122041b4d3cf83d1c613` 的候选从未部署；
+  因此部署说明固定以 `f6af…74f2` / `bbbe…24fa` 为唯一已部署基线，再重封当前制品。
