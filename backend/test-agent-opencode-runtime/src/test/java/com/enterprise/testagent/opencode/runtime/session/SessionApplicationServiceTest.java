@@ -40,6 +40,7 @@ import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
@@ -128,6 +129,28 @@ class SessionApplicationServiceTest {
         assertThat(created.workspaceId()).isEqualTo(experienceId);
         verify(experienceAuthorizer).requireAccess(userId, experienceId);
         verify(ordinaryWorkspaces, never()).findUserWorkspace(userId, experienceId);
+    }
+
+    @Test
+    void createSessionAllowsAppSourceWorkspaceThroughClassifiedAccessFallback() {
+        UserId userId = new UserId("usr_app_source");
+        WorkspaceId appSourceId = new WorkspaceId("wrk_app_source_workspace");
+        UserWorkspaceQueryRepository ordinaryWorkspaces = Mockito.mock(UserWorkspaceQueryRepository.class);
+        Mockito.when(ordinaryWorkspaces.findUserWorkspace(userId, appSourceId)).thenReturn(Optional.empty());
+        ConversationWorkspaceAccessAuthorizer accessAuthorizer =
+                Mockito.mock(ConversationWorkspaceAccessAuthorizer.class);
+        Mockito.when(accessAuthorizer.requireClassifiedFileAccess(userId, appSourceId, true))
+                .thenReturn(ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind.APP_SOURCE);
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        SessionApplicationService service = service(
+                new FakeWorkspaceRepository(true), sessions, new FakeMessageRepository());
+        service.setUserWorkspaceQueryRepository(ordinaryWorkspaces);
+        service.setWorkspaceAccessAuthorizer(accessAuthorizer);
+
+        Session created = service.createSession(userId, appSourceId, "应用源码会话", "trace_app_source");
+
+        assertThat(created.workspaceId()).isEqualTo(appSourceId);
+        verify(accessAuthorizer).requireClassifiedFileAccess(userId, appSourceId, true);
     }
 
     @Test

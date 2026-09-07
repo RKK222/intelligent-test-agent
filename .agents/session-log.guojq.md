@@ -1,5 +1,33 @@
 # Session Log — guojq
 
+## 2026-09-07 修复：应用代码库工作区首次发起会话报 "Workspace 不存在"
+
+### Why
+用户在前端"切换工作空间"选择"应用代码库"（APP_SOURCE）后发起会话，后端返回 `NOT_FOUND: Workspace 不存在`。根因是 `SessionApplicationService.requireUserWorkspace` 直接调用底层 `UserWorkspaceQueryRepository.findUserWorkspace`，而该 SQL 只认可 `local_client_workspaces`、`personal_workspaces`、已有 ACTIVE session 三类归属；APP_SOURCE 工作区由 `app_source_replicas.runtime_workspace_id` 映射，不在这三类里，首次会话时第三类也不成立，必然返回 empty。
+
+### What
+修改 [SessionApplicationService.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/session/SessionApplicationService.java)：
+- 新增字段 `ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer`（domain 接口，opencode-runtime 已依赖 domain，无需新增模块依赖）
+- 新增 `@Autowired(required = false)` setter `setWorkspaceAccessAuthorizer`
+- 重写 `requireUserWorkspace`：`findUserWorkspace` 为空时，调用 `workspaceAccessAuthorizer.requireClassifiedFileAccess` 判定工作区类型；仅当返回 `APP_SOURCE` 时回退到 `workspaceRepository.findById` 校验 `status == ACTIVE`，否则仍抛 `Workspace 不存在`
+- 复用 `UserWorkspaceQueryService.requireUserWorkspace` 的同款 APP_SOURCE 回退逻辑（但不直接依赖 workspace-management 模块，遵守 dependency-rules.md 第62-68行约束）
+
+新增测试 [SessionApplicationServiceTest.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/session/SessionApplicationServiceTest.java)：
+- `createSessionAllowsAppSourceWorkspaceThroughClassifiedAccessFallback`：验证 APP_SOURCE 工作区首次创建会话成功
+
+### How
+- 不修改 `UserWorkspaceQueryMapper.xml` SQL（归属判断应在业务层，不应在 SQL 层）
+- 不依赖 workspace-management 模块（遵守分层依赖规则），直接用 domain 层的 `ConversationWorkspaceAccessAuthorizer` 接口
+- `@Autowired(required = false)` 保证纯单元测试环境下不注入也不报错
+
+### Result
+- `mvn -pl test-agent-opencode-runtime -am compile` 编译成功
+- `SessionApplicationServiceTest` 25 个测试全部通过（含新增 1 个）
+- 待用户在真实环境验证：切换应用代码库后发起会话不再报 "Workspace 不存在"
+
+### 未完成事项
+- 第二个问题（应用代码库物化提交 readtimeout 但实际克隆成功）用户表示还要再看看，暂不修改。已定位根因：`AppSourceApplicationService.materialize` 内部同步执行 `git ls-remote` + `git archive`（后端超时 60s），前端 HTTP 超时 30s 先断开，后端继续执行并最终克隆成功。
+
 ## 2026-07-22 新增 HTTP 代理工具及后端接口
 
 ### Why

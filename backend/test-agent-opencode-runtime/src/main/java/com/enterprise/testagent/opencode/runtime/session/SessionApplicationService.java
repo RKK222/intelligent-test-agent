@@ -26,8 +26,10 @@ import com.enterprise.testagent.domain.run.RunResendRepository;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceRepository;
+import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import com.enterprise.testagent.domain.workspace.ExperienceWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.UserWorkspaceQueryRepository;
+import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import com.enterprise.testagent.opencode.runtime.run.RunSessionTitleWatchService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
@@ -63,6 +65,7 @@ public class SessionApplicationService {
     private UserWorkspaceQueryRepository userWorkspaceQueryRepository;
     private UserNotificationApplicationService notificationService;
     private ExperienceWorkspaceAccessAuthorizer experienceWorkspaceAccessAuthorizer;
+    private ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer;
     private LocalClientWorkspaceRepository localClientWorkspaceRepository;
     private SessionRuntimeTargetRepository sessionRuntimeTargetRepository;
 
@@ -501,6 +504,15 @@ public class SessionApplicationService {
         this.experienceWorkspaceAccessAuthorizer = experienceWorkspaceAccessAuthorizer;
     }
 
+    /**
+     * 应用代码库（APP_SOURCE）工作区由 app_source_replicas 映射，不在用户归属表内；
+     * 创建会话前必须复用 ConversationWorkspaceAccessAuthorizer 分类鉴权，仅 APP_SOURCE 回退到主表校验 ACTIVE。
+     */
+    @Autowired(required = false)
+    void setWorkspaceAccessAuthorizer(ConversationWorkspaceAccessAuthorizer workspaceAccessAuthorizer) {
+        this.workspaceAccessAuthorizer = workspaceAccessAuthorizer;
+    }
+
     private void requireNightExecutionUnlocked(SessionId sessionId) {
         if (nightExecutionLockGuard != null) {
             nightExecutionLockGuard.requireUnlocked(sessionId);
@@ -639,11 +651,26 @@ public class SessionApplicationService {
             experienceWorkspaceAccessAuthorizer.requireAccess(userId, workspaceId);
             return;
         }
-        if (userWorkspaceQueryRepository.findUserWorkspace(userId, workspaceId).isEmpty()) {
-            throw new PlatformException(
-                    ErrorCode.NOT_FOUND,
-                    "Workspace 不存在",
-                    Map.of("workspaceId", workspaceId.value()));
+        if (userWorkspaceQueryRepository.findUserWorkspace(userId, workspaceId).isPresent()) {
+            return;
         }
+        // 应用代码库（APP_SOURCE）工作区由 app_source_replicas 映射，不在用户归属表内；
+        // 复用 ConversationWorkspaceAccessAuthorizer 分类鉴权，仅 APP_SOURCE 回退到主表校验 ACTIVE。
+        if (workspaceAccessAuthorizer != null) {
+            var kind = workspaceAccessAuthorizer.requireClassifiedFileAccess(userId, workspaceId, true);
+            if (kind == ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind.APP_SOURCE) {
+                workspaceRepository.findById(workspaceId)
+                        .filter(workspace -> workspace.status() == WorkspaceStatus.ACTIVE)
+                        .orElseThrow(() -> new PlatformException(
+                                ErrorCode.NOT_FOUND,
+                                "Workspace 不存在",
+                                Map.of("workspaceId", workspaceId.value())));
+                return;
+            }
+        }
+        throw new PlatformException(
+                ErrorCode.NOT_FOUND,
+                "Workspace 不存在",
+                Map.of("workspaceId", workspaceId.value()));
     }
 }
