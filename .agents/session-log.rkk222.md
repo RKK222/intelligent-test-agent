@@ -17136,3 +17136,24 @@
 ### Result
 
 - 100 测试环境已成功部署，前一轮因依赖停止导致的后端未就绪问题已修复。本机浏览器访问工作台会跳转统一认证，认证站点当前返回 HTTP 502；因此没有绕过认证或向共享库写入用户/应用夹具，登录后的真实浏览器业务链路尚未验收。此次未修改产品代码、API、数据库、环境文件或服务配置。
+
+## 2026-09-07 - 100 测试制品启用账号密码登录
+
+### Why
+
+- 共享 `192.168.8.100` 测试机的前端 production 构建继承 `VITE_ENV=production`，未登录访问被前端路由重定向到不可用的 AAM；该测试环境应复用已存在的账号密码登录入口。
+
+### What
+
+- 仅在 `deploy/local/jenkins-release.sh` 的 100 Jenkins 前端构建容器中注入 `VITE_ENV=localhost`，继续使用 production 优化构建、现有 `/api/auth/login` 后端校验和既有登录页。
+- Jenkins 发布契约检查新增该参数断言，并在测试环境与前端部署文档中明确：企业离线包和其它 production 构建保持 AAM 默认，不能复用该测试参数。
+
+### How
+
+- `bash -n deploy/local/jenkins-release.sh`、`tools/verify-jenkins-release.sh` 和 `git diff --check` 通过。
+- 以 Jenkins 同一变量运行 `VITE_ENV=localhost VITE_TEST_AGENT_LOBEHUB_ENABLED=false corepack pnpm build`，用户手册构建、agent-web 类型检查与 Vite production build 全部通过。
+
+### Result
+
+- 本提交将使下一次 Jenkins `DEPLOY` 的 100 前端展示账号密码登录页而非跳转 AAM；尚待 Jenkins 部署和真实浏览器验收。
+- 不变更 HTTP API、RunEvent/SSE、数据库、Flyway、后端、凭据、企业环境文件、generated SDK 或 OpenCode 只读源码；`release` 未新增部署节点。

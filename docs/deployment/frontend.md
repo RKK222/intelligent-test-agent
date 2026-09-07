@@ -58,9 +58,11 @@ FRONTEND_OPENCODE_REAL_API_BASE_URL=http://127.0.0.1:8080 corepack pnpm e2e:real
 VITE_TEST_AGENT_API_BASE_URL=https://<frontend-entry>   # agent-web backend-api 的统一 base URL；同域部署可留空走 /api
 VITE_AAM_BASE_URL=http://zfw.sdc.cs.icbc/aam/onlyLogin/ # AAM 完整登录入口；变更后必须重新构建
 VITE_TEST_AGENT_LOBEHUB_ENABLED=false                   # 仅显式 true 时开放通用问答入口和路由
+VITE_ENV=production                                     # 除 localhost 外均使用 AAM 统一认证
 ```
 
 - `VITE_` 前缀变量在构建时注入 `import.meta.env`，变更需重新构建。
+- `VITE_ENV=localhost` 只允许用于开发或受控的 `192.168.8.100` Jenkins 测试制品：它复用既有账号密码登录页，后端仍执行正常凭据校验。企业离线包和其他生产构建不得设置该值，缺失或非 `localhost` 的值一律走 AAM。
 - 显式空的 `VITE_TEST_AGENT_API_BASE_URL` 表示同源相对请求，不等于未配置；适用于同一份静态资源同时通过多个 origin 访问。
 - 该值应填写浏览器实际访问的前端入口 origin，而不是实体 Nginx 内网地址或 Java 地址；例如当前现场是 `http://mimo.sdc.cs.icbc:9996`，实体 Nginx 仍监听 `122.233.30.2:80`。
 - `VITE_TEST_AGENT_BUILD_VERSION` 由 Vite 配置内部生成，不是部署参数，不得在 `nginx.env` 或外部构建环境中覆盖。

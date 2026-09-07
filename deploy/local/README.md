@@ -13,6 +13,8 @@
   输出、归档或写入 Git 任何密码、Token 或数据库连接密钥。
 - 前端固定使用带 git 的 `node:22.16.0-bookworm` 构建镜像；VitePress 会读取页面对应的 Git 提交时间，不能
   换成不含 git 的 slim 镜像。
+- 100 测试机的前端仍执行生产优化构建，但构建容器固定注入 `VITE_ENV=localhost`，因此显示现有账号密码登录页，
+  不跳转 AAM。该例外只用于本机 Jenkins 测试制品；企业离线包和其他 production 构建继续使用 AAM 默认，不得复制此参数。
 - 后端验证和正式运行固定复用 `maven:3.9.9-eclipse-temurin-21`；体验工作区和应用资产会在运行期调用 Git，
   不能换成不含 git 的纯 JRE 镜像。流水线在宿主门禁中同时检查镜像内的 Java 和 Git。
 - 现场 `127.0.0.1:16379/13306` 由 MockCenter 占用；正式容器显式把 Redis 与 XXL MySQL 主机覆盖为

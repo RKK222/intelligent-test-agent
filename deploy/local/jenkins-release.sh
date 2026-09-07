@@ -236,6 +236,7 @@ build_release() {
     maven_run clean package -DskipTests
 
     echo '==> Install, typecheck and build agent-web with locked pnpm'
+    # 100 测试机复用本地账号密码登录页；企业交付构建仍保持 production 环境的 AAM 默认。
     docker run --rm \
         --user "$(id -u):$(id -g)" \
         --volume "${repository_root}:/workspace" \
@@ -246,6 +247,7 @@ build_release() {
         --env COREPACK_HOME=/corepack-cache \
         --env PNPM_HOME=/tmp/pnpm-home \
         --env "VITE_TEST_AGENT_API_BASE_URL=${BACKEND_BASE_URL}" \
+        --env VITE_ENV=localhost \
         --env VITE_TEST_AGENT_LOBEHUB_ENABLED=false \
         "${NODE_IMAGE}" \
         sh -euc '
