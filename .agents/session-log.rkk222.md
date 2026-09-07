@@ -17155,5 +17155,6 @@
 
 ### Result
 
-- 本提交将使下一次 Jenkins `DEPLOY` 的 100 前端展示账号密码登录页而非跳转 AAM；尚待 Jenkins 部署和真实浏览器验收。
+- Jenkins #20 已以提交 `224e331455bcbe69c14e09f266f12c0e26f5f667` 和不可变标签 `release-20-224e3314` 成功发布。100 服务器的后端、XXL Admin、同源 XXL readiness 均为 `UP`，前端返回 HTTP 200，executor `9999` 可连接。
+- 真实浏览器从 `http://192.168.8.100:3000/` 进入 `http://192.168.8.100:3000/985211?redirect=/workbench`，显示用户名、密码输入框与登录按钮，未跳转 AAM；未提交任何账号密码或向共享库写入测试数据。
 - 不变更 HTTP API、RunEvent/SSE、数据库、Flyway、后端、凭据、企业环境文件、generated SDK 或 OpenCode 只读源码；`release` 未新增部署节点。
