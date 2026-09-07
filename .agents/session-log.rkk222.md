@@ -17094,3 +17094,24 @@
 
 - 100 测试环境未部署完成，未执行真实浏览器业务验收，也未将前端静态资源 200 误报为功能通过。
 - 仅做 Jenkins 受控发布与只读检查，没有 SSH/SCP 覆盖、手工 Compose、Flyway repair/outOfOrder 或测试机直接重启；后续需先取得测试机后端容器日志或修复其启动依赖，再重新通过 Jenkins 部署。
+
+## 2026-09-07 - 明确 100 测试环境后端未就绪根因
+
+### Why
+
+- Jenkins #18 在完成构建、数据库升级门禁和容器重建后，后端 readiness 在 240 秒内始终不可用；需要在故障发起服务器上用只读证据区分应用代码问题和运行依赖问题。
+
+### What
+
+- 通过测试机只读 SSH 核查监听端口、容器状态、非敏感运行端点和限定范围后端日志，确认平台运行时固定连接 `192.168.8.100:16379` 的 Redis 与 `192.168.8.100:13306` 的 XXL MySQL。
+- 两个对应的 TestAgent 依赖容器 `test-agent-redis`、`test-agent-xxl-job-mysql` 均在 2026-09-04 11:58 UTC 收到用户终止信号后以 exit 0 正常退出，且 restart policy 为 `no`；并非 OOM 或应用异常崩溃。
+- 同端口当前仅有 MockCenter 的 Redis/MySQL 监听 `127.0.0.1`，因此不能接受平台容器访问服务器 IP `192.168.8.100` 的连接。
+
+### How
+
+- 现场 `ss`、Docker inspect 和日志证明 Redis/XXL MySQL 目标均返回 `Connection refused`；后端在 `BackendJavaProcessLifecycleService.registerHeartbeat` 访问 Redis 时导致 Spring `ApplicationContext` 退出，容器已累计重启 41 次。
+- XXL Admin 子上下文也在访问 MySQL/Flyway 时出现 `Communications link failure`，所以 `18082` readiness、`18083` Admin 和前端同源 XXL 代理都无法就绪。
+
+### Result
+
+- #18 的直接根因是测试机 TestAgent Redis 与 XXL MySQL 被正常停止且未恢复，而非本次前端去重代码、Flyway 字节或构建产物问题。恢复依赖后仍必须重新经 Jenkins 发布并执行真实浏览器验收；本次排障没有修改服务器、容器、数据库或配置，且未记录任何凭据。
