@@ -17279,8 +17279,9 @@
 
 ### What
 
-- 以 `7756bbe7d6e3` 的干净 `release` 工作树重新构建内层发布 ZIP，并使用既有受控组织签名密钥生成客户端不可变版本 `20260907171431`。
+- 以 `7756bbe7d6e3` 的产品代码和当前 `release` 交付手册重新构建内层发布 ZIP，并使用既有受控组织签名密钥生成客户端不可变版本 `20260907171431`。
 - 重建固定名外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`；复用三台节点专属配置，未写入或覆盖 `.4` 灰度 `models.json`。
+- 同步修正包内多后台手册的客户端版本、版本菜单/批量生成兼容和时间精度说明，避免现场操作说明仍指向上一候选。
 
 ### How
 
@@ -17290,5 +17291,5 @@
 
 ### Result
 
-- 内层 SHA-256：`a7c65c4b50603e6406574b65cdf67ca31e37a9fda0150ad502468970731b6d3c`；外层 SHA-256：`93d90640c671c1a18980f3eb4322340ac6bf2eb865b74748548a638e1068ffe9`。
+- 内层 SHA-256：`8e5b8a3bd8c31d8e5786359393d7a3d91b39f2e2ec49ca94d17cbd8ee6e0d4f7`；外层 SHA-256：`00d08efad84defe1d4925bf571f62e8c0a2f0bc46e79a994b19bb58da07627ba`。
 - 两台后台节点包中的 `TEST_AGENT_TCDS_BASE_URL` 均为 `http://tcds-prod.sdc.icbc:9080`；本轮无需加载 worker 镜像、重启 worker/toolbox、同步 CK/Mem0/BGE/pgvector 或更新 `.114` 模型灰度。
