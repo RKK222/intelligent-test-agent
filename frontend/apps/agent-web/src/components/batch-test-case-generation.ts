@@ -102,7 +102,7 @@ export async function buildBatchItemRunInput(options: {
     }
     contextCharCount += content.length;
     readableFileCount += 1;
-    const name = path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path;
+    const name = path.split(/[\\/]+/).filter(Boolean).pop() ?? path;
     parts.push({
       type: "file",
       path,

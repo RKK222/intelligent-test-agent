@@ -17181,3 +17181,25 @@
 - Jenkins #20 已以提交 `224e331455bcbe69c14e09f266f12c0e26f5f667` 和不可变标签 `release-20-224e3314` 成功发布。100 服务器的后端、XXL Admin、同源 XXL readiness 均为 `UP`，前端返回 HTTP 200，executor `9999` 可连接。
 - 真实浏览器从 `http://192.168.8.100:3000/` 进入 `http://192.168.8.100:3000/985211?redirect=/workbench`，显示用户名、密码输入框与登录按钮，未跳转 AAM；未提交任何账号密码或向共享库写入测试数据。
 - 不变更 HTTP API、RunEvent/SSE、数据库、Flyway、后端、凭据、企业环境文件、generated SDK 或 OpenCode 只读源码；`release` 未新增部署节点。
+
+## 2026-09-07 - 修复批量生成子条目在旧浏览器中的文件名处理
+
+### Why
+
+- 批量生成子条目测试案例在读取关联文件后使用 `Array.prototype.at(-1)` 提取文件名；部分企业浏览器未实现该 API，导致生成操作报错并中断。
+
+### What
+
+- 复用前端既有的 `split → filter → pop` 路径处理方式，移除批量编排链路对 `Array.prototype.at()` 的依赖。
+- 新增回归测试，显式模拟浏览器缺少 `Array.prototype.at`，并验证 Windows 路径仍能生成正确的文件名。
+- 同步更新 agent-web 源码包说明。
+
+### How
+
+- `corepack pnpm exec vitest run apps/agent-web/tests/batch-test-case-generation.test.ts`：9 项通过。
+- `corepack pnpm --filter @test-agent/agent-web typecheck`：通过；启动 `corepack pnpm --filter @test-agent/agent-web dev -- --host 127.0.0.1` 后，`http://127.0.0.1:3000/` 返回 200。
+- 全量前端测试有 4 项既有失败（帮助中心文案 2 项、编辑器 Canvas/懒加载 2 项）；生产构建另受同时存在的 `FigmaEditorArea.vue`、`FigmaFileExplorer.vue` 隐式 `any` 错误阻断，均不在本次文件范围内。
+
+### Result
+
+- 批量生成的局部文件上下文可在缺少 `Array.prototype.at()` 的浏览器中继续组装，不影响 Session/Run、API、事件、数据库、安全或部署契约；使用 `release`，未新增部署节点。

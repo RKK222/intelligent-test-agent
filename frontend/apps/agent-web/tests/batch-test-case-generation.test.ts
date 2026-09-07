@@ -34,6 +34,26 @@ describe("batch test case generation", () => {
       .toEqual(reference.filePaths);
   });
 
+  it("builds file names when the browser does not support Array.prototype.at", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Array.prototype, "at");
+    Object.defineProperty(Array.prototype, "at", { value: undefined, configurable: true });
+    try {
+      const result = await buildBatchItemRunInput({
+        reference: { ...reference, filePaths: ["spec\\需求一\\01-需求\\登录\\需求.md"] },
+        requirement: "请生成子条目测试案例。",
+        readFile: async () => ({ content: "正文" })
+      });
+
+      expect(result.parts[1]).toEqual(expect.objectContaining({
+        type: "file",
+        name: "需求.md"
+      }));
+    } finally {
+      if (descriptor) Object.defineProperty(Array.prototype, "at", descriptor);
+      else delete (Array.prototype as { at?: unknown }).at;
+    }
+  });
+
   it("skips binary files but rejects unreadable or oversized local contexts", async () => {
     const binarySkipped = await buildBatchItemRunInput({
       reference: { ...reference, filePaths: ["binary.dat", "readable.md"] },

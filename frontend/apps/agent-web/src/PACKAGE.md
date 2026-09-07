@@ -8,7 +8,7 @@
 
 - 模型选择入口默认对所有用户隐藏；仅非分享态的 `SUPER_ADMIN` 可在工作台每连续独立按三次 Ctrl 后切换入口显隐，`FigmaChatPanel` 同时隐藏未授权或已再次收起时的 `/models` 原生命令。
 
-- `components/BatchTestCaseGenerationDialog.vue`、`components/ExecutionTimePicker.vue`、`components/useBatchTestCaseGeneration.ts` 与 `components/batch-test-case-generation.ts`：提供宽 70vw、高 90vh 的批量选择弹层、选择/会话创建进度两阶段门禁、单条/批量失败重试、单条/批量共用时间选择、最多四路局部上下文编排和纯容量分配；定时选择与立即执行互斥，只有时间和容量有效时才在主操作位展示定时执行，关闭定时选择会清空未提交时间。候选只消费输入 `#` 的既有聚合结果，重试复用原批次与已创建 Session，用户确认关闭后显式清理前端批次身份，执行过程不修改当前 Session、输入正文或附件。
+- `components/BatchTestCaseGenerationDialog.vue`、`components/ExecutionTimePicker.vue`、`components/useBatchTestCaseGeneration.ts` 与 `components/batch-test-case-generation.ts`：提供宽 70vw、高 90vh 的批量选择弹层、选择/会话创建进度两阶段门禁、单条/批量失败重试、单条/批量共用时间选择、最多四路局部上下文编排和纯容量分配；定时选择与立即执行互斥，只有时间和容量有效时才在主操作位展示定时执行，关闭定时选择会清空未提交时间。候选只消费输入 `#` 的既有聚合结果，重试复用原批次与已创建 Session，用户确认关闭后显式清理前端批次身份，执行过程不修改当前 Session、输入正文或附件。局部文件名提取只使用兼容的数组 `pop()`，不依赖旧版浏览器缺失的 `Array.prototype.at()`。
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，在 `router.isReady()` 完成首次异步导航前渲染复用工作台 Logo 与 shell token 的品牌加载态，导航成功或失败后切换到 `<RouterView />`，避免冷缓存白屏。
 - `release-features.ts`：集中解析 LobeHub 编译期开关；只接受显式 `true`，并为入口、登录回跳和路由守卫提供同一事实源。当前 dev 默认关闭。
