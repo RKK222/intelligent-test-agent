@@ -37,14 +37,16 @@
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
 - 本地客户端为 `reuse`，沿用已部署版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996` 和既有组织签名；
   内层 ZIP 不携带 `dist/local-opencode-client/`，`.2` 部署只校验现有客户端分发，不替换制品，用户无需重新下载安装。
-- 后端和前端没有本轮业务源码变化，AAM 地址继续为 `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。标准包按既有流程生成，
-  但浏览器修复生效不依赖重新安装客户端或更新系统 Node。
+- 相对已部署的 360 CDP 包，本轮后端和前端还包含个人 SSH 私钥文件选择、SSH Key 变更后工作空间实时复检，以及标准应用
+  工作空间“按分支新建版本”：只接受合法的 `feature_testagent_yyyyMMdd` 远程分支并从分支派生版本。创建版本请求新增可选
+  `branch` 字段，旧版仅传 `version` 的调用保持兼容；响应、RunEvent/SSE、数据库和 Flyway 均未变化。AAM 地址继续为
+  `http://tcds-prod.sdc.icbc/aam/onlyLogin/`。
 - `deploy/internal/local_browser.ts` 是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
   的已发布 commit 才是权威源。部署包到位后仍须把该模板同步为新的公共配置 commit，再由平台构建签名完整能力包，
   用户确认“更新公共能力”并等待 OpenCode 重启；未完成该发布链路时，旧 Tool 不会自动获得修复。
 - PostgreSQL、XXL MySQL、ClickHouse migration 与已部署基线一致，本轮三套历史均不应新增记录；最终 persistence JAR
   仍须按下文核验，未知历史或 checksum 必须停止，不能用 `repair` 或 `outOfOrder` 绕过。
-- Workflow/LobeHub、独立 memory 制品和 trace 继续 `disabled`；本轮没有新增部署节点、API、事件、数据库或客户端协议变更。
+- Workflow/LobeHub、独立 memory 制品和 trace 继续 `disabled`；本轮没有新增部署节点、事件、数据库或客户端协议变更。
 
 ## 1. 正式拓扑
 

@@ -17005,3 +17005,32 @@
 - 本地库现有 1 个用户、1 个应用、1 个版本库、1 个工作空间模板、2 个应用版本；两个版本均为 `ACTIVE`，目标提交均为本地远端提交 `cf394518de553a4a611a0491d6244de1b521d7da`，副本和运行态 Workspace 均位于 `kakadeMacBook-Pro.local`。
 - 后端 readiness、前端和本地 Smart HTTPS Git 保持可用；后台 screen 包含 backend、frontend、opencode-manager 和 `test-agent-e2e-git`，用户可继续在页面复核。
 - 本次未修改产品代码、HTTP/RunEvent 契约、数据库结构、Flyway、环境文件、generated SDK 或 OpenCode 只读源码；测试证书、Git 远端和 Playwright 脚本只保留在被忽略的 `.tmp/e2e-version-data`。OpenCode 本机版本仍为 1.18.18，而项目要求 1.18.4。
+
+## 2026-09-07 - 基于已部署 360 包重打当前 release 企业增量包
+
+### Why
+
+- 用户确认企业已经部署浏览器 CDP 修复完整包，外层 SHA-256 为
+  `f6af13005352fa1f64dad4a9bd9fe762f10094ae0c3f87e85c0eae0ee92574f2`，内层为
+  `bbbe20688aa6a5541886b7afc383c6a8236468a08ea1c3a17cdcc00ef26224fa`。当前 `release`
+  只应增量交付其后的后端与前端功能，不能重建或替换已经部署的 worker、toolbox、麒麟客户端和独立数据面。
+- 当前构建目录未保留当时的客户端指纹计算状态。已逐字核对 `local_browser.ts` SHA-256 为
+  `ae7d9f58ece9037a5c811f579ea712edfee764c0682aa5e4b480552bef503604`，与已部署包一致；当前源码也没有
+  客户端组件输入文件差异。
+
+### What
+
+- 新增受控的 `20260902-browser-client-deployed.env` 基线文件，固定已部署来源提交、客户端版本和所有已签名制品摘要，
+  并以当前同一客户端源码和企业域名输入重新计算组件指纹。它只允许该组件按 `reuse` 通过，不复制、备份或替换客户端目录。
+- 更新双后台部署说明，准确披露本轮包含个人 SSH Key 实时复检和标准应用工作空间按分支创建版本；HTTP 创建请求只新增向后兼容的
+  可选 `branch` 字段。Flyway、RunEvent/SSE、数据库、worker/toolbox、models 灰度和独立数据面均不变。
+
+### How
+
+- 以 `release@756106f78d6bd214d8fa942452058569880182c0` 为打包输入，核对相对已部署基线无 Flyway migration 差异，
+  并执行 `package-release.sh --component-plan-only`。组件门禁实际输出 worker、toolbox 和本地客户端全部为 `reuse`。
+- 组织私钥继续只保存在 Git 忽略的 `.secure/`，未写入基线、文档或交付包；没有访问、修改或重启企业服务器。
+
+### Result
+
+- 本记录与基线会先提交，再以同一干净源码正式重建后端、前端及三节点外层包；最终 SHA、ZIP 结构和迁移字节校验另行在构建完成后复核。
