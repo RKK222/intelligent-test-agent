@@ -17033,10 +17033,11 @@
 
 ### Result
 
-- 基线与部署说明提交为 `8780c39508c6d07df2da6115d1bb9cd27bef767b` 后，以该提交重建后端、前端、内层 ZIP 和固定名
-  三节点外层包。最终内层及外层内嵌内层 SHA-256 均为
-  `b957cb10a0e742cdde1affaac0d21fbfc6314874d3ec8560435e5863e0f6cf0b`；外层 SHA-256 为
-  `873a571500cecd4ec87c459c807ec034b16f24852fcbc9e3f3b9ce7bd59b0ad8`，大小 `155534489` bytes。
+- 基线与部署说明提交为 `8780c39508c6d07df2da6115d1bb9cd27bef767b` 后，以该提交重建后端、前端和候选制品；
+  在用户明确 `7933e350…` 未部署后，修正基线记录提交为 `572bcf25cc60ca4f41ebb6218d29605d97ee052d`，只对同一批已验证
+  二进制执行 `--zip-only` 重封。最终内层及外层内嵌内层 SHA-256 均为
+  `ffd5f37e8338aac71ea009feabd64e921d2701016c9d2fcb69d4eac5ee401e38`；固定名外层 SHA-256 为
+  `913e25d170148110cf781703497065ac8a1eb5e9fb806d7df24df8495b883ae3`，大小 `155535037` bytes。
 - `shasum -c`、外层 ZIP CRC、内外层嵌套字节一致性、增量组件门禁、固定名三节点包门禁和 OpenCode Tool runtime
   依赖门禁全部通过。后端、前端 production build 和 persistence/XXL/ClickHouse migration 字节校验通过；前端仅有
   既有大 chunk 提示，没有编译错误。
@@ -17044,3 +17045,6 @@
   客户端、worker、toolbox、CK/Mem0/BGE/pgvector、trace、Workflow/LobeHub 无部署动作。企业环境尚未部署或验收本包。
 - 用户随后再次确认外层 SHA 为 `7933e3509a996fc46aca993469614adb0a19c4190049122041b4d3cf83d1c613` 的候选从未部署；
   因此部署说明固定以 `f6af…74f2` / `bbbe…24fa` 为唯一已部署基线，再重封当前制品。
+- 最终固定名包和同目录 `.sha256` 位于 `/Users/kaka/Desktop/mimoagent/0709/`；`shasum -a 256 -c`、外层 ZIP CRC、
+  内外层逐字节一致性、增量组件门禁、完整双后台包门禁及 OpenCode Tool runtime 门禁均再次通过。最终摘要在制品完成后
+  单独提交，避免把会改变内层 ZIP 的自引用摘要再次混入制品。
