@@ -10743,7 +10743,7 @@ test("workspace cascade menu creates a version from an existing branch without a
   expect(createVersionRequests[0]).toEqual({ branch: "feature_testagent_20260824" });
 });
 
-test("header keeps one shortcut for opening the shared new-version dialog", async ({ page }) => {
+test("header version menu only selects existing versions", async ({ page }) => {
   await mockBackendApi(page, {
     workspaceTemplates: {
       app_gcms: [
@@ -10759,7 +10759,6 @@ test("header keeps one shortcut for opening the shared new-version dialog", asyn
         }
       ]
     },
-    repositoryBranches: { repo_1: ["feature_testagent_20260824", "feature_testagent_20260801"] },
     workspaceVersions: {
       "app_gcms:awp_main": [{
         versionId: "awv_existing",
@@ -10778,37 +10777,8 @@ test("header keeps one shortcut for opening the shared new-version dialog", asyn
   await gotoWorkbench(page);
   await page.getByTestId("header-version-selector").click();
   await expect(page.getByTestId("header-create-version")).toHaveCount(0);
-  const createShortcut = page.getByTestId("header-create-version-shortcut");
-  await expect(createShortcut).toBeVisible();
-  await expect(createShortcut).toHaveAttribute("aria-label", "按分支为F-GCMS 主服务新建版本");
-  await expect(createShortcut).toContainText("按分支新建");
-  await createShortcut.click();
-
-  const dialog = page.locator(".el-dialog");
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByText("选择远端分支")).toBeVisible();
-  await expect(dialog.locator(".el-date-editor")).toHaveCount(0);
-  await expect(dialog.getByRole("button", { name: "确定" })).toBeEnabled();
-
-  // 顶栏使用 transform 做视觉居中；弹窗必须挂到 body，否则 fixed 遮罩会被限制在顶部上下文舱内。
-  const overlayState = await dialog.evaluate((element) => {
-    const overlay = element.closest(".el-overlay");
-    const rect = overlay?.getBoundingClientRect();
-    return {
-      attachedToBody: overlay?.parentElement === document.body,
-      x: rect?.x,
-      y: rect?.y,
-      width: rect?.width,
-      height: rect?.height
-    };
-  });
-  const viewport = page.viewportSize();
-  expect(viewport).not.toBeNull();
-  expect(overlayState.attachedToBody).toBe(true);
-  expect(overlayState.x).toBe(0);
-  expect(overlayState.y).toBe(0);
-  expect(overlayState.width).toBe(viewport!.width);
-  expect(overlayState.height).toBe(viewport!.height);
+  await expect(page.getByTestId("header-create-version-shortcut")).toHaveCount(0);
+  await expect(page.getByRole("option", { name: /20260801/ })).toBeVisible();
 });
 
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {

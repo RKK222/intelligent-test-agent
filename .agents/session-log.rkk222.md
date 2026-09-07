@@ -5,6 +5,29 @@
 
 ## Entries
 
+### 2026-09-07 - 收敛按分支新建版本入口
+
+### Why
+
+- 用户确认顶部常驻“按分支新建”按钮视觉上重复且不美观，要求只保留展开目标工作空间后出现的入口。
+
+### What
+
+- 移除 `FigmaShell` 顶部快捷按钮、重复弹窗状态和向 `AgentWorkbench` 传递的重复创建事件；顶部版本菜单只保留已有版本选择。
+- 保留左下角“应用工作空间”二级菜单的“按分支新建版本”，继续复用既有 `CreateWorkspaceVersionDialog` 与 `AgentWorkbench.handleCreateVersion`，因此标准库仍按分支名识别版本号、不会要求重复选择月和日。
+- 同步前端说明、模块图、HTTP API 的 UI 流程说明和内置用户手册；接口、数据格式和后端创建链路均未修改。
+
+### How
+
+- 组件定向 Vitest：`FigmaShell.test.ts`、`WorkbenchFooter.test.ts`，89 项通过。
+- Chromium Playwright 定向端到端用例通过：左下角从已有分支创建版本、顶部版本菜单只选择已有版本，共 2 项。
+- `@test-agent/agent-web` 类型检查、前端 production build 与 `git diff --check` 通过；提交前已回顾全部 `.agents/session-log*.md` 近期条目，未发现冲突或会覆盖的并行成果。
+
+### Result
+
+- `release` 不新增部署节点；按分支新建版本只有一个业务入口且仍使用原有权限、进程检查、缓存失效和工作区切换链路。
+- 不涉及 HTTP API、RunEvent/SSE、数据库、Flyway、SQL、后端、安全边界、兼容协议、环境配置、generated SDK 或 OpenCode 只读源码。
+
 ### 2026-08-25 - 合并远程 release 并重建 AAM 与本地客户端企业增量包
 
 ### Why

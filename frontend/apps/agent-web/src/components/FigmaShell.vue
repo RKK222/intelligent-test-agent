@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch, type CSSProperties } from "vue";
-import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, Plus, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
+import { Activity, BookOpen, CalendarDays, ChevronDown, Dices, Gamepad2, KeyRound, LogOut, Maximize2, Minimize2, MousePointer2, PawPrint, RefreshCw, Search, ShieldCheck, UserRound, X, Pin } from "lucide-vue-next";
 import { CodeXml, FlaskConical } from "lucide-vue-next";
 import type { AppSourceRepositorySummary, OpencodeEndpoint, UserNotification, UserOpencodeProcess, Workspace } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.png";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
-import CreateWorkspaceVersionDialog from "./CreateWorkspaceVersionDialog.vue";
 import PetMiniGames from "./PetMiniGames.vue";
 import PetCompanionAvatar from "./PetCompanionAvatar.vue";
 import UserNotificationCenter, { type UserNotificationFilter } from "./UserNotificationCenter.vue";
@@ -77,8 +76,6 @@ const props = withDefaults(
     selectedVersionId?: string;
     loadingAppTemplates?: boolean;
     loadingAppVersions?: boolean;
-    /** 顶部与左下角共用的版本创建提交态。 */
-    creatingVersion?: boolean;
     /** 用户手册弹框是否打开，用于让入口保持与左侧活动按钮一致的选中态。 */
     helpCenterOpen?: boolean;
     notifications?: UserNotification[];
@@ -207,7 +204,6 @@ const emit = defineEmits<{
   (e: "open-experience"): void;
   (e: "load-versions", templateId: string): void;
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
-  (e: "create-version", payload: { template: AppWorkspaceTemplate; version?: string; branch: string }): void;
   (e: "open-app-source"): void;
   (e: "load-app-source-repositories"): void;
   (e: "open-app-source-repository", repository: AppSourceRepositorySummary): void;
@@ -234,8 +230,6 @@ const workspaceMenuOpen = ref(false);
 const workspaceSearch = ref("");
 const workspaceSearchInput = ref<HTMLInputElement | null>(null);
 const versionMenuOpen = ref(false);
-const headerCreateVersionOpen = ref(false);
-const headerCreateVersionTarget = ref<AppWorkspaceTemplate | null>(null);
 const userMenuOpen = ref(false);
 const runtimeInventoryOpen = ref(false);
 const runtimeInventoryFullscreen = ref(false);
@@ -474,15 +468,6 @@ function selectHeaderVersion(version: AppWorkspaceVersion, explicitTemplate?: Ap
   closeVersionMenu();
 }
 
-/** 顶部入口只负责选择模板并打开共享弹窗；实际创建继续交给 AgentWorkbench 的唯一处理器。 */
-function openHeaderCreateVersion() {
-  const template = headerWorkspaceTemplate.value;
-  if ((props.workspaceKind ?? "MANAGED") !== "MANAGED" || !template || template.gitAccessStatus === "INACCESSIBLE") return;
-  headerCreateVersionTarget.value = template;
-  headerCreateVersionOpen.value = true;
-  closeVersionMenu();
-}
-
 function openHeaderAppSourceManagement() {
   closeWorkspaceMenu();
   emit("open-app-source");
@@ -523,12 +508,6 @@ watch(() => props.workspaceKind, (kind) => {
     workspaceMenuOpen.value = false;
     versionMenuOpen.value = false;
   }
-  if (kind !== "MANAGED") headerCreateVersionOpen.value = false;
-});
-
-watch(() => props.selectedAppId, () => {
-  headerCreateVersionOpen.value = false;
-  headerCreateVersionTarget.value = null;
 });
 // 逐字段兼容旧调用方，避免新增 Tool 目录后旧快照缺字段导致详情面板失效。
 const runtimeInventory = computed<RuntimeInventorySummary>(() => ({
@@ -2608,22 +2587,7 @@ function submitJoinApp() {
                 :class="{ 'is-open': versionMenuOpen }"
               />
             </button>
-            <button
-              v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate"
-              type="button"
-              class="figma-version-create-shortcut"
-              data-testid="header-create-version-shortcut"
-              :disabled="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'"
-              :aria-label="`按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
-              :title="headerWorkspaceTemplate.gitAccessStatus === 'INACCESSIBLE'
-                ? (headerWorkspaceGitAccessHint || 'Git 权限巡检未通过')
-                : `按分支为${headerWorkspaceTemplate.workspaceName}新建版本`"
-              @click="openHeaderCreateVersion"
-            >
-              <Plus :size="13" aria-hidden="true" />
-              <span>按分支新建</span>
-            </button>
-          <ul v-if="versionMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
+            <ul v-if="versionMenuOpen" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
             <li v-if="loadingAppVersions && !headerWorkspaceTemplate?.versions" class="figma-context-menu-empty">版本加载中…</li>
             <li v-else-if="!headerWorkspaceTemplate?.versions?.length" class="figma-context-menu-empty">暂无版本</li>
             <li
@@ -2642,13 +2606,6 @@ function submitJoinApp() {
               <span v-if="version.versionId === selectedVersionId" class="figma-app-menu-item-check">✓</span>
             </li>
           </ul>
-          <CreateWorkspaceVersionDialog
-            v-model="headerCreateVersionOpen"
-            :template="headerCreateVersionTarget"
-            :creating="creatingVersion"
-            :disabled="workspaceKind !== 'MANAGED'"
-            @submit="emit('create-version', $event)"
-          />
           </div>
         </div>
       </div>
@@ -4338,36 +4295,6 @@ function submitJoinApp() {
   align-items: center;
 }
 
-.figma-version-create-shortcut {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 22px;
-  margin-right: 3px;
-  padding: 0 6px;
-  border: 0;
-  border-left: 1px solid var(--ta-shell-border, #e5e7eb);
-  background: transparent;
-  color: var(--ta-shell-accent-strong, #991b1b);
-  cursor: pointer;
-  font: inherit;
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.figma-version-create-shortcut:hover:not(:disabled),
-.figma-version-create-shortcut:focus-visible {
-  border-radius: 6px;
-  background: var(--ta-shell-accent-soft, #fdf2f2);
-  outline: none;
-}
-
-.figma-version-create-shortcut:disabled {
-  color: var(--ta-shell-muted, #6b7280);
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
 .figma-context-rail {
   position: relative;
   display: flex;
@@ -5805,10 +5732,6 @@ function submitJoinApp() {
 
   .figma-version-menu-wrapper .figma-context-menu-trigger {
     max-width: 110px;
-  }
-
-  .figma-version-create-shortcut span {
-    display: none;
   }
 
   .figma-app-menu-trigger,
