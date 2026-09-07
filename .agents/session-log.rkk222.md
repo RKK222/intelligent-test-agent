@@ -17033,4 +17033,12 @@
 
 ### Result
 
-- 本记录与基线会先提交，再以同一干净源码正式重建后端、前端及三节点外层包；最终 SHA、ZIP 结构和迁移字节校验另行在构建完成后复核。
+- 基线与部署说明提交为 `8780c39508c6d07df2da6115d1bb9cd27bef767b` 后，以该提交重建后端、前端、内层 ZIP 和固定名
+  三节点外层包。最终内层及外层内嵌内层 SHA-256 均为
+  `b957cb10a0e742cdde1affaac0d21fbfc6314874d3ec8560435e5863e0f6cf0b`；外层 SHA-256 为
+  `873a571500cecd4ec87c459c807ec034b16f24852fcbc9e3f3b9ce7bd59b0ad8`，大小 `155534489` bytes。
+- `shasum -c`、外层 ZIP CRC、内外层嵌套字节一致性、增量组件门禁、固定名三节点包门禁和 OpenCode Tool runtime
+  依赖门禁全部通过。后端、前端 production build 和 persistence/XXL/ClickHouse migration 字节校验通过；前端仅有
+  既有大 chunk 提示，没有编译错误。
+- 两台后台的 TCDS 地址均为 `http://tcds-prod.sdc.icbc:9080`，三节点归档不携带 `models.json`；`.4` 的 Qwen 灰度、
+  客户端、worker、toolbox、CK/Mem0/BGE/pgvector、trace、Workflow/LobeHub 无部署动作。企业环境尚未部署或验收本包。
