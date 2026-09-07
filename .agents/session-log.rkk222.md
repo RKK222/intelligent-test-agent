@@ -17293,3 +17293,9 @@
 
 - 内层 SHA-256：`8e5b8a3bd8c31d8e5786359393d7a3d91b39f2e2ec49ca94d17cbd8ee6e0d4f7`；外层 SHA-256：`00d08efad84defe1d4925bf571f62e8c0a2f0bc46e79a994b19bb58da07627ba`。
 - 两台后台节点包中的 `TEST_AGENT_TCDS_BASE_URL` 均为 `http://tcds-prod.sdc.icbc:9080`；本轮无需加载 worker 镜像、重启 worker/toolbox、同步 CK/Mem0/BGE/pgvector 或更新 `.114` 模型灰度。
+## 2026-09-07 - 评审应用源码会话与物化超时修复方案
+
+- Why: 用户要求评审外部方案，未要求实施方案中的代码修改或企业部署。
+- What: 对照 release 的 SessionApplicationService、UserWorkspaceQueryService、公共分类鉴权、物化/retry 和前端请求实现，确认首次 APP_SOURCE 会话缺少受控鉴权回退；物化串行执行两条各 60 秒的 Git 命令，90 秒不是充分预算；retry 不重新解析 Git。
+- How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
+- Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
