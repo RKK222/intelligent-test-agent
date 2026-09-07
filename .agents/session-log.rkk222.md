@@ -17020,29 +17020,32 @@
 
 ### What
 
-- 新增受控的 `20260902-browser-client-deployed.env` 基线文件，固定已部署来源提交、客户端版本和所有已签名制品摘要，
-  并以当前同一客户端源码和企业域名输入重新计算组件指纹。它只允许该组件按 `reuse` 通过，不复制、备份或替换客户端目录。
+- 新增受控的 `20260902-browser-client-deployed.env` 基线文件，保留当时已部署来源提交、客户端版本和已签名制品摘要的追溯；
+  用户随后明确当前客户端更新尚未随企业包交付，因此本轮不得把该文件作为打包参数强制 `reuse`。
 - 更新双后台部署说明，准确披露本轮包含个人 SSH Key 实时复检和标准应用工作空间按分支创建版本；HTTP 创建请求只新增向后兼容的
   可选 `branch` 字段。Flyway、RunEvent/SSE、数据库、worker/toolbox、models 灰度和独立数据面均不变。
 
 ### How
 
-- 以 `release@756106f78d6bd214d8fa942452058569880182c0` 为打包输入，核对相对已部署基线无 Flyway migration 差异，
-  并执行 `package-release.sh --component-plan-only`。组件门禁实际输出 worker、toolbox 和本地客户端全部为 `reuse`。
+- 首次按客户端基线执行组件计划时错误得出本地客户端 `reuse`；用户指出客户端更新尚未打包后，停止使用该基线参数，
+  将客户端版本提升为 `20260907093905` 并重新执行组件计划。最终门禁输出 worker/toolbox 为 `reuse`、本地客户端为
+  `included`，客户端指纹为 `4fabde17757bf6695deaafb0d501708cd6432b1296e29cedbefc55ad95f4023d`。
+- 正式构建在 Mac 上按固定 SHA-256 下载并封装 Linux arm64 JDK、OpenCode 1.18.4、当前客户端 JAR 和已发布公共能力包；
+  客户端分发验签、后端/前端构建、persistence/XXL Flyway 字节校验、内外层嵌套一致性和三个部署门禁均通过。
 - 组织私钥继续只保存在 Git 忽略的 `.secure/`，未写入基线、文档或交付包；没有访问、修改或重启企业服务器。
 
 ### Result
 
-- 基线与部署说明提交为 `8780c39508c6d07df2da6115d1bb9cd27bef767b` 后，以该提交重建后端、前端和候选制品；
-  在用户明确 `7933e350…` 未部署后，修正基线记录提交为 `572bcf25cc60ca4f41ebb6218d29605d97ee052d`，只对同一批已验证
-  二进制执行 `--zip-only` 重封。最终内层及外层内嵌内层 SHA-256 均为
-  `ffd5f37e8338aac71ea009feabd64e921d2701016c9d2fcb69d4eac5ee401e38`；固定名外层 SHA-256 为
-  `913e25d170148110cf781703497065ac8a1eb5e9fb806d7df24df8495b883ae3`，大小 `155535037` bytes。
+- 外层 `913e25d170148110cf781703497065ac8a1eb5e9fb806d7df24df8495b883ae3` 是错误标为客户端 `reuse` 的候选，
+  不得部署。按用户确认的实际部署基线 `f6af…74f2` / `bbbe…24fa` 重新构建后，最终内层及外层内嵌内层 SHA-256 均为
+  `8bfea5cb0cfb203a9ee7d0c8c52b155f0cecebcfa935096eb8af268303da19be`；固定名外层 SHA-256 为
+  `e2d530db115fe6c71077803b0acc0b75b13c4f35b3430cf24d2b2c4928833c6c`，大小 `444052654` bytes。
 - `shasum -c`、外层 ZIP CRC、内外层嵌套字节一致性、增量组件门禁、固定名三节点包门禁和 OpenCode Tool runtime
   依赖门禁全部通过。后端、前端 production build 和 persistence/XXL/ClickHouse migration 字节校验通过；前端仅有
   既有大 chunk 提示，没有编译错误。
 - 两台后台的 TCDS 地址均为 `http://tcds-prod.sdc.icbc:9080`，三节点归档不携带 `models.json`；`.4` 的 Qwen 灰度、
-  客户端、worker、toolbox、CK/Mem0/BGE/pgvector、trace、Workflow/LobeHub 无部署动作。企业环境尚未部署或验收本包。
+  worker、toolbox、CK/Mem0/BGE/pgvector、trace、Workflow/LobeHub 无部署动作。除本轮 Java 后端和 `.2` 前端静态资源外，
+  新增的交付动作是由 `.2` 原子更新客户端分发目录；用户可更新到 `20260907093905` 或从下载页首次安装；企业环境尚未部署或验收本包。
 - 用户随后再次确认外层 SHA 为 `7933e3509a996fc46aca993469614adb0a19c4190049122041b4d3cf83d1c613` 的候选从未部署；
   因此部署说明固定以 `f6af…74f2` / `bbbe…24fa` 为唯一已部署基线，再重封当前制品。
 - 最终固定名包和同目录 `.sha256` 位于 `/Users/kaka/Desktop/mimoagent/0709/`；`shasum -a 256 -c`、外层 ZIP CRC、

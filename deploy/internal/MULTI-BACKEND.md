@@ -33,11 +33,12 @@
   模型输出脱敏边界保持不变。
 - 当前 `release` 同时包含已提交的麒麟个人 SSH 私钥本地文件选择：只调整前端设置页、新手引导和用户手册，继续复用既有
   浏览器端加密与 SSH Key 保存接口，不新增后端 API；文件选择器需要按 `Ctrl+H` 显示 `.ssh` 隐藏目录，不能选择 `.pub`。
-- worker runtime、toolbox 和本地客户端均为 `reuse`。现有 programs 和签名公共能力依赖已经包含
+- worker runtime 和 toolbox 为 `reuse`，本地客户端为 `included`。现有 programs 和签名公共能力依赖已经包含
   `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
-- 本地客户端为 `reuse`，沿用已部署版本 `20260901203844`、企业入口 `http://mimo.sdc.cs.icbc:9996` 和既有组织签名；
-  内层 ZIP 不携带 `dist/local-opencode-client/`，`.2` 部署只校验现有客户端分发，不替换制品，用户无需重新下载安装。
+- 本轮重新签发并交付客户端 `20260907093905`，入口仍为 `http://mimo.sdc.cs.icbc:9996`，继续使用既有组织签名。
+  内层 ZIP 仅携带这一版完整离线客户端分发；`.2` 部署会先验签、再原子替换客户端静态分发目录，已有用户可在平台确认后更新，
+  新用户可从网页下载安装。
 - 相对已部署的 360 CDP 包，本轮后端和前端还包含个人 SSH 私钥文件选择、SSH Key 变更后工作空间实时复检，以及标准应用
   工作空间“按分支新建版本”：只接受合法的 `feature_testagent_yyyyMMdd` 远程分支并从分支派生版本。创建版本请求新增可选
   `branch` 字段，旧版仅传 `version` 的调用保持兼容；响应、RunEvent/SSE、数据库和 Flyway 均未变化。AAM 地址继续为
