@@ -17270,3 +17270,25 @@
 - 代码级复现与回归通过；提交时尚待 Jenkins 发布和真实页面验收，不能把已落库版本直接当作完整创建成功。
 - 发布补验：修复提交 5db45f469 已推送两个 release 远端，Jenkins #23 SUCCESS，标签 release-23-5db45f46；前后端容器 Started，verify-deployment 通过，对外 readiness=UP、首页 HTTP 200。
 - 真实业务页面尚未复测：原已登录浏览器标签被另一会话占用，独立标签进入本地登录页；未借用或提取其它会话凭据。因此只确认部署和代码级回归通过，不声称完整新建链路验收通过。
+
+## 2026-09-07 - 重新构建当前 release 企业离线完整包
+
+### Why
+
+- 上一份包含客户端更新的候选包尚未部署，之后 `release` 又合入版本菜单、批量生成兼容和版本副本时间精度修复等提交，不能把旧候选当作现场基线或仅重封装。
+
+### What
+
+- 以 `7756bbe7d6e3` 的干净 `release` 工作树重新构建内层发布 ZIP，并使用既有受控组织签名密钥生成客户端不可变版本 `20260907171431`。
+- 重建固定名外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`；复用三台节点专属配置，未写入或覆盖 `.4` 灰度 `models.json`。
+
+### How
+
+- 完整打包前组件计划确认 worker/runtime、toolbox 均为 `reuse`，local client 为 `included`；worker 指纹 `aba0bb06...127687b`，toolbox 指纹 `35447da0...f15040`。
+- `tools/verify-internal-incremental-components.sh`、`tools/verify-opencode-tool-runtime-deploy.sh`、`tools/verify-internal-two-backend-complete-package.sh` 均通过；外层 SHA、ZIP 结构、内外层内层 ZIP 摘要一致及客户端 manifest RSA 签名均已验证。
+- 对最终 persistence JAR 校验正式 toolbox migration，SHA-256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；从最后已部署基线到本次 HEAD 没有新增 Flyway migration 文件。
+
+### Result
+
+- 内层 SHA-256：`a7c65c4b50603e6406574b65cdf67ca31e37a9fda0150ad502468970731b6d3c`；外层 SHA-256：`93d90640c671c1a18980f3eb4322340ac6bf2eb865b74748548a638e1068ffe9`。
+- 两台后台节点包中的 `TEST_AGENT_TCDS_BASE_URL` 均为 `http://tcds-prod.sdc.icbc:9080`；本轮无需加载 worker 镜像、重启 worker/toolbox、同步 CK/Mem0/BGE/pgvector 或更新 `.114` 模型灰度。
