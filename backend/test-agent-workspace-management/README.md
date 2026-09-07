@@ -1,5 +1,7 @@
 # test-agent-workspace-management
 
+创建应用版本使用既有注入 Clock 取时；副本写入后同仓库状态回写的时间校验遵循数据库微秒舍入精度，避免纳秒时间与数据库读回值差异导致创建失败。`ManagedWorkspaceApplicationServiceTest` 使用固定纳秒时间和模拟数据库舍入覆盖完整创建及最近工作区登记。顶部与左下角创建入口均复用 `createVersion`。
+
 Agent 配置权限补充：公共 Git 的 worktree 管理、暂存、提交和发布仍仅允许 `SUPER_ADMIN`；已登录用户可在服务层所有权校验通过后回退本人公共个人 worktree 的本地改动。应用 Agent 的暂存、提交和发布仍由 `APP_ADMIN`（含 `SUPER_ADMIN`）执行，普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动，不能指定共享 worktree。
 
 应用工作空间模板列表只返回配置管理中 `enabled=true` 的非自动化模板；响应继续携带 `repositoryType` 和兼容字段 `standard`。自动化代码库不再使用工作空间模板/版本模型，而由 `(appId, repositoryId)` 唯一当前配置管理；旧模板、版本、副本和个人 worktree 仅保留追溯，不能进入主工作空间、recent、个人 worktree 或 Git 入口。

@@ -67,6 +67,8 @@
 
 ## 测试覆盖
 
+- `ApplicationWorkspaceVersionReplicaTest` 覆盖副本时间以 PostgreSQL 微秒四舍五入精度比较：同一数据库时刻允许纳秒差异，跨微秒倒序仍拒绝；同步原始时间保留。
+
 - `WorkspaceTest` 覆盖工作区默认状态、traceId 占位和更新时间边界。
 - `RunStatusTest`、`RunTest` 覆盖 Run 状态机、终态、取消请求、非法流转、时间边界和 token/cost 快照兼容。
 - 终态摘要领域对象由 runtime/persistence 集成测试覆盖角色唯一性、两条上限、Unicode 长度、状态版本和无原文 SQL 边界；`RunTerminalRetryTest` 覆盖严格退避、5 分钟封顶和 24 小时保留边界。

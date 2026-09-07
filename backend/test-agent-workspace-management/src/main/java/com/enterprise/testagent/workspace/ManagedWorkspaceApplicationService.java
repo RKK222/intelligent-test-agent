@@ -1048,7 +1048,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 workspaceRoot,
                 workspaceRootValue,
                 traceId);
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         ApplicationWorkspaceVersion savedVersion = managedWorkspaceRepository.saveVersion(new ApplicationWorkspaceVersion(
                 new ApplicationWorkspaceVersionId(RuntimeIdGenerator.applicationWorkspaceVersionId()),
                 template.workspaceId(),

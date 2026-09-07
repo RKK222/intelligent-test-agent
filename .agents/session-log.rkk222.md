@@ -17247,3 +17247,24 @@
 
 - 新测试分支已存在，版本号按现有标准规则解析为 20260907；未预先创建平台版本，留给用户通过新增入口验收。未执行该账号登录后的创建链路。
 - 本轮没有产品代码、API、事件、数据库写入、配置或规则变更；只新增专用仓库测试分支并记录会话结果，无需重新部署。
+
+## 2026-09-07 - 修复新建版本的副本时间精度误报
+
+### Why
+
+- 用户创建 20260907 收到 updatedAt must not be before createdAt。只读查库确认版本和 READY 副本已写入，trace 为 trace_mtqzzcnb9nkv4i31r2；问题位于写入后同仓库副本回写，PostgreSQL 微秒舍入后的 createdAt 可能比原始 Java 纳秒时间大几百纳秒。
+
+### What
+
+- 副本领域校验按 PostgreSQL 微秒四舍五入比较，保留原始同步时间及跨微秒真实倒序拦截。版本创建复用已有注入 Clock，便于固定纳秒时间测试。
+- 顶部和左下角继续共用 CreateWorkspaceVersionDialog → handleCreateVersion → 后端 createVersion；分支命名、API、数据库结构和权限保持不变。同步两个模块 README。
+
+### How
+
+- 固定时间 2026-09-07T09:00:00.123456789Z，模拟数据库副本舍入，修复前稳定复现相同异常栈，修复后通过。
+- JDK25 执行 mvn -q -pl test-agent-workspace-management -am -Dtest=ApplicationWorkspaceVersionReplicaTest,ManagedWorkspaceApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test：115 项通过，含跨秒舍入和真实倒序拒绝。
+- 已回顾所有会话日志近期条目；未修改环境文件或 SQL，目标 release，不新增部署节点。服务构建和重启交由已授权的 100 Jenkins 发布。
+
+### Result
+
+- 代码级复现与回归通过；提交时尚待 Jenkins 发布和真实页面验收，不能把已落库版本直接当作完整创建成功。

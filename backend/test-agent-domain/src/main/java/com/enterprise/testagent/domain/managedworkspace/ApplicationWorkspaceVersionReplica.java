@@ -3,6 +3,7 @@ package com.enterprise.testagent.domain.managedworkspace;
 import com.enterprise.testagent.domain.support.DomainValidation;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /**
@@ -39,7 +40,9 @@ public record ApplicationWorkspaceVersionReplica(
         traceId = DomainValidation.requireText(traceId, "traceId");
         createdAt = DomainValidation.requireInstant(createdAt, "createdAt");
         updatedAt = DomainValidation.requireInstant(updatedAt, "updatedAt");
-        if (updatedAt.isBefore(createdAt)) {
+        // PostgreSQL 往返会将纳秒四舍五入为微秒，比较时使用同一精度，避免同一时刻被误判倒序。
+        if (updatedAt.plusNanos(500).truncatedTo(ChronoUnit.MICROS)
+                .isBefore(createdAt.plusNanos(500).truncatedTo(ChronoUnit.MICROS))) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
     }

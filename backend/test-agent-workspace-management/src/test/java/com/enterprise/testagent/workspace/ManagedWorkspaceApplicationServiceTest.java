@@ -163,6 +163,30 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void createsVersionWhenDatabaseRoundsReplicaCreationTimeUpToMicroseconds() throws Exception {
+        // macOS 临时目录可能经过 /var 符号链接，统一真实根以覆盖同仓库副本回写。
+        root = root.toRealPath();
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        managed.roundReplicaTimestamps = true;
+        Instant observed = Instant.parse("2026-09-07T09:00:00.123456789Z");
+        ManagedWorkspaceApplicationService service = serviceWithGitRemote(
+                new FakeConfigurationRepository(true), managed, new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"),
+                new FakeGitRemoteService(List.of("feature_testagent_20260907")),
+                Clock.fixed(observed, ZoneOffset.UTC));
+
+        var response = service.createVersion("app_gcms", "awp_1", null,
+                "feature_testagent_20260907", new UserId("usr_1"), "trace_microsecond_roundtrip");
+
+        assertThat(response.version()).isEqualTo("20260907");
+        assertThat(managed.replicas).singleElement().satisfies(replica -> {
+            assertThat(replica.syncStatus()).isEqualTo(WorkspaceReplicaSyncStatus.READY);
+            assertThat(replica.updatedAt()).isAfterOrEqualTo(replica.createdAt());
+        });
+        assertThat(managed.applicationPreference).isNotNull();
+    }
+
+    @Test
     void rejectsMismatchedVersionAndSelectedStandardBranch() {
         ManagedWorkspaceApplicationService service = serviceWithBranches(
                 new FakeConfigurationRepository(true),
@@ -4997,6 +5021,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<PersonalWorkspace> personals = new ArrayList<>();
         private final List<WorkspaceSyncRecord> syncRecords = new ArrayList<>();
         private boolean failVersionReplicaSave;
+        private boolean roundReplicaTimestamps;
         private UserWorkspacePreference globalPreference;
         private UserWorkspacePreference applicationPreference;
         private UserWorkspaceBranchPreference branchPreference;
@@ -5024,8 +5049,16 @@ class ManagedWorkspaceApplicationServiceTest {
                 throw new IllegalStateException("replica save failed");
             }
             replicas.removeIf(item -> item.versionId().equals(replica.versionId()) && item.linuxServerId().equals(replica.linuxServerId()));
-            replicas.add(replica);
+            // 模拟 PostgreSQL 将纳秒四舍五入为微秒；插入返回原对象，后续查询读取数据库精度。
+            replicas.add(roundReplicaTimestamps ? new ApplicationWorkspaceVersionReplica(
+                    replica.replicaId(), replica.versionId(), replica.linuxServerId(), replica.repoRootPath(),
+                    replica.workspaceRootPath(), replica.runtimeWorkspaceId(), replica.currentCommitHash(),
+                    replica.syncStatus(), replica.lastError(), roundMicros(replica.lastSyncedAt()), replica.traceId(),
+                    roundMicros(replica.createdAt()), roundMicros(replica.updatedAt())) : replica);
             return replica;
+        }
+        private static Instant roundMicros(Instant value) {
+            return value == null ? null : value.plusNanos(500).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         }
         @Override public Optional<ApplicationWorkspaceVersionReplica> findVersionReplica(ApplicationWorkspaceVersionId versionId, String linuxServerId) {
             return replicas.stream().filter(item -> item.versionId().equals(versionId) && item.linuxServerId().equals(linuxServerId)).findFirst();
