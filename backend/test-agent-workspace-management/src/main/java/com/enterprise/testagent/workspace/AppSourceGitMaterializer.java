@@ -381,6 +381,12 @@ public class AppSourceGitMaterializer {
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                // git 会把 packed-refs、objects/pack/*.pack 等文件设为只读，
+                // Windows 上 Files.deleteIfExists 对只读文件会抛 AccessDeniedException，
+                // 删除前必须显式清除只读属性。
+                if (!Files.isWritable(file)) {
+                    file.toFile().setWritable(true);
+                }
                 Files.deleteIfExists(file);
                 return FileVisitResult.CONTINUE;
             }

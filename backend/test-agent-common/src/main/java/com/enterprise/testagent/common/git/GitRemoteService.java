@@ -1,5 +1,7 @@
 package com.enterprise.testagent.common.git;
 
+import com.enterprise.testagent.common.error.ErrorCode;
+import com.enterprise.testagent.common.error.PlatformException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -75,6 +77,45 @@ public class GitRemoteService {
                 privateKey,
                 DEFAULT_TIMEOUT);
         return parseTarTree(result.stdoutBytes());
+    }
+
+    /**
+     * 优先用 commit hash 调 archive 锁定不可变快照；当远端服务（如 Gitee）拒绝
+     * 按 commit hash archive（stderr 含 "no such ref"）时，回退用完整 branch ref 再试一次。
+     * 调用方仍需保留原 commit 用于后续一致性校验。
+     */
+    public List<RemoteTreeNode> listTreeWithCommitOrBranchFallback(
+            String gitUrl, String commit, String branch, String privateKey) {
+        try {
+            return listTree(gitUrl, commit, privateKey);
+        } catch (PlatformException exception) {
+            if (!isGitUnavailableWithNoSuchRef(exception)) {
+                throw exception;
+            }
+            return listTree(gitUrl, normalizeBranchRef(branch), privateKey);
+        }
+    }
+
+    /**
+     * 判断异常是否为远端 upload-archive 拒绝 commit hash 的特征错误。
+     */
+    private static boolean isGitUnavailableWithNoSuchRef(PlatformException exception) {
+        if (exception.errorCode() != ErrorCode.GIT_UNAVAILABLE) {
+            return false;
+        }
+        Object stderr = exception.details().get("stderr");
+        return stderr instanceof String text && text.contains("no such ref");
+    }
+
+    /**
+     * 规范化 branch 为完整 ref，避免 archive 时远端按短名查 ref 失败。
+     */
+    private static String normalizeBranchRef(String branch) {
+        String trimmed = branch == null ? "" : branch.trim();
+        if (trimmed.isEmpty()) {
+            throw new IllegalArgumentException("branch must not be blank");
+        }
+        return trimmed.startsWith("refs/heads/") ? trimmed : "refs/heads/" + trimmed;
     }
 
     /**

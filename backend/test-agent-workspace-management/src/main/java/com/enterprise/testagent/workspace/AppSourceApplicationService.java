@@ -360,7 +360,8 @@ public class AppSourceApplicationService {
         String normalizedPath = normalizeSelectedPath(path == null || path.isBlank() ? "." : path);
         GitAccess access = gitAccess(repository, userId);
         String commit = git.resolveRemoteBranchCommit(access.url(), normalizedBranch, access.privateKey());
-        List<GitRemoteService.RemoteTreeNode> tree = remote.listTree(access.url(), commit, access.privateKey());
+        List<GitRemoteService.RemoteTreeNode> tree =
+                remote.listTreeWithCommitOrBranchFallback(access.url(), commit, normalizedBranch, access.privateKey());
         if (".".equals(normalizedPath)) {
             return new TreeSnapshot(commit, tree);
         }
@@ -417,7 +418,7 @@ public class AppSourceApplicationService {
         }
         validateRemoteSelections(
                 selectedPaths,
-                remote.listTree(access.url(), targetCommit, access.privateKey()));
+                remote.listTreeWithCommitOrBranchFallback(access.url(), targetCommit, branch, access.privateKey()));
 
         Set<LinuxServerId> targets = targetServers(command.purpose(), userId);
         AppSourceRetention retention = new AppSourceRetention(command.retentionHours());
