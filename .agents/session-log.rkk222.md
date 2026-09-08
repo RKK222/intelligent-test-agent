@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-08 - 复核已合入的 APP_SOURCE 会话鉴权影响
+
+- Why: 用户要求分析当前代码改动的其它影响；以 ffb52e533 到 f5d1cc77b 的实际差异评审，不执行附件修复指令。
+- What: 产品只修改 SessionApplicationService 分类鉴权回退，另增一条正向 mock 测试；前端超时未改。requireUserWorkspace 同时影响创建与按工作区列会话，列表仍由用户历史 SQL 隔离。查询命中时跳过实时鉴权属于原有边界，运行上下文和旧协议 Run 仍执行独立实时校验；未发现本次新增的跨用户会话读取放行。
+- How: JDK 25 在 backend 执行 mvn -q -DappLogDir=target/log -pl test-agent-opencode-runtime,test-agent-workspace-management -am -Dtest=SessionApplicationServiceTest,AppSourceWorkspaceAccessTest,ManagedConversationWorkspaceAccessAuthorizerTest,UserWorkspaceQueryServiceTest,AppSourceContextTest -Dsurefire.failIfNoSpecifiedTests=false test，实际执行前四类共 45 项；AppSourceContextTest 属于未选择的 app 模块，未执行且不计入证据。另以 -pl test-agent-opencode-runtime -am -Dtest=ConversationContextApplicationServiceTest 及相同其它参数运行 13 项。58 项均通过、0 skipped。
+- Result: 仅代码评审和定向运行验证，未修改产品代码/配置或连接企业现场。需补新增回退的拒绝/归档/列表用户隔离测试和稳定文档；错误语义可能从 NOT_FOUND 变为 FORBIDDEN，首次回退增加多次只读数据库查询。真实 APP_SOURCE 创建→上下文→消息回复及生产 Spring 注入未在本轮端到端验证，不据此宣称企业故障已解决。
+
 ### 2026-09-07 - 收敛按分支新建版本入口
 
 ### Why
