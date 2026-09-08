@@ -4538,3 +4538,7 @@ Agent/Skill/Tool 数量、`requiresRestart` 和 `changeSummaryJson`。公共配�
 受保护 Agent 目录项 additive 增加 `source=PUBLIC_GIT|APPLICATION_HUB`。声明 `PUBLIC_CAPABILITY_SYNC_V1`
 且已有本地激活摘要的客户端不再追加 `PUBLIC_GIT` 服务器受保护副本；应用 Hub Agent 仍按现有逻辑展示。
 上述接口不返回能力正文、依赖文件、本地路径、Client key 或 Tool 参数。
+
+## 个人工作区搬迁诊断兼容说明
+
+搬迁诊断不新增 HTTP 入口或修改请求、成功响应、鉴权和 WebSocket 传输。内部搬迁异常 details 可附加受控 `reason`（如 `RELOCATION_IDENTITY_CHANGED`）；源快照异常保留原错误码，并附加 `relocationStage`，文件类错误仅附加相对路径 SHA-256 的 `pathRef`。服务端日志另以 `filePath` 显示内部上下文中的仓库相对路径及文件名，不加入 API details、数据库安全消息或事件。这些信息不得作为客户端状态机或授权依据。重试日志和既有数据库 `safe_error_message` 的消费契约见 `docs/architecture/xxl-job-integration.md`，未开放普通用户手动强制迁移 API。

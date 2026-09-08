@@ -86,3 +86,13 @@ Testcontainers 需要可用 Docker；Docker 不可用时相关 MySQL/Redis 测�
 - URL、访问日志、应用日志和错误响应不得出现票据、Cookie、Token、MySQL 密码或完整 executor 参数中的敏感载荷。
 - XXL 详情日志和完成备注只展示 `ScheduledTaskResult` 的低敏聚合结果；失败不显示原始任务参数和第三方异常 message，完成备注中的可变字段必须经过 HTML 转义并限制长度。
 - XXL 日志保留 30 天；PostgreSQL 已结束 scheduler 历史仍按 7 天清理。
+
+## 搬迁失败诊断回归
+
+- `PersonalWorkspaceRelocationWorkerTest`：源校验/快照/清理阶段、原因与路径指纹持久化；保留错误码、指数退避上限和不重复导出/清理保护。
+- `PersonalWorkspaceRelocationDiagnosticsTest`：拒绝任意 reason/stage/pathRef、原始消息与换行注入；Git 原因保留、SHA-256 指纹、原因类型与消息长度；日志专用路径上下文、相对文件名可见、控制字符转义、长度截断及数据库/API 不泄露路径。
+- `PersonalWorkspaceSnapshotDiagnosticsTest`：快照前 Git 拒绝、未跟踪特殊条目定位、打包中单文件变化和归档后 Git 状态变化，且不修改源文件；不依赖 Windows 符号链接创建权限。
+- `PersonalWorkspaceSnapshotServiceRealGitTest`：原有脏工作区导出/恢复、子模块拒绝、清理恢复及链接安全回归。
+- 企业验收仍需新版本源 Java 到期重试：确认最新日志阶段/原因、数据库安全说明和原迁移保护不变；本机单测不证明企业迁移成功。
+
+Windows 验证注意：既有真实 Git 链接安全用例需要操作系统授予创建符号链接权限，权限缺失必须明确报告未验收，不得当作通过。测试 Git 的换行配置可能向 diff 混入 CRLF 警告，可仅对测试进程设置 `GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=core.autocrlf`、`GIT_CONFIG_VALUE_0=false`，不修改用户全局 Git 配置。

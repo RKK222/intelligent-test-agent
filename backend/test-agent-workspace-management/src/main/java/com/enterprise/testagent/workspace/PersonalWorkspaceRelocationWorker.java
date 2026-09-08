@@ -5,6 +5,7 @@ import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceRelocation;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceRelocationCandidate;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceRelocationRepository;
+import com.enterprise.testagent.workspace.PersonalWorkspaceRelocationDiagnostics.Stage;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -76,11 +77,13 @@ public class PersonalWorkspaceRelocationWorker {
             if (claimed.isEmpty()) {
                 continue;
             }
+            // 每次认领独立记录进度，避免并发广播互相覆盖失败阶段。
+            Progress progress = new Progress();
             try {
-                process(claimed.get(), leaseOwner, traceId);
+                process(claimed.get(), leaseOwner, traceId, progress);
                 succeeded++;
             } catch (RuntimeException exception) {
-                retry(claimed.get(), leaseOwner, exception);
+                retry(claimed.get(), leaseOwner, exception, progress.stage, traceId);
                 retried++;
             }
         }
@@ -88,21 +91,25 @@ public class PersonalWorkspaceRelocationWorker {
     }
 
     private void process(
-            PersonalWorkspaceRelocation relocation, String leaseOwner, String traceId) {
+            PersonalWorkspaceRelocation relocation, String leaseOwner, String traceId, Progress progress) {
         PersonalWorkspaceRelocationPaths sourcePaths =
                 managedWorkspaceService.sourceRelocationPaths(relocation);
         if (relocation.cleanupPending()) {
+            progress.stage = Stage.CLEANUP_SOURCE;
             cleanupSource(relocation, sourcePaths, leaseOwner);
             return;
         }
         Path archive = null;
         try {
+            progress.stage = Stage.CREATE_ARCHIVE;
             archive = Files.createTempFile(
                     sourcePaths.personalRepoRoot().getParent(),
                     ".workspace-relocation-",
                     ".zip");
+            progress.stage = Stage.EXPORT_SNAPSHOT;
             PersonalWorkspaceSnapshotService.Snapshot snapshot = snapshotService.exportSnapshot(
                     sourcePaths.personalRepoRoot(), archive, relocation.relocationId());
+            progress.stage = Stage.REGISTER_SNAPSHOT;
             if (!repository.markTransferring(
                     relocation.relocationId(),
                     leaseOwner,
@@ -111,12 +118,14 @@ public class PersonalWorkspaceRelocationWorker {
                     clock.instant())) {
                 throw new IllegalStateException("personal workspace relocation lease lost before transfer");
             }
+            progress.stage = Stage.TRANSFER;
             transferGateway.transfer(
                     relocation,
                     snapshot.archive(),
                     snapshot.sha256(),
                     snapshot.size(),
                     traceId);
+            progress.stage = Stage.CLEANUP_SOURCE;
             cleanupSource(relocation, sourcePaths, leaseOwner);
         } catch (RuntimeException exception) {
             throw exception;
@@ -151,7 +160,9 @@ public class PersonalWorkspaceRelocationWorker {
     private void retry(
             PersonalWorkspaceRelocation relocation,
             String leaseOwner,
-            RuntimeException exception) {
+            RuntimeException exception,
+            Stage stage,
+            String traceId) {
         Instant now = clock.instant();
         long delayMinutes = Math.min(
                 MAX_RETRY_DELAY.toMinutes(),
@@ -159,22 +170,30 @@ public class PersonalWorkspaceRelocationWorker {
         String code = exception instanceof PlatformException platform
                 ? "RELOCATION_" + platform.errorCode().name()
                 : "RELOCATION_INTERNAL_ERROR";
+        var failure = PersonalWorkspaceRelocationDiagnostics.describe(exception, stage);
         repository.reschedule(
                 relocation.relocationId(),
                 leaseOwner,
                 relocation.attemptCount(),
                 now.plus(Duration.ofMinutes(delayMinutes)),
                 code,
-                "个人工作区自动搬迁失败，等待下一轮安全重试",
+                failure.safeMessage(),
                 now);
         LOGGER.warn(
-                "event=personal_workspace_relocation_retry relocationId={} sourceLinuxServerId={} targetLinuxServerId={} attempt={} errorCode={} errorType={}",
+                "event=personal_workspace_relocation_retry relocationId={} sourceLinuxServerId={} targetLinuxServerId={} attempt={} errorCode={} errorType={} stage={} reason={} pathRef={} filePath=\"{}\" traceId={} causeType={}",
                 relocation.relocationId(),
                 relocation.sourceLinuxServerId(),
                 relocation.targetLinuxServerId(),
                 relocation.attemptCount(),
                 code,
-                exception.getClass().getSimpleName());
+                exception.getClass().getSimpleName(),
+                failure.stage(), failure.reason(), failure.pathRef(), PersonalWorkspaceRelocationDiagnostics.logFilePath(exception), traceId,
+                PersonalWorkspaceRelocationDiagnostics.causeType(exception));
+    }
+
+    /** 仅在单条搬迁调用栈中使用，不持久化、不改变原有状态机。 */
+    private static final class Progress {
+        private Stage stage = Stage.SOURCE_PATHS;
     }
 
     public record RunResult(int discovered, int due, int succeeded, int retried) {

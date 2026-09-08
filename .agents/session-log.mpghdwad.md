@@ -542,3 +542,38 @@
 
 ### Result
 - 无 API、事件、数据库、安全、部署节点或业务兼容性变更，无新增性能开销；未进行真实浏览器视觉验收或部署。
+
+## 2026-09-08 - 补齐个人工作区搬迁失败安全诊断
+
+### Why
+- 企业源 .4 到目标 .114 搬迁反复失败；Git 合并/子模块和身份、副本检查正常，未跟踪 `.opencode` 链接曾命中拒绝，用户删除后仍失败。旧日志只记录 PlatformException/RELOCATION_CONFLICT，无法确认最新根因。
+
+### What
+- 增强 Worker 单次认领阶段和 Snapshot 细分阶段；日志新增受控 reason、stage、pathRef、本次 traceId 与 causeType，既有 safe_error_message 保存固定安全提示。文件问题仅保存相对路径 SHA-256，不记录原始路径/链接目标、异常消息、任意 details 或 stderr；源端事实校验补充固定原因码。
+- 同步工程/模块 README、XXL 架构/测试、API/事件边界和数据库兼容说明；无 schema、调度、租约、重试、文件保护、路由、环境或部署节点变化。
+
+### How
+- workspace-management 及依赖模块定向 Maven：Diagnostics/Worker/SnapshotDiagnostics/TaskHandler 和三项 RealGit 方法，共 17 项通过；git diff --check 通过。
+- 首次完整 RealGit 运行发现 Windows 无创建符号链接权限，以及 autocrlf 警告混入 diff；仅对后续测试进程固定 core.autocrlf=false，三项可执行 RealGit 全通过。链接安全用例未验收，未修改全局 Git 配置、系统权限或既有用例。
+- 开始时 release 工作区 clean；提交前回顾全部 session-log 近期条目，未覆盖他人修改；仅提交本次相关文件。
+
+### Result
+- 诊断增强完成，未连接/部署企业服务器，也未修改企业数据库或用户文件；最新现场原因仍需部署新版本源 Java 后重试确定。目标恢复内部仍以 TRANSFER 表示，未知原因安全降级 UNCLASSIFIED。
+- 需按既有发布流程更新源 .4 Java，不能仅更新 .114；既有错误说明在下一次真实失败时更新。未推送或发布，Windows 链接安全用例需在具备权限的环境补验。
+
+## 2026-09-08 - 搬迁失败日志直接显示相对路径及文件名
+
+### Why
+- 用户明确要求日志直接输出文件路径和名称，避免现场逐个计算 pathRef 定位。
+
+### What
+- Snapshot 将单文件失败路径保留于私有异常上下文，Worker 重试日志新增 filePath，直接显示仓库相对路径及名称；不进入 API details、数据库安全消息或事件。双引号、反斜线及控制/格式字符转义，有界输出；无单文件定位时为 NONE。
+- 同步工程/模块 README、XXL 架构和测试、HTTP API 边界、安全规范。保留 pathRef，不改变搬迁保护、重试、数据库结构、路由和部署节点。
+
+### How
+- Maven 定向运行 Diagnostics、Worker、SnapshotDiagnostics、TaskHandler 及三项 RealGit 方法，18 项通过；git diff --check 通过。测试仅在进程级固定 core.autocrlf=false。
+- 回顾所有 session-log 近期条目，release 起始工作区 clean，未修改其他人员成果、环境配置或 OpenCode 源码。
+
+### Result
+- 文件名可直接在源端运维日志查看，外发日志需脱敏；没有部署或推送，现场仍需源 Java 使用新版本后重试确认根因。
+- Windows 符号链接权限受限的既有真实链接测试本次未执行，保留后续目标环境补验要求。

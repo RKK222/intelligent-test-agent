@@ -161,3 +161,11 @@ manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`
 `PublicClientCapabilityPackageBuilderTest` 覆盖确定性完整包、提交绑定版本身份、白名单/JS/TS/Python 敏感文件排除、未声明依赖和原生扩展拒绝；
 `PublicClientCapabilityBootstrapReconcilerTest` 覆盖历史 HEAD 首次补建与未配置跳过；发布测试还必须验证首次版本、
 无变化版本、Agent/Skill 热加载摘要与 Tool/依赖重启摘要。
+
+## 个人工作区搬迁失败诊断
+
+`PersonalWorkspaceRelocationDiagnostics` 统一过滤原因白名单和阶段枚举；Worker 为每次认领保存调用栈内进度，Snapshot 细分 Git 捕获、未跟踪扫描、bundle、归档及末次校验。重试日志保留 `errorCode/errorType` 并新增 `stage/reason/pathRef/filePath/traceId/causeType`，既有 `safe_error_message` 保存阶段、原因、路径指纹及固定中文提示。禁止记录异常原文、任意 details、stderr、文件内容或链接目标。
+
+`pathRef` 为仓库相对路径（Git 返回的 `/` 分隔格式、UTF-8、无末尾换行）的 SHA-256；没有单文件定位时为 `NONE`。仅符号链接/特殊条目拒绝和单文件归档内容变化附带此指纹；全量快照前后不一致不伪造具体文件。未知原因用 `UNCLASSIFIED`，结合日志原因类型排查。错误码和重试/清理状态机不变，无新 API、事件或 schema。
+
+定向测试：`mvn -f backend/pom.xml -pl test-agent-workspace-management -am "-Dtest=PersonalWorkspaceRelocationWorkerTest,PersonalWorkspaceRelocationDiagnosticsTest,PersonalWorkspaceSnapshotDiagnosticsTest,PersonalWorkspaceSnapshotServiceRealGitTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`。

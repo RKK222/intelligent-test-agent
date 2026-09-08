@@ -1609,7 +1609,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      */
     PersonalWorkspaceRelocationPaths sourceRelocationPaths(PersonalWorkspaceRelocation relocation) {
         if (!serverIdentity.linuxServerId().equals(relocation.sourceLinuxServerId())) {
-            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区搬迁源服务器已变化");
+            throw new PlatformException(
+                    ErrorCode.CONFLICT, "个人工作区搬迁源服务器已变化", Map.of("reason", "SOURCE_SERVER_CHANGED"));
         }
         PersonalWorkspace personal = existingPersonalWorkspace(relocation.personalWorkspaceId());
         requireRelocationIdentity(relocation, personal);
@@ -1618,7 +1619,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .findVersionReplica(version.versionId(), relocation.sourceLinuxServerId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.CONFLICT,
-                        "源服务器缺少个人工作区所属应用副本"));
+                        "源服务器缺少个人工作区所属应用副本", Map.of("reason", "SOURCE_REPLICA_MISSING")));
         Path personalRoot = pathResolver.resolve(relocation.sourceRepoRootPath()).toAbsolutePath().normalize();
         Path workspaceRoot = pathResolver.resolve(relocation.sourceWorkspaceRootPath()).toAbsolutePath().normalize();
         boolean sourceExists = Files.exists(personalRoot, LinkOption.NOFOLLOW_LINKS);
@@ -1626,7 +1627,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 || (sourceExists && (Files.isSymbolicLink(personalRoot)
                         || !Files.isDirectory(personalRoot, LinkOption.NOFOLLOW_LINKS)
                         || !gitWorkspaceService.isGitRepository(personalRoot)))) {
-            throw new PlatformException(ErrorCode.CONFLICT, "源服务器个人工作区目录不可用");
+            throw new PlatformException(
+                    ErrorCode.CONFLICT, "源服务器个人工作区目录不可用", Map.of("reason", "SOURCE_DIRECTORY_INVALID"));
         }
         return new PersonalWorkspaceRelocationPaths(
                 pathResolver.resolve(sourceReplica.repoRootPath()).toAbsolutePath().normalize(),
@@ -1679,7 +1681,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         && (!personal.repoRootPath().equals(relocation.sourceRepoRootPath())
                                 || !personal.workspaceRootPath().equals(relocation.sourceWorkspaceRootPath())))
                 || personal.status() != ManagedWorkspaceStatus.ACTIVE) {
-            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区搬迁事实已变化");
+            throw new PlatformException(
+                    ErrorCode.CONFLICT, "个人工作区搬迁事实已变化", Map.of("reason", "RELOCATION_IDENTITY_CHANGED"));
         }
     }
 

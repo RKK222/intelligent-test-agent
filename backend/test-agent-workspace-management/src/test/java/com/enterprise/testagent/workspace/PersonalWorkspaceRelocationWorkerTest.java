@@ -73,7 +73,8 @@ class PersonalWorkspaceRelocationWorkerTest {
         assertThat(result).isEqualTo(new PersonalWorkspaceRelocationWorker.RunResult(1, 1, 0, 1));
         verify(fixture.repository).reschedule(
                 eq("pwr_1"), anyString(), eq(1), eq(NOW.plusSeconds(60)),
-                eq("RELOCATION_CONFLICT"), eq("个人工作区自动搬迁失败，等待下一轮安全重试"), eq(NOW));
+                eq("RELOCATION_CONFLICT"), eq(new PersonalWorkspaceRelocationDiagnostics.Failure(
+                        PersonalWorkspaceRelocationDiagnostics.Stage.EXPORT_SNAPSHOT, "UNCLASSIFIED", "NONE").safeMessage()), eq(NOW));
         verify(fixture.transferGateway, never()).transfer(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong(),
@@ -96,6 +97,75 @@ class PersonalWorkspaceRelocationWorkerTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyLong(),
                 org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void persistsSafeSnapshotReasonAndKeepsRetryCodeAndBackoff() {
+        Fixture fixture = fixture(PersonalWorkspaceRelocationStatus.EXPORTING, 6);
+        String pathRef = PersonalWorkspaceRelocationDiagnostics.pathRef(".opencode/private-link");
+        when(fixture.snapshotService.exportSnapshot(
+                eq(fixture.paths.personalRepoRoot()), org.mockito.ArgumentMatchers.any(Path.class), eq("pwr_1")))
+                .thenThrow(PersonalWorkspaceRelocationDiagnostics.atStage(
+                        new PlatformException(ErrorCode.CONFLICT, "secret /private/user token=hidden",
+                                java.util.Map.of("reason", "UNSUPPORTED_UNTRACKED_ENTRY", "pathRef", pathRef)),
+                        PersonalWorkspaceRelocationDiagnostics.Stage.INSPECT_UNTRACKED));
+        fixture.worker.runDue("trace_current_retry");
+        verify(fixture.repository).reschedule(
+                eq("pwr_1"), anyString(), eq(6), eq(NOW.plusSeconds(1800)), eq("RELOCATION_CONFLICT"),
+                eq(new PersonalWorkspaceRelocationDiagnostics.Failure(
+                        PersonalWorkspaceRelocationDiagnostics.Stage.INSPECT_UNTRACKED,
+                        "UNSUPPORTED_UNTRACKED_ENTRY", pathRef).safeMessage()), eq(NOW));
+        verify(fixture.snapshotService, never()).removeSourceWorktree(fixture.paths);
+    }
+
+    @Test
+    void identifiesSourceValidationFailureBeforeSnapshot() {
+        Fixture fixture = fixture(PersonalWorkspaceRelocationStatus.EXPORTING, 1);
+        when(fixture.managedWorkspaceService.sourceRelocationPaths(fixture.claimed))
+                .thenThrow(new PlatformException(ErrorCode.CONFLICT, "private",
+                        java.util.Map.of("reason", "SOURCE_REPLICA_MISSING")));
+        fixture.worker.runDue("trace_paths");
+        verify(fixture.repository).reschedule(
+                eq("pwr_1"), anyString(), eq(1), eq(NOW.plusSeconds(60)), eq("RELOCATION_CONFLICT"),
+                eq(new PersonalWorkspaceRelocationDiagnostics.Failure(
+                        PersonalWorkspaceRelocationDiagnostics.Stage.SOURCE_PATHS,
+                        "SOURCE_REPLICA_MISSING", "NONE").safeMessage()), eq(NOW));
+    }
+
+    @Test
+    void identifiesCleanupFailureWithoutReExportAndRetainsInternalErrorCode() {
+        Fixture fixture = fixture(PersonalWorkspaceRelocationStatus.CLEANUP_PENDING, 2);
+        org.mockito.Mockito.doThrow(new IllegalStateException("secret absolute path"))
+                .when(fixture.snapshotService).removeSourceWorktree(fixture.paths);
+        fixture.worker.runDue("trace_cleanup_failure");
+        verify(fixture.repository).reschedule(
+                eq("pwr_1"), anyString(), eq(2), eq(NOW.plusSeconds(120)), eq("RELOCATION_INTERNAL_ERROR"),
+                eq(new PersonalWorkspaceRelocationDiagnostics.Failure(
+                        PersonalWorkspaceRelocationDiagnostics.Stage.CLEANUP_SOURCE,
+                        "UNCLASSIFIED", "NONE").safeMessage()), eq(NOW));
+        verify(fixture.snapshotService, never()).exportSnapshot(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), anyString());
+    }
+
+    @Test
+    void identifiesTransferFailureAndNeverCleansSource() {
+        Fixture fixture = fixture(PersonalWorkspaceRelocationStatus.EXPORTING, 1);
+        when(fixture.snapshotService.exportSnapshot(
+                eq(fixture.paths.personalRepoRoot()), org.mockito.ArgumentMatchers.any(Path.class), eq("pwr_1")))
+                .thenAnswer(invocation -> new PersonalWorkspaceSnapshotService.Snapshot(
+                        invocation.getArgument(1), SHA256, 3L, "a".repeat(40)));
+        when(fixture.repository.markTransferring(eq("pwr_1"), anyString(), eq(SHA256), eq(3L), eq(NOW)))
+                .thenReturn(true);
+        org.mockito.Mockito.doThrow(new PlatformException(ErrorCode.CONFLICT, "secret target"))
+                .when(fixture.transferGateway).transfer(eq(fixture.claimed), org.mockito.ArgumentMatchers.any(Path.class),
+                        eq(SHA256), eq(3L), eq("trace_transfer"));
+        fixture.worker.runDue("trace_transfer");
+        verify(fixture.repository).reschedule(
+                eq("pwr_1"), anyString(), eq(1), eq(NOW.plusSeconds(60)), eq("RELOCATION_CONFLICT"),
+                eq(new PersonalWorkspaceRelocationDiagnostics.Failure(
+                        PersonalWorkspaceRelocationDiagnostics.Stage.TRANSFER,
+                        "UNCLASSIFIED", "NONE").safeMessage()), eq(NOW));
+        verify(fixture.snapshotService, never()).removeSourceWorktree(fixture.paths);
     }
 
     private Fixture fixture(PersonalWorkspaceRelocationStatus claimedStatus, int attemptCount) {
@@ -131,7 +201,7 @@ class PersonalWorkspaceRelocationWorkerTest {
                 new WorkspaceServerIdentity("server-a"),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         return new Fixture(
-                repository, snapshotService, transferGateway, worker, candidate, claimed, paths);
+                repository, managedWorkspaceService, snapshotService, transferGateway, worker, candidate, claimed, paths);
     }
 
     private PersonalWorkspaceRelocationCandidate candidate() {
@@ -173,6 +243,7 @@ class PersonalWorkspaceRelocationWorkerTest {
 
     private record Fixture(
             PersonalWorkspaceRelocationRepository repository,
+            ManagedWorkspaceApplicationService managedWorkspaceService,
             PersonalWorkspaceSnapshotService snapshotService,
             PersonalWorkspaceRelocationTransferGateway transferGateway,
             PersonalWorkspaceRelocationWorker worker,

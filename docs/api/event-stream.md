@@ -1145,3 +1145,7 @@ relay token、Cookie、profile 或页面数据发送到平台。旧服务端可�
 实例状态，不能从事件正文安装制品。
 
 Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅允许 `SUPER_ADMIN`；公共 `diff/discard` 仅允许已登录用户操作本人公共个人 worktree。应用级 Agent/Skill 的暂存、提交和发布仍由 `APP_ADMIN`（含 `SUPER_ADMIN`）执行，普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动；该权限变化不新增 RunEvent/SSE 类型。
+
+## 个人工作区搬迁诊断边界
+
+搬迁失败诊断仅增强源 Java 日志及既有数据库安全错误说明，不新增 RunEvent/SSE 或广播字段；`personal-workspace.relocation-requested` 仍为空业务 payload 的唤醒事件。

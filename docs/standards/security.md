@@ -498,3 +498,7 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 精确重放输入只能进入有限 TTL Redis，缺失时必须在 revert 前失败；未知投递状态保持锁并继续探测，禁止重复发送；只有稳定替代
   message ID 明确不存在时才允许 unrevert，unrevert 回包未知仍不得解锁。
 - 源 Run 明细清理不得删除 feedback、usage、Run 或重发审计关系；API/SSE 只返回 additive 元数据，旧客户端安全忽略。
+
+### 个人工作区搬迁文件诊断日志
+
+为企业现场定位，`personal_workspace_relocation_retry` 的 `filePath` 允许输出仓库相对路径及文件名，仅来源于本模块内部文件异常上下文，不消费外部 details 的路径字段。双引号包围字段，转义引号、反斜线、控制字符、Unicode 格式字符及行分隔符；转义结果最多 2048 字符，超出追加截断标记。无单文件定位时为 `NONE`。不输出绝对根目录、链接目标、文件内容、异常原文或 stderr；数据库安全消息与 API details 仍仅使用路径指纹。日志含业务文件名，应限制运维访问，外发前脱敏；此例外不放宽体验工作区等其他日志安全边界。

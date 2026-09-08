@@ -2169,3 +2169,7 @@ SHA-256 一致。
 `d032d0a50c59a719f056654880424f5525a843ea96512ac7d95c7d4c36027362`。发布前必须收集企业 `postgres` 数据库的完整
 `flyway_schema_history`，从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中该 migration 字节一致；
 未知 checksum、未知更高版本或历史分叉必须停止，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
+
+### 搬迁安全错误说明兼容性
+
+个人工作区搬迁诊断复用 `personal_workspace_relocations.safe_error_message`（512 字符），写入受控 stage/reason/pathRef 和固定中文提示；`safe_error_code`、表结构、状态机、重试与租约字段不变，无新增 migration。历史通用说明仅在新版本处理下一次失败时更新，禁止为补诊断手工更新记录。

@@ -263,3 +263,7 @@ mvn test
 - 对外成功/错误响应使用 `test-agent-common` 的 `ApiResponse` 和 `ApiErrorResponse`。
 - HTTP 入口 traceId 使用 `X-Trace-Id`，由 `test-agent-observability` 和 `test-agent-api` 协作生成或透传。
 - 后端运行态使用 Log4j2 作为 SLF4J 实际绑定，默认控制台日志为 `key=value` 结构化格式并输出 traceId；运行文件日志写入 `logs/backend.log`，SSE 相关日志额外写入 `logs/sse.log`，`ERROR` 及以上日志额外写入 `logs/error.log`。
+
+### 个人工作区搬迁诊断
+
+`test-agent-workspace-management` 在搬迁失败时输出受控阶段、原因、路径指纹、日志专用相对路径/文件名及本次 traceId；详细字段与排查步骤见 `docs/architecture/xxl-job-integration.md` 的“个人工作区搬迁失败诊断”。不改变迁移、租约、重试、文件保护及部署节点。

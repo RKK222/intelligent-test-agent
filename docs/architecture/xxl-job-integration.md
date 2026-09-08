@@ -149,3 +149,19 @@ executor 的 XXL 注册和 ROUND 路由仍不携带 Linux 亲和；取得全局�
 - 离线包仍只有一个平台应用 JAR，同时包含上游源码、LICENSE、UPSTREAM 元数据、版本文件和配置示例。
 
 完整变量和网络要求见 `docs/deployment/backend.md`，验证清单见 `docs/testing/xxl-job-integration.md`。
+
+## 个人工作区搬迁失败诊断
+
+搬迁重试事件 `personal_workspace_relocation_retry` 保留原 `relocationId/sourceLinuxServerId/targetLinuxServerId/attempt/errorCode/errorType`，新增：
+
+- `stage`：`SOURCE_PATHS`、`CREATE_ARCHIVE`、`EXPORT_SNAPSHOT`、`CAPTURE_SOURCE_STATE`、`INSPECT_UNTRACKED`、`CREATE_BUNDLE`、`WRITE_ARCHIVE`、`VERIFY_SOURCE_STATE`、`HASH_ARCHIVE`、`REGISTER_SNAPSHOT`、`TRANSFER`、`CLEANUP_SOURCE`。`TRANSFER` 包含远端传输/应用响应，不声称已细分目标内部阶段。
+- `reason`：白名单业务原因，优先 `reason`，其次 `gitFailureType`；未知值为 `UNCLASSIFIED`，不透传外部字符串。
+- `pathRef`：单文件拒绝/归档内容变化时，源仓库相对路径的 UTF-8 SHA-256；否则为 `NONE`。另以日志专用 `filePath="..."` 直接显示仓库相对路径及文件名（如 `.opencode/xxx`）；不记录绝对根目录或链接目标。字段仅来自内部文件异常上下文，转义引号、反斜线、控制字符及格式字符，转义结果最多 2048 字符，超出追加 `...[truncated]`，无单文件定位时为 `NONE`。
+- `traceId`：本次调度/广播执行的 traceId，不拿搬迁最初发现时的数据库 traceId 冒充本次调用。
+- `causeType`：有界原因链末端异常类型；不输出原始消息、堆栈、凭据或 stderr。
+
+既有 `safe_error_code` 保持 `RELOCATION_<ErrorCode>` / `RELOCATION_INTERNAL_ERROR`；`safe_error_message` 改为不超过 512 字符的阶段、原因、路径指纹及固定中文提示。无数据库 migration，不改重试时间、认领租约、调度或文件安全判断。旧失败记录不会追溯补齐，需新版本源 Java 实际重试后更新。
+
+现场处理顺序：在 DBeaver 查询该记录 `attempt_count/updated_at/safe_error_message/snapshot_sha256/archive_size_bytes/target_applied_at`，确认新重试发生；按 `relocationId` 查源 Java 本次日志。`INSPECT_UNTRACKED + UNSUPPORTED_UNTRACKED_ENTRY` 检查含 ignored 文件的链接/特殊条目；`VERIFY_SOURCE_STATE + SOURCE_CHANGED_DURING_SNAPSHOT` 检查持续写入；`SOURCE_PATHS` 检查副本/目录/搬迁事实；`TRANSFER` 转向目标与传输；`CLEANUP_SOURCE` 不要重新导出或修改服务器归属。
+
+现场直接查看源端日志 `filePath` 定位文件，无需计算哈希；数据库安全消息仍只保留 `pathRef`，相对路径不进入 API details 或事件。哈希仅用于诊断关联，不是授权凭据，也不是加密。每 30 分钟默认扫描与独立 `next_retry_at`/租约条件同时生效；XXL 手动触发不绕过到期条件。发布需源端 Java 使用新版本，不能只更新目标 `.114`；按现有发布流程部署，本改动无需新增节点或修改环境配置。

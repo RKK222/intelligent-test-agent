@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.common.git.GitWorkspaceService;
 import com.enterprise.testagent.common.git.GitWorkspaceService.PortableTrackedState;
+import com.enterprise.testagent.workspace.PersonalWorkspaceRelocationDiagnostics.Stage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -64,12 +65,16 @@ class PersonalWorkspaceSnapshotService {
         Path normalizedRoot = sourceRoot.toAbsolutePath().normalize();
         Path normalizedArchive = archive.toAbsolutePath().normalize();
         Path bundle = null;
+        // 只记录执行到哪一步，失败时保留原错误码和源文件保护，不额外重试或跳过文件。
+        Stage stage = Stage.CAPTURE_SOURCE_STATE;
         try {
             PortableTrackedState before = git.capturePortableTrackedState(normalizedRoot);
+            stage = Stage.INSPECT_UNTRACKED;
             List<UntrackedFile> untrackedBefore = inspectUntracked(normalizedRoot);
             String refBase = refBase(relocationId);
             String headRef = refBase + "/head";
             String stashRef = refBase + "/stash";
+            stage = Stage.CREATE_BUNDLE;
             bundle = Files.createTempFile(normalizedArchive.getParent(), ".workspace-relocation-", ".bundle");
             git.createPortableBundle(normalizedRoot, bundle, headRef, stashRef, before);
             SnapshotManifest manifest = new SnapshotManifest(
@@ -82,8 +87,10 @@ class PersonalWorkspaceSnapshotService {
                     before.worktreeTree(),
                     before.stashCommit() != null,
                     untrackedBefore);
+            stage = Stage.WRITE_ARCHIVE;
             writeArchive(normalizedRoot, bundle, normalizedArchive, manifest);
 
+            stage = Stage.VERIFY_SOURCE_STATE;
             PortableTrackedState after = git.capturePortableTrackedState(normalizedRoot);
             List<UntrackedFile> untrackedAfter = inspectUntracked(normalizedRoot);
             if (!sameTrackedContent(before, after) || !untrackedBefore.equals(untrackedAfter)) {
@@ -96,17 +103,18 @@ class PersonalWorkspaceSnapshotService {
             if (archiveSize > MAX_ARCHIVE_BYTES) {
                 throw tooLarge();
             }
+            stage = Stage.HASH_ARCHIVE;
             return new Snapshot(normalizedArchive, sha256(normalizedArchive), archiveSize, before.headCommit());
         } catch (PlatformException exception) {
             deleteQuietly(normalizedArchive);
-            throw exception;
+            throw PersonalWorkspaceRelocationDiagnostics.atStage(exception, stage);
         } catch (Exception exception) {
             deleteQuietly(normalizedArchive);
-            throw new PlatformException(
+            throw PersonalWorkspaceRelocationDiagnostics.atStage(new PlatformException(
                     ErrorCode.GIT_UNAVAILABLE,
                     "创建个人工作区搬迁快照失败",
                     Map.of("reason", "SNAPSHOT_EXPORT_FAILED"),
-                    exception);
+                    exception), stage);
         } finally {
             deleteQuietly(bundle);
         }
@@ -207,10 +215,10 @@ class PersonalWorkspaceSnapshotService {
         try (OutputStream output = Files.newOutputStream(archive);
              ZipOutputStream zip = new ZipOutputStream(output)) {
             putBytes(zip, MANIFEST_ENTRY, manifestBytes);
-            putFile(zip, BUNDLE_ENTRY, bundle, null);
+            putFile(zip, BUNDLE_ENTRY, bundle, null, null);
             for (UntrackedFile file : manifest.untrackedFiles()) {
                 Path source = safeResolve(sourceRoot, file.path());
-                putFile(zip, file.storageEntry(), source, file.sha256());
+                putFile(zip, file.storageEntry(), source, file.sha256(), file.path());
             }
         }
     }
@@ -289,10 +297,11 @@ class PersonalWorkspaceSnapshotService {
             String relative = paths.get(index);
             Path file = safeResolve(root, relative);
             if (Files.isSymbolicLink(file) || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-                throw new PlatformException(
+                throw PersonalWorkspaceRelocationDiagnostics.withFilePath(new PlatformException(
                         ErrorCode.CONFLICT,
                         "未跟踪文件包含暂不支持的符号链接或特殊文件",
-                        Map.of("reason", "UNSUPPORTED_UNTRACKED_ENTRY"));
+                        Map.of("reason", "UNSUPPORTED_UNTRACKED_ENTRY",
+                                "pathRef", PersonalWorkspaceRelocationDiagnostics.pathRef(relative))), relative);
             }
             long size = Files.size(file);
             total = Math.addExact(total, size);
@@ -513,7 +522,8 @@ class PersonalWorkspaceSnapshotService {
         zip.closeEntry();
     }
 
-    private void putFile(ZipOutputStream zip, String name, Path file, String expectedSha256) throws Exception {
+    private void putFile(
+            ZipOutputStream zip, String name, Path file, String expectedSha256, String relative) throws Exception {
         zip.putNextEntry(new ZipEntry(name));
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream input = Files.newInputStream(file)) {
@@ -527,10 +537,11 @@ class PersonalWorkspaceSnapshotService {
         zip.closeEntry();
         if (expectedSha256 != null
                 && !expectedSha256.equals(HexFormat.of().formatHex(digest.digest()))) {
-            throw new PlatformException(
+            throw PersonalWorkspaceRelocationDiagnostics.withFilePath(new PlatformException(
                     ErrorCode.CONFLICT,
                     "个人工作区在归档期间发生变化，将稍后重试",
-                    Map.of("reason", "SOURCE_FILE_CHANGED_DURING_ARCHIVE"));
+                    Map.of("reason", "SOURCE_FILE_CHANGED_DURING_ARCHIVE",
+                            "pathRef", PersonalWorkspaceRelocationDiagnostics.pathRef(relative))), relative);
         }
     }
 
