@@ -17270,3 +17270,32 @@
 - 代码级复现与回归通过；提交时尚待 Jenkins 发布和真实页面验收，不能把已落库版本直接当作完整创建成功。
 - 发布补验：修复提交 5db45f469 已推送两个 release 远端，Jenkins #23 SUCCESS，标签 release-23-5db45f46；前后端容器 Started，verify-deployment 通过，对外 readiness=UP、首页 HTTP 200。
 - 真实业务页面尚未复测：原已登录浏览器标签被另一会话占用，独立标签进入本地登录页；未借用或提取其它会话凭据。因此只确认部署和代码级回归通过，不声称完整新建链路验收通过。
+
+## 2026-09-07 - 重新构建当前 release 企业离线完整包
+
+### Why
+
+- 上一份包含客户端更新的候选包尚未部署，之后 `release` 又合入版本菜单、批量生成兼容和版本副本时间精度修复等提交，不能把旧候选当作现场基线或仅重封装。
+
+### What
+
+- 以 `7756bbe7d6e3` 的产品代码和当前 `release` 交付手册重新构建内层发布 ZIP，并使用既有受控组织签名密钥生成客户端不可变版本 `20260907171431`。
+- 重建固定名外层包 `/Users/kaka/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip`；复用三台节点专属配置，未写入或覆盖 `.4` 灰度 `models.json`。
+- 同步修正包内多后台手册的客户端版本、版本菜单/批量生成兼容和时间精度说明，避免现场操作说明仍指向上一候选。
+
+### How
+
+- 完整打包前组件计划确认 worker/runtime、toolbox 均为 `reuse`，local client 为 `included`；worker 指纹 `aba0bb06...127687b`，toolbox 指纹 `35447da0...f15040`。
+- `tools/verify-internal-incremental-components.sh`、`tools/verify-opencode-tool-runtime-deploy.sh`、`tools/verify-internal-two-backend-complete-package.sh` 均通过；外层 SHA、ZIP 结构、内外层内层 ZIP 摘要一致及客户端 manifest RSA 签名均已验证。
+- 对最终 persistence JAR 校验正式 toolbox migration，SHA-256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`；从最后已部署基线到本次 HEAD 没有新增 Flyway migration 文件。
+
+### Result
+
+- 内层 SHA-256：`8e5b8a3bd8c31d8e5786359393d7a3d91b39f2e2ec49ca94d17cbd8ee6e0d4f7`；外层 SHA-256：`00d08efad84defe1d4925bf571f62e8c0a2f0bc46e79a994b19bb58da07627ba`。
+- 两台后台节点包中的 `TEST_AGENT_TCDS_BASE_URL` 均为 `http://tcds-prod.sdc.icbc:9080`；本轮无需加载 worker 镜像、重启 worker/toolbox、同步 CK/Mem0/BGE/pgvector 或更新 `.114` 模型灰度。
+## 2026-09-07 - 评审应用源码会话与物化超时修复方案
+
+- Why: 用户要求评审外部方案，未要求实施方案中的代码修改或企业部署。
+- What: 对照 release 的 SessionApplicationService、UserWorkspaceQueryService、公共分类鉴权、物化/retry 和前端请求实现，确认首次 APP_SOURCE 会话缺少受控鉴权回退；物化串行执行两条各 60 秒的 Git 命令，90 秒不是充分预算；retry 不重新解析 Git。
+- How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
+- Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
