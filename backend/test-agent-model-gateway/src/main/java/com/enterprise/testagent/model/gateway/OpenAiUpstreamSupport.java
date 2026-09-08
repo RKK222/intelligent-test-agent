@@ -18,6 +18,10 @@ public final class OpenAiUpstreamSupport {
 
     /**
      * 只写入服务端解析出的供应商密钥与用户身份；调用前主动清除同名客户端值，避免身份覆盖。
+     *
+     * <p>同时设置 {@code Auth-Token} 和 {@code Authorization: Bearer}：企业内部网关读取
+     * {@code Auth-Token}，外部 OpenAI 兼容 API（如 DeepSeek）读取 {@code Authorization}。
+     * 两个 header 共存不会冲突，上游按自身协议选择读取。
      */
     public static void applyTrustedRequestHeaders(
             HttpHeaders headers,
@@ -32,8 +36,11 @@ public final class OpenAiUpstreamSupport {
         headers.remove(AUTH_TOKEN_HEADER);
         headers.remove(UCID_HEADER);
         headers.remove(TraceConstants.TRACE_ID_HEADER);
+        String token = requireText(providerToken, "providerToken");
         // 企业网关的 Bearer 模式不会让 UCID 生效，平台必须使用 Auth-Token 原值鉴权。
-        headers.set(AUTH_TOKEN_HEADER, requireText(providerToken, "providerToken"));
+        headers.set(AUTH_TOKEN_HEADER, token);
+        // 外部 OpenAI 兼容 API 只识别 Authorization: Bearer。
+        headers.set(HttpHeaders.AUTHORIZATION, "Bearer " + token);
         headers.setContentType(Objects.requireNonNull(contentType, "contentType must not be null"));
         headers.setAccept(accept == null || accept.isEmpty()
                 ? List.of(MediaType.APPLICATION_JSON)

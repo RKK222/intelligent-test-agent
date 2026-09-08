@@ -26,7 +26,8 @@ class OpenAiUpstreamSupportTest {
                 MediaType.APPLICATION_JSON,
                 List.of(MediaType.TEXT_EVENT_STREAM));
 
-        assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        // 外部 OpenAI 兼容 API 走 Authorization: Bearer，企业网关走 Auth-Token，两者共存。
+        assertThat(headers.getFirst(HttpHeaders.AUTHORIZATION)).isEqualTo("Bearer provider-token");
         assertThat(headers.getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER)).isEqualTo("provider-token");
         assertThat(headers.getFirst(OpenAiUpstreamSupport.PROVIDER_HEADER)).isNull();
         assertThat(headers.getFirst(OpenAiUpstreamSupport.UCID_HEADER)).isEqualTo("AUTH_001");

@@ -110,7 +110,7 @@ class AppSourceApplicationServiceTest {
         when(appSources.findSlot(REPOSITORY_ID)).thenReturn(Optional.empty());
         when(appSources.findActiveSnapshot(REPOSITORY_ID)).thenReturn(Optional.empty());
         when(git.resolveRemoteBranchCommit("/git/repo.git", "main", null)).thenReturn(COMMIT);
-        when(remote.listTree("/git/repo.git", COMMIT, null)).thenReturn(List.of(
+        when(remote.listTreeWithCommitOrBranchFallback("/git/repo.git", COMMIT, "main", null)).thenReturn(List.of(
                 new GitRemoteService.RemoteTreeNode("src", "src", GitRemoteService.NODE_TYPE_DIRECTORY, List.of(
                         new GitRemoteService.RemoteTreeNode(
                                 "Main.java", "src/Main.java", GitRemoteService.NODE_TYPE_FILE, List.of())))));
@@ -144,12 +144,12 @@ class AppSourceApplicationServiceTest {
                     .isEqualTo("src/Main.java");
         });
         verify(git).resolveRemoteBranchCommit("/git/repo.git", "main", null);
-        verify(remote).listTree("/git/repo.git", COMMIT, null);
+        verify(remote).listTreeWithCommitOrBranchFallback("/git/repo.git", COMMIT, "main", null);
     }
 
     @Test
     void emptyDirectoryTreeSnapshotStillReturnsTheFullFixedCommit() {
-        when(remote.listTree("/git/repo.git", COMMIT, null)).thenReturn(List.of(
+        when(remote.listTreeWithCommitOrBranchFallback("/git/repo.git", COMMIT, "main", null)).thenReturn(List.of(
                 new GitRemoteService.RemoteTreeNode(
                         "empty", "empty", GitRemoteService.NODE_TYPE_DIRECTORY, List.of())));
 
@@ -159,7 +159,7 @@ class AppSourceApplicationServiceTest {
         assertThat(snapshot.targetCommit()).isEqualTo(COMMIT).hasSize(40);
         assertThat(snapshot.nodes()).isEmpty();
         verify(git).resolveRemoteBranchCommit("/git/repo.git", "main", null);
-        verify(remote).listTree("/git/repo.git", COMMIT, null);
+        verify(remote).listTreeWithCommitOrBranchFallback("/git/repo.git", COMMIT, "main", null);
     }
 
     @Test
@@ -608,7 +608,7 @@ class AppSourceApplicationServiceTest {
         assertThat(request.getValue().targetServerIds()).containsExactly(new LinuxServerId("server-a"));
         assertThat(active.expiresAt()).isEqualTo(NOW.plusSeconds(3600));
         verify(git, never()).resolveRemoteBranchCommit(any(), any(), any());
-        verify(remote, never()).listTree(any(), any(), any());
+        verify(remote, never()).listTreeWithCommitOrBranchFallback(any(), any(), any(), any());
         verify(dispatcher).wake(retry, request.getValue().targetServerIds());
     }
 
