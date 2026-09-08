@@ -133,6 +133,9 @@ const repositoryTree = ref<WorkspaceTreeNode[]>([]);
 const newDirectoryName = ref("");
 const treeErrorMessage = ref("");
 const workspaceName = ref(DEFAULT_WORKSPACE_ALIAS);
+const workspaceRenameOpen = ref(false);
+const workspaceRenameTarget = ref<ApplicationWorkspaceConfig | null>(null);
+const workspaceRenameName = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
 const workspaceCatalogNotifiedOperationIds = new Set<string>();
 let workspaceCreatePollTimer: number | undefined;
@@ -146,6 +149,23 @@ const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.step
 const customBranchError = ref("");
 const selectedAppName = computed(() => selectedApp.value?.appName ?? "");
 const workspaceAlias = computed(() => workspaceName.value.trim());
+const workspaceRenameAlias = computed(() => workspaceRenameName.value.trim());
+const workspaceRenameDuplicate = computed(() => {
+  const alias = workspaceRenameAlias.value;
+  const target = workspaceRenameTarget.value;
+  return Boolean(alias) && workspaces.value.some((workspace) =>
+    workspace.workspaceId !== target?.workspaceId
+    && workspace.workspaceName.trim() === alias
+  );
+});
+const canRenameWorkspace = computed(() => {
+  const target = workspaceRenameTarget.value;
+  return Boolean(target)
+    && Boolean(workspaceRenameAlias.value)
+    && workspaceRenameAlias.value !== target?.workspaceName.trim()
+    && !workspaceRenameDuplicate.value
+    && !loading.value;
+});
 const matchingWorkspaceLocation = computed(() => workspaces.value.find((workspace) =>
   workspace.repositoryId === workspaceRepositoryId.value
   && workspace.branch === workspaceBranch.value
@@ -524,6 +544,42 @@ async function updateWorkspaceEnabled(workspace: ApplicationWorkspaceConfig, ena
   });
 }
 
+function openWorkspaceRename(workspace: ApplicationWorkspaceConfig) {
+  // 行内草稿独立于列表，失焦取消；确认框打开后锁定草稿，避免焦点转移丢失名称。
+  if (loading.value || workspaceRenameOpen.value || workspaceRenameTarget.value?.workspaceId === workspace.workspaceId) return;
+  workspaceRenameTarget.value = workspace;
+  workspaceRenameName.value = workspace.workspaceName;
+}
+
+function cancelWorkspaceRenameOnBlur() {
+  if (!workspaceRenameOpen.value) resetWorkspaceRename();
+}
+
+function confirmWorkspaceRename(event: Event | KeyboardEvent) {
+  // 中文输入法选字的回车不能误触发确认。
+  if (!(event instanceof KeyboardEvent) || event.isComposing || event.keyCode === 229 || !canRenameWorkspace.value) return;
+  workspaceRenameOpen.value = true;
+}
+
+function resetWorkspaceRename() {
+  workspaceRenameOpen.value = false;
+  workspaceRenameTarget.value = null;
+  workspaceRenameName.value = "";
+}
+
+async function renameWorkspace() {
+  const workspace = workspaceRenameTarget.value;
+  const workspaceName = workspaceRenameAlias.value;
+  if (!workspace || !canRenameWorkspace.value) return;
+  await run(async () => {
+    // 名称修改复用配置管理 PATCH，工作空间位置、版本和启停状态保持不变。
+    await api.updateApplicationWorkspace(workspace.appId, workspace.workspaceId, { workspaceName });
+    resetWorkspaceRename();
+    await loadWorkspaces();
+    emit("workspace-catalog-changed");
+  });
+}
+
 async function loadBranches(changedRepositoryId?: string) {
   const repositoryId = changedRepositoryId || workspaceRepositoryId.value;
   const requestToken = ++branchRequestToken;
@@ -756,6 +812,7 @@ watch(() => props.initialAppId, (newAppId) => {
 async function handleApplicationChange(appId: string) {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
+  resetWorkspaceRename();
   linkRepositoryId.value = "";
   lastLinkRepositoryId.value = "";
   await run(loadAppContext);
@@ -1069,20 +1126,52 @@ onBeforeUnmount(() => {
           <div v-if="!testWorkspaces.length" class="ta-empty-hint">暂无工作空间</div>
           <div v-for="ws in testWorkspaces" :key="ws.workspaceId" class="ta-item-row">
             <div>
-              <div class="ta-item-title">{{ ws.workspaceName }}</div>
+              <el-input
+                :model-value="workspaceRenameTarget?.workspaceId === ws.workspaceId ? workspaceRenameName : ws.workspaceName"
+                :readonly="workspaceRenameTarget?.workspaceId !== ws.workspaceId || workspaceRenameOpen"
+                :disabled="loading"
+                :aria-label="`工作空间名称：${ws.workspaceName}`"
+                title="单击编辑，回车确认，点击文本框外取消"
+                maxlength="255"
+                @click="openWorkspaceRename(ws)"
+                @update:model-value="workspaceRenameName = $event"
+                @blur="cancelWorkspaceRenameOnBlur"
+                @keydown.enter.prevent="confirmWorkspaceRename"
+              />
+              <div v-if="workspaceRenameTarget?.workspaceId === ws.workspaceId && workspaceRenameDuplicate" class="ta-branch-error">工作空间名称已存在</div>
               <div class="ta-item-subtitle">{{ ws.branch }} · {{ ws.directoryPath }}</div>
             </div>
-            <el-switch
-              :model-value="ws.enabled !== false"
-              :disabled="loading"
-              active-text="启用"
-              inactive-text="停用"
-              :aria-label="`设置工作空间“${ws.workspaceName}”是否启用`"
-              @change="(enabled: string | number | boolean) => updateWorkspaceEnabled(ws, Boolean(enabled))"
-            />
+            <div class="ta-item-actions">
+              <el-switch
+                :model-value="ws.enabled !== false"
+                :disabled="loading"
+                active-text="启用"
+                inactive-text="停用"
+                :aria-label="`设置工作空间“${ws.workspaceName}”是否启用`"
+                @change="(enabled: string | number | boolean) => updateWorkspaceEnabled(ws, Boolean(enabled))"
+              />
+            </div>
           </div>
         </div>
       </div>
+
+      <el-dialog
+        v-model="workspaceRenameOpen"
+        title="重命名工作空间"
+        width="460px"
+        append-to-body
+        align-center
+        :close-on-click-modal="!loading"
+        :close-on-press-escape="!loading"
+        :show-close="!loading"
+        @closed="resetWorkspaceRename"
+      >
+        <p>确认将工作空间“{{ workspaceRenameTarget?.workspaceName }}”修改为“{{ workspaceRenameAlias }}”吗？</p>
+        <template #footer>
+          <el-button :disabled="loading" @click="resetWorkspaceRename">取消</el-button>
+          <el-button type="primary" :disabled="!canRenameWorkspace" @click="renameWorkspace">确认重命名</el-button>
+        </template>
+      </el-dialog>
 
       <div v-if="selectedAppId === '' && hasAppSettingsPermission" class="ta-empty-hint">
         暂无启用应用

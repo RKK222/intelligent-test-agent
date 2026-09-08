@@ -487,3 +487,42 @@
 
 - 从搜索结果打开 Workspace 文件后，文件树不再只展开目录，而会选中并滚动到对应文件；同路径引用节点不会被误选。
 - 使用 `release`，不新增部署节点；不涉及 HTTP API、RunEvent/SSE、WebSocket 契约、数据库、Flyway、后端、部署、安全、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-09-07 - 支持管理员重命名已有工作空间
+
+### Why
+
+- 后端 `PATCH /applications/{appId}/workspaces/{workspaceId}` 与前端 `updateApplicationWorkspace` 已支持应用管理员和超级管理员更新 `workspaceName`，但设置页“已有工作空间”列表缺少直接入口。
+
+### What
+
+- 在设置页“工作空间管理”的已有工作空间行新增“重命名”操作，弹窗预填当前名称；空名称、名称未变化或同一应用内名称重复时禁止提交。
+- 重命名只提交 `workspaceName`，成功后刷新列表并通知工作台刷新工作空间目录；原有启停开关和不提供删除操作的边界保持不变。
+- 增加成功重命名及重复名称拦截回归测试，并同步 agent-web README 与内置用户手册。
+
+### How
+
+- 复用既有 `updateApplicationWorkspace` PATCH API，没有新增接口、DTO 或后端逻辑。
+- 定向 Vitest `settings-app-workspace-panel.test.ts` 共 22 项全部通过；`@test-agent/agent-web` typecheck 与 `git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录，并隔离保留工作区已有 TCDS 修改及两个未跟踪本地启动脚本。
+
+### Result
+
+- APP_ADMIN/SUPER_ADMIN 可在已有工作空间列表直接修改显示名称，工作台目录会同步刷新；版本库、分支、目录、版本和启停状态不变。
+- 使用 `release`，不新增部署节点；不变更 HTTP API 契约、RunEvent/SSE、数据库、Flyway、后端、安全、环境配置、generated SDK 或 OpenCode 只读源码。
+
+## 2026-09-08 - 工作空间名称改为行内编辑并回车确认
+
+### Why
+- 用户要求不增加独立重命名按钮；交互由双击弹窗编辑进一步调整为单击行内编辑、点击框外取消、回车弹窗确认。
+
+### What
+- 已有工作空间名称框单击进入编辑，失焦丢弃草稿并恢复原名称；有效新名称按回车后展示只读确认框，确认才调用 PATCH。取消确认放弃修改，确认框获得焦点时不丢弃草稿。
+- 保留名称校验、PATCH 保存、目录刷新和启停逻辑，同步组件测试、agent-web README 与用户手册。
+
+### How
+- 定向 Vitest 22/22 通过，agent-web typecheck 通过；覆盖失焦取消、空白/未变化/重复名称、输入法回车、确认前不提交、取消确认与成功保存。
+- 已回顾全部提交者会话日志近期记录；本次开始工作区 clean，在当前 release 上最小修改，不新建分支。
+
+### Result
+- 最终交互为单击编辑、失焦取消、回车弹窗确认；不变更 API、事件、数据库、部署、安全或兼容性契约。未做真实浏览器验收。

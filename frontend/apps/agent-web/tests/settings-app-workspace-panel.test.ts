@@ -760,27 +760,118 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await waitFor(() => expect(api.unlinkApplicationRepository).toHaveBeenCalledWith("F-COSS", "repo_wr"));
   });
 
-  it("shows existing workspaces as read-only items without rename or delete operations", async () => {
+  it("renames an existing workspace without exposing delete operations", async () => {
+    const api = createApi();
+    const onWorkspaceCatalogChanged = vi.fn();
+    let workspaceName = "测试工作空间";
+    api.listApplicationWorkspaces = vi.fn().mockImplementation(async () => [
+      {
+        workspaceId: "ws_test",
+        appId: "F-COSS",
+        workspaceName,
+        branch: "feature_testagent_20260707",
+        directoryPath: "tests",
+        repositoryId: "repo_wr",
+        enabled: true,
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-07-23T00:00:00Z"
+      }
+    ]);
+    api.updateApplicationWorkspace = vi.fn().mockImplementation(async (_appId, _workspaceId, payload) => {
+      workspaceName = payload.workspaceName ?? workspaceName;
+    });
+    const view = renderPanel(api, ["APP_ADMIN"], undefined, onWorkspaceCatalogChanged);
+
+    await view.findByText("应用人员管理");
+    await fireEvent.click(view.getByText("工作空间管理"));
+    expect(await view.findByDisplayValue("测试工作空间")).toBeTruthy();
+    expect(view.queryByText("删除")).toBeNull();
+    expect(view.queryByRole("button", { name: "重命名" })).toBeNull();
+    const nameBox = view.getByRole("textbox", { name: "工作空间名称：测试工作空间" }) as HTMLInputElement;
+    await waitFor(() => expect(nameBox.disabled).toBe(false));
+    expect(nameBox.readOnly).toBe(true);
+    await fireEvent.click(nameBox);
+    expect(nameBox.readOnly).toBe(false);
+    expect(view.queryByRole("dialog")).toBeNull();
+    await fireEvent.update(nameBox, "放弃的名称");
+    await fireEvent.blur(nameBox);
+    expect(nameBox.value).toBe("测试工作空间");
+    expect(nameBox.readOnly).toBe(true);
+    expect(api.updateApplicationWorkspace).not.toHaveBeenCalled();
+
+    await fireEvent.click(nameBox);
+    await fireEvent.keyDown(nameBox, { key: "Enter" });
+    expect(view.queryByRole("dialog")).toBeNull();
+    await fireEvent.update(nameBox, "   ");
+    await fireEvent.keyDown(nameBox, { key: "Enter" });
+    expect(view.queryByRole("dialog")).toBeNull();
+    await fireEvent.update(nameBox, "新工作空间");
+    await fireEvent.keyDown(nameBox, { key: "Enter", isComposing: true });
+    expect(view.queryByRole("dialog")).toBeNull();
+    await fireEvent.keyDown(nameBox, { key: "Enter" });
+    await fireEvent.blur(nameBox);
+    let dialog = view.getByRole("dialog");
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(within(dialog).getByText("确认将工作空间“测试工作空间”修改为“新工作空间”吗？")).toBeTruthy();
+    expect(api.updateApplicationWorkspace).not.toHaveBeenCalled();
+    await fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(nameBox.value).toBe("测试工作空间");
+    expect(api.updateApplicationWorkspace).not.toHaveBeenCalled();
+
+    await fireEvent.click(nameBox);
+    await fireEvent.update(nameBox, "新工作空间");
+    await fireEvent.keyDown(nameBox, { key: "Enter" });
+    dialog = view.getByRole("dialog");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "确认重命名" }));
+    await waitFor(() => expect(api.updateApplicationWorkspace).toHaveBeenCalledWith(
+      "F-COSS",
+      "ws_test",
+      { workspaceName: "新工作空间" }
+    ));
+    expect(await view.findByDisplayValue("新工作空间")).toBeTruthy();
+    expect(onWorkspaceCatalogChanged).toHaveBeenCalledTimes(1);
+    expect(api.deleteApplicationWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("prevents renaming a workspace to another existing workspace name", async () => {
     const api = createApi();
     api.listApplicationWorkspaces = vi.fn().mockResolvedValue([
       {
         workspaceId: "ws_test",
+        appId: "F-COSS",
         workspaceName: "测试工作空间",
         branch: "feature_testagent_20260707",
         directoryPath: "tests",
-        repositoryId: "repo_wr"
+        repositoryId: "repo_wr",
+        enabled: true,
+        createdAt: "2026-07-01T00:00:00Z",
+        updatedAt: "2026-07-23T00:00:00Z"
+      },
+      {
+        workspaceId: "ws_other",
+        appId: "F-COSS",
+        workspaceName: "另一工作空间",
+        branch: "feature_testagent_20260708",
+        directoryPath: "tests-other",
+        repositoryId: "repo_wr",
+        enabled: true,
+        createdAt: "2026-07-02T00:00:00Z",
+        updatedAt: "2026-07-24T00:00:00Z"
       }
     ]);
-    const { findByText, getByText, queryByText } = renderPanel(api);
+    const view = renderPanel(api);
 
-    await findByText("应用人员管理");
-    await fireEvent.click(getByText("工作空间管理"));
-    expect(await findByText("测试工作空间")).toBeTruthy();
-
-    expect(queryByText("重命名")).toBeNull();
-    expect(queryByText("删除")).toBeNull();
-    expect(api.deleteApplicationWorkspace).not.toHaveBeenCalled();
-    expect(queryByText("确认删除工作空间")).toBeNull();
+    await view.findByText("应用人员管理");
+    await fireEvent.click(view.getByText("工作空间管理"));
+    await view.findByDisplayValue("测试工作空间");
+    await waitFor(() => expect((view.getByRole("textbox", { name: "工作空间名称：测试工作空间" }) as HTMLInputElement).disabled).toBe(false));
+    const nameBox = view.getByRole("textbox", { name: "工作空间名称：测试工作空间" });
+    await fireEvent.click(nameBox);
+    await fireEvent.update(nameBox, "另一工作空间");
+    expect(view.getByText("工作空间名称已存在")).toBeTruthy();
+    await fireEvent.keyDown(nameBox, { key: "Enter" });
+    expect(view.queryByRole("dialog")).toBeNull();
+    expect(api.updateApplicationWorkspace).not.toHaveBeenCalled();
   });
 
   it("updates whether an existing workspace is enabled", async () => {
