@@ -1405,6 +1405,10 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: #f8fafc;
 }
+/* 目录树滑块常显，局部覆盖全局透明样式，不改变其他面板的悬浮行为。 */
+.ta-workspace-tree-panel::-webkit-scrollbar-thumb {
+  background-color: rgba(140, 140, 140, 0.48);
+}
 .ta-workspace-tree-header {
   display: flex;
   align-items: center;
