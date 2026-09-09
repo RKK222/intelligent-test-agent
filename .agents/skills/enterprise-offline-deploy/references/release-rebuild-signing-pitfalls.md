@@ -80,6 +80,28 @@ unzip -Z1 deploy/internal/dist/test-agent-internal-release.zip | \
 
 同一 JDK/OpenCode 输入跨客户端版本应保持相同 SHA-256。版本变化导致这两个摘要变化时，先检查归档时间戳、条目顺序、属主和 gzip header，不要让用户重复下载同一运行时。
 
+### 客户端体积异常的强制停线门禁
+
+“当前只改前后端”时，`local client=included` 是异常信号，不是可以忽略的正常现象。生成外层包前必须完成下面的判定；不能先签发一个新客户端版本、看到包体变大后再解释：
+
+1. 从 `.2` 的**实际安装目录**留存当前客户端版本、manifest/签名摘要和组件状态，而不是读取 Mac `dist/` 或未部署候选：
+
+   ```bash
+   awk -F'"' '$2 == "version" { print "installedClientVersion=" $4; exit }' \
+     /data/testagent/dist/local-opencode-client/stable/manifest.json
+   sha256sum \
+     /data/testagent/dist/local-opencode-client/stable/manifest.json \
+     /data/testagent/dist/local-opencode-client/stable/manifest.json.sig
+   awk -F= '$1 ~ /^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT/ { print }' \
+     /data/testagent/config/release-component-state.env
+   ```
+
+2. 对比最后成功部署的客户端输入：客户端 JAR/启动器源码、下载与控制域名、组织签名公钥、JDK/OpenCode 原始输入 SHA-256、公共能力发布 commit/归档摘要。普通前端页面、后端业务代码、发布手册或客户端 README 的改动不构成重新签发客户端的理由。
+3. 上述输入均未变化时，保留目标机已安装客户端的版本与五项摘要，先执行 `--component-plan-only`；预期必须是 `local client component: reuse`，最终 `release-components.env` 也必须为 `TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse`，且 ZIP 中不得存在 `dist/local-opencode-client/`。
+4. 如果计划意外显示 `included`，立即停止打包并找出哪个输入发生变化；特别检查是否只是人为递增了 `TEST_AGENT_LOCAL_CLIENT_VERSION`。禁止为了得到较小包而手改 `.2` 的 `release-component-state.env`、伪造 baseline，或把不匹配的客户端版本标为 `reuse`。实际安装版本与构建输入不一致时，必须明确选择“重新签发并全量下发客户端”或“恢复已部署客户端的受控输入后再打平台包”。
+
+这种门禁避免把约 200 MiB JDK 和约 60 MiB OpenCode 运行时随纯前后端发布重复传输，也避免客户端签名、下载地址或公共能力真的变化时被错误跳过。
+
 ## 4. 内外层包总是成对重建
 
 内层 `test-agent-internal-release.zip` 每次变化后，固定名外层包必须重新生成。不能拿历史外层包仅因为它自己的 `.sha256` 仍通过就继续分发。

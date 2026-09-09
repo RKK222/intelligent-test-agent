@@ -187,6 +187,26 @@ deploy/internal/package-release.sh --component-plan-only \
   --output-dir deploy/internal/dist
 ```
 
+### 客户端是否进入平台包的强制判定
+
+前后端业务改动本身不需要重新签发客户端。每次企业打包前，先在 `.2` 留存**已实际部署**客户端的版本、签名清单摘要和组件状态；不能用 Mac 构建目录或未部署候选替代：
+
+```bash
+awk -F'"' '$2 == "version" { print "installedClientVersion=" $4; exit }' \
+  /data/testagent/dist/local-opencode-client/stable/manifest.json
+sha256sum \
+  /data/testagent/dist/local-opencode-client/stable/manifest.json \
+  /data/testagent/dist/local-opencode-client/stable/manifest.json.sig
+awk -F= '$1 ~ /^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT/ { print }' \
+  /data/testagent/config/release-component-state.env
+```
+
+只有客户端 JAR/启动器、下载或控制域名、组织签名公钥、JDK/OpenCode 输入 SHA-256、公共能力发布 commit 或能力归档摘要发生变化，才递增 `TEST_AGENT_LOCAL_CLIENT_VERSION` 并允许客户端为 `included`。普通前端、后端、部署手册或客户端 README 改动都不是理由。
+
+上述输入未变化时，以目标机已安装版本和摘要作为受控基线先执行 `--component-plan-only`。预期输出必须是 `local client component: reuse`；最终内层 `release-components.env` 必须为 `TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse`，且 ZIP 中不得存在 `dist/local-opencode-client/`。若计划显示 `included`，特别检查是否只是人为递增了版本号；立即停止，不得先打出约 400 MiB 的候选再解释。
+
+客户端当前输入与目标机已安装摘要不一致时，也不得为了缩小包而手写组件状态、伪造 baseline 或强行标记 `reuse`。必须明确选择“按新输入签发并全量下发客户端”或“恢复与已部署版本相同的受控输入后重打平台包”。
+
 交付：
 
 ```text
