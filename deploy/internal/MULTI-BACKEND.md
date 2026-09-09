@@ -228,23 +228,15 @@ sha256sum -c test-agent-two-backend-complete.zip.sha256
 unzip -t test-agent-two-backend-complete.zip
 ```
 
-然后由中转机逐台发往目标服务器：
+然后由中转机逐台发往目标服务器。`/data/0709` 是既有接收目录，常规增量发布不再重复执行
+`ssh ... install -m`；只有首次初始化且确认目录不存在时，才单独创建一次该目录。
 
 ```bash
-ssh root@122.233.30.4 'install -d -m 0755 /data/0709'
-scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
-  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
-  root@122.233.30.4:/data/0709/
-
-ssh root@122.233.30.114 'install -d -m 0755 /data/0709'
-scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
-  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
-  root@122.233.30.114:/data/0709/
-
-ssh root@122.233.30.2 'install -d -m 0755 /data/0709'
-scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
-  ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
-  root@122.233.30.2:/data/0709/
+for host in 122.233.30.4 122.233.30.114 122.233.30.2; do
+  scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
+    ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip.sha256 \
+    "root@${host}:/data/0709/"
+done
 ```
 
 平台 zip 和校验文件只复制到：
@@ -255,10 +247,13 @@ scp ~/Desktop/mimoagent/0709/test-agent-two-backend-complete.zip \
 122.233.30.114:/data/0709/
 ```
 
-每台都执行：
+三台目标机都先校验并解压外层包；随后才可校验其中的内层包：
 
 ```bash
 cd /data/0709
+sha256sum -c test-agent-two-backend-complete.zip.sha256
+unzip -oq test-agent-two-backend-complete.zip
+cd /data/0709/test-agent-two-backend-complete
 sha256sum -c test-agent-internal-release.zip.sha256
 unzip -t test-agent-internal-release.zip
 ```
