@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-09 - 重新构建当前 release 企业离线完整包
+
+- Why: 用户要求以当前本地 `release` 重新打企业包；上一候选尚未部署，且之后合入应用源码工作区首次会话、远端 Git archive 兼容、搬迁诊断和工作空间设置体验改动。
+- What: 以产品提交 `b4debf95f79f4524e9739a9b1bb8be9a7cf59d7a` 完整构建内层包，重新签发客户端不可变版本 `20260909110624`，并重组双后端外层包。同步更新多后台手册的版本与本轮功能说明；节点专属归档继续复用，未覆盖 `.4` 灰度 `models.json`。
+- How: 完整构建通过后，`tools/verify-internal-incremental-components.sh`、`tools/verify-opencode-tool-runtime-deploy.sh`、`tools/verify-internal-two-backend-complete-package.sh` 均通过；外层 SHA、ZIP 结构、嵌入内层字节一致性、客户端 manifest RSA 签名和最终 persistence JAR migration 字节均已复核。worker/toolbox 均为 `reuse`，本地客户端为 `included`，LobeHub/memory 为 `disabled`。JDK/OpenCode 离线输入仍分别锁定 `edf0da4debe7cf475dbe320d174d6eed81479eb363f41e38a2efb740428c603a` 与 `eba87efba3976d533a24cca0316f8ef375b5f8e797c0a95c25ee919700b7ba35`；没有新增 PostgreSQL、XXL 或 ClickHouse migration，正式 toolbox migration SHA-256 仍为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`。
+- Result: 内层 SHA-256 为 `b6830da644f922471778dc8e4b52fcff4d092765d41b5c7dcedc26c64f18183a`，外层 SHA-256 为 `5a5424446dc73bb41437634980a335bc14030e3e7a219aa2194d307a9f23fe22`。两台后台保留的 `TEST_AGENT_TCDS_BASE_URL` 均为 `http://tcds-prod.sdc.icbc:9080`。未连接企业数据库或服务器；安装前仍须由目标环境查询并确认三套 Flyway 历史，出现未知 checksum、失败记录或版本分叉即停止，不能用 `repair` 或 `outOfOrder` 绕过。
+
 ### 2026-09-08 - 复核已合入的 APP_SOURCE 会话鉴权影响
 
 - Why: 用户要求分析当前代码改动的其它影响；以 ffb52e533 到 f5d1cc77b 的实际差异评审，不执行附件修复指令。

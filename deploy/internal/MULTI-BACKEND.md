@@ -18,7 +18,7 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
-## 当前增量说明（2026-09-07）
+## 当前增量说明（2026-09-09）
 
 - 用户已确认企业实际部署的浏览器 CDP 修复包基线：内层 SHA-256 为
   `bbbe20688aa6a5541886b7afc383c6a8236468a08ea1c3a17cdcc00ef26224fa`，外层 SHA-256 为
@@ -36,7 +36,7 @@
 - worker runtime 和 toolbox 为 `reuse`，本地客户端为 `included`。现有 programs 和签名公共能力依赖已经包含
   `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
-- 本轮重新签发并交付客户端 `20260907171431`，入口仍为 `http://mimo.sdc.cs.icbc:9996`，继续使用既有组织签名。
+- 本轮重新签发并交付客户端 `20260909110624`，入口仍为 `http://mimo.sdc.cs.icbc:9996`，继续使用既有组织签名。
   内层 ZIP 仅携带这一版完整离线客户端分发；`.2` 部署会先验签、再原子替换客户端静态分发目录，已有用户可在平台确认后更新，
   新用户可从网页下载安装。
 - 相对已部署的 360 CDP 包，本轮后端和前端还包含个人 SSH 私钥文件选择、SSH Key 变更后工作空间实时复检，以及标准应用
@@ -47,6 +47,11 @@
   子条目生成不再依赖旧 Chromium 可能缺失的 `Array.prototype.at()`，Windows 路径仍能正确生成文件名。
 - 新建版本副本回写按 PostgreSQL 微秒精度比较 `createdAt/updatedAt`，避免数据库时间四舍五入导致的
   `updatedAt must not be before createdAt` 误报；跨微秒的真实倒序继续拒绝。该修复不新增 API、事件或 Flyway migration。
+- 应用代码库工作区首次创建会话时改按既有分类访问策略校验 `APP_SOURCE` 副本，避免它不在个人工作区关联表中而误报
+  “Workspace 不存在”。远端 Git 服务拒绝以 commit 执行 archive 时，目录读取会受控回退到同一分支的完整 ref，随后仍以
+  固定 commit 做物化一致性校验；Windows 清理只读 Git pack 文件也已兼容。
+- 个人工作区跨服务器搬迁失败现在记录受控阶段、白名单原因和路径摘要，日志可辅助定位且不泄露绝对路径、文件名、凭据或 stderr。
+  设置中的工作空间名称可原地编辑、回车确认保存，目录树滚动条始终可见；这些改动均不新增部署节点、API 或 Flyway migration。
 - `deploy/internal/local_browser.ts` 是公共 Tool 的受控模板，平台包不会直接覆盖企业公共配置；企业公共配置 Git
   的已发布 commit 才是权威源。部署包到位后仍须把该模板同步为新的公共配置 commit，再由平台构建签名完整能力包，
   用户确认“更新公共能力”并等待 OpenCode 重启；未完成该发布链路时，旧 Tool 不会自动获得修复。
