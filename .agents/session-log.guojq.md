@@ -1,5 +1,32 @@
 # Session Log — guojq
 
+## 2026-09-10 重复代码变更打包（相同源码，产物重建）
+
+### Why
+
+dist-code/ 目录已清空，需基于相同源码（HEAD 88040f46e）重新构建代码变更包交付现场。
+
+### What
+
+1. 内层 `test-agent-internal-release.zip`（148 MB）→ `deploy/internal/dist-code/`。
+2. 外层 `test-agent-two-backend-complete.zip` → `deploy/internal/dist-code/`。
+
+### How
+
+- `--component-plan-only` 确认三个组件全部 reuse（worker/toolbox/local client 指纹匹配 dist/ 基线）。
+- 关键：必须将 `TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL`、`TEST_AGENT_LOCAL_CLIENT_SERVER_URL`、`TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL` 置空，使 local client 指纹匹配存储基线 `33d714...`，否则自动切到 included 导致包膨胀 +289 MB。
+- 全量模式运行 `package-release.sh` 到 `dist-code/`，reuse 跳过 worker/toolbox/local client，只打 backend + frontend。
+- `package-two-backend-complete.sh` 必须显式传 `--release-archive deploy/internal/dist-code/test-agent-internal-release.zip`，否则默认嵌入 dist/ 旧完整包（1.3 GB）。
+- 外层封装需要 `TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY` 指向企业签名公钥。
+
+### Result
+
+- 内层 SHA256 `a31624ff38808e7241bbc6de4e4e3821ac38303f6d134a43d89e3b642ead8bec`，外层内嵌 ZIP SHA256 一致 ✓。
+- 外层 SHA256 `7ec91de60ee4ab1df8221454ea4bb42dfd2519883a3ab48edcd046a278c0b65b`。
+- release-components.env：`WORKER_RUNTIME=reuse, TOOLBOX=reuse, LOCAL_OPENCODE_CLIENT=reuse, LOBEHUB=disabled, MEMORY=disabled`。
+- 所有 Flyway migration SHA-256 校验通过；persistence JAR 内 toolbox migration SHA-256 `777a96...51f2` 匹配。
+- 无源码变更，dist-code/ 为 gitignore 产物，仅提交本日志。
+
 ## 2026-09-10 打代码变更包（含 bullseye-security EOL 修复）
 
 ### Why
