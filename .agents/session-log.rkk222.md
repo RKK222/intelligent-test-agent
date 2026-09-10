@@ -7,10 +7,10 @@
 
 ### 2026-09-10 - 提供按人和时间统计对话用户发送次数的查库 SQL
 
-- Why: 用户明确选择直接查询 SQL，需要按实际发送人、日期和对话查看发送次数与明细，不要求增加统计页面。
-- What: 新增 `tools/query-user-message-statistics.sql`，默认按人/自然日/对话输出计数、首次/末次发送时间、人员与对话区间总数，支持时间和姓名/统一认证号/用户 ID 筛选，并附复用同一 CTE 的逐条发送时间 SELECT；同步 `docs/deployment/database.md` 的口径和执行说明。
-- How: 复用现有消息、Run 来源和人员归属字段，legacy 仅读 USER 消息，REDIS_SUMMARY 仅读 Run 锚点，防止尚未落终态摘要时漏数或 raw/summary 重复计数；实际发送人优先于执行所属人，排除自动定时和 SIDE_QUESTION，允许定时会话的后续人工发送。以 `.env.test` 固定 PostgreSQL 的只读连接运行 `psql -X -v ON_ERROR_STOP=1 -f tools/query-user-message-statistics.sql`，并以仅含 VALUES 的 CTE fixture 验证跨日、上下界、同名不同人、共享归属、摘要进行中/终态互斥、来源排除、未知归属和人员筛选，未写测试数据。
-- Result: 最终主查询与逐条查询一致，当前测试库存量为 316 条分组明细、427 次发送，其中 13 条缺少归属；这些记录标记未知用户且个人总数留空，不能合并成某一人的统计。查询使用当前应用 Asia/Shanghai 写入的无时区时间值，人员/组织为当前目录，旧数据不可推定事件时组织。全部相关 SQL 验证通过；只交付查询与文档，无 API、事件、业务服务、表结构、Flyway、环境配置或部署节点变更。已回顾各提交者近期日志，仅在现有 release 提交本次文件。
+- Why: 用户明确选择直接查询 SQL，需要按实际发送人、日期和对话查看发送次数与明细；后续指定统计周期为 2026-08-31 至 09-08、09-09 至当天，并要求完整注释以便交接同事，不要求增加统计页面。
+- What: 新增并完善 `tools/query-user-message-statistics.sql`，一次输出两个独立周期的每日对话明细，所有人员/对话窗口总数按 `period_no` 隔离；`report_date` 默认显式取北京时间当天，也可改成固定日期。保留姓名/统一认证号/用户 ID 筛选，提供每人每周期汇总、逐条发送时间两个备用 SELECT，补齐执行步骤、参数示例、字段含义、计数口径及总数重复展示说明；同步 `docs/deployment/database.md`。
+- How: 复用现有消息、Run 来源和人员归属字段，legacy 仅读 USER 消息，REDIS_SUMMARY 仅读 Run 锚点，防止尚未落终态摘要时漏数或 raw/summary 重复计数；实际发送人优先于执行所属人，排除自动定时和 SIDE_QUESTION，允许定时会话的后续人工发送。以 `.env.test` 固定 PostgreSQL 的只读连接运行 `psql -X -v ON_ERROR_STOP=1 -f tools/query-user-message-statistics.sql`；`python3 .tmp/user-message-statistics/verify-periods.py` 用不落库的 VALUES CTE 验证 8/31 零点、9/8 最后一微秒、9/9 零点、当天结束/次日排除、跨周期总数隔离、UTC 连接下北京时间跨天，并复核同名、共享归属、摘要互斥、来源排除、未知归属和人员筛选。默认查询与两个备用 SELECT 次数一致。
+- Result: 最终双周期 SQL 只读执行及边界验证通过；测试库这两个周期没有匹配数据，边界 fixture 为周期 1 共 6 次、周期 2 共 7 次。此前未限定时间的实库验证为 316 条明细、427 次发送，其中 13 条缺少归属；未知记录个人总数留空，不能合并成某一人的统计。时间沿当前应用 Asia/Shanghai 写入的无时区值解释，人员/组织为当前目录。只交付查询与文档，无 API、事件、业务服务、表结构、Flyway、环境配置或部署节点变更；已回顾各提交者近期日志，仅在现有 release 提交本次文件。
 
 ### 2026-09-09 - 按已部署客户端复用基线重封企业前后端增量包
 
