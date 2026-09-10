@@ -17355,3 +17355,26 @@
 - What: 对照 release 的 SessionApplicationService、UserWorkspaceQueryService、公共分类鉴权、物化/retry 和前端请求实现，确认首次 APP_SOURCE 会话缺少受控鉴权回退；物化串行执行两条各 60 秒的 Git 命令，90 秒不是充分预算；retry 不重新解析 Git。
 - How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
 - Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
+
+## 2026-09-10 - 定位对话创建 Skill 在应用配置树不可见的目录差异
+
+### Why
+
+- 企业用户在个人 Git worktree 根的 `.opencode/skills` 创建技能，左侧应用 Agent 配置手动刷新后仍不可见。
+
+### What
+
+- 用户提供的企业查询结果确认：同一个人仓库承载 `F-GCMS-PSN/workspace` 和 `F-GCMS-PSN/workspace-house` 两个运行态工作区，`workspaces.root_path` 分别指向对应子目录；两条工作区记录与 ACTIVE Agent binding 的服务器相同。
+- `AgentConfigApplicationService.workspaceAgentRootForRead` 从运行态工作区根解析 `.opencode`，不会读取其 Git 仓库祖先根的 `.opencode`。因此仓库根技能不在这两个应用配置树的读取范围内；恢复应按实际会话工作区选择目标，只迁移本次技能包，保留同名目标和其它工作区内容。
+- 本机公共配置副本的 skill-creator 以 `<worktree-root>/.opencode/skills` 描述应用落点，未区分 Git 根与运行态工作区根，存在引导歧义；未核验企业实际安装版本，不能断言现场一定由该提示导致。
+
+### How
+
+- 只读核对用户附件中的两条查询结果，并沿 AgentWorkbench → AgentConfigPanel → backend-api 文件 WebSocket → AgentConfigApplicationService 确认读取路径；对照 ManagedWorkspaceApplicationService 的 `repoRoot + template.directoryPath` 工作区创建规则。
+- 回顾全部提交者会话日志近期记录；仅记录排障事实，不修改产品代码、公共技能仓库、环境配置、API、事件、数据库或服务器归属。
+- `bash tools/verify-ai-docs.sh` 与 `git diff --check` 通过；本次仅记录诊断，没有启动或重启应用。
+
+### Result
+
+- 已确认用户提供的技能保存路径与页面工作区根目录不同，服务器归属记录一致；不能以本机状态外推企业目录存在性或请求链路健康。
+- 企业技能目录迁移与页面刷新验收尚未执行；后续需在当前会话对应的工作区 `.opencode/skills` 检查目标冲突并恢复技能包，再验收应用级目录与文件读取。对话终态只刷新普通文件树的独立缓存缺口不是本次手动刷新无效的充分解释，未据此修改前端。
