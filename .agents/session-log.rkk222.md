@@ -17356,7 +17356,7 @@
 - How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
 - Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
 
-## 2026-09-10 - 定位对话创建 Skill 在应用配置树不可见的目录差异
+## 2026-09-10 - 定位技能不可见并修正创建 Skill 的工作区落点
 
 ### Why
 
@@ -17367,14 +17367,19 @@
 - 用户提供的企业查询结果确认：同一个人仓库承载 `F-GCMS-PSN/workspace` 和 `F-GCMS-PSN/workspace-house` 两个运行态工作区，`workspaces.root_path` 分别指向对应子目录；两条工作区记录与 ACTIVE Agent binding 的服务器相同。
 - `AgentConfigApplicationService.workspaceAgentRootForRead` 从运行态工作区根解析 `.opencode`，不会读取其 Git 仓库祖先根的 `.opencode`。因此仓库根技能不在这两个应用配置树的读取范围内；恢复应按实际会话工作区选择目标，只迁移本次技能包，保留同名目标和其它工作区内容。
 - 本机公共配置副本的 skill-creator 以 `<worktree-root>/.opencode/skills` 描述应用落点，未区分 Git 根与运行态工作区根，存在引导歧义；未核验企业实际安装版本，不能断言现场一定由该提示导致。
+- 用户后续明确要求调整创建技能，已在公共配置仓库现有 `public-usr_test_dev` 分支将 `opencode/skills/skill-creator` 升级至 1.2.1，提交 `a777af57d6ebfa98a139ae48b5e91ebc3452b9f8`。以 OpenCode 的 `Working directory` 固定应用输出根，明确 `Workspace root folder` 是 Git 根，后续 `cd`、祖先已有 `.opencode` 和“公共技能”措辞均不改变应用落点。
+- 扩展既有离线结构校验脚本，增加互斥的 `--workspace-root` / `--public-config-root` 参数；增加临时目录 CLI 测试与模型场景，同步公共配置 README/结构规范及平台 `docs/testing/application-worktree-feature-cases.md`。旧无参数调用仍可校验已有技能结构；未修改另一历史路径下的同名技能。
 
 ### How
 
 - 只读核对用户附件中的两条查询结果，并沿 AgentWorkbench → AgentConfigPanel → backend-api 文件 WebSocket → AgentConfigApplicationService 确认读取路径；对照 ManagedWorkspaceApplicationService 的 `repoRoot + template.directoryPath` 工作区创建规则。
-- 回顾全部提交者会话日志近期记录；仅记录排障事实，不修改产品代码、公共技能仓库、环境配置、API、事件、数据库或服务器归属。
-- `bash tools/verify-ai-docs.sh` 与 `git diff --check` 通过；本次仅记录诊断，没有启动或重启应用。
+- 回顾平台和公共配置仓库的全部提交者会话日志近期记录；没有变更平台前后端代码、环境配置、API、事件、数据库或服务器归属，没有新建/切换分支。
+- 目录 CLI 测试 8/8、自带结构/落点校验和支持 OpenCode compatibility 的 quick_validate.py 通过；新增模型场景共 9 项，尚未以企业模型逐项执行。未启动或重启企业服务，最相关可运行目标为技能自带 Python 校验器。
+- 平台文档检查 `bash tools/verify-ai-docs.sh` 与两仓库 `git diff --check` 通过，稳定测试文档和本机对应会话日志同步更新。
+- 独立交付包 `.tmp/enterprise-skill-packages/20260910/skill-creator-1.2.1.zip` 从公共配置固定提交归档，根目录为 `SKILL.md`，不含其它 Agent 或公共配置。ZIP CRC、逐文件提交字节一致性及解压后结构/落点校验和 8 项目录测试通过；SHA-256 为 `04354b8299a56043a05385370827b2344d8f2fd097760c71df87a154d69bd46d`。
 
 ### Result
 
 - 已确认用户提供的技能保存路径与页面工作区根目录不同，服务器归属记录一致；不能以本机状态外推企业目录存在性或请求链路健康。
+- 修正规则和校验脚本已保存于独立公共配置 Git，未推送或发布。需要在企业公共 Agent 个人编辑区更新完整技能包，并通过既有 Diff/提交/发布流程生效；平台 JAR 更新不会自动发布该独立 Git 内容。
 - 企业技能目录迁移与页面刷新验收尚未执行；后续需在当前会话对应的工作区 `.opencode/skills` 检查目标冲突并恢复技能包，再验收应用级目录与文件读取。对话终态只刷新普通文件树的独立缓存缺口不是本次手动刷新无效的充分解释，未据此修改前端。

@@ -49,6 +49,20 @@ flowchart LR
 
 反向同步固定使用版本记录的 `targetCommitHash`，不在执行时重新解析可移动分支名。个人 worktree 无论是否存在 dirty、staged 或 untracked 内容都会先执行 Git 原生合并：非重叠本地改动原样保留并完成合并；只有 Git 判定文件会被覆盖时才不 stash、不 reset、不覆盖并在 Diff 返回待同步状态。真实冲突保留 Git 原生 merge 状态，在三方编辑器解决全部冲突后点击“完成合并”提交完整 merge index。
 
+#### 对话创建技能的工作区落点
+
+Git worktree 根与运行态工作区根可能不同：`ManagedWorkspaceApplicationService` 以个人仓库根加模板 `directoryPath` 创建工作区，左侧应用 Agent 树由 `AgentConfigApplicationService` 读取该工作区内的 `.opencode`。对话创建应用 Skill 必须以 OpenCode 环境的 `Working directory`（当前会话目录）为根，不能用 `Workspace root folder` 或 `git rev-parse --show-toplevel` 代替；祖先根已有 `.opencode` 也不能改变落点。
+
+公共配置 Git 中 `opencode/skills/skill-creator` 1.2.1 通过 `validate_skill.py <技能目录> --workspace-root <当前会话绝对目录>` 核对应用落点，公共个人配置使用 `--public-config-root <已包含 opencode 的编辑根>`。两参数互斥且向后兼容：旧无参数调用只做结构校验。校验器不证明用户归属或页面可见性，也不自动移动历史错放技能；公共配置需按既有导入、Diff、发布流程更新，平台 JAR 更新不会自动发布这份独立 Git 内容。
+
+| 场景 | 操作与预期 |
+| --- | --- |
+| 嵌套工作区 | 同一个人仓库 `/repo` 下存在 `F-APP/workspace` 和 `F-APP/workspace-house`。在 house 会话创建技能，必须仅新增 `F-APP/workspace-house/.opencode/skills/<技能名>`；当前工作区尚无 `.opencode` 时仍在此创建。刷新“应用级 → skills”并打开 `SKILL.md` 核对内容。 |
+| Git 根或相邻工作区误写 | 用当前 house 工作区作为 `--workspace-root` 校验仓库根或 workspace 下的技能，应返回非零退出码且不移动、不覆盖文件；仅有 Git 根但无法确定当前会话目录时，写入前应询问具体工作区。 |
+| 公共个人配置 | 平台明确打开当前用户公共个人配置 `opencode/` 编辑根时，技能写其 `skills/<技能名>`，不重复添加 `.opencode`；只提出“公共技能”而仍在应用会话时，先保存到当前应用工作区供审阅。 |
+
+脚本回归在公共配置仓库执行 `python3 -B opencode/skills/skill-creator/evals/test_creation_target.py`；模型行为场景保存在同目录 `evals.json`。脚本和结构校验通过不代表企业模型已执行新规则，企业仍需更新该 Skill 后通过真实对话完成目录与文件读取验收。
+
 ### 1.3 OpenCode 如何读取并整合配置
 
 平台不解析或复制多层 OpenCode 配置，也不创建“应用 runtime”。每个用户只有一个受管 OpenCode 进程，配置仍由 OpenCode 原生加载：
