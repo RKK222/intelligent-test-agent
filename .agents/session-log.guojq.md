@@ -4,28 +4,32 @@
 
 ### Why
 
-企业现场 bullseye-security 仓库 EOL 导致 opencode-worker Docker 构建依赖冲突；需要基于最新后端/前端代码打代码变更包交付现场，worker/toolbox 组件声明 reuse 沿用现网版本，本地客户端因源码已演进需重新构建。
+企业现场 bullseye-security 仓库 EOL 导致 opencode-worker Docker 构建依赖冲突；需要基于最新后端/前端代码打代码变更包交付现场，worker/toolbox/local client 组件声明 reuse 沿用现网版本。
 
 ### What
 
 1. [opencode-worker.Dockerfile](file:///Users/guo/Developer/intelligent-test-agent/deploy/internal/opencode-worker.Dockerfile)：新增 `DISABLE_SECURITY_REPO` ARG，设为 true 时禁用 debian-security 源并将 libc6/libssl1.1/perl-base 降级到主仓库匹配版本；apt 新增 `Check-Valid-Until=false`。
 2. [package-release.sh](file:///Users/guo/Developer/intelligent-test-agent/deploy/internal/package-release.sh)：`build_opencode_worker_image` 传递 `DISABLE_SECURITY_REPO` build-arg。
 3. 代码变更包输出到 `deploy/internal/dist-code/`：
-   - 内层 `test-agent-internal-release.zip`（423 MB），组件清单 `WORKER_RUNTIME=reuse, TOOLBOX=reuse, LOCAL_OPENCODE_CLIENT=included, LOBEHUB=disabled, MEMORY=disabled`。
-   - 外层 `test-agent-two-backend-complete.zip`（424 MB），SHA256 `13b3f6f9cc740f213f1ae72f0f7f68d09d22497396ba339689d9ed253c44b03a`。
-4. 关键坑：`package-two-backend-complete.sh` 默认 `RELEASE_ARCHIVE` 指向 `deploy/internal/dist/test-agent-internal-release.zip`（旧完整包），打代码变更包时必须显式传 `--release-archive deploy/internal/dist-code/test-agent-internal-release.zip`，否则外层包会错误嵌入旧完整包（1.3 GB）而非新代码变更包（423 MB）。
+   - 内层 `test-agent-internal-release.zip`（148 MB），组件清单 `WORKER_RUNTIME=reuse, TOOLBOX=reuse, LOCAL_OPENCODE_CLIENT=reuse, LOBEHUB=disabled, MEMORY=disabled`。
+   - 外层 `test-agent-two-backend-complete.zip`（148 MB），SHA256 `38e3a2c766d575a03626420fabb320dc735f157a798222ae866bc4c027493558`。
 
 ### How
 
-- 先 `--component-plan-only` 确认 worker/toolbox 指纹匹配（reuse），local client 指纹已变化（included）。
-- 全量模式运行 `package-release.sh`，reuse 自动跳过 worker/toolbox 构建；本地客户端单独构建后 `--zip-only` 重组内层 zip。
+- 先 `--component-plan-only` 确认三个组件指纹全部匹配（reuse）。
+- 全量模式运行 `package-release.sh`，reuse 自动跳过 worker/toolbox/local client 构建，只打 backend jar + frontend dist。
 - 外层包用 `--release-archive` 指定代码变更包路径，并校验内层 SHA256 与外层内嵌 ZIP SHA256 一致。
 
 ### Result
 
-- 内层 SHA256 `a94d679fc44fed800bc11dc6ecd2134ecd50fa04aa6f318f1d74d32cda57eaf5`，外层内嵌 ZIP SHA256 一致 ✓。
+- 内层 SHA256 `cb9932b9a2740e6427c26d3683f28970f7c5c17df92c0a2f2d621c92e8d42465`，外层内嵌 ZIP SHA256 一致 ✓。
 - 所有 Flyway migration SHA-256 校验通过。
-- 交付物：`deploy/internal/dist-code/test-agent-two-backend-complete.zip`（424 MB）+ `.sha256`。
+- 交付物：`deploy/internal/dist-code/test-agent-two-backend-complete.zip`（148 MB）+ `.sha256`。
+
+### 关键坑
+
+1. **本地客户端指纹变化导致包膨胀**：首次打包时误传了 `TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL`/`SERVER_URL`/`PUBLIC_CONFIG_COMMIT` 等环境变量，导致 `local_client_config` 指纹和存储基线不同，脚本自动切到 included 模式重新构建本地客户端（+289 MB：jdk.tar.gz 196 MB + opencode.tar.gz 56 MB + jar 13 MB + capabilities 10 MB），包从 148 MB 膨胀到 423 MB。代码变更包不应传这些变量，让指纹匹配存储基线保持 reuse。
+2. **`package-two-backend-complete.sh` 默认 release-archive 路径**：默认指向 `deploy/internal/dist/test-agent-internal-release.zip`（旧完整包 1.3 GB），打代码变更包时必须显式传 `--release-archive deploy/internal/dist-code/test-agent-internal-release.zip`，否则外层包会错误嵌入旧完整包。
 
 ## 2026-09-07 修复：应用代码库工作区首次发起会话报 "Workspace 不存在"
 
