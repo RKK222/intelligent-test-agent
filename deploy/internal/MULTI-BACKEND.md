@@ -18,15 +18,16 @@
 | XXL MySQL | `122.210.106.43:3306/xxl_job`（外部共享 MySQL，当前使用既有 `root` 账号） |
 | 企业内部模型 | `ai-code.sdc.enterprise:9070` |
 
-## 当前增量说明（2026-09-10 客户端复用基线纠正）
+## 当前增量说明（2026-09-10 纳入客户端完整制品）
 
 - 2026-09-10 现场截图确认：`.2` 下载目录和用户电脑客户端均为 `20260907093905`。上一包错误使用
   `20260901203844` 基线，前端部署在客户端校验阶段报该旧版 `manifest.json` 缺失，尚未解压新前端或 reload Nginx；
   日志中的 `Configuration installed` 只表示配置已经备份并安装，不代表前端部署成功。`.114` 已显示后台验证通过。
-- 本次保留 9 月 9 日同批后端 JAR/lib 和前端 tar 字节，只用现场已核对的
-  `release-baselines/20260910-client-20260907093905-deployed.env` 重封包。旧外层
-  `b819956d82c4792c797a0828c357126c9e79228117f1434373156ef79a50a0d4` 不再用于前端部署；已成功升级的后台
-  无需重部署。将新固定名完整包传至 `.2` 后，重新执行本文 `.2` 的 `deploy-frontend-node.sh` 即可补齐发布。
+- 用户随后明确要求把客户端一起封入。本次保留 9 月 9 日同批后端 JAR/lib 和前端 tar 字节，将已验签的
+  `20260909110624` 客户端完整制品标为 `included`；不再传入客户端 `reuse` 基线，也不重新生成版本。
+  旧外层 `b819956d82c4792c797a0828c357126c9e79228117f1434373156ef79a50a0d4` 及后续只修正复用基线的
+  `16207e60514f091b60aa6a4415ba9ae34abe06a295486cc51c5e54980cc47b06` 均由本次完整交付替代。
+  已成功升级的后台无需重部署；新固定名完整包只需传至 `.2`，执行 `deploy-frontend-node.sh` 同时更新前端和客户端分发。
 
 - 用户已确认企业实际部署的浏览器 CDP 修复包基线：内层 SHA-256 为
   `bbbe20688aa6a5541886b7afc383c6a8236468a08ea1c3a17cdcc00ef26224fa`，外层 SHA-256 为
@@ -41,12 +42,18 @@
   模型输出脱敏边界保持不变。
 - 当前 `release` 同时包含已提交的麒麟个人 SSH 私钥本地文件选择：只调整前端设置页、新手引导和用户手册，继续复用既有
   浏览器端加密与 SSH Key 保存接口，不新增后端 API；文件选择器需要按 `Ctrl+H` 显示 `.ssh` 隐藏目录，不能选择 `.pub`。
-- worker runtime、toolbox 和本地客户端均为 `reuse`。现有 programs 和签名公共能力依赖已经包含
+- worker runtime、toolbox 为 `reuse`，本地客户端为 `included`。现有 programs 和签名公共能力依赖已经包含
   `playwright-core@1.61.0`；目标用户不需要系统 Node，也不在企业现场执行 npm。两台后台不因本修复重建或重启
   worker/manager；`.4` models 灰度不由标准包覆盖，CK/Mem0/BGE/pgvector 不重新部署、重启或同步。
-- 本轮只交付后端、前端和部署手册，不重新签发客户端；本地客户端组件为 `reuse`，继续以 `.2` 已部署的
-  `20260907093905` 及其签名清单为准。内层 ZIP 不含 `dist/local-opencode-client/`，`.2` 部署只校验已有客户端
-  分发目录而不替换；此前误含 `20260909110624` 完整离线运行时的约 400 MiB 候选不得部署。
+- 内层 ZIP 的 `dist/local-opencode-client/` 只含 `20260909110624` 一个 release、安装器、普通用户包、签名清单、
+  JDK、OpenCode 和离线公共能力，不带本机构建目录的历史 release。`.2` 分发版本从 `20260907093905` 更新到
+  `20260909110624`；这是用户明确要求的完整客户端交付，包体因此约为 424 MiB。客户端 JDK、OpenCode 和初始公共能力
+  摘要与现网 0907 版一致；客户端主模块源码没有新增功能，JAR 中的共享 `GitRemoteService` 已包含远端 archive
+  commit/ref 回退方法，不能仅凭客户端目录无源码变化断言两个完整 JAR 相同。
+- `.2` 部署成功且新 catalog/manifest 可下载后，超级管理员在客户端版本管理中同步 release/catalog。已有用户在本人
+  麒麟终端执行 `"$HOME/.local/bin/test-agent-local-client" setup`，随后用同一路径 `--version` 检查为
+  `20260909110624`；该安装流程保留凭据、实例 ID 和工作区，并复用签名校验通过的 JDK/OpenCode 缓存，无需 sudo。
+  从网页重新下载、完整解压普通用户包再双击，也走相同的就地升级流程。
 - 相对已部署的 360 CDP 包，本轮后端和前端还包含个人 SSH 私钥文件选择、SSH Key 变更后工作空间实时复检，以及标准应用
   工作空间“按分支新建版本”：只接受合法的 `feature_testagent_yyyyMMdd` 远程分支并从分支派生版本。创建版本请求新增可选
   `branch` 字段，旧版仅传 `version` 的调用保持兼容；响应、RunEvent/SSE、数据库和 Flyway 均未变化。AAM 地址继续为
@@ -220,6 +227,10 @@ awk -F= '$1 ~ /^TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT/ { print }' \
 上述输入未变化时，以目标机已安装版本和摘要作为受控基线先执行 `--component-plan-only`。预期输出必须是 `local client component: reuse`；最终内层 `release-components.env` 必须为 `TEST_AGENT_RELEASE_LOCAL_OPENCODE_CLIENT=reuse`，且 ZIP 中不得存在 `dist/local-opencode-client/`。若计划显示 `included`，特别检查是否只是人为递增了版本号；立即停止，不得先打出约 400 MiB 的候选再解释。
 
 客户端当前输入与目标机已安装摘要不一致时，也不得为了缩小包而手写组件状态、伪造 baseline 或强行标记 `reuse`。必须明确选择“按新输入签发并全量下发客户端”或“恢复与已部署版本相同的受控输入后重打平台包”。
+
+用户明确要求将客户端完整制品纳入时，允许复用已经与当前代码匹配且验签通过的不可变客户端候选，将组件标为
+`included`；仍只携带当前一个版本，不必为了重新封包递增版本。检查输入变化时同时核对打入 shaded JAR 的
+`test-agent-common`、`test-agent-workspace-filesystem` 等共享依赖；现有源码指纹不能替代最终 JAR 的内容对比。
 
 交付：
 
