@@ -2173,3 +2173,23 @@ SHA-256 一致。
 ### 搬迁安全错误说明兼容性
 
 个人工作区搬迁诊断复用 `personal_workspace_relocations.safe_error_message`（512 字符），写入受控 stage/reason/pathRef 和固定中文提示；`safe_error_code`、表结构、状态机、重试与租约字段不变，无新增 migration。历史通用说明仅在新版本处理下一次失败时更新，禁止为补诊断手工更新记录。
+
+## 按人、日期、对话统计用户发送次数
+
+人工直查 PostgreSQL 使用 [query-user-message-statistics.sql](../../tools/query-user-message-statistics.sql)。
+脚本为单条只读查询，`params` 中开始时间、结束时间和人员关键词默认 `NULL`（全部）；人员关键词支持姓名、统一认证号和用户 ID。
+时间区间采用开始包含、结束不包含，当前应用固定以 `Asia/Shanghai` 写入无时区时间列，查询直接按列值分自然日。
+每行返回实际发送人、当前组织、日期、对话 ID/标题、当天次数与首次/末次发送时间，并附同一人对同一对话的区间总次数和该人的区间总次数。
+脚本末尾提供复用同一 CTE 的逐条发送时间查询。
+
+计数复用平台已有消息/Run 来源及人员归属：`LEGACY_FULL` 读取 `session_messages.role='USER'`，
+`REDIS_SUMMARY` 仅读取 `runs` 唯一锚点，不叠加终态 `SUMMARY` 消息，避免漏算尚未终态的发送或重复计数。
+只计人工 `MANUAL` 来源，排除定时触发和内部 `SIDE_QUESTION`；在定时来源会话中后来人工发送的消息仍计入。
+不按 Run 成功状态过滤，已记录的发送即使运行失败或取消也计数；撤回后重新发送另计一次，模型内部重试不另计。
+归属优先取消息实际发送人，再取 Run 的 `message_sender_user_id`，最后兼容回退到执行人/会话创建人；
+共享发送不得直接归给 `triggered_by_user_id`。仍无归属的历史消息保留为“未知用户”，其个人总数留空，避免把不同未知发送人合并成一个人；姓名及组织取当前 `users`，不能当作事件发生时的历史快照。
+
+本脚本满足人工查库需求，不接入运营 API，不改变运营接口只读 ClickHouse 的边界，也不修改表结构、数据或环境配置。
+验证时使用根目录 `.env.test` 指定的 PostgreSQL，通过 `psql -X -v ON_ERROR_STOP=1 -f tools/query-user-message-statistics.sql`
+执行，连接参数由环境安全注入，并设置 `PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=10000'`。
+真实数据库只读 CTE fixture 覆盖跨日/时间边界、同名不同用户、共享发送、摘要进行中/终态去重、来源排除、未知用户和人员筛选。
