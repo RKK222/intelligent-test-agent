@@ -73,7 +73,7 @@
         where 1 = 1
         <include refid="userFilters"/>
         group by um.user_id, u.username, um.session_id, um.session_title
-        order by user_message_count desc, last_message_at desc, um.session_id
+        order by last_message_at desc, user_message_count desc, um.session_id
         limit #{limit} offset #{offset}
     </select>
 

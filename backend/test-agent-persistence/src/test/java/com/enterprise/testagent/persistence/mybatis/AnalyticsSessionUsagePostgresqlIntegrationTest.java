@@ -67,7 +67,7 @@ class AnalyticsSessionUsagePostgresqlIntegrationTest {
         assertThat(page.total()).isEqualTo(5);
         assertThat(page.items()).hasSize(5);
 
-        AnalyticsModels.SessionUsageRow busiest = page.items().get(0);
+        AnalyticsModels.SessionUsageRow busiest = row(page, "usr_a", "ses_1");
         assertThat(busiest.userId()).isEqualTo("usr_a");
         assertThat(busiest.sessionId()).isEqualTo("ses_1");
         // 旧存储按 USER 消息 2 条(08-31、09-08)+1 条(09-09)+ 摘要锚点 1 条(09-10)=4
@@ -109,15 +109,16 @@ class AnalyticsSessionUsagePostgresqlIntegrationTest {
     }
 
     @Test
-    void paginatesServerSide() {
+    void ordersByLatestActivityFirstAndPaginatesServerSide() {
         PageResponse<AnalyticsModels.SessionUsageRow> first = repository.sessionMessageUsage(filter(null, null, null, null, 1, 2));
         PageResponse<AnalyticsModels.SessionUsageRow> second = repository.sessionMessageUsage(filter(null, null, null, null, 2, 2));
 
         assertThat(first.total()).isEqualTo(5);
         assertThat(first.items()).hasSize(2);
         assertThat(second.items()).hasSize(2);
-        assertThat(first.items().get(0).userId()).isEqualTo("usr_a");
-        assertThat(second.items().get(0).userId()).isEqualTo("usr_c");
+        // 最近发送优先：09-10 12:00 的未知用户会话排第一，09-10 10:00 的 usr_c 次之
+        assertThat(first.items().get(0).sessionId()).isEqualTo("ses_6");
+        assertThat(second.items().get(0).userId()).isEqualTo("usr_a");
     }
 
     private static AnalyticsModels.SessionUsageRow row(

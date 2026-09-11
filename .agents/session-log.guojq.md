@@ -1,5 +1,26 @@
 # Session Log — guojq
 
+## 2026-09-11 「会话消息」Tab 排序改为最近发送优先（修复新会话不在首页）
+
+### Why
+
+用户反馈“新发起了会话，运营分析的对话列表没有新数据”。核对本地业务库（`127.0.0.1:15432/test_agent`）确认新会话 `ses_09811f…` 的 USER 消息已正常落库（`role=USER`、`sender_user_id=888888888`、run `LEGACY_FULL/MANUAL`），并非漏数或筛选错误。
+
+### What
+
+- 根因是排序：原按「用户消息数降序、最后发送时间降序」，新会话只有 1 条，被「造数脚本扩容」产生的 3–5 条演示数据挤到第 41/52 位（第 3 页）。
+- 将 `AnalyticsSessionUsageMapper.xml` 主查询排序改为 `last_message_at desc, user_message_count desc, session_id`，最近发送优先；同步更新 http-api 口径说明、persistence README 与集成测试断言。
+
+### How
+
+- 先用容器内 `psql` 直接核库：新会话 USER 消息存在；按原排序 `row_number()` 得 41/52，按新排序为第 1 行。
+- 集成测试由按索引断言改为按 `(userId, sessionId)` 定位，并新增“最近发送优先”的分页断言；`mvn -pl test-agent-persistence -am -Dtest=AnalyticsSessionUsagePostgresqlIntegrationTest test` 4 用例通过。
+- 用 `./restart-dev-services.sh --profile local --skip-frontend-build` 重建并重启后端使排序生效；`/sessions` 返回 401（路由已注册）。
+
+### Result
+
+- 新会话现在出现在「会话消息」Tab 首页第一行。仅改排序，口径/列/分页不变；不影响其他 Tab 及其只读 ClickHouse 边界。
+
 ## 2026-09-11 「会话消息」造数脚本扩容以验证分页
 
 ### Why

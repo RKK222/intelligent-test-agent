@@ -265,7 +265,7 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 
 满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 ClickHouse 小时直方图近似计算。运营数据不统计、不展示、不导出费用字段。
 
-`/sessions` 会话消息口径：按实际发送人统计 `LEGACY_FULL` 的 `role='USER'` 消息与 `REDIS_SUMMARY` 的唯一 Run 锚点（两者按 `storage_mode` 互斥，不重复计数），排除 `SIDE_QUESTION` 会话与 `SCHEDULED_TASK` 自动来源；人员归属按 消息发送人 → Run 发送人 → Run 执行人 → 会话创建人 依次回退，全空时归「未知用户」（`userId` 为空）。按 `(用户, 会话)` 分组返回条数与首次/末次发送时间，不按 `users.status` 过滤。
+`/sessions` 会话消息口径：按实际发送人统计 `LEGACY_FULL` 的 `role='USER'` 消息与 `REDIS_SUMMARY` 的唯一 Run 锚点（两者按 `storage_mode` 互斥，不重复计数），排除 `SIDE_QUESTION` 会话与 `SCHEDULED_TASK` 自动来源；人员归属按 消息发送人 → Run 发送人 → Run 执行人 → 会话创建人 依次回退，全空时归「未知用户」（`userId` 为空）。按 `(用户, 会话)` 分组返回条数与首次/末次发送时间，默认按最后发送时间倒序（新会话优先在首页）、再按条数与会话 ID 排序，不按 `users.status` 过滤。
 
 对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`AnalyticsOperationsQueryServiceTest`、`AnalyticsSessionUsageQueryServiceTest`、`ClickHouseAnalyticsIntegrationTest`、`AnalyticsSessionUsagePostgresqlIntegrationTest`、`analytics-management-panel.test.ts`。
 
