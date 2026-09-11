@@ -1281,9 +1281,16 @@ public class AnalyticsQueryService {
         return parts.isEmpty() ? "-" : String.join(" / ", parts);
     }
 
+    /**
+     * 导出时间列统一按上海时区输出“年-月-日 时:分:秒”，与页面展示口径一致。
+     * 不要再用 {@code ZonedDateTime.toString()}，那会带出 ISO 偏移和 {@code [Asia/Shanghai]} 后缀。
+     */
     private String formatInstant(Instant instant) {
-        return instant == null ? "" : instant.atZone(ANALYTICS_ZONE).toString();
+        return instant == null ? "" : EXPORT_DATE_TIME_FORMATTER.format(instant.atZone(ANALYTICS_ZONE));
     }
+
+    private static final java.time.format.DateTimeFormatter EXPORT_DATE_TIME_FORMATTER =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private static final class Totals {
         private final Set<String> loginUsers = new java.util.HashSet<>();

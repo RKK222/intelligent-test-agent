@@ -437,7 +437,8 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-analytics-header-actions { gap:8px; }
 .ta-icon-btn,.ta-export-btn { height:32px; border:1px solid #d7dce3; border-radius:5px; background:#fff; color:#374151; cursor:pointer; }
 .ta-icon-btn { display:grid; width:32px; place-items:center; }
-.ta-export-btn { display:inline-flex; align-items:center; gap:6px; padding:0 10px; }
+.ta-export-btn { display:inline-flex; align-items:center; gap:6px; padding:0 10px; cursor:pointer; }
+.ta-export-btn:hover { border-color:#b9c2cc; background:#f5f7fa; }
 .ta-analytics-filters { flex-wrap:wrap; gap:9px 14px; padding:10px 12px; border-block:1px solid #dfe3e8; background:#fff; }
 .ta-analytics-filters label { display:inline-flex; align-items:center; gap:6px; color:#505b6b; font-size:12px; }
 .ta-analytics-filters input,.ta-analytics-filters select { height:30px; min-width:126px; box-sizing:border-box; border:1px solid #d5dae2; border-radius:4px; padding:0 8px; background:#fff; color:#28313d; font-size:12px; }

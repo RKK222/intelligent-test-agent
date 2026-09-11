@@ -1,5 +1,28 @@
 # Session Log — guojq
 
+## 2026-09-11 导出时间列改为「年月日 时分秒」，导出按钮补 hover 反馈
+
+### Why
+
+用户反馈导出的 xlsx 里满意度与异常 Run 的时间列不可读，要求改成与页面一致的「年月日 时分秒」。排查确认根因在 `AnalyticsQueryService.formatInstant` 直接用了 `ZonedDateTime.toString()`，输出成 `2026-09-11T10:01:32+08:00[Asia/Shanghai]`；另反馈导出按钮 hover 时希望鼠标指针变小手。
+
+### What
+
+1. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java#L1285)：`formatInstant` 改用 `EXPORT_DATE_TIME_FORMATTER`（`yyyy-MM-dd HH:mm:ss`，上海时区），满意度、异常 Run、使用总览 Run 趋势三处共用该helper，一并生效。
+2. [AnalyticsManagementPanel.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue#L440)：把 `cursor:pointer` 显式写进 `.ta-export-btn` 自己的规则，并补 `:hover` 边框/底色反馈，与项目其它按钮 hover 色调（`#f5f7fa`）一致。
+
+### How
+
+- 先确认 `.ta-export-btn` 是否真的缺指针样式：`cursor:pointer` 自 `bc14390a1` 起就存在于共享规则 `.ta-icon-btn,.ta-export-btn` 中，并通过抓取 Vite dev server 下发的 scoped CSS 实证已生效。因此本次只是显式化 + 补 hover 视觉反馈，真正缺的是 hover 反馈而不是 cursor。
+- 时间格式统一走一个 formatter，避免三个 Sheet 各自实现；`yyyy-MM-dd HH:mm:ss` 既满足「年月日 时分秒」，也能被 Excel 直接识别为日期时间。
+
+### Result
+
+- 导出实测（HTTP 200，29039 字节）：满意度与异常 Run 时间列输出 `2026-09-10 10:48:15`；使用总览 Run 趋势时间点输出 `2026-08-12 00:00:00`。
+- 顺带核对造数参数化未失效：`--param_day_count=30` 生效，feedback/activity 各 30 个不同日期、hourly 31 个日期，行数 80/150/900。
+- `mvn -pl test-agent-opencode-runtime,test-agent-api -am -Dtest='Analytics*Test,AnalyticsControllerTest'` → 28 + 4 全通过。
+- 只改后端导出格式化 + 前端一个 CSS 规则，不涉及 API 契约、事件、数据库或部署节点。
+
 ## 2026-09-11 运营分析五个列表加分页控件（修复网页静默只显示 20 条）
 
 ### Why

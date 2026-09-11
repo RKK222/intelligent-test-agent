@@ -78,6 +78,7 @@
 | 异常Run | `exceptionDetails()` | 时间, Run, 用户, 组织, 状态 |
 
 - 列头加粗 + 浅灰背景（`CellStyle` + `setFillForegroundColor(IndexedColors.GREY_25_PERCENT)`）以贴近网页表头样式。
+- **时间列统一 `yyyy-MM-dd HH:mm:ss`（上海时区）**：满意度、异常 Run、使用总览 Run 趋势都用同一个 `formatInstant`，禁止再用 `ZonedDateTime.toString()`（会输出 `2026-09-11T10:01:32+08:00[Asia/Shanghai]` 这种带偏移和时区后缀的形态）。
 - **导出取全量、不受网页分页限制**：网页明细/排行接口默认 `pageSize=20`、`topN=20`，导出改用 `unlimitedFilter` 把 page 归 1、topN 放宽到 `EXPORT_ROW_LIMIT`；明细类（用户/满意度/异常Run）因 `PageResponse` 单页上限 200，再通过 `collectAll` 翻页取满 total。
 - 返回 `byte[]`，`Content-Disposition: attachment; filename=analytics-export.xlsx`。
 
