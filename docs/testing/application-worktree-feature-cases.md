@@ -23,6 +23,11 @@
 `ripgrep execution failed` 是底层异常的通用包装，不能仅凭该字符串区分目录不存在、程序不可执行、权限或进程 I/O 问题。
 当前实现将退出码 1 视为空结果，技能只有 SKILL.md、没有辅助文件本身不是该错误的充分原因。
 `permission=skill ... action.action=allow` 只确认技能权限规则放行，不代表磁盘读取或工具执行成功。
+若运行态接口返回 `ConfigInvalidError` 且 `issues[].keys=["agents"]`，应先修复当前工作区 `.opencode/opencode.jsonc`：
+OpenCode 1.18.4 将 Agent 定义从 `agents/` 或 `agent/` Markdown 目录扫描，`agents` 不是该 JSONC 的合法顶层配置键。
+该配置错误会在实例配置读取阶段阻断 `/find` 等接口，可能同时造成斜杠目录、Agent/Skill 目录查询异常；不能继续以 ripgrep、权限或浏览器缓存为首要假设。
+保留 `.opencode/agents/<name>.md` 文件，把误写进 JSONC 的 Agent 定义迁回目录；修复前先通过平台 Agent 配置编辑器查看并保存，保留 Git diff 和原文件备份，不能直接在企业库执行删除或覆盖。
+复测搜索时使用普通无正则文本（例如 `__TEST_AGENT_DIAG_20260911_NO_MATCH__`）；`^**...**$` 不是有效的正则表达式，避免把测试模式错误与配置错误混在一起。
 1.18.4 的 `SessionProcessor.failToolCall` 将简化错误写入对话 part，该分支没有输出完整底层异常的日志调用；
 进程日志没有 ripgrep 错误正文时，不能认定未发生错误，也不应反复扩大同一关键词日志采集来代替实际执行复测。
 同窗出现的 `failed to add snapshot files / unknown option 'sparse'` 属于 Git 快照命令不兼容，源码只记录 warning；
