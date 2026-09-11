@@ -183,8 +183,8 @@ class AnalyticsQueryServiceTest {
     }
 
     /**
-     * 「会话消息」Sheet 的数据来自业务库独立查询服务，必须翻页取满全部行，
-     * 不能只导出首页 20 条，也不能因为单页上限 200 就丢掉后续页。
+     * 「会话消息」Sheet 的数据来自业务库独立查询服务，必须同时导出「用户汇总」与「会话明细」两段，
+     * 且明细要翻页取满全部行，不能只导出首页 20 条，也不能因为单页上限 200 就丢掉后续页。
      */
     @Test
     void exportAllIncludesSessionUsageSheetAcrossAllPages() throws Exception {
@@ -193,9 +193,14 @@ class AnalyticsQueryServiceTest {
                         "usr_" + index, "用户" + index, "ses_" + index, "会话" + index, index + 1L,
                         START.plusSeconds(index), START.plusSeconds(index + 1)))
                 .toList();
+        List<AnalyticsModels.SessionUsageSummaryRow> summaryRows = java.util.stream.IntStream.range(0, 3)
+                .mapToObj(index -> new AnalyticsModels.SessionUsageSummaryRow(
+                        "usr_sum_" + index, "汇总用户" + index, "auth_" + index, "总行", "研发一部", "效能平台",
+                        index + 3L, index + 7L, START.plusSeconds(index), START.plusSeconds(index + 1)))
+                .toList();
         AnalyticsQueryService service = new AnalyticsQueryService(
                 new FakeAnalyticsRepository(List.of(row())),
-                new AnalyticsSessionUsageQueryService(new FakeSessionUsageRepository(sessionRows)));
+                new AnalyticsSessionUsageQueryService(new FakeSessionUsageRepository(sessionRows, summaryRows)));
         AnalyticsModels.Filter filter =
                 service.filter(START, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
 
@@ -205,14 +210,39 @@ class AnalyticsQueryServiceTest {
                 new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(xlsx))) {
             org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheet("会话消息");
             assertThat(sheet).isNotNull();
-            // 表头 1 行 + 250 条数据，跨两页取满
-            assertThat(sheet.getLastRowNum()).isEqualTo(250);
-            assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("用户名");
-            assertThat(sheet.getRow(0).getCell(4).getStringCellValue()).isEqualTo("最后发送时间");
-            assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("会话0");
-            assertThat(sheet.getRow(250).getCell(2).getNumericCellValue()).isEqualTo(250d);
-            assertThat(sheet.getRow(250).getCell(3).getStringCellValue()).isEqualTo("2026-06-28 08:04:09");
+
+            // 第一段：用户汇总
+            int summarySection = sectionRow(sheet, "用户汇总");
+            int summaryHeader = summarySection + 1;
+            assertThat(sheet.getRow(summaryHeader).getCell(0).getStringCellValue()).isEqualTo("用户ID");
+            assertThat(sheet.getRow(summaryHeader).getCell(9).getStringCellValue()).isEqualTo("最后发送时间");
+            assertThat(sheet.getRow(summaryHeader + 1).getCell(0).getStringCellValue()).isEqualTo("usr_sum_0");
+            assertThat(sheet.getRow(summaryHeader + 1).getCell(1).getStringCellValue()).isEqualTo("汇总用户0");
+            assertThat(sheet.getRow(summaryHeader + 3).getCell(6).getNumericCellValue()).isEqualTo(5d);
+            assertThat(sheet.getRow(summaryHeader + 3).getCell(7).getNumericCellValue()).isEqualTo(9d);
+
+            // 第二段：会话明细，表头 1 行 + 250 条数据跨两页取满
+            int detailSection = sectionRow(sheet, "会话明细");
+            assertThat(detailSection).isGreaterThan(summarySection);
+            assertThat(sheet.getRow(detailSection + 1).getCell(0).getStringCellValue()).isEqualTo("用户名");
+            assertThat(sheet.getRow(detailSection + 1).getCell(4).getStringCellValue()).isEqualTo("最后发送时间");
+            assertThat(sheet.getRow(detailSection + 2).getCell(1).getStringCellValue()).isEqualTo("会话0");
+            assertThat(sheet.getRow(detailSection + 251).getCell(2).getNumericCellValue()).isEqualTo(250d);
+            assertThat(sheet.getRow(detailSection + 251).getCell(3).getStringCellValue())
+                    .isEqualTo("2026-06-28 08:04:09");
+            assertThat(sheet.getLastRowNum()).isEqualTo(detailSection + 251);
         }
+    }
+
+    /** 按首列文本定位分段标题行，避免用例依赖固定行号。 */
+    private static int sectionRow(org.apache.poi.ss.usermodel.Sheet sheet, String firstCellValue) {
+        for (int index = sheet.getFirstRowNum(); index <= sheet.getLastRowNum(); index++) {
+            org.apache.poi.ss.usermodel.Row row = sheet.getRow(index);
+            if (row != null && row.getCell(0) != null && firstCellValue.equals(row.getCell(0).getStringCellValue())) {
+                return index;
+            }
+        }
+        throw new AssertionError("未找到分段标题行：" + firstCellValue);
     }
 
     private static void removePluginAdditiveFields(JsonNode node) {
@@ -423,7 +453,9 @@ class AnalyticsQueryServiceTest {
     }
 
     /** 按页切片返回业务库会话消息统计，用于验证导出翻页取满。 */
-    private record FakeSessionUsageRepository(List<AnalyticsModels.SessionUsageRow> rows)
+    private record FakeSessionUsageRepository(
+            List<AnalyticsModels.SessionUsageRow> rows,
+            List<AnalyticsModels.SessionUsageSummaryRow> summaryRows)
             implements AnalyticsSessionUsageRepository {
 
         @Override
@@ -436,7 +468,10 @@ class AnalyticsQueryServiceTest {
 
         @Override
         public PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter) {
-            return new PageResponse<>(List.of(), filter.page(), filter.pageSize(), 0);
+            int size = filter.pageSize();
+            int from = Math.min((filter.page() - 1) * size, summaryRows.size());
+            int to = Math.min(from + size, summaryRows.size());
+            return new PageResponse<>(summaryRows.subList(from, to), filter.page(), size, summaryRows.size());
         }
     }
 }

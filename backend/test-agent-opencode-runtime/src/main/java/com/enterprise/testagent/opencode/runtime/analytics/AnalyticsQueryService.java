@@ -771,7 +771,7 @@ public class AnalyticsQueryService {
 
             buildOverviewSheet(workbook, exportFilter, headerStyle, sectionStyle);
             buildUsersSheet(workbook, exportFilter, headerStyle);
-            buildSessionUsageSheet(workbook, exportFilter, headerStyle);
+            buildSessionUsageSheet(workbook, exportFilter, headerStyle, sectionStyle);
             buildTokenSheet(workbook, exportFilter, headerStyle, sectionStyle);
             buildCapabilitiesSheet(workbook, exportFilter, headerStyle);
             buildOrganizationsSheet(workbook, exportFilter, headerStyle);
@@ -1039,35 +1039,68 @@ public class AnalyticsQueryService {
     }
 
     /**
-     * 会话消息 Sheet：按「用户 × 会话」统计用户消息条数。
+     * 会话消息 Sheet：与网页 Tab 一致，分「用户汇总」与「会话明细」两段。
      * 口径依赖业务库的存储模式与来源类型，数据来自 {@link AnalyticsSessionUsageQueryService}，与其它只读 ClickHouse 的 Sheet 来源不同。
      */
     private void buildSessionUsageSheet(
             org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
             AnalyticsModels.Filter filter,
-            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+            org.apache.poi.ss.usermodel.CellStyle headerStyle,
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle) {
         if (sessionUsageQueryService == null) {
             return;
         }
         org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("会话消息");
-        String[] headers = {"用户名", "会话名", "用户消息数", "首次发送时间", "最后发送时间"};
-        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
-        for (int i = 0; i < headers.length; i++) {
-            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
-            cell.setCellValue(headers[i]);
+        int rowIdx = 0;
+
+        // 第一段：用户汇总（网页「用户汇总」表），按用户维度汇总参与对话数与发送总次数
+        org.apache.poi.ss.usermodel.Row summarySection = sheet.createRow(rowIdx++);
+        summarySection.createCell(0).setCellValue("用户汇总");
+        summarySection.getCell(0).setCellStyle(sectionStyle);
+        String[] summaryHeaders = {"用户ID", "姓名", "统一认证号", "机构", "研发部", "部门",
+                "参与对话数", "区间发送总次数", "首次发送时间", "最后发送时间"};
+        org.apache.poi.ss.usermodel.Row summaryHeader = sheet.createRow(rowIdx++);
+        for (int i = 0; i < summaryHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = summaryHeader.createCell(i);
+            cell.setCellValue(summaryHeaders[i]);
             cell.setCellStyle(headerStyle);
         }
-        int rowIdx = 1;
+        for (AnalyticsModels.SessionUsageSummaryRow row
+                : collectAll(filter, sessionUsageQueryService::sessionMessageSummary)) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(orDash(row.userId()));
+            r.createCell(1).setCellValue(displayNameOrUnknown(row.username(), row.userId()));
+            r.createCell(2).setCellValue(orDash(row.unifiedAuthId()));
+            r.createCell(3).setCellValue(orDash(row.organization()));
+            r.createCell(4).setCellValue(orDash(row.rdDepartment()));
+            r.createCell(5).setCellValue(orDash(row.department()));
+            r.createCell(6).setCellValue(row.sessionCount());
+            r.createCell(7).setCellValue(row.userMessageCount());
+            r.createCell(8).setCellValue(row.firstMessageAt() == null ? "-" : formatInstant(row.firstMessageAt()));
+            r.createCell(9).setCellValue(row.lastMessageAt() == null ? "-" : formatInstant(row.lastMessageAt()));
+        }
+
+        rowIdx++;
+        // 第二段：会话明细（网页「会话明细」表），按「用户 × 会话」统计
+        org.apache.poi.ss.usermodel.Row detailSection = sheet.createRow(rowIdx++);
+        detailSection.createCell(0).setCellValue("会话明细");
+        detailSection.getCell(0).setCellStyle(sectionStyle);
+        String[] detailHeaders = {"用户名", "会话名", "用户消息数", "首次发送时间", "最后发送时间"};
+        org.apache.poi.ss.usermodel.Row detailHeader = sheet.createRow(rowIdx++);
+        for (int i = 0; i < detailHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = detailHeader.createCell(i);
+            cell.setCellValue(detailHeaders[i]);
+            cell.setCellStyle(headerStyle);
+        }
         for (AnalyticsModels.SessionUsageRow row : collectAll(filter, sessionUsageQueryService::sessionMessageUsage)) {
             org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
-            String username = displayName(row.username(), row.userId());
-            r.createCell(0).setCellValue(username == null || username.isBlank() ? "未知用户" : username);
+            r.createCell(0).setCellValue(displayNameOrUnknown(row.username(), row.userId()));
             r.createCell(1).setCellValue(orDash(row.sessionTitle()));
             r.createCell(2).setCellValue(row.userMessageCount());
             r.createCell(3).setCellValue(row.firstMessageAt() == null ? "-" : formatInstant(row.firstMessageAt()));
             r.createCell(4).setCellValue(row.lastMessageAt() == null ? "-" : formatInstant(row.lastMessageAt()));
         }
-        autoSizeColumns(sheet, headers.length);
+        autoSizeColumns(sheet, summaryHeaders.length);
     }
 
     // Token 运营 Sheet：Token 汇总 + 每日 Token + 用户排行三段
@@ -1307,6 +1340,12 @@ public class AnalyticsQueryService {
 
     private String displayName(String username, String userId) {
         return username != null && !username.isBlank() ? username : userId;
+    }
+
+    // 姓名列与网页一致：优先用户名，其次用户 ID，都没有时显示「未知用户」
+    private String displayNameOrUnknown(String username, String userId) {
+        String name = displayName(username, userId);
+        return name == null || name.isBlank() ? "未知用户" : name;
     }
 
     private String orDash(String value) {

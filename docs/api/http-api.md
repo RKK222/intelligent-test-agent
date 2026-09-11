@@ -103,7 +103,7 @@
 | `analytics` | `/api/internal/platform/analytics/satisfaction` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/exceptions` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/export` | 无旧 URL |
-| `analytics` | `/api/internal/platform/analytics/export-all` | 无旧 URL；一次导出所有运营分析 Tab 为多 Sheet xlsx，Sheet 名与列头用中文且与网页表格一致，仅 `SUPER_ADMIN` 可调用；共 8 个 Sheet：使用总览、用户运营、会话消息、Token运营、能力使用、组织分析、满意度、异常Run，明细类均导出全量、不受网页 20 条分页限制；其中「会话消息」数据来自业务库（与 `/sessions` 同一口径），其余 Sheet 只读 ClickHouse |
+| `analytics` | `/api/internal/platform/analytics/export-all` | 无旧 URL；一次导出所有运营分析 Tab 为多 Sheet xlsx，Sheet 名与列头用中文且与网页表格一致，仅 `SUPER_ADMIN` 可调用；共 8 个 Sheet：使用总览、用户运营、会话消息、Token运营、能力使用、组织分析、满意度、异常Run，明细类均导出全量、不受网页 20 条分页限制；其中「会话消息」Sheet 含「用户汇总」（对应 `/sessions/summary`）与「会话明细」（对应 `/sessions`）两段，数据来自业务库，其余 Sheet 只读 ClickHouse |
 | `xxl-job` | `/api/internal/platform/xxl-job/sso-tickets` | 无旧 URL |
 | `integration/lobehub` | `/api/internal/platform/lobehub-sso/tickets`、`/tickets/redeem`、`/grants/revoke` | 无旧 URL |
 | `model-gateway` | `/api/internal/platform/model-gateway/v1/models`、`/chat/completions` 等固定端点 | 无旧 URL |

@@ -170,7 +170,7 @@
 - **机构/研发部/部门筛选**作用于实际发送人的当前 `users` 记录；未知用户（`users` 无匹配）在设置组织筛选时会被排除，与 SQL 关键词筛选语义一致。
 - **不做 users.status 过滤**，与统计 SQL 保持一致（避免与 SQL 结果口径分叉）。
 - **分页**服务端分页，`pageSize=20`；排序固定「最后发送时间降序（新会话优先）、用户消息数降序、会话 ID」。
-- **已纳入 `export-all`（后续追加）**：`AnalyticsQueryService.exportAllXlsx` 新增「会话消息」Sheet，列头与页面一致（`用户名 / 会话名 / 用户消息数 / 首次发送时间 / 最后发送时间`），数据经 `AnalyticsSessionUsageQueryService` 取满全量（复用 `collectAll` 翻页，不受网页 20 条分页限制）。`AnalyticsQueryService` 通过重载构造器接收该服务，`@Autowired(required = false)` 语义下单测只注入 ClickHouse 仓储时该 Sheet 跳过而非报错。
+- **已纳入 `export-all`（后续追加）**：`AnalyticsQueryService.exportAllXlsx` 新增「会话消息」Sheet，与页面 Tab 一致分两段：「用户汇总」（对应 `/sessions/summary`，列头 `用户ID / 姓名 / 统一认证号 / 机构 / 研发部 / 部门 / 参与对话数 / 区间发送总次数 / 首次发送时间 / 最后发送时间`）与「会话明细」（对应 `/sessions`，列头 `用户名 / 会话名 / 用户消息数 / 首次发送时间 / 最后发送时间`）。两段都经 `AnalyticsSessionUsageQueryService` 取满全量（复用 `collectAll` 翻页，不受网页 20 条分页限制）。`AnalyticsQueryService` 通过重载构造器接收该服务，`@Autowired(required = false)` 语义下单测只注入 ClickHouse 仓储时该 Sheet 跳过而非报错。
 - 该 Tab 在 ClickHouse 未启用时也能用（不依赖 ClickHouse 开关），这是「业务库例外」的必然结果。
 - 不新增 Flyway migration；`session_messages(sender_user_id, role, created_at)` 与 `runs(created_at, ...)` 等既有索引已可支撑，不新增 DDL。
 - 新增/修改的人工维护代码补中文注释；不修改 OpenCode 源码；不修改 `.env.local`。

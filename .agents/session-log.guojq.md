@@ -1,5 +1,32 @@
 # Session Log — guojq
 
+## 2026-09-11 导出「会话消息」Sheet 补「用户汇总」段
+
+### Why
+
+用户给「会话消息」Tab 加了「用户汇总」表（新增 `/sessions/summary`），要求导出也带上它。原来 Excel 的「会话消息」Sheet 只有会话明细一段。
+
+### What
+
+1. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java) 的 `buildSessionUsageSheet` 改为与页面一致的两段结构，并按网页列头输出：
+   - 「用户汇总」：用户ID / 姓名 / 统一认证号 / 机构 / 研发部 / 部门 / 参与对话数 / 区间发送总次数 / 首次发送时间 / 最后发送时间，数据用 `collectAll(filter, sessionUsageQueryService::sessionMessageSummary)` 取满全量。
+   - 「会话明细」：用户名 / 会话名 / 用户消息数 / 首次发送时间 / 最后发送时间（原逻辑保留）。
+   - 该方法新增 `sectionStyle` 参数用于分段标题，并新增 `displayNameOrUnknown` 小工具（姓名列优先用户名、其次用户 ID、都没有显示「未知用户」，与网页一致），明细段也改用它。
+2. [AnalyticsQueryServiceTest.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryServiceTest.java)：用例改为覆盖两段（新增 3 条汇总行 + 250 条明细行跨两页），并用 `sectionRow(sheet, "用户汇总")` 这类按首列文本定位的辅助方法断言，避免依赖固定行号；`FakeSessionUsageRepository` 增加汇总行并按页切片。
+3. 文档同步：`docs/api/http-api.md` 的 export-all 行、`.trae/documents/analytics-seed-and-xlsx-export.md` 的 Sheet 表、`.trae/documents/analytics-session-usage-tab.md` 的导出说明、`frontend/apps/agent-web/README.md` 的面板段落都补上「会话消息 Sheet 含用户汇总 + 会话明细两段」。
+
+### How
+
+- 复用既有的分段写法（使用总览、Token 运营都是多段），保持一个 Sheet 对应一个 Tab 的既有约定，而不是新开 Sheet。
+- 汇总与明细都用 `collectAll` 翻页取满：单页上限 200（`PageResponse` 约束），不能靠放大 pageSize。
+
+### Result
+
+- 导出实测：8 个 Sheet 不变，「会话消息」Sheet 结构为 `第1行 用户汇总 → 第2行 表头(10列) → 9 行数据 → 空行 → 第13行 会话明细 → 表头(5列) → 58 行数据`。
+- 固定时间窗严格对账：用户汇总导出 9 行 = 接口 total 9，会话明细导出 58 行 = 接口 total 58，两段都未被分页截断。
+- `mvn -pl test-agent-opencode-runtime,test-agent-api -am -Dtest='Analytics*Test,AnalyticsControllerTest'` → 32 + 6 全通过。
+- 排查插曲：我先后两次算错 Excel 行数公式（把分段间的空行/表头行重复扣减），一度误判成「导出比 total 多 1 行、分页有问题」。最终用固定时间窗 + 正确锚点核对确认数据一致，并直接在库里对比 `sessionMessageUsage`/`sessionMessageSummary` 的两种 group by（58/9）与接口一致。教训：核对表格行数时按「分段标题 + 表头 + 空行」逐项推导，别用 `max_row - 分段标题行` 这类简写。
+
 ## 2026-09-11 会话消息 Tab 新增「用户汇总」表格（按用户汇总）
 
 ### Why
