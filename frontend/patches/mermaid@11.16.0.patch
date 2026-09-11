@@ -1,0 +1,22 @@
+diff --git a/dist/chunks/mermaid.core/chunk-Q4XR5HBZ.mjs b/dist/chunks/mermaid.core/chunk-Q4XR5HBZ.mjs
+index 3f0dd6d1538eab4916fb8200f50668a5402f4c5c..7fa009e2a5ae13bf72bcb05e3cc047afff4b97c3 100644
+--- a/dist/chunks/mermaid.core/chunk-Q4XR5HBZ.mjs
++++ b/dist/chunks/mermaid.core/chunk-Q4XR5HBZ.mjs
+@@ -233,8 +233,16 @@ async function addHtmlSpan(element, node, width, classes, addBackground = false,
+     div.attr("class", "labelBkg");
+   }
+   let bbox = div.node().getBoundingClientRect();
+-  if (bbox.width === width) {
++  // TestAgent 补丁：max-width 截断判定改为 1px 容差。getBoundingClientRect().width 是按
++  // 设备像素比量化的浮点数，在 125%/150% 等小数缩放（企业 Windows/360 浏览器常见）下会返回
++  // 200.0078125 之类并非整数的值，严格相等会漏判，使长标签停留在 white-space: nowrap 而不换行，
++  // 文本溢出后被裁切；整数 DPR 下则恰好相等，所以同一版本在不同机器表现不一致。
++  // 对齐 mermaid 上游 issue #7794 / PR #8242。
++  if (Math.abs(bbox.width - width) < 1) {
+     div.style("display", "table");
++    // TestAgent 补丁：先用所有内核都支持的 pre-wrap 打底，再尝试 break-spaces，
++    // 避免不支持 break-spaces 的老 Blink 内核丢弃该声明后退回 nowrap 而不换行。
++    div.style("white-space", "pre-wrap");
+     div.style("white-space", "break-spaces");
+     div.style("width", width + "px");
+     bbox = div.node().getBoundingClientRect();

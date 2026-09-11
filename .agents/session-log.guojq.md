@@ -1,5 +1,30 @@
 # Session Log — guojq
 
+## 2026-09-11 修复 360 浏览器（小数设备像素比）下 mermaid 节点长文字不换行
+
+### Why
+
+企业现场用 360 浏览器（Chromium 内核）查看 Markdown 预览里的 mermaid 流程图时，节点文字一多就不换行、溢出后被隐藏，而本机（整数设备像素比）同一份产物正常换行，用户要求定位并修复。
+
+### What
+
+- 根因在第三方 `mermaid@11.16.0` 的 `addHtmlSpan`（`dist/chunks/mermaid.core/chunk-Q4XR5HBZ.mjs`）：它用 `getBoundingClientRect().width === wrappingWidth` 的严格相等判断 `max-width` 是否截断，命中才切到 `white-space: break-spaces` 的换行分支。该宽度受设备像素比量化，在 125%/150% 等小数缩放下会得到 `200.0078125` 这类非整数值而漏判，长标签停留在 `nowrap`，既不换行又被裁切；整数 DPR 恰好相等，所以同版本不同机器表现不一致。对应上游 mermaid#7794 / PR #8242。
+- 新增依赖补丁 `frontend/patches/mermaid@11.16.0.patch`：判定改为 1px 容差 `Math.abs(bbox.width - width) < 1`，并先用所有内核都支持的 `pre-wrap` 打底再设置 `break-spaces`，兼容不支持后者的旧 Blink 内核。
+- `frontend/package.json` 增加 `pnpm.patchedDependencies` 映射，`frontend/pnpm-lock.yaml` 同步补丁 hash；`frontend/packages/editor/README.md` 与 `frontend/README.md` 记录该补丁的原因、范围与升级注意事项。
+- 未改 `init.ts` 的 mermaid 配置（`htmlLabels` 仍为默认 true），也未改自研可视化编辑器（`MermaidFlowNode.vue` 不受影响）。
+
+### How
+
+- 先排除自研编辑器与我们的渲染封装：截图对应 Markdown 预览「图表」模式（`MarkdownPreview.vue` 调 `mermaid.render`），标签换行完全由 mermaid 内部决定；再用本机 mermaid 11.16.0 源码确认严格相等判定，并对照上游 issue/PR 结论。
+- 用 `corepack pnpm patch mermaid@11.16.0` 生成临时目录，改完 `patch-commit` 落补丁并触发 install。
+- 验证：`node --check` 校验补丁后的 chunk 语法通过；`corepack pnpm vitest run packages/editor` 26 个文件 472 用例全部通过（含 Mermaid 渲染与可视化编辑用例）。
+
+### Result
+
+- 影响面仅 mermaid HTML 标签的换行与尺寸测量，不改解析、序列化、可视化编辑与保存链路；`pnpm install` 会按 lockfile 中的 patch hash 自动应用补丁。
+- Pitfall：本机无法复现 360 现场（二进制 CI/headless 也不复现小数 DPR 量化），结论依据上游同因 issue 与代码路径，仍需企业现场确认；升级 mermaid 后 chunk 文件名与补丁都会失效，必须重新核对并重放该补丁。
+- Pitfall：pnpm 10.25 的 `patch-commit` 把 `patchedDependencies` 写入 `frontend/package.json`（不是 `pnpm-workspace.yaml`），改动 lockfile 后需一并提交，否则其他机器 install 会缺补丁。
+
 ## 2026-09-11 运营分析新增「会话消息」Tab（直连业务库统计用户×会话发送次数）
 
 ### Why

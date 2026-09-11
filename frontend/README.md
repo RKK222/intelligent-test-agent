@@ -31,6 +31,7 @@ SPA 首次导航等待异步路由组件时，由根组件立即展示复用同�
 - Monaco Editor（原生 `monaco-editor`，按需懒加载）
 - Vue Flow（`@vue-flow/core`，仅在 Mermaid 可视化编辑时懒加载）
 - SimpleMindMap（固定 `simple-mind-map@0.14.0-fix.3`，仅在思维导图预览或编辑时懒加载 core、Drag 和 KeyboardNavigation；MIT License）
+- mermaid 11.16.0（Markdown 预览的 `flowchart`/`sequenceDiagram`/`stateDiagram` 渲染；经 `patches/mermaid@11.16.0.patch` 修正小数设备像素比下节点长标签不换行的问题，见 `packages/editor/README.md`）
 - lucide-vue-next
 - @vscode/codicons（仅文件浏览区使用）
 - jsonc-parser 3.3.1（引用配置对 `.opencode/opencode.jsonc` 做保留注释的最小字段补丁）

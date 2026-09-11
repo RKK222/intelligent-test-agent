@@ -32,6 +32,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "vue-demi"
-    ]
+    ],
+    "patchedDependencies": {
+      "mermaid@11.16.0": "patches/mermaid@11.16.0.patch"
+    }
   }
 }
