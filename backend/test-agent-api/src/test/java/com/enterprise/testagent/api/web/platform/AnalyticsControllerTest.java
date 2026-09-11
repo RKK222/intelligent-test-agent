@@ -163,6 +163,30 @@ class AnalyticsControllerTest {
                 .isEqualTo("一个非常长的会话标题用于验证前端截断与悬浮展示");
     }
 
+    @Test
+    void superAdminCanQuerySessionUsageSummary() {
+        AnalyticsQueryService service = org.mockito.Mockito.mock(AnalyticsQueryService.class);
+        AnalyticsSessionUsageQueryService sessionUsageService =
+                org.mockito.Mockito.mock(AnalyticsSessionUsageQueryService.class);
+        when(sessionUsageService.sessionMessageSummary(any())).thenReturn(new PageResponse<>(
+                List.of(new AnalyticsModels.SessionUsageSummaryRow(
+                        "usr_1", "张三", "AUTH_1", "总行", "研发一部", "平台部", 3, 9, NOW, NOW.plusSeconds(120))),
+                1,
+                20,
+                1));
+
+        client(service, sessionUsageService, List.of(Dictionary.ROLE_SUPER_ADMIN))
+                .get()
+                .uri("/api/internal/platform/analytics/sessions/summary?page=1&pageSize=20")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.total").isEqualTo(1)
+                .jsonPath("$.data.items[0].sessionCount").isEqualTo(3)
+                .jsonPath("$.data.items[0].userMessageCount").isEqualTo(9);
+    }
+
     private static WebTestClient client(AnalyticsQueryService service, List<String> roles) {
         return client(service, org.mockito.Mockito.mock(AnalyticsSessionUsageQueryService.class), roles);
     }

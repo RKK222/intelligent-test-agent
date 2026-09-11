@@ -133,6 +133,15 @@ public class AnalyticsController {
                 RuntimeApiSupport.traceId(exchange));
     }
 
+    /** 用户维度汇总：同一筛选下按用户汇总参与对话数、发送总次数与首末发送时间。 */
+    @GetMapping("/sessions/summary")
+    public ApiResponse<Object> sessionSummary(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(
+                sessionUsageService.sessionMessageSummary(filter(params)),
+                RuntimeApiSupport.traceId(exchange));
+    }
+
     @GetMapping(value = "/export", produces = "text/csv")
     public ResponseEntity<byte[]> export(
             QueryParams params,

@@ -50,4 +50,27 @@ public class MyBatisAnalyticsSessionUsageRepository implements AnalyticsSessionU
                 filter.userKeyword());
         return new PageResponse<>(items, filter.page(), pageSize, total);
     }
+
+    @Override
+    public PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter) {
+        int pageSize = filter.pageSize();
+        long offset = (long) Math.max(0, filter.page() - 1) * pageSize;
+        List<AnalyticsModels.SessionUsageSummaryRow> items = mapper.sessionMessageSummary(
+                filter.startTime(),
+                filter.endTime(),
+                filter.organization(),
+                filter.rdDepartment(),
+                filter.department(),
+                filter.userKeyword(),
+                pageSize,
+                offset);
+        long total = mapper.countSessionMessageSummary(
+                filter.startTime(),
+                filter.endTime(),
+                filter.organization(),
+                filter.rdDepartment(),
+                filter.department(),
+                filter.userKeyword());
+        return new PageResponse<>(items, filter.page(), pageSize, total);
+    }
 }

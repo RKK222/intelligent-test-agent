@@ -12,4 +12,6 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 public interface AnalyticsSessionUsageRepository {
 
     PageResponse<AnalyticsModels.SessionUsageRow> sessionMessageUsage(AnalyticsModels.Filter filter);
+
+    PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter);
 }

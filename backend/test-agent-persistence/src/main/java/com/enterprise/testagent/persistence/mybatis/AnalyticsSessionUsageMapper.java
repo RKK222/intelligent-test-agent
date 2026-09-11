@@ -1,5 +1,6 @@
 package com.enterprise.testagent.persistence.mybatis;
 
+import com.enterprise.testagent.domain.analytics.AnalyticsModels;
 import java.time.Instant;
 import java.util.List;
 import org.apache.ibatis.annotations.Mapper;
@@ -22,6 +23,24 @@ public interface AnalyticsSessionUsageMapper {
             @Param("offset") long offset);
 
     long countSessionMessageUsage(
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive,
+            @Param("organization") String organization,
+            @Param("rdDepartment") String rdDepartment,
+            @Param("department") String department,
+            @Param("userKeyword") String userKeyword);
+
+    List<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(
+            @Param("startInclusive") Instant startInclusive,
+            @Param("endExclusive") Instant endExclusive,
+            @Param("organization") String organization,
+            @Param("rdDepartment") String rdDepartment,
+            @Param("department") String department,
+            @Param("userKeyword") String userKeyword,
+            @Param("limit") int limit,
+            @Param("offset") long offset);
+
+    long countSessionMessageSummary(
             @Param("startInclusive") Instant startInclusive,
             @Param("endExclusive") Instant endExclusive,
             @Param("organization") String organization,

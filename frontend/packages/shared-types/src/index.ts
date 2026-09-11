@@ -1905,6 +1905,19 @@ export type AnalyticsSessionUsageRow = {
   lastMessageAt?: string | null;
 };
 
+export type AnalyticsSessionUsageSummaryRow = {
+  userId?: string | null;
+  username?: string | null;
+  unifiedAuthId?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  sessionCount: number;
+  userMessageCount: number;
+  firstMessageAt?: string | null;
+  lastMessageAt?: string | null;
+};
+
 export type AnalyticsSatisfaction = {
   positiveFeedbackCount: number;
   negativeFeedbackCount: number;

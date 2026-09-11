@@ -14,6 +14,7 @@ import type {
   AnalyticsQueryParams,
   AnalyticsSatisfaction,
   AnalyticsSessionUsageRow,
+  AnalyticsSessionUsageSummaryRow,
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
@@ -45,6 +46,7 @@ const SERVER_PAGE_SIZE = 20;
 const RANK_FETCH_LIMIT = 100;
 const usersPage = ref(1);
 const sessionsPage = ref(1);
+const sessionsSummaryPage = ref(1);
 const feedbackPage = ref(1);
 const exceptionsPage = ref(1);
 const organizationPage = ref(1);
@@ -66,6 +68,7 @@ const params = computed<AnalyticsQueryParams>(() => ({
 // 服务端分页的三个明细列表各自持有页码，避免切换 Tab 时互相串页
 const usersParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: usersPage.value }));
 const sessionsParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: sessionsPage.value }));
+const sessionsSummaryParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: sessionsSummaryPage.value }));
 const feedbackParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: feedbackPage.value }));
 const exceptionsParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: exceptionsPage.value }));
 const heatmapRangeSupported = computed(() => {
@@ -143,6 +146,12 @@ const sessionUsageQuery = useQuery<PageResponse<AnalyticsSessionUsageRow>, Error
   retry: false,
   queryFn: () => api.getAnalyticsSessionUsage(sessionsParams.value)
 });
+const sessionSummaryQuery = useQuery<PageResponse<AnalyticsSessionUsageSummaryRow>, Error>({
+  queryKey: computed(() => ["analytics-session-usage-summary", sessionsSummaryParams.value]),
+  enabled: () => activeTab.value === "sessions",
+  retry: false,
+  queryFn: () => api.getAnalyticsSessionUsageSummary(sessionsSummaryParams.value)
+});
 
 const overview = computed(() => overviewQuery.data.value);
 const funnel = computed(() => funnelQuery.data.value);
@@ -203,6 +212,7 @@ watch(rdDepartment, () => {
 function resetListPages() {
   usersPage.value = 1;
   sessionsPage.value = 1;
+  sessionsSummaryPage.value = 1;
   feedbackPage.value = 1;
   exceptionsPage.value = 1;
   organizationPage.value = 1;
@@ -215,6 +225,9 @@ function changeUsersPage(next: number) {
 }
 function changeSessionPage(next: number) {
   sessionsPage.value = next;
+}
+function changeSessionsSummaryPage(next: number) {
+  sessionsSummaryPage.value = next;
 }
 function changeFeedbackPage(next: number) {
   feedbackPage.value = next;
@@ -240,6 +253,7 @@ function refresh() {
   void timeseriesQuery.refetch();
   void usersQuery.refetch();
   void sessionUsageQuery.refetch();
+  void sessionSummaryQuery.refetch();
   void tokenQuery.refetch();
   void capabilitiesQuery.refetch();
   void organizationsQuery.refetch();
@@ -433,8 +447,13 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
       <div v-if="(usersQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="usersPage" :page-size="SERVER_PAGE_SIZE" :total="usersQuery.data.value?.total ?? 0" @current-change="changeUsersPage" /></div>
     </section>
 
-    <section v-else-if="activeTab === 'sessions'" class="ta-panel"><h3>会话消息统计</h3><table class="ta-table"><thead><tr><th>用户名</th><th>会话名</th><th>用户消息数</th><th>首次发送时间</th><th>最后发送时间</th></tr></thead><tbody><tr v-for="row in sessionUsageQuery.data.value?.items ?? []" :key="`${row.userId ?? 'unknown'}-${row.sessionId}`"><td>{{ row.username || row.userId || '未知用户' }}</td><td><span class="ta-ellipsis" :title="row.sessionTitle || '-'">{{ row.sessionTitle || '-' }}</span></td><td>{{ row.userMessageCount }}</td><td>{{ row.firstMessageAt ? new Date(row.firstMessageAt).toLocaleString('zh-CN') : '-' }}</td><td>{{ row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleString('zh-CN') : '-' }}</td></tr></tbody></table>
-      <div v-if="(sessionUsageQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="sessionsPage" :page-size="SERVER_PAGE_SIZE" :total="sessionUsageQuery.data.value?.total ?? 0" @current-change="changeSessionPage" /></div>
+    <section v-else-if="activeTab === 'sessions'" class="ta-stack">
+      <section class="ta-panel"><h3>用户汇总</h3><table class="ta-table"><thead><tr><th>用户ID</th><th>姓名</th><th>统一认证号</th><th>机构</th><th>研发部</th><th>部门</th><th>参与对话数</th><th>区间发送总次数</th><th>首次发送时间</th><th>最后发送时间</th></tr></thead><tbody><tr v-for="row in sessionSummaryQuery.data.value?.items ?? []" :key="row.userId ?? 'unknown'"><td>{{ row.userId || '-' }}</td><td>{{ row.username || row.userId || '未知用户' }}</td><td>{{ row.unifiedAuthId || '-' }}</td><td>{{ row.organization || '-' }}</td><td>{{ row.rdDepartment || '-' }}</td><td>{{ row.department || '-' }}</td><td>{{ row.sessionCount }}</td><td>{{ row.userMessageCount }}</td><td>{{ row.firstMessageAt ? new Date(row.firstMessageAt).toLocaleString('zh-CN') : '-' }}</td><td>{{ row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleString('zh-CN') : '-' }}</td></tr></tbody></table>
+        <div v-if="(sessionSummaryQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="sessionsSummaryPage" :page-size="SERVER_PAGE_SIZE" :total="sessionSummaryQuery.data.value?.total ?? 0" @current-change="changeSessionsSummaryPage" /></div>
+      </section>
+      <section class="ta-panel"><h3>会话明细</h3><table class="ta-table"><thead><tr><th>用户名</th><th>会话名</th><th>用户消息数</th><th>首次发送时间</th><th>最后发送时间</th></tr></thead><tbody><tr v-for="row in sessionUsageQuery.data.value?.items ?? []" :key="`${row.userId ?? 'unknown'}-${row.sessionId}`"><td>{{ row.username || row.userId || '未知用户' }}</td><td><span class="ta-ellipsis" :title="row.sessionTitle || '-'">{{ row.sessionTitle || '-' }}</span></td><td>{{ row.userMessageCount }}</td><td>{{ row.firstMessageAt ? new Date(row.firstMessageAt).toLocaleString('zh-CN') : '-' }}</td><td>{{ row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleString('zh-CN') : '-' }}</td></tr></tbody></table>
+        <div v-if="(sessionUsageQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="sessionsPage" :page-size="SERVER_PAGE_SIZE" :total="sessionUsageQuery.data.value?.total ?? 0" @current-change="changeSessionPage" /></div>
+      </section>
     </section>
 
     <section v-else-if="activeTab === 'organizations'" class="ta-panel"><h3>组织排行</h3><table class="ta-table"><thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in organizationPageRows" :key="`${row.dimension}-${row.name}`"><td>{{ row.dimension }}</td><td>{{ row.name }}</td><td>{{ row.loginUsers }}</td><td>{{ row.activeUsers }}</td><td>{{ row.deepUsers }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table>

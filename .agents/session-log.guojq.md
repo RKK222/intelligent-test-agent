@@ -1,5 +1,29 @@
 # Session Log — guojq
 
+## 2026-09-11 会话消息 Tab 新增「用户汇总」表格（按用户汇总）
+
+### Why
+
+用户要求在运营分析「会话消息」页再加一个汇总表格，按用户维度展示：用户ID/姓名/统一认证号/机构/研发部/部门/参与对话数/区间发送总次数/首末发送时间（对应统计 SQL 的“每人一行”汇总）。
+
+### What
+
+- 领域：`AnalyticsModels.SessionUsageSummaryRow`；端口 `AnalyticsSessionUsageRepository` 增加 `sessionMessageSummary(Filter)`。
+- 持久化：`AnalyticsSessionUsageMapper` 增加 `sessionMessageSummary`/`countSessionMessageSummary`，XML 复用同一 `userMessages`/`userFilters` 片段按「用户」分组（`count(distinct session_id)` 为参与对话数、`count(*)` 为区间发送总次数，带当前组织与首末时间），默认按发送总次数倒序；仓储实现组装 `PageResponse`。
+- 服务/API：`AnalyticsSessionUsageQueryService.sessionMessageSummary`；新增 `GET /api/internal/platform/analytics/sessions/summary`。
+- 前端：`AnalyticsSessionUsageSummaryRow` 类型、`getAnalyticsSessionUsageSummary`、面板「会话消息」Tab 拆为「用户汇总」+「会话明细」两张表，各自服务端分页与页码重置。
+- 文档：http-api 新增 `/sessions/summary` 行与口径说明，persistence/shared-types/backend-api/agent-web README 同步。
+
+### How
+
+- 后端 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-persistence -am -Dtest='AnalyticsControllerTest,AnalyticsSessionUsageQueryServiceTest,AnalyticsQueryServiceTest,AnalyticsSessionUsagePostgresqlIntegrationTest' test` 全通过；集成测试新增 `summarizesPerUserAcrossSessions`（usr_a 参与 3 个会话、6 条消息，组织/认证号/首末时间正确，未知用户单列）。
+- 新增接口使 `AnalyticsSessionUsageRepository` 变为多方法，同步补 `AnalyticsQueryServiceTest.FakeSessionUsageRepository` 与重写 `AnalyticsSessionUsageQueryServiceTest`（去 lambda、改显式 fake）。
+- 前端 `corepack pnpm test analytics-management-panel`（11 用例）与 shared-types/backend-api/agent-web typecheck 通过。
+
+### Result
+
+- 「会话消息」Tab 现在同时给出用户汇总（参与对话数与区间总次数）与会话明细；两者同源同口径、同一时间窗口与筛选。仅新增只读查询与页面展示，未改既有明细口径与排序。
+
 ## 2026-09-11 运营分析时间窗口补齐秒级精度（修复同一分钟内新会话查不出）
 
 ### Why

@@ -433,5 +433,10 @@ class AnalyticsQueryServiceTest {
             int to = Math.min(from + size, rows.size());
             return new PageResponse<>(rows.subList(from, to), filter.page(), size, rows.size());
         }
+
+        @Override
+        public PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter) {
+            return new PageResponse<>(List.of(), filter.page(), filter.pageSize(), 0);
+        }
     }
 }

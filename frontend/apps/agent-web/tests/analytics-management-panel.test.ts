@@ -16,6 +16,7 @@ import type {
   AnalyticsPeaks,
   AnalyticsSatisfaction,
   AnalyticsSessionUsageRow,
+  AnalyticsSessionUsageSummaryRow,
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
@@ -270,6 +271,7 @@ function api() {
     } satisfies AnalyticsSatisfaction),
     getAnalyticsExceptions: vi.fn().mockResolvedValue(pageOf<AnalyticsExceptionDetail>([])),
     getAnalyticsSessionUsage: vi.fn().mockResolvedValue(pageOf<AnalyticsSessionUsageRow>([])),
+    getAnalyticsSessionUsageSummary: vi.fn().mockResolvedValue(pageOf<AnalyticsSessionUsageSummaryRow>([])),
     exportAnalyticsXlsx: vi.fn().mockResolvedValue(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }))
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -539,6 +541,37 @@ describe("analytics management panel", () => {
       const calls = vi.mocked(backendApi.getAnalyticsSessionUsage).mock.calls;
       expect(calls.at(-1)?.[0]?.page).toBe(2);
     });
+    view.queryClient.clear();
+  });
+
+  it("renders the per-user session message summary table", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getAnalyticsSessionUsageSummary).mockResolvedValue({
+      items: [
+        {
+          userId: "u_1",
+          username: "张三",
+          unifiedAuthId: "AUTH_1",
+          organization: "总行",
+          rdDepartment: "研发一部",
+          department: "平台部",
+          sessionCount: 3,
+          userMessageCount: 9,
+          firstMessageAt: "2026-09-01T00:00:00Z",
+          lastMessageAt: "2026-09-02T00:00:00Z"
+        } satisfies AnalyticsSessionUsageSummaryRow
+      ],
+      page: 1,
+      size: 20,
+      total: 1
+    });
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "会话消息" }));
+    expect(await view.findByText("用户汇总")).toBeTruthy();
+    expect(view.getByText("参与对话数")).toBeTruthy();
+    expect(await view.findByText("AUTH_1")).toBeTruthy();
+    expect(await view.findByText("平台部")).toBeTruthy();
     view.queryClient.clear();
   });
 });

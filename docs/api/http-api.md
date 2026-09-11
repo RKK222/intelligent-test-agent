@@ -259,13 +259,14 @@ Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`
 | `GET` | `/satisfaction` | 满意率、反馈覆盖率、负反馈原因分布和反馈明细 | `AnalyticsSatisfaction` |
 | `GET` | `/exceptions` | 失败/取消 Run 明细，不返回 prompt 或 assistant 原文 | `PageResponse<AnalyticsExceptionDetail>` |
 | `GET` | `/sessions` | 按 `用户 × 会话` 统计所选时间内的用户消息条数（口径同 `tools/query-user-message-statistics.sql`），返回用户名、会话标题、发送次数与首次/末次发送时间；**该端点是唯一例外，直连平台 PostgreSQL** | `PageResponse<AnalyticsSessionUsageRow>` |
+| `GET` | `/sessions/summary` | 同一筛选与口径下按 `用户` 汇总：用户ID/姓名/统一认证号/机构/研发部/部门、参与对话数、区间发送总次数、首次与最后发送时间；同样直连平台 PostgreSQL | `PageResponse<AnalyticsSessionUsageSummaryRow>` |
 | `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions|funnel|token-operations|capabilities` | CSV 导出；不导出 prompt、回答、反馈评论或 cost/costUsd 字段 | `text/csv` |
 
 核心口径：总用户是 ClickHouse 最新用户维度快照中当前未删除的全部平台用户，不受所选时间影响；活跃用户是所选时间内至少发送 1 条用户消息的人；深度用户是活跃用户中至少 2 个上海自然日有使用且累计至少 5 条用户消息的人。主 Token 为 `input+output+reasoning`，总 Token 为主 Token 加缓存 read/write；日人均 Token 的分母只包含当天产生任意主或缓存 Token 的用户人天。Token 使用率为 Token 用户数/活跃用户数，复用率为至少 2 个自然日有 Token 的用户数/Token 用户数，用户强度按每 Token 活跃日总 Token 的四分位数分层。能力使用率为调用该能力的去重用户数/同期活跃用户数；Agent 主 Run、`task` 子 Agent、`skill` 和其它 Tool 分开统计，开始态与终态按 `runId+scopeId+callId` 去重，未看到终态的调用计入 `incompleteCount`。
 
 满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 ClickHouse 小时直方图近似计算。运营数据不统计、不展示、不导出费用字段。
 
-`/sessions` 会话消息口径：按实际发送人统计 `LEGACY_FULL` 的 `role='USER'` 消息与 `REDIS_SUMMARY` 的唯一 Run 锚点（两者按 `storage_mode` 互斥，不重复计数），排除 `SIDE_QUESTION` 会话与 `SCHEDULED_TASK` 自动来源；人员归属按 消息发送人 → Run 发送人 → Run 执行人 → 会话创建人 依次回退，全空时归「未知用户」（`userId` 为空）。按 `(用户, 会话)` 分组返回条数与首次/末次发送时间，默认按最后发送时间倒序（新会话优先在首页）、再按条数与会话 ID 排序，不按 `users.status` 过滤。
+`/sessions` 会话消息口径：按实际发送人统计 `LEGACY_FULL` 的 `role='USER'` 消息与 `REDIS_SUMMARY` 的唯一 Run 锚点（两者按 `storage_mode` 互斥，不重复计数），排除 `SIDE_QUESTION` 会话与 `SCHEDULED_TASK` 自动来源；人员归属按 消息发送人 → Run 发送人 → Run 执行人 → 会话创建人 依次回退，全空时归「未知用户」（`userId` 为空）。按 `(用户, 会话)` 分组返回条数与首次/末次发送时间，默认按最后发送时间倒序（新会话优先在首页）、再按条数与会话 ID 排序，不按 `users.status` 过滤。`/sessions/summary` 使用完全相同的过滤与人员归属口径，只是把粒度提升到「用户」：`参与对话数` 为区间内去重会话数，`区间发送总次数` 为该用户区间内用户消息总数，并返回该用户当前组织信息与首末发送时间，默认按发送总次数倒序。
 
 对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`AnalyticsOperationsQueryServiceTest`、`AnalyticsSessionUsageQueryServiceTest`、`ClickHouseAnalyticsIntegrationTest`、`AnalyticsSessionUsagePostgresqlIntegrationTest`、`analytics-management-panel.test.ts`。
 

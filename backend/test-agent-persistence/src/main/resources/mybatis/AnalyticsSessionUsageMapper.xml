@@ -87,4 +87,37 @@
             group by um.user_id, um.session_id
         ) grouped
     </select>
+
+    <!-- 用户维度汇总：同一过滤与口径下，按用户汇总参与对话数、发送总次数与首末发送时间。 -->
+    <select id="sessionMessageSummary"
+            resultType="com.enterprise.testagent.domain.analytics.AnalyticsModels$SessionUsageSummaryRow">
+        select um.user_id,
+               coalesce(u.username, um.user_id, '未知用户') as username,
+               u.unified_auth_id,
+               u.organization,
+               u.rd_department,
+               u.department,
+               count(distinct um.session_id) as session_count,
+               count(*) as user_message_count,
+               min(um.sent_at) as first_message_at,
+               max(um.sent_at) as last_message_at
+        from (<include refid="userMessages"/>) um
+        left join users u on u.user_id = um.user_id
+        where 1 = 1
+        <include refid="userFilters"/>
+        group by um.user_id, u.username, u.unified_auth_id, u.organization, u.rd_department, u.department
+        order by user_message_count desc, last_message_at desc, um.user_id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countSessionMessageSummary" resultType="long">
+        select count(*) from (
+            select um.user_id
+            from (<include refid="userMessages"/>) um
+            left join users u on u.user_id = um.user_id
+            where 1 = 1
+            <include refid="userFilters"/>
+            group by um.user_id, u.username, u.unified_auth_id, u.organization, u.rd_department, u.department
+        ) grouped
+    </select>
 </mapper>

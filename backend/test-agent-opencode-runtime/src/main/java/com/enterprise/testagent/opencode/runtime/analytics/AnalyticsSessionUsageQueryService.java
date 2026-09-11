@@ -24,4 +24,8 @@ public class AnalyticsSessionUsageQueryService {
     public PageResponse<AnalyticsModels.SessionUsageRow> sessionMessageUsage(AnalyticsModels.Filter filter) {
         return repository.sessionMessageUsage(filter);
     }
+
+    public PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter) {
+        return repository.sessionMessageSummary(filter);
+    }
 }

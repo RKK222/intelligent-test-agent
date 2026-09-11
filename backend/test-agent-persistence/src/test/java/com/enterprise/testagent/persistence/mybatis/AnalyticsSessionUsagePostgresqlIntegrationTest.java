@@ -121,6 +121,32 @@ class AnalyticsSessionUsagePostgresqlIntegrationTest {
         assertThat(second.items().get(0).userId()).isEqualTo("usr_a");
     }
 
+    @Test
+    void summarizesPerUserAcrossSessions() {
+        PageResponse<AnalyticsModels.SessionUsageSummaryRow> page =
+                repository.sessionMessageSummary(filter(null, null, null, null, 1, 20));
+
+        assertThat(page.total()).isEqualTo(3);
+        assertThat(page.items().get(0).userId()).isEqualTo("usr_a");
+
+        AnalyticsModels.SessionUsageSummaryRow usrA = page.items().stream()
+                .filter(row -> "usr_a".equals(row.userId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(usrA.sessionCount()).isEqualTo(3);
+        assertThat(usrA.userMessageCount()).isEqualTo(6);
+        assertThat(usrA.username()).isEqualTo("张三");
+        assertThat(usrA.unifiedAuthId()).isEqualTo("AUTH_A");
+        assertThat(usrA.organization()).isEqualTo("总行");
+        assertThat(usrA.rdDepartment()).isEqualTo("研发一部");
+        assertThat(usrA.department()).isEqualTo("平台部");
+        assertThat(usrA.firstMessageAt()).isEqualTo(shanghai(2026, 8, 31, 0, 0, 0));
+        assertThat(usrA.lastMessageAt()).isEqualTo(shanghai(2026, 9, 10, 9, 0, 0));
+
+        assertThat(page.items()).anyMatch(row -> row.userId() == null && row.sessionCount() == 1);
+        assertThat(page.items()).anyMatch(row -> "usr_c".equals(row.userId()) && row.userMessageCount() == 1);
+    }
+
     private static AnalyticsModels.SessionUsageRow row(
             PageResponse<AnalyticsModels.SessionUsageRow> page,
             String userId,

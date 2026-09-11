@@ -364,6 +364,23 @@ public final class AnalyticsModels {
             Instant lastMessageAt) {
     }
 
+    /**
+     * 用户维度的发送次数汇总行：同一时间范围内该用户参与对话数、发送总次数与首末发送时间。
+     * 与明细行同源同口径，只是汇总粒度由「用户 × 会话」提升到「用户」。
+     */
+    public record SessionUsageSummaryRow(
+            String userId,
+            String username,
+            String unifiedAuthId,
+            String organization,
+            String rdDepartment,
+            String department,
+            long sessionCount,
+            long userMessageCount,
+            Instant firstMessageAt,
+            Instant lastMessageAt) {
+    }
+
     public record Satisfaction(
             long positiveFeedbackCount,
             long negativeFeedbackCount,

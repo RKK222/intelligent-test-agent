@@ -17,9 +17,10 @@ class AnalyticsSessionUsageQueryServiceTest {
     void delegatesToRepositoryAndReturnsPage() {
         AnalyticsModels.SessionUsageRow row = new AnalyticsModels.SessionUsageRow(
                 "usr_1", "张三", "ses_1", "会话标题", 3, NOW, NOW.plusSeconds(60));
-        AnalyticsSessionUsageRepository repository = filter -> new PageResponse<>(
-                List.of(row), filter.page(), filter.pageSize(), 1);
-        AnalyticsSessionUsageQueryService service = new AnalyticsSessionUsageQueryService(repository);
+        AnalyticsSessionUsageQueryService service = new AnalyticsSessionUsageQueryService(
+                new FakeSessionUsageRepository(
+                        new PageResponse<>(List.of(row), 1, 20, 1),
+                        new PageResponse<>(List.of(), 1, 20, 0)));
 
         PageResponse<AnalyticsModels.SessionUsageRow> page = service.sessionMessageUsage(filter());
 
@@ -31,14 +32,34 @@ class AnalyticsSessionUsageQueryServiceTest {
 
     @Test
     void emptyRepositoryResultKeepsPageMetadata() {
-        AnalyticsSessionUsageQueryService service =
-                new AnalyticsSessionUsageQueryService(filter -> new PageResponse<>(List.of(), 2, 20, 0));
+        AnalyticsSessionUsageQueryService service = new AnalyticsSessionUsageQueryService(
+                new FakeSessionUsageRepository(
+                        new PageResponse<>(List.of(), 2, 20, 0),
+                        new PageResponse<>(List.of(), 2, 20, 0)));
 
         PageResponse<AnalyticsModels.SessionUsageRow> page = service.sessionMessageUsage(filter(2));
 
         assertThat(page.items()).isEmpty();
         assertThat(page.page()).isEqualTo(2);
         assertThat(page.total()).isZero();
+    }
+
+    @Test
+    void summaryReturnsRepositoryPage() {
+        AnalyticsModels.SessionUsageSummaryRow summaryRow = new AnalyticsModels.SessionUsageSummaryRow(
+                "usr_1", "张三", "AUTH_1", "总行", "研发一部", "平台部", 3, 9, NOW, NOW.plusSeconds(60));
+        AnalyticsSessionUsageQueryService service = new AnalyticsSessionUsageQueryService(
+                new FakeSessionUsageRepository(
+                        new PageResponse<>(List.of(), 1, 20, 0),
+                        new PageResponse<>(List.of(summaryRow), 1, 20, 1)));
+
+        PageResponse<AnalyticsModels.SessionUsageSummaryRow> page = service.sessionMessageSummary(filter());
+
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).sessionCount()).isEqualTo(3);
+        assertThat(page.items().get(0).userMessageCount()).isEqualTo(9);
+        assertThat(page.items().get(0).unifiedAuthId()).isEqualTo("AUTH_1");
+        assertThat(page.total()).isEqualTo(1);
     }
 
     private static AnalyticsModels.Filter filter() {
@@ -61,5 +82,22 @@ class AnalyticsSessionUsageQueryServiceTest {
                 page,
                 20,
                 "active");
+    }
+
+    /** 固定返回明细/汇总两页，用于验证查询服务透传。 */
+    private record FakeSessionUsageRepository(
+            PageResponse<AnalyticsModels.SessionUsageRow> usage,
+            PageResponse<AnalyticsModels.SessionUsageSummaryRow> summary)
+            implements AnalyticsSessionUsageRepository {
+
+        @Override
+        public PageResponse<AnalyticsModels.SessionUsageRow> sessionMessageUsage(AnalyticsModels.Filter filter) {
+            return usage;
+        }
+
+        @Override
+        public PageResponse<AnalyticsModels.SessionUsageSummaryRow> sessionMessageSummary(AnalyticsModels.Filter filter) {
+            return summary;
+        }
     }
 }

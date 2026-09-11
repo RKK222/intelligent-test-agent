@@ -52,6 +52,7 @@ import type {
   AnalyticsQueryParams,
   AnalyticsSatisfaction,
   AnalyticsSessionUsageRow,
+  AnalyticsSessionUsageSummaryRow,
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
@@ -2678,6 +2679,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
     getAnalyticsSessionUsage: (params: AnalyticsQueryParams = {}) =>
       request<PageResponse<AnalyticsSessionUsageRow>>(`${analyticsBase}/sessions${query({ ...params })}`),
+    getAnalyticsSessionUsageSummary: (params: AnalyticsQueryParams = {}) =>
+      request<PageResponse<AnalyticsSessionUsageSummaryRow>>(`${analyticsBase}/sessions/summary${query({ ...params })}`),
     exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions" | "funnel" | "token-operations" | "capabilities", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
     exportAnalyticsXlsx: (params: AnalyticsQueryParams = {}) =>
