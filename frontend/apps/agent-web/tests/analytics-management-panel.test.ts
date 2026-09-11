@@ -2,6 +2,7 @@
 
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { defineComponent } from "vue";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
@@ -10,6 +11,7 @@ import type {
   AnalyticsFilterOptions,
   AnalyticsFunnel,
   AnalyticsHourlyHeatmap,
+  AnalyticsOrganizationUsageRow,
   AnalyticsOverview,
   AnalyticsPeaks,
   AnalyticsSatisfaction,
@@ -181,6 +183,69 @@ function pageOf<T>(items: T[]): PageResponse<T> {
   return { items, page: 1, size: 20, total: items.length };
 }
 
+function userRow(index: number): AnalyticsUserUsageRow {
+  return {
+    userId: `u_${index}`,
+    username: `用户${index}`,
+    organization: "总行研发中心",
+    rdDepartment: "平台研发部",
+    department: `业务${index}组`,
+    loginCount: 1,
+    sessionCount: 1,
+    activeSessionCount: 1,
+    userMessageCount: 1,
+    runCount: 1,
+    succeededRuns: 1,
+    failedRuns: 0,
+    cancelledRuns: 0,
+    positiveFeedbackCount: 0,
+    negativeFeedbackCount: 0,
+    diffAcceptedCount: 0,
+    diffRejectedCount: 0,
+    totalTokens: 100,
+    successRate: 1,
+    satisfactionRate: 1,
+    diffAcceptanceRate: 1,
+    lastActivityAt: "2026-06-28T00:00:00Z"
+  };
+}
+
+function organizationRow(index: number): AnalyticsOrganizationUsageRow {
+  return {
+    dimension: "department",
+    name: `业务${index}组`,
+    registeredUsers: 1,
+    enabledUsers: 1,
+    loginUsers: 1,
+    activeUsers: 1,
+    deepUsers: 1,
+    runCount: 1,
+    succeededRuns: 1,
+    failedRuns: 0,
+    cancelledRuns: 0,
+    positiveFeedbackCount: 0,
+    negativeFeedbackCount: 0,
+    diffAcceptedCount: 0,
+    diffRejectedCount: 0,
+    totalTokens: 100,
+    successRate: 1,
+    satisfactionRate: 1
+  };
+}
+
+// 分页组件按项目既有测试约定打桩，避免依赖 Element Plus 内部分页 DOM 结构
+const ElPaginationStub = defineComponent({
+  props: {
+    total: { type: Number, default: 0 },
+    currentPage: { type: Number, default: 1 },
+    pageSize: { type: Number, default: 20 }
+  },
+  emits: ["current-change"],
+  template: `<div class="ta-pagination-stub" :data-total="total" :data-page="currentPage" :data-size="pageSize">
+    <button type="button" @click="$emit('current-change', currentPage + 1)">下一页</button>
+  </div>`
+});
+
 function api() {
   return {
     getAnalyticsFilterOptions: vi.fn().mockResolvedValue(filterOptions),
@@ -203,7 +268,7 @@ function api() {
       freshness: overview.freshness
     } satisfies AnalyticsSatisfaction),
     getAnalyticsExceptions: vi.fn().mockResolvedValue(pageOf<AnalyticsExceptionDetail>([])),
-    exportAnalyticsCsv: vi.fn().mockResolvedValue(new Blob(["metric,value\n"], { type: "text/csv" }))
+    exportAnalyticsXlsx: vi.fn().mockResolvedValue(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }))
   } as Partial<BackendApiClient> as BackendApiClient;
 }
 
@@ -212,7 +277,8 @@ function renderPanel(backendApi: BackendApiClient) {
   const view = render(AnalyticsManagementPanel, {
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
-      provide: { api: backendApi }
+      provide: { api: backendApi },
+      stubs: { ElPagination: ElPaginationStub }
     }
   });
   return { ...view, queryClient: client };
@@ -313,7 +379,7 @@ describe("analytics management panel", () => {
     view.queryClient.clear();
   });
 
-  it("exports csv with the current overview filters", async () => {
+  it("exports xlsx with the current overview filters", async () => {
     const backendApi = api();
     const createObjectURL = vi.fn(() => "blob:test");
     const revokeObjectURL = vi.fn();
@@ -323,16 +389,119 @@ describe("analytics management panel", () => {
     const view = renderPanel(backendApi);
 
     await view.findByText("运营分析");
-    await fireEvent.click(view.getByRole("button", { name: /导出 CSV/ }));
+    await fireEvent.click(view.getByRole("button", { name: /导出 Excel/ }));
 
-    await waitFor(() => expect(backendApi.exportAnalyticsCsv).toHaveBeenCalledWith("overview", expect.objectContaining({
+    await waitFor(() => expect(backendApi.exportAnalyticsXlsx).toHaveBeenCalledWith(expect.objectContaining({
       granularity: "day",
-      topN: 20,
+      topN: 100,
       pageSize: 20
     })));
     expect(createObjectURL).toHaveBeenCalled();
     expect(click).toHaveBeenCalled();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:test");
+    view.queryClient.clear();
+  });
+
+  it("paginates the user detail list on the server", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getAnalyticsUsers).mockResolvedValue({
+      items: Array.from({ length: 20 }, (_, index) => userRow(index)),
+      page: 1,
+      size: 20,
+      total: 30
+    });
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "用户运营" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(20));
+    const pager = view.container.querySelector<HTMLElement>(".ta-pagination-stub");
+    expect(pager?.dataset.total).toBe("30");
+
+    await fireEvent.click(view.getByRole("button", { name: "下一页" }));
+    await waitFor(() => {
+      const calls = vi.mocked(backendApi.getAnalyticsUsers).mock.calls;
+      expect(calls.at(-1)?.[0]?.page).toBe(2);
+    });
+    view.queryClient.clear();
+  });
+
+  it("fetches every organization row and pages them locally", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getAnalyticsOrganizations).mockResolvedValue(
+      Array.from({ length: 32 }, (_, index) => organizationRow(index))
+    );
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "组织分析" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(20));
+    expect(view.container.querySelector<HTMLElement>(".ta-pagination-stub")?.dataset.total).toBe("32");
+    // 组织分析没有服务端分页，必须用 topN 上限一次性取满，避免只拿到 20 条
+    expect(backendApi.getAnalyticsOrganizations).toHaveBeenCalledWith(expect.objectContaining({ topN: 100 }));
+
+    await fireEvent.click(view.getByRole("button", { name: "下一页" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(12));
+    view.queryClient.clear();
+  });
+
+  it("paginates satisfaction feedback and exception lists on the server", async () => {
+    const backendApi = api();
+    vi.mocked(backendApi.getAnalyticsSatisfaction).mockResolvedValue({
+      positiveFeedbackCount: 3,
+      negativeFeedbackCount: 1,
+      satisfactionRate: 0.75,
+      feedbackCoverageRate: 0.4,
+      negativeReasonCounts: { WRONG_ANSWER: 1 },
+      feedbackDetails: {
+        items: Array.from({ length: 20 }, (_, index) => ({
+          feedbackId: `fb_${index}`,
+          userId: `u_${index}`,
+          username: `用户${index}`,
+          organization: "总行研发中心",
+          rdDepartment: "平台研发部",
+          department: "业务1组",
+          sessionId: `sess_${index}`,
+          runId: `run_${index}`,
+          messageId: `msg_${index}`,
+          rating: "POSITIVE" as const,
+          reasonCode: null,
+          comment: null,
+          createdAt: "2026-06-28T00:00:00Z",
+          updatedAt: "2026-06-28T00:00:00Z"
+        })),
+        page: 1,
+        size: 20,
+        total: 77
+      },
+      freshness: overview.freshness
+    } satisfies AnalyticsSatisfaction);
+    vi.mocked(backendApi.getAnalyticsExceptions).mockResolvedValue({
+      items: Array.from({ length: 20 }, (_, index) => ({
+        runId: `run_${index}`,
+        userId: `u_${index}`,
+        username: `用户${index}`,
+        organization: "总行研发中心",
+        rdDepartment: "平台研发部",
+        department: "业务1组",
+        workspaceId: "ws_demo",
+        agentId: null,
+        modelId: null,
+        status: "FAILED",
+        createdAt: "2026-06-28T00:00:00Z",
+        updatedAt: "2026-06-28T00:00:00Z"
+      })),
+      page: 1,
+      size: 20,
+      total: 96
+    });
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "满意度" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(20));
+    expect(view.container.querySelector<HTMLElement>(".ta-pagination-stub")?.dataset.total).toBe("77");
+
+    await fireEvent.click(view.getByRole("button", { name: "异常 Run" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(20));
+    expect(view.container.querySelector<HTMLElement>(".ta-pagination-stub")?.dataset.total).toBe("96");
     view.queryClient.clear();
   });
 });

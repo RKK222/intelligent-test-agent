@@ -1,5 +1,35 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析五个列表加分页控件（修复网页静默只显示 20 条）
+
+### Why
+
+上一轮确认导出此前被分页截断后，发现网页侧同样是坏的：`AnalyticsManagementPanel.vue` 把 `page:1, pageSize:20` 写死在共享 `params` 里，用户运营/满意度/异常 Run 表格没有分页控件，实际只渲染前 20 条（后台分别有 30/77/96 条）；组织分析与 Token 用户排行被 `topN=20` 截断且无法翻页。用户要求按“加分页控件”方案修复。
+
+### What
+
+[AnalyticsManagementPanel.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue)：
+
+1. 共享 `params` 的 `topN` 由 20 提到 `RANK_FETCH_LIMIT=100`，`pageSize` 用 `SERVER_PAGE_SIZE=20`；新增 `usersPage`/`feedbackPage`/`exceptionsPage`/`organizationPage`/`tokenUserPage` 五个独立页码。
+2. 新增 `usersParams`/`feedbackParams`/`exceptionsParams` 三个派生参数，让服务端分页的三个列表各自持有页码，互不串页。
+3. 组织分析与 Token 用户排行没有服务端分页（只有 `topN` 上限、没有 `total`），改为 `topN=100` 取满后用 `pageSlice` 本地分页。
+4. 五个列表各加 `el-pagination`（`layout="prev, pager, next, total"`，沿用项目既有 `.ta-pagination` 约定），仅当总数超过一页时渲染。
+5. 新增 `watch(params, resetListPages)`：筛选条件变化时页码统一回到第 1 页，避免停留在越界页。
+
+同步更新 [agent-web/README.md](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/README.md#L164) 的运营分析面板说明（分页口径 + 导出为全量）。
+
+### How
+
+- 沿用 `SettingsUserManagementPanel.vue` 的 `el-pagination` 用法与 `.ta-pagination` 样式；Element Plus 组件经 `unplugin-vue-components` 自动导入，`components.d.ts` 已含 `ElPagination`，无需手工 import。
+- 测试按项目既有约定对 `ElPagination` 打桩，不依赖 Element Plus 内部分页 DOM，避免版本升级导致用例脆弱。
+
+### Result
+
+- 顺带修复了一个**过期失败用例**：`analytics-management-panel.test.ts` 仍断言旧接口 `exportAnalyticsCsv` 与“导出 CSV”按钮（上一轮已改名 xlsx），此前一直失败但未跑过。已改为断言 `exportAnalyticsXlsx` + “导出 Excel” + `topN:100`。
+- 新增 3 个分页用例：用户运营服务端翻页（断言 `page=2`）、组织分析取满 32 行且本地翻到第 2 页剩 12 行、满意度(77)与异常 Run(96)服务端分页。
+- `vitest run tests/analytics-management-panel.test.ts` → 9/9 通过；`vue-tsc --noEmit` 通过；Vite HMR 正常，前端 200。
+- 本次只改前端展示层与测试/文档，不涉及 HTTP API、事件、数据库、Flyway 或部署节点。
+
 ## 2026-09-11 运营分析导出补齐缺失 Tab 内容并改为取全量
 
 ### Why

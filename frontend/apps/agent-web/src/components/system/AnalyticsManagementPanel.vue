@@ -38,6 +38,16 @@ const userKeyword = ref("");
 const heatmapMetric = ref<AnalyticsHeatmapMetric>("USER_MESSAGES");
 const capabilityType = ref<CapabilityType>("ALL");
 
+// 列表分页：明细类接口支持服务端分页，每页 20 条；
+// 组织分析、Token 用户排行只有 topN 上限（最大 100），改为一次取满后在本地分页。
+const SERVER_PAGE_SIZE = 20;
+const RANK_FETCH_LIMIT = 100;
+const usersPage = ref(1);
+const feedbackPage = ref(1);
+const exceptionsPage = ref(1);
+const organizationPage = ref(1);
+const tokenUserPage = ref(1);
+
 const params = computed<AnalyticsQueryParams>(() => ({
   startTime: fromLocalInput(startTime.value),
   endTime: fromLocalInput(endTime.value),
@@ -46,11 +56,15 @@ const params = computed<AnalyticsQueryParams>(() => ({
   rdDepartment: rdDepartment.value || undefined,
   department: department.value || undefined,
   user: userKeyword.value.trim() || undefined,
-  topN: 20,
+  topN: RANK_FETCH_LIMIT,
   page: 1,
-  pageSize: 20,
+  pageSize: SERVER_PAGE_SIZE,
   sort: "active"
 }));
+// 服务端分页的三个明细列表各自持有页码，避免切换 Tab 时互相串页
+const usersParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: usersPage.value }));
+const feedbackParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: feedbackPage.value }));
+const exceptionsParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: exceptionsPage.value }));
 const heatmapRangeSupported = computed(() => {
   const start = new Date(params.value.startTime ?? "").getTime();
   const end = new Date(params.value.endTime ?? "").getTime();
@@ -85,10 +99,10 @@ const timeseriesQuery = useQuery<AnalyticsTimeSeriesPoint[], Error>({
   queryFn: () => api.getAnalyticsTimeseries(params.value)
 });
 const usersQuery = useQuery<PageResponse<AnalyticsUserUsageRow>, Error>({
-  queryKey: computed(() => ["analytics-users", params.value]),
+  queryKey: computed(() => ["analytics-users", usersParams.value]),
   enabled: () => activeTab.value === "users",
   retry: false,
-  queryFn: () => api.getAnalyticsUsers(params.value)
+  queryFn: () => api.getAnalyticsUsers(usersParams.value)
 });
 const tokenQuery = useQuery<AnalyticsTokenOperations, Error>({
   queryKey: computed(() => ["analytics-token-operations", params.value]),
@@ -109,16 +123,16 @@ const organizationsQuery = useQuery<AnalyticsOrganizationUsageRow[], Error>({
   queryFn: () => api.getAnalyticsOrganizations({ ...params.value, groupBy: "department" })
 });
 const satisfactionQuery = useQuery<AnalyticsSatisfaction, Error>({
-  queryKey: computed(() => ["analytics-satisfaction", params.value]),
+  queryKey: computed(() => ["analytics-satisfaction", feedbackParams.value]),
   enabled: () => activeTab.value === "satisfaction",
   retry: false,
-  queryFn: () => api.getAnalyticsSatisfaction(params.value)
+  queryFn: () => api.getAnalyticsSatisfaction(feedbackParams.value)
 });
 const exceptionsQuery = useQuery<PageResponse<AnalyticsExceptionDetail>, Error>({
-  queryKey: computed(() => ["analytics-exceptions", params.value]),
+  queryKey: computed(() => ["analytics-exceptions", exceptionsParams.value]),
   enabled: () => activeTab.value === "exceptions",
   retry: false,
-  queryFn: () => api.getAnalyticsExceptions(params.value)
+  queryFn: () => api.getAnalyticsExceptions(exceptionsParams.value)
 });
 
 const overview = computed(() => overviewQuery.data.value);
@@ -130,6 +144,16 @@ const maxHeatmap = computed(() => Math.max(1, ...(heatmap.value?.points ?? []).m
 const trendGridStyle = computed(() => ({ "--ta-trend-columns": String(Math.max(timeseries.value.length, 1)) }));
 const capabilityRows = computed(() => (capabilitiesQuery.data.value?.rows ?? [])
   .filter(row => capabilityType.value === "ALL" || row.type === capabilityType.value));
+// 组织分析与 Token 用户排行接口只返回 topN 条数组、没有 total，取满后在这里本地分页
+const organizationRows = computed(() => organizationsQuery.data.value ?? []);
+const organizationPageRows = computed(() => pageSlice(organizationRows.value, organizationPage.value));
+const tokenUserRows = computed(() => tokenQuery.data.value?.users ?? []);
+const tokenUserPageRows = computed(() => pageSlice(tokenUserRows.value, tokenUserPage.value));
+
+function pageSlice<T>(rows: T[], page: number): T[] {
+  const from = (page - 1) * SERVER_PAGE_SIZE;
+  return rows.slice(from, from + SERVER_PAGE_SIZE);
+}
 const capabilityCoverageText = computed(() => {
   const value = capabilitiesQuery.data.value;
   if (!value) return "正在读取插件覆盖口径";
@@ -165,6 +189,32 @@ watch(organization, () => {
 watch(rdDepartment, () => {
   department.value = "";
 });
+
+// 筛选条件变化后各列表总数会变，页码必须统一回到第 1 页，避免停留在越界页
+function resetListPages() {
+  usersPage.value = 1;
+  feedbackPage.value = 1;
+  exceptionsPage.value = 1;
+  organizationPage.value = 1;
+  tokenUserPage.value = 1;
+}
+watch(params, resetListPages);
+
+function changeUsersPage(next: number) {
+  usersPage.value = next;
+}
+function changeFeedbackPage(next: number) {
+  feedbackPage.value = next;
+}
+function changeExceptionsPage(next: number) {
+  exceptionsPage.value = next;
+}
+function changeOrganizationPage(next: number) {
+  organizationPage.value = next;
+}
+function changeTokenUserPage(next: number) {
+  tokenUserPage.value = next;
+}
 
 function refresh() {
   void optionsQuery.refetch();
@@ -348,7 +398,9 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
       </div>
       <div class="ta-two-columns">
         <section class="ta-panel"><h3>每日 Token 使用</h3><table class="ta-table"><thead><tr><th>日期</th><th>使用用户</th><th>总 Token</th><th>日人均</th><th>主 Token</th><th>缓存读/写</th></tr></thead><tbody><tr v-for="row in tokenQuery.data.value?.daily ?? []" :key="row.date"><td>{{ row.date }}</td><td>{{ row.tokenUsers }}</td><td>{{ formatNumber(row.totalTokens) }}</td><td>{{ formatNumber(row.tokensPerUser) }}</td><td>{{ formatNumber(row.primaryTokens) }}</td><td>{{ formatNumber(row.cacheReadTokens) }} / {{ formatNumber(row.cacheWriteTokens) }}</td></tr></tbody></table></section>
-        <section class="ta-panel"><h3>用户使用排行</h3><table class="ta-table"><thead><tr><th>用户</th><th>使用强度</th><th>Token 日</th><th>总 Token</th><th>Token 日均</th></tr></thead><tbody><tr v-for="row in tokenQuery.data.value?.users ?? []" :key="row.userId"><td>{{ row.username || row.userId }}</td><td><span class="ta-band">{{ row.intensityBand }}</span></td><td>{{ row.tokenDays }}</td><td>{{ formatNumber(row.totalTokens) }}</td><td>{{ formatNumber(row.tokensPerTokenDay) }}</td></tr></tbody></table></section>
+        <section class="ta-panel"><h3>用户使用排行</h3><table class="ta-table"><thead><tr><th>用户</th><th>使用强度</th><th>Token 日</th><th>总 Token</th><th>Token 日均</th></tr></thead><tbody><tr v-for="row in tokenUserPageRows" :key="row.userId"><td>{{ row.username || row.userId }}</td><td><span class="ta-band">{{ row.intensityBand }}</span></td><td>{{ row.tokenDays }}</td><td>{{ formatNumber(row.totalTokens) }}</td><td>{{ formatNumber(row.tokensPerTokenDay) }}</td></tr></tbody></table>
+          <div v-if="tokenUserRows.length > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="tokenUserPage" :page-size="SERVER_PAGE_SIZE" :total="tokenUserRows.length" @current-change="changeTokenUserPage" /></div>
+        </section>
       </div>
     </section>
 
@@ -358,13 +410,21 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
       <table class="ta-table"><thead><tr><th>类型</th><th>名称</th><th>使用率</th><th>使用用户</th><th>调用次数</th><th>成功</th><th>失败</th><th>取消</th><th>未完成</th></tr></thead><tbody><tr v-for="row in capabilityRows" :key="`${row.type}-${row.name}`"><td><span class="ta-type">{{ capabilityLabel(row.type) }}</span></td><td>{{ row.name }}</td><td class="ta-rate">{{ formatRate(row.usageRate) }}</td><td>{{ row.userCount }}</td><td>{{ row.invocationCount }}</td><td>{{ row.succeededCount }}</td><td>{{ row.failedCount }}</td><td>{{ row.cancelledCount }}</td><td>{{ row.incompleteCount }}</td></tr></tbody></table>
     </section>
 
-    <section v-else-if="activeTab === 'users'" class="ta-panel"><h3>用户使用明细</h3><table class="ta-table"><thead><tr><th>用户</th><th>机构</th><th>研发部</th><th>部门</th><th>登录</th><th>会话</th><th>消息</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in usersQuery.data.value?.items ?? []" :key="row.userId"><td>{{ row.username || row.userId }}</td><td>{{ row.organization || '-' }}</td><td>{{ row.rdDepartment || '-' }}</td><td>{{ row.department || '-' }}</td><td>{{ row.loginCount }}</td><td>{{ row.activeSessionCount }}</td><td>{{ row.userMessageCount }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table></section>
+    <section v-else-if="activeTab === 'users'" class="ta-panel"><h3>用户使用明细</h3><table class="ta-table"><thead><tr><th>用户</th><th>机构</th><th>研发部</th><th>部门</th><th>登录</th><th>会话</th><th>消息</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in usersQuery.data.value?.items ?? []" :key="row.userId"><td>{{ row.username || row.userId }}</td><td>{{ row.organization || '-' }}</td><td>{{ row.rdDepartment || '-' }}</td><td>{{ row.department || '-' }}</td><td>{{ row.loginCount }}</td><td>{{ row.activeSessionCount }}</td><td>{{ row.userMessageCount }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table>
+      <div v-if="(usersQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="usersPage" :page-size="SERVER_PAGE_SIZE" :total="usersQuery.data.value?.total ?? 0" @current-change="changeUsersPage" /></div>
+    </section>
 
-    <section v-else-if="activeTab === 'organizations'" class="ta-panel"><h3>组织排行</h3><table class="ta-table"><thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in organizationsQuery.data.value ?? []" :key="`${row.dimension}-${row.name}`"><td>{{ row.dimension }}</td><td>{{ row.name }}</td><td>{{ row.loginUsers }}</td><td>{{ row.activeUsers }}</td><td>{{ row.deepUsers }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table></section>
+    <section v-else-if="activeTab === 'organizations'" class="ta-panel"><h3>组织排行</h3><table class="ta-table"><thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in organizationPageRows" :key="`${row.dimension}-${row.name}`"><td>{{ row.dimension }}</td><td>{{ row.name }}</td><td>{{ row.loginUsers }}</td><td>{{ row.activeUsers }}</td><td>{{ row.deepUsers }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table>
+      <div v-if="organizationRows.length > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="organizationPage" :page-size="SERVER_PAGE_SIZE" :total="organizationRows.length" @current-change="changeOrganizationPage" /></div>
+    </section>
 
-    <section v-else-if="activeTab === 'satisfaction'" class="ta-panel"><h3>满意度与反馈明细</h3><div class="ta-reason-list"><span v-for="(count, reason) in satisfactionQuery.data.value?.negativeReasonCounts ?? {}" :key="reason">{{ reason }} · {{ count }}</span></div><table class="ta-table"><thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead><tbody><tr v-for="row in satisfactionQuery.data.value?.feedbackDetails.items ?? []" :key="row.feedbackId"><td>{{ new Date(row.createdAt).toLocaleString('zh-CN') }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.sessionId }}</td><td>{{ row.runId || '-' }}</td><td>{{ row.rating === 'POSITIVE' ? '满意' : '不满意' }}</td><td>{{ row.reasonCode || '-' }}</td><td>{{ row.comment || '-' }}</td></tr></tbody></table></section>
+    <section v-else-if="activeTab === 'satisfaction'" class="ta-panel"><h3>满意度与反馈明细</h3><div class="ta-reason-list"><span v-for="(count, reason) in satisfactionQuery.data.value?.negativeReasonCounts ?? {}" :key="reason">{{ reason }} · {{ count }}</span></div><table class="ta-table"><thead><tr><th>时间</th><th>用户</th><th>组织</th><th>会话</th><th>Run</th><th>反馈</th><th>原因</th><th>备注</th></tr></thead><tbody><tr v-for="row in satisfactionQuery.data.value?.feedbackDetails.items ?? []" :key="row.feedbackId"><td>{{ new Date(row.createdAt).toLocaleString('zh-CN') }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.sessionId }}</td><td>{{ row.runId || '-' }}</td><td>{{ row.rating === 'POSITIVE' ? '满意' : '不满意' }}</td><td>{{ row.reasonCode || '-' }}</td><td>{{ row.comment || '-' }}</td></tr></tbody></table>
+      <div v-if="(satisfactionQuery.data.value?.feedbackDetails.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="feedbackPage" :page-size="SERVER_PAGE_SIZE" :total="satisfactionQuery.data.value?.feedbackDetails.total ?? 0" @current-change="changeFeedbackPage" /></div>
+    </section>
 
-    <section v-else class="ta-panel"><h3>异常 Run 明细</h3><table class="ta-table"><thead><tr><th>时间</th><th>Run</th><th>用户</th><th>组织</th><th>状态</th></tr></thead><tbody><tr v-for="row in exceptionsQuery.data.value?.items ?? []" :key="row.runId"><td>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</td><td>{{ row.runId }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.status }}</td></tr></tbody></table></section>
+    <section v-else class="ta-panel"><h3>异常 Run 明细</h3><table class="ta-table"><thead><tr><th>时间</th><th>Run</th><th>用户</th><th>组织</th><th>状态</th></tr></thead><tbody><tr v-for="row in exceptionsQuery.data.value?.items ?? []" :key="row.runId"><td>{{ new Date(row.updatedAt).toLocaleString('zh-CN') }}</td><td>{{ row.runId }}</td><td>{{ row.username || row.userId }}</td><td>{{ [row.organization, row.rdDepartment, row.department].filter(Boolean).join(' / ') }}</td><td>{{ row.status }}</td></tr></tbody></table>
+      <div v-if="(exceptionsQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="exceptionsPage" :page-size="SERVER_PAGE_SIZE" :total="exceptionsQuery.data.value?.total ?? 0" @current-change="changeExceptionsPage" /></div>
+    </section>
   </section>
 </template>
 
@@ -420,5 +480,6 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-reason-list { flex-wrap:wrap; gap:6px; margin-bottom:8px; }.ta-reason-list span,.ta-band,.ta-type { display:inline-block; padding:3px 6px; border-radius:4px; background:#eef1f4; color:#4c5868; font-size:11px; }
 .ta-type { background:#e8f2f1; color:#176b67; }.ta-rate { color:#a41729; font-weight:600; }
 .ta-table { width:100%; border-collapse:collapse; font-size:12px; }.ta-table th,.ta-table td { padding:8px; border-bottom:1px solid #edf0f3; text-align:left; white-space:nowrap; }.ta-table th { color:#697486; font-weight:600; background:#fafbfc; }
+.ta-pagination { display:flex; justify-content:flex-end; margin-top:8px; }
 @media (max-width:900px) { .ta-overview-grid,.ta-two-columns { grid-template-columns:1fr; }.ta-analytics { padding:10px; }.ta-analytics-header { align-items:flex-start; }.ta-analytics-filters { align-items:flex-start; }.ta-search-label { width:100%; }.ta-search { flex:1; }.ta-search input { width:100%; }.ta-panel-heading { align-items:flex-start; flex-wrap:wrap; } }
 </style>
