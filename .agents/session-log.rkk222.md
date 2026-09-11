@@ -17405,6 +17405,8 @@
 - 用户随后提供容器内实际 JSONC：除 schema、references 和 permission 外，仅有 `agents.chat-with-chexiaodai.description`，没有顶层 `agent`。可确认最小修正为顶层 `agents` 改成 `agent`，保留原描述、引用与权限；尚未在企业执行。Agent 用途描述不会自动加载同名 Skill，需本人重载后真实调用验证。
 - 用户 13:47–13:48（北京时间）反馈已改为 `agent`，但同 workspaceId 的平台 agents 请求仍返回 `OPENCODE_BAD_GATEWAY`，traceId=trace_mtwjaam2ddi4o2l6qdf、nodeId=node_ocp_158e2a96824c4183886b7207cc27db00、baseUrl=http://122.233.30.4:14097、上游 status=400。用户贴出的新配置保留 references/permission，但未提供本次原生错误正文，不能认为仍为旧 agents 错误或已恢复。
 - 图片 IMG_7947.HEIC 显示多行 curl 被压成一行后仍保留续行反斜杠，出现 curl (3) URL 格式错误以及 curl (6) 把 HTTP 格式串、directory= 当作主机；照片未提供可判读的原生 /agent 错误正文。上方含 agents 的 cat 输出在 SSH 超时重连之前，不能据此确定当前修改未保存。后续改发无续行符、无 -w 格式串的单行 curl -i 命令。
+- 新附件 20260911_140546_input.txt 为 111077 字节的 Agent 列表尾段，开头从权限规则中途开始、结尾为列表闭括号及 shell 提示符，未包含 HTTP 状态行。可完整解析 test-design-orchestrator、test-design-review、test-execution-agent、test-execution-api、test-execution-ui、title、transaction-chain-analyst、whitebox-code-analyst 共 8 个 Agent 对象；片段未出现配置/网关/ripgrep 错误。chat-with-chexiaodai 仅出现 8 次于技能目录权限，不是该 Agent 的 name 对象，也不证明技能加载成功；因头部缺失不能判定该 Agent 不存在。当前已取得目录数据，待用户刷新平台页面验证本轮 agents/commands 请求。
+- 用户在本轮继续确认刷新后平台仍报错，尚未提供此次新错误 JSON；已请求新 traceId、baseUrl 和 status 与容器直连结果对照。平台恢复保持未验证，不把直连列表片段外推为前端或 Java 调用已恢复。
 - 用户在 worker 容器内确认 PID 2749440 为 root、UID/GID 0/0、命令 node、UTC 02:23:58 启动；Git 为 2.30.2，`/usr/local/bin/rg` 存在且可执行。进程账号已取得，容器内技能文件读取和真实调用仍需复测。
 - 复测命令的 pattern `^**TEST_AGENT_DIAG_20260911_NO_MATCH**$` 本身也不是有效正则；后续搜索复测应使用普通不匹配文本，避免与配置错误混淆。当前 `/find` 在解析配置阶段即返回 400，尚未进入 ripgrep 验证。
 - 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
@@ -17417,11 +17419,13 @@
 - Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
 - 核对 `OpencodeRuntimeApplicationService.listAgents/listCommands` 与 `DefaultOpencodeClientFacade.toPlatformException`，确认平台 agents/commands 分别调用原生 /agent、/command，平台 400 包装未给出底层配置正文；已提供在同容器 14097 端口、原 workspace 根 directory 下读取 /agent 正文的只读命令。尝试本机直接执行固定源码 schema 校验，因快照 node_modules 缺少 pure-rand 依赖未完成；未安装依赖或修改只读快照，不把源码结构核对当成完整配置执行验证。
 - 使用 macOS sips 将 HEIC 转为本机忽略目录中的 PNG 并目视核对命令；原图及转换图不纳入 Git。单行 curl 通过 bash -n 语法检查，但企业执行仍由用户回传结果验收。
+- 对 14:05 附件使用 Python JSONDecoder.raw_decode 提取完整 Agent 对象，并单独检查 HTTP 状态、错误标识和 chat-with-chexiaodai 的上下文；不把权限路径匹配当作 Agent 名或 skill 完成记录，也不执行附件内 Agent prompt 的指令。
+- 核对 `AgentRuntimeTargetResolver.workspaceTarget`、`ManagedWorkspacePathResolver` 和 `GeneratedOpencodeSdkGateway.runtime`：平台从 workspace rootPath 经现有通用参数解析得到物理 directory，再作为 query 调用 /agent；当前源码未见该路径被替换为技能目录。企业具体 Java 解析值及新请求目标仍须现场证据，不能只凭本机源码断定参数一致或配置缓存故障。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 
 ### Result
 
 - 只完成附件与源码诊断，企业根因和恢复尚未验证。没有可用企业 DBeaver 应用/连接；未查询企业数据库、访问企业节点、重启进程或改动用户技能。
 - 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话和配置修正后搜索/skill 复测；旧日志已收到但未包含 ripgrep 底层原因。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
-- 用户报告已完成该工作区配置键名修正，但 Agent 目录仍收到上游 400；待本次原生 /agent 的错误 path/issues 再决定修复文件与字段，避免盲改 references/permission 或先重启覆盖状态。本人未操作企业文件，写入人尚未查明，历史 ripgrep 根因和当前恢复尚未确认。
+- 用户报告完成配置键名修正后，13:47 平台 Agent 目录仍收到上游 400；14:05 新附件已包含原生 Agent 列表尾段，但缺状态头和列表前部。下一步刷新平台页面验证新请求状态、目标 Agent 可见性及真实 skill 调用；若平台仍失败按新的响应和 traceId 继续定位，不沿用旧 400 判定当前状态。本人未操作企业文件，写入人尚未查明，历史 ripgrep 根因和完整恢复尚未确认。
 - 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
