@@ -50,84 +50,104 @@
   该用户区间总次数：这个人在“本周期 + 所有对话”中的累计发送次数。
   两个总数字段会在明细中重复展示，不要逐行相加；汇总请加“当天发送次数”，
   或使用末尾的每人每周期汇总 SELECT。两个周期的总数不会互相累加。
+
+六、实现与性能要点
+  - 两个周期共用一次范围扫描：只对 [周期 1 首日, 当天次日) 过滤一次，再用交界日
+    （second_start_date）把行归入 period 1/2，不再为每个周期各扫一遍基表或做区间自连接。
+  - 过滤条件全部是可直接下推的 sargable 范围（created_at >= 下界、< 上界），
+    在 created_at 索引存在时可走范围扫描；runs 已有 created_at 相关索引。
+  - 会话标题随消息本身一次 join sessions 取得，不再二次 join，减少一次连接。
+  - 人员归属、来源排除、存储模式互斥等口径与旧版完全一致，本次仅调整查询结构。
 */
+
 WITH params AS (
     SELECT
         DATE '2026-08-31' AS first_start_date,  -- 周期 1 首日，包含当天。
-        DATE '2026-09-09' AS second_start_date, -- 周期 2 首日；周期 1 截止到它的前一天。
+        DATE '2026-09-09' AS second_start_date, -- 周期 2 首日；同时也是周期 1 的排他上界/交界日。
         -- 动态取北京时间的当天；复查固定周期时可改成 DATE '2026-09-10'。
         (statement_timestamp() AT TIME ZONE 'Asia/Shanghai')::date AS report_date,
         NULL::text AS user_keyword            -- 例如改成 '张三'::text；NULL 查询所有人。
         -- 调整日期时需保持 first_start_date < second_start_date <= report_date，不能填 NULL。
-), periods AS (
-    -- 两个周期共用同一个交界日期，结束边界一律不包含。
-    SELECT 1 AS period_no, first_start_date AS start_date,
-           second_start_date AS end_date_exclusive
-    FROM params
-    UNION ALL
-    SELECT 2 AS period_no, second_start_date AS start_date,
-           report_date + 1 AS end_date_exclusive
-    FROM params
-), user_messages AS (
-    -- 旧存储模式：每条人工 USER 消息计一次，发送时间来自消息记录。
+), bounds AS (
+    -- 把两个周期压成一次扫描：只保留 [周期 1 首日, 当天次日) 一个范围，
+    -- 交界日 boundary 用于把行归到 period 1/2，避免区间自连接带来的重复扫描。
     SELECT
-        p.period_no,
-        p.start_date,
-        p.end_date_exclusive,
+        p.first_start_date,
+        p.second_start_date,
+        p.report_date,
+        p.user_keyword,
+        p.first_start_date::timestamp AS lower_bound,        -- 整体下界，包含。
+        p.second_start_date::timestamp AS boundary,          -- 交界日零点：< 它属于周期 1。
+        (p.report_date + 1)::timestamp AS upper_bound        -- 整体上界，不包含。
+    FROM params p
+), user_messages AS (
+    -- 旧存储模式（LEGACY_FULL）：每条人工 USER 消息计一次，发送时间来自消息记录。
+    SELECT
+        CASE WHEN m.created_at < b.boundary THEN 1 ELSE 2 END AS period_no,
         m.message_id AS message_key,
         m.run_id,
         m.session_id,
+        s.title AS session_title,
         COALESCE(m.sender_user_id, r.message_sender_user_id,
                  r.triggered_by_user_id, s.created_by_user_id) AS user_id,
         m.created_at AS sent_at
     FROM session_messages m
     JOIN sessions s ON s.session_id = m.session_id
     LEFT JOIN runs r ON r.run_id = m.run_id
-    JOIN periods p ON m.created_at >= p.start_date::timestamp
-                  AND m.created_at < p.end_date_exclusive::timestamp
+    CROSS JOIN bounds b
     WHERE m.role = 'USER'
+      AND m.created_at >= b.lower_bound
+      AND m.created_at <  b.upper_bound
       AND COALESCE(r.storage_mode, 'LEGACY_FULL') = 'LEGACY_FULL'
       AND COALESCE(r.source_type, m.source_type, 'MANUAL') = 'MANUAL'
       AND COALESCE(s.source_type, 'MANUAL') <> 'SIDE_QUESTION'
 
     UNION ALL
 
-    -- 摘要模式：每个 Run 锚点计一次；与上面的存储模式互斥，禁止再 UNION 摘要消息。
+    -- 摘要模式（REDIS_SUMMARY）：每个 Run 锚点计一次，发送时间取 Run 创建时间；
+    -- 与上一支按 storage_mode 互斥，禁止再 UNION 摘要消息，避免同一发送重复计数。
     SELECT
-        p.period_no,
-        p.start_date,
-        p.end_date_exclusive,
+        CASE WHEN r.created_at < b.boundary THEN 1 ELSE 2 END AS period_no,
         r.run_id AS message_key,
         r.run_id,
         r.session_id,
+        s.title AS session_title,
         COALESCE(r.message_sender_user_id, r.triggered_by_user_id,
                  s.created_by_user_id) AS user_id,
         r.created_at AS sent_at
     FROM runs r
     JOIN sessions s ON s.session_id = r.session_id
-    JOIN periods p ON r.created_at >= p.start_date::timestamp
-                  AND r.created_at < p.end_date_exclusive::timestamp
+    CROSS JOIN bounds b
     WHERE r.storage_mode = 'REDIS_SUMMARY'
+      AND r.created_at >= b.lower_bound
+      AND r.created_at <  b.upper_bound
       AND COALESCE(r.source_type, 'MANUAL') = 'MANUAL'
       AND COALESCE(s.source_type, 'MANUAL') <> 'SIDE_QUESTION'
 ), details AS (
-    -- LEFT JOIN 保留缺少用户目录/归属的历史消息；按当前人员目录做关键词筛选。
+    -- 补齐周期日期范围（供默认明细与两个备用 SELECT 复用）与当前人员/对话主数据；
+    -- LEFT JOIN 保留缺少用户目录/归属的历史消息，再按当前人员目录做关键词筛选。
     SELECT
-        m.*,
+        m.period_no,
+        CASE WHEN m.period_no = 1 THEN b.first_start_date ELSE b.second_start_date END AS start_date,
+        CASE WHEN m.period_no = 1 THEN b.second_start_date ELSE b.report_date + 1 END AS end_date_exclusive,
+        m.message_key,
+        m.run_id,
+        m.session_id,
+        m.session_title,
+        m.user_id,
+        m.sent_at,
         COALESCE(u.username, m.user_id, '未知用户') AS username,
         u.unified_auth_id,
         u.organization,
         u.rd_department,
-        u.department,
-        s.title AS session_title
+        u.department
     FROM user_messages m
-    JOIN sessions s ON s.session_id = m.session_id
+    CROSS JOIN bounds b
     LEFT JOIN users u ON u.user_id = m.user_id
-    CROSS JOIN params p
-    WHERE NULLIF(BTRIM(p.user_keyword), '') IS NULL
-       OR u.username ILIKE '%' || BTRIM(p.user_keyword) || '%'
-       OR u.unified_auth_id ILIKE '%' || BTRIM(p.user_keyword) || '%'
-       OR m.user_id ILIKE '%' || BTRIM(p.user_keyword) || '%'
+    WHERE NULLIF(BTRIM(b.user_keyword), '') IS NULL
+       OR u.username ILIKE '%' || BTRIM(b.user_keyword) || '%'
+       OR u.unified_auth_id ILIKE '%' || BTRIM(b.user_keyword) || '%'
+       OR m.user_id ILIKE '%' || BTRIM(b.user_keyword) || '%'
 )
 SELECT
     period_no AS "周期序号",

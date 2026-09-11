@@ -1,5 +1,29 @@
 # Session Log — guojq
 
+## 2026-09-11 优化按人/日期/对话的用户发送次数统计 SQL（合并为单次范围扫描）
+
+### Why
+
+用户要求对既有 [query-user-message-statistics.sql](file:///Users/guo/Developer/intelligent-test-agent/tools/query-user-message-statistics.sql) 重新优化，但计数口径必须保持不变。
+
+### What
+
+只改查询结构、不改口径：
+
+1. 用 `bounds` CTE 把两个周期压成一次 `[周期1首日, 当天次日)` 范围过滤，再用交界日 `second_start_date` 派生 `period_no`，删除原 `periods` 区间自连接，避免为每个周期各扫一遍基表。
+2. 会话标题随消息一次 `join sessions` 取得，删掉 `details` 里第二次 `join sessions`。
+3. 归属 COALESCE 回退链、`LEGACY_FULL`/`REDIS_SUMMARY` 存储模式互斥、`MANUAL` 来源过滤、`SIDE_QUESTION` 排除、两个窗口总数列、默认明细与两个备用 SELECT 全部保持与旧版一致。
+
+### How
+
+用 `docker run postgres:16-alpine` 建最小四表（users/sessions/runs/session_messages）fixture，把 `report_date` 固定为 `2026-09-10` 后分别执行旧版与新版查询并 `diff`。fixture 覆盖：8/31 零点、9/8 `23:59:59.999999`、9/9 零点、`report_date+1` 次日排除、跨周期总数隔离、共享会话按实际发送人（`sender_user_id` 先于 `triggered_by_user_id`）、REDIS_SUMMARY 只算 Run 锚点且其 USER 消息不重复计数、SCHEDULED_TASK/SIDE_QUESTION/ASSISTANT 排除、无归属消息归「未知用户」且个人总数留空、长对话标题、以及 `ILIKE` 姓名筛选。
+
+### Result
+
+- 旧版与新版查询结果 `diff` 完全一致（8 行明细）；备用 A（每人每周期）、备用 B（逐条发送）两条 SELECT 均可执行且次数与明细一致。
+- 关键词 `'李四'` 只返回 u3 一行；`('2026-09-09 16:30:00+00' AT TIME ZONE 'Asia/Shanghai')::date = 2026-09-10`、`15:59:59+00 → 2026-09-09`，北京时间「当天」换算正确。
+- 仅修改一个只读查询文件和本日志，不涉及 API、事件、数据库结构、Flyway 或部署节点。
+
 ## 2026-09-11 导出时间列改为「年月日 时分秒」，导出按钮补 hover 反馈
 
 ### Why
