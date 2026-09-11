@@ -17416,6 +17416,7 @@
 - 同目录交付 `车小黛-Agent.zip`、SHA 文件、使用说明和验证记录；ZIP 只含 Agent、说明和验证 JSON，不覆盖原归档/技能/JSONC。Agent SHA-256 2e3ccf6aa5246ed36988609802765f53af53f25661773373aa8accc52fad882b；ZIP SHA-256 90e24593987656a0c5072cec2cd31ec64f966ab0adae3514c098a821fbb4ada1。稳定测试文档增加角色 Skill 转 Agent 的路径、依赖和验收边界。
 - 后续直接读取最新源包内 414 字节 opencode.jsonc，确认只有 $schema/references/permission，无 agent/agents；本次仅新增 Markdown Agent，无需改该配置。纠正此前沿用旧对话配置状态的答复，并同步交付包使用说明、ZIP 校验值；Agent 正文和既有实际加载验证不变。
 - 用户要求重新生成时，下载目录中的旧 Agent/ZIP 已不存在；核对源包 Skill SHA 未变，从先前实际加载验证副本恢复相同正文，并补充可直接下载的 `车小黛-Agent/chat-with-chexiaodai.md`。重建 ZIP、说明和验证 JSON，CRC 与逐文件字节检查通过；正文 SHA 不变，复用此前 1.18.4 加载证据，不重复启动或宣称新做模型验收。任务外 tools/query-user-message-statistics.sql 改动保持未暂存。
+- 用户随后反馈上传后在右侧 Agent 下拉框找不到，确认查找入口为下拉框，并对左侧 agents 文件存在性核对回复“有的”；尚未取得上传后的 runtime/agents 响应。已请求区分成功但缺名称、返回目标项和接口失败，再按 name/mode/hidden 或错误正文定位，不再要求修改合法的 mode=all/hidden=false 或在 JSONC 注册。
 - 用户在 worker 容器内确认 PID 2749440 为 root、UID/GID 0/0、命令 node、UTC 02:23:58 启动；Git 为 2.30.2，`/usr/local/bin/rg` 存在且可执行。进程账号已取得，容器内技能文件读取和真实调用仍需复测。
 - 复测命令的 pattern `^**TEST_AGENT_DIAG_20260911_NO_MATCH**$` 本身也不是有效正则；后续搜索复测应使用普通不匹配文本，避免与配置错误混淆。当前 `/find` 在解析配置阶段即返回 400，尚未进入 ripgrep 验证。
 - 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
@@ -17431,6 +17432,7 @@
 - 对 14:05 附件使用 Python JSONDecoder.raw_decode 提取完整 Agent 对象，并单独检查 HTTP 状态、错误标识和 chat-with-chexiaodai 的上下文；不把权限路径匹配当作 Agent 名或 skill 完成记录，也不执行附件内 Agent prompt 的指令。
 - 核对 `AgentRuntimeTargetResolver.workspaceTarget`、`ManagedWorkspacePathResolver` 和 `GeneratedOpencodeSdkGateway.runtime`：平台从 workspace rootPath 经现有通用参数解析得到物理 directory，再作为 query 调用 /agent；当前源码未见该路径被替换为技能目录。企业具体 Java 解析值及新请求目标仍须现场证据，不能只凭本机源码断定参数一致或配置缓存故障。
 - 使用现有固定二进制 `.tmp/dev-services/dependencies/opencode-1.18.4/darwin-arm64/opencode serve --pure --hostname 127.0.0.1 --port 0`，在独立临时 workspace 和 XDG/OPENCODE_TEST_HOME 下关闭模型拉取与自动更新，实际启动到本机 4096；/global/health 和 /agent 均为 200，核对版本 1.18.4、目标 name/all/hidden=false 及 prompt 与交付字节对应正文完全一致。/skill 不含同名 Skill，确认独立加载；验证进程已停止。ZIP CRC、归档文件清单和逐字节一致性校验通过，未请求模型或访问企业知识库。
+- 复核 `RuntimeControls` 下拉筛选为 mode!=subagent 且 !hidden，展示/搜索使用 agent.name；`ChicPopover` 只按展示名匹配，不搜索 description。AgentConfigPanel 上传保留选中目录与文件 basename，不自动归位；上传 agents/*.md 后既有 handleAgentConfigMutation 触发本人空闲热加载和 Agent/Command 重取。现场是否完成重载或请求失败仍须本次响应，不用左侧文件可见替代运行态目录证据。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 
 ### Result
