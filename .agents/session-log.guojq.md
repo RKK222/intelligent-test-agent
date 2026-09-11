@@ -1,5 +1,35 @@
 # Session Log — guojq
 
+## 2026-09-11 新增「会话消息」多用户造数脚本
+
+### Why
+
+「会话消息」Tab 此前只有真实账号 888888888 的 2 条数据，无法验证多用户分组、机构/研发部/部门筛选与导出排序。该 Tab（及导出的同名 Sheet）的口径依赖业务库的 `storage_mode`/`source_type`/人员归属链，ClickHouse 事实表没有这些字段，`tools/seed-analytics-clickhouse.sh` 覆盖不到，需要补一个业务库侧的造数入口。
+
+### What
+
+新增 [seed-analytics-session-usage.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-session-usage.sh)：默认 `docker exec` 写入 `deploy/local/docker-compose.yml` 起的本地 PostgreSQL 容器 `test-agent-postgres`（库 `test_agent`），先按 `demo_ana_` 前缀清理旧演示数据再插入：
+
+- 1 个演示工作区 `demo_ana_ws_01`（`sessions.workspace_id` 有外键约束，必须指向真实工作区行）
+- 3 个演示用户，分布在 2 个机构 / 2 个研发部 / 3 个部门，`password_hash` 用非 bcrypt 占位值保证无法登录
+- 5 个 `MANUAL` 来源会话，`run_id` 留空走 LEGACY_FULL 分支
+- 19 条 `role='USER'` 消息，按 `(now at Asia/Shanghai) - N 天 - N 小时 + N×3 分钟` 生成，每个会话首次/末次发送时间互不相同
+
+同步在 [docs/guides/ai-workflow.md](file:///Users/guo/Developer/intelligent-test-agent/docs/guides/ai-workflow.md#L131) 补该脚本的用法与数据源差异说明。
+
+### How
+
+- 关键坑：`session_messages.created_at` 是 `timestamp without time zone`，本仓库写入的是**北京墙上时间**（实测同一时刻 DB 容器 `now()` 是 UTC 07:2x，而落库值是 15:2x）。因此 SQL 里必须用 `now() at time zone 'Asia/Shanghai'` 而不是 `now()`，否则数据会偏 8 小时、落在页面时间窗之外。
+- 另一个坑：`sessions.workspace_id` 有 `fk_sessions_workspace` 外键，首次用自造 `ws_demo_analytics` 直接报约束失败，改为先插一个演示工作区行。
+- 演示数据统一 `demo_ana_` 前缀，脚本可重复执行且只清理自己的数据；属 AGENTS.md 规则 14 允许的「显式本地开发脚本」，不进 Flyway。
+
+### Result
+
+- 脚本执行：`INSERT 0 1`（工作区）/`INSERT 0 3`（用户）/`INSERT 0 5`（会话）/`INSERT 0 19`（消息）。
+- `/sessions` 无筛选 total=8（5 条演示 + 3 条真实）；`organization=北京分行` 筛选 total=4，证明机构筛选对演示用户生效。
+- 导出 8 个 Sheet，其中「会话消息」8 行，时间列输出 `2026-09-09 13:27:41` 风格。
+- 只新增一个本地脚本与文档，未改后端/前端代码、API 契约、数据库结构或部署节点。
+
 ## 2026-09-11 导出新增「会话消息」Sheet
 
 ### Why

@@ -127,6 +127,14 @@ Docker volume 保留，停容器或重启平台不得删除该 volume。
 `KEY=VALUE` 只读 `.tmp/dev-services/clickhouse/clickhouse-dev.env`，先 `TRUNCATE` 再灌入覆盖 7 个 Tab 的示例数据，
 可重复执行。它属于本地开发造数脚本，不是 Flyway migration，示例数据不得进入生产迁移。
 
+「会话消息」Tab 与导出里的「会话消息」Sheet 只读平台业务库（口径依赖 `storage_mode`/`source_type`/人员归属链，
+ClickHouse 事实表没有这些字段），因此 ClickHouse 造数覆盖不到它。需要该 Tab 也有数据时，执行
+`bash tools/seed-analytics-session-usage.sh`：默认通过 `docker exec` 写入 `deploy/local/docker-compose.yml` 起的本地
+PostgreSQL 容器 `test-agent-postgres`（库 `test_agent`），先按 `demo_ana_` 前缀清理旧演示数据再灌入 3 个演示用户 /
+5 个会话 / 19 条用户消息，可重复执行；容器名、库名和用户名可用
+`TEST_AGENT_ANALYTICS_SESSION_DB_CONTAINER`/`_NAME`/`_USER` 覆盖。该脚本同样只是显式本地开发脚本，演示用户使用
+非 bcrypt 占位密码，无法登录。
+
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级
 `../lobehub-platform`，生成的密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改任何 `.env.local`；开发
