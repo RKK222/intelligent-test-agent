@@ -24,9 +24,10 @@
 当前实现将退出码 1 视为空结果，技能只有 SKILL.md、没有辅助文件本身不是该错误的充分原因。
 `permission=skill ... action.action=allow` 只确认技能权限规则放行，不代表磁盘读取或工具执行成功。
 若运行态接口返回 `ConfigInvalidError` 且 `issues[].keys=["agents"]`，应先修复当前工作区 `.opencode/opencode.jsonc`：
-OpenCode 1.18.4 将 Agent 定义从 `agents/` 或 `agent/` Markdown 目录扫描，`agents` 不是该 JSONC 的合法顶层配置键。
-该配置错误会在实例配置读取阶段阻断 `/find` 等接口，可能同时造成斜杠目录、Agent/Skill 目录查询异常；不能继续以 ripgrep、权限或浏览器缓存为首要假设。
-保留 `.opencode/agents/<name>.md` 文件，把误写进 JSONC 的 Agent 定义迁回目录；修复前先通过平台 Agent 配置编辑器查看并保存，保留 Git diff 和原文件备份，不能直接在企业库执行删除或覆盖。
+OpenCode 1.18.4 支持 JSONC 顶层单数 `agent`（按 Agent 名称组织的配置对象），也支持 `agents/` 或 `agent/` Markdown 目录；复数 `agents` 不是合法顶层配置键。
+该配置错误只确认当前请求在配置读取阶段受阻。若探针 directory 使用技能目录、原会话使用工作区根，或当前进程晚于原失败，须分别记录；不能据此断定旧会话的 `ripgrep execution failed` 已找到根因。
+修复前通过平台 Agent 配置编辑器读取并备份原文件、保留 Git diff，检查 `agents` 内容及是否已有 `agent`：仅当它确为 Agent 配置对象且不存在同级 `agent` 时，才将顶层键改为单数；已存在 `agent` 时逐项合并并处理同名冲突；数组、路径或其它结构不能直接改名，也不能整块删除有效定义。
+应用个人配置保存后复用本人空闲重载，再在原工作区验证目录与真实 skill 调用；仅修正个人配置时不需要先发布给其他用户。路径中的用户号表示 worktree 归属，root 属主和文件修改时间不能认定实际写入人；已提交内容先查该文件 Git 历史，未提交内容须结合对话工具调用或已有审计证据追溯。
 复测搜索时使用普通无正则文本（例如 `__TEST_AGENT_DIAG_20260911_NO_MATCH__`）；`^**...**$` 不是有效的正则表达式，避免把测试模式错误与配置错误混在一起。
 1.18.4 的 `SessionProcessor.failToolCall` 将简化错误写入对话 part，该分支没有输出完整底层异常的日志调用；
 进程日志没有 ripgrep 错误正文时，不能认定未发生错误，也不应反复扩大同一关键词日志采集来代替实际执行复测。
