@@ -105,14 +105,10 @@ SELECT
     1
 FROM
 (
-    -- 30 天 × 5 用户，每行带不同数值以体现趋势
+    -- 中间层：tup 已由下一层物化，这里按“上海本地时刻”算 bucketStart，避免同层别名前向引用。
+    -- 每个用户有各自基准小时（9/11/13/15/17），再按天偏移 0~6 小时，保证小时热力图各时段都有值。
     SELECT
-        toStartOfHour(now() - INTERVAL number DAY) + INTERVAL 9 HOUR AS bucketStart,
-        arrayJoin([('u_1001','张伟','总行研发中心','平台研发部','前端工程组'),
-                   ('u_1002','李娜','总行研发中心','平台研发部','后端工程组'),
-                   ('u_1003','王强','北京分行','数据研发部','数据平台组'),
-                   ('u_1004','刘洋','北京分行','数据研发部','算法工程组'),
-                   ('u_1005','陈静','上海分行','应用研发部','测试工程组')]) AS tup,
+        dayStart + INTERVAL (tup.6 - 8 + (number % 4) * 2) HOUR AS bucketStart,
         tup.1 AS userId,
         tup.2 AS username,
         tup.3 AS organization,
@@ -133,7 +129,19 @@ FROM
         (number * 50 + 200) AS cache_read,
         (number * 20 + 80) AS cache_write,
         (number * 1500 + 3000) AS duration_ms
-    FROM numbers(30)
+    FROM
+    (
+        -- 30 天 × 5 用户，先展开用户元组（末位为基准本地小时）
+        SELECT
+            toStartOfDay(now() - INTERVAL number DAY) AS dayStart,
+            arrayJoin([('u_1001','张伟','总行研发中心','平台研发部','前端工程组', 9),
+                       ('u_1002','李娜','总行研发中心','平台研发部','后端工程组', 11),
+                       ('u_1003','王强','北京分行','数据研发部','数据平台组', 13),
+                       ('u_1004','刘洋','北京分行','数据研发部','算法工程组', 15),
+                       ('u_1005','陈静','上海分行','应用研发部','测试工程组', 17)]) AS tup,
+            number
+        FROM numbers(30)
+    )
 ) AS raw
 WHERE messages > 0;
 

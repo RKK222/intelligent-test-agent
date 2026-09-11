@@ -35,6 +35,14 @@ public class AnalyticsQueryService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int MAX_POINTS = 500;
     private static final int DEFAULT_RANGE_DAYS = 30;
+    // 网页明细/排行接口按 pageSize、topN 截断（默认 20），导出必须脱离分页取全量。
+    // 排行/组织类按 topN 放宽到该上限；明细类受 PageResponse 单页 200 条约束，改为翻页取全量。
+    private static final int EXPORT_ROW_LIMIT = 100_000;
+    private static final int EXPORT_PAGE_SIZE = com.enterprise.testagent.common.pagination.PageRequest.MAX_SIZE;
+    // 与 hourlyHeatmap 保持同一口径：超过 90 天网页不支持热力图，导出只写提示行而不是中断整份导出。
+    private static final int HEATMAP_MAX_RANGE_DAYS = 90;
+    // 热力矩阵列数：1 列日期 + 24 个小时
+    private static final int HEATMAP_COLUMNS = 25;
 
     private final AnalyticsRepository repository;
 
@@ -733,6 +741,8 @@ public class AnalyticsQueryService {
      * 复用各 Tab 现有查询方法，避免重复实现数据获取逻辑。
      */
     public byte[] exportAllXlsx(AnalyticsModels.Filter filter) {
+        // 导出脱离网页分页：page 归 1，pageSize/topN 放宽到全量上限，否则明细与排行只会导出前 20 条。
+        AnalyticsModels.Filter exportFilter = unlimitedFilter(filter);
         try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
             org.apache.poi.ss.usermodel.CellStyle headerStyle = workbook.createCellStyle();
             org.apache.poi.ss.usermodel.Font headerFont = workbook.createFont();
@@ -746,13 +756,13 @@ public class AnalyticsQueryService {
             sectionFont.setFontHeightInPoints((short) 13);
             sectionStyle.setFont(sectionFont);
 
-            buildOverviewSheet(workbook, filter, headerStyle, sectionStyle);
-            buildUsersSheet(workbook, filter, headerStyle);
-            buildTokenSheet(workbook, filter, headerStyle, sectionStyle);
-            buildCapabilitiesSheet(workbook, filter, headerStyle);
-            buildOrganizationsSheet(workbook, filter, headerStyle);
-            buildFeedbackSheet(workbook, filter, headerStyle);
-            buildExceptionsSheet(workbook, filter, headerStyle);
+            buildOverviewSheet(workbook, exportFilter, headerStyle, sectionStyle);
+            buildUsersSheet(workbook, exportFilter, headerStyle);
+            buildTokenSheet(workbook, exportFilter, headerStyle, sectionStyle);
+            buildCapabilitiesSheet(workbook, exportFilter, headerStyle);
+            buildOrganizationsSheet(workbook, exportFilter, headerStyle);
+            buildFeedbackSheet(workbook, exportFilter, headerStyle);
+            buildExceptionsSheet(workbook, exportFilter, headerStyle);
 
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             workbook.write(out);
@@ -760,6 +770,79 @@ public class AnalyticsQueryService {
         } catch (java.io.IOException exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "导出 xlsx 失败", Map.of(), exception);
         }
+    }
+
+    /**
+     * 构造导出用过滤器：页码固定 1，pageSize 取 PageResponse 允许的单页上限，topN 放宽到全量上限。
+     * 明细类查询再用 {@link #collectAll} 翻页取满，排行类靠放宽后的 topN 取满。
+     */
+    private AnalyticsModels.Filter unlimitedFilter(AnalyticsModels.Filter filter) {
+        return new AnalyticsModels.Filter(
+                filter.startTime(),
+                filter.endTime(),
+                filter.granularity(),
+                filter.organization(),
+                filter.rdDepartment(),
+                filter.department(),
+                filter.userKeyword(),
+                filter.agentId(),
+                filter.model(),
+                filter.workspaceId(),
+                EXPORT_ROW_LIMIT,
+                1,
+                EXPORT_PAGE_SIZE,
+                filter.sort());
+    }
+
+    /** 复制过滤器并替换页码，其余条件保持不变。 */
+    private AnalyticsModels.Filter withPage(AnalyticsModels.Filter filter, int page) {
+        return new AnalyticsModels.Filter(
+                filter.startTime(),
+                filter.endTime(),
+                filter.granularity(),
+                filter.organization(),
+                filter.rdDepartment(),
+                filter.department(),
+                filter.userKeyword(),
+                filter.agentId(),
+                filter.model(),
+                filter.workspaceId(),
+                filter.topN(),
+                page,
+                filter.pageSize(),
+                filter.sort());
+    }
+
+    /**
+     * 按页翻取明细直到取满 total，避免导出被单页 200 条上限截断。
+     * 单页大小不能超过 {@code PageRequest.MAX_SIZE}，因此只能翻页而不能一次性放大 pageSize。
+     */
+    private <T> List<T> collectAll(
+            AnalyticsModels.Filter filter,
+            java.util.function.Function<AnalyticsModels.Filter, PageResponse<T>> pageLoader) {
+        List<T> collected = new ArrayList<>();
+        int page = 1;
+        while (true) {
+            PageResponse<T> response = pageLoader.apply(withPage(filter, page));
+            collected.addAll(response.items());
+            if (response.items().isEmpty() || collected.size() >= response.total()) {
+                break;
+            }
+            page++;
+        }
+        return collected;
+    }
+
+    private List<AnalyticsModels.UserUsageRow> allUsers(AnalyticsModels.Filter filter) {
+        return collectAll(filter, this::users);
+    }
+
+    private List<AnalyticsModels.FeedbackDetail> allFeedbackDetails(AnalyticsModels.Filter filter) {
+        return collectAll(filter, this::feedbackDetails);
+    }
+
+    private List<AnalyticsModels.ExceptionDetail> allExceptionDetails(AnalyticsModels.Filter filter) {
+        return collectAll(filter, this::exceptionDetails);
     }
 
     // 使用总览 Sheet：KPI 指标卡 + 用户使用漏斗
@@ -797,10 +880,96 @@ public class AnalyticsQueryService {
         writeFunnelRow(sheet.createRow(rowIdx++), "总用户数", funnel.totalUsers(), null, "当前全部平台用户");
         writeFunnelRow(sheet.createRow(rowIdx++), "活跃用户数", funnel.activeUsers(), funnel.activeRate(), funnel.activeDefinition());
         writeFunnelRow(sheet.createRow(rowIdx++), "深度用户数", funnel.deepUsers(), funnel.deepRate(), funnel.deepDefinition());
-        sheet.autoSizeColumn(0);
-        sheet.autoSizeColumn(1);
-        sheet.autoSizeColumn(2);
-        sheet.autoSizeColumn(3);
+
+        rowIdx++;
+        rowIdx = writeTrendSection(sheet, filter, rowIdx, headerStyle, sectionStyle);
+
+        rowIdx++;
+        rowIdx = writeHeatmapSections(sheet, filter, rowIdx, headerStyle, sectionStyle);
+
+        // 热力矩阵占 1 + 24 列，统一按最大列数自动列宽
+        autoSizeColumns(sheet, HEATMAP_COLUMNS);
+    }
+
+    // 使用总览中的 Run 趋势：与网页柱状图同源，导出为时间点及各核心指标数值
+    private int writeTrendSection(
+            org.apache.poi.ss.usermodel.Sheet sheet,
+            AnalyticsModels.Filter filter,
+            int rowIdx,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle,
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle) {
+        org.apache.poi.ss.usermodel.Row sectionRow = sheet.createRow(rowIdx++);
+        sectionRow.createCell(0).setCellValue("Run 趋势");
+        sectionRow.getCell(0).setCellStyle(sectionStyle);
+        String[] headers = {"时间点", "Run", "成功", "失败", "取消", "登录用户", "活跃用户", "用户消息", "AI 回复"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(rowIdx++);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        for (AnalyticsModels.TimeSeriesPoint point : timeseries(filter)) {
+            org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx++);
+            row.createCell(0).setCellValue(formatInstant(point.bucketStart()));
+            row.createCell(1).setCellValue(point.runCount());
+            row.createCell(2).setCellValue(point.succeededRuns());
+            row.createCell(3).setCellValue(point.failedRuns());
+            row.createCell(4).setCellValue(point.cancelledRuns());
+            row.createCell(5).setCellValue(point.loginUsers());
+            row.createCell(6).setCellValue(point.activeUsers());
+            row.createCell(7).setCellValue(point.userMessageCount());
+            row.createCell(8).setCellValue(point.assistantMessageCount());
+        }
+        return rowIdx;
+    }
+
+    /**
+     * 使用总览中的小时热力：网页可切换三种指标，导出把三种全部写出，避免丢数据。
+     * 超过 90 天时网页本身不支持热力图，这里同样只写提示行，不因为该 Tab 让整份导出失败。
+     */
+    private int writeHeatmapSections(
+            org.apache.poi.ss.usermodel.Sheet sheet,
+            AnalyticsModels.Filter filter,
+            int rowIdx,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle,
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle) {
+        org.apache.poi.ss.usermodel.Row sectionRow = sheet.createRow(rowIdx++);
+        sectionRow.createCell(0).setCellValue("小时热力");
+        sectionRow.getCell(0).setCellStyle(sectionStyle);
+        if (Duration.between(filter.startTime(), filter.endTime()).compareTo(Duration.ofDays(HEATMAP_MAX_RANGE_DAYS)) > 0) {
+            sheet.createRow(rowIdx++).createCell(0).setCellValue("小时热力图最多支持 90 天，当前筛选范围超出，未导出热力数据");
+            return rowIdx;
+        }
+        Map<AnalyticsModels.HeatmapMetric, String> metrics = new LinkedHashMap<>();
+        metrics.put(AnalyticsModels.HeatmapMetric.USER_MESSAGES, "用户消息");
+        metrics.put(AnalyticsModels.HeatmapMetric.PRIMARY_TOKENS, "主 Token");
+        metrics.put(AnalyticsModels.HeatmapMetric.CACHE_TOKENS, "缓存 Token");
+        for (Map.Entry<AnalyticsModels.HeatmapMetric, String> entry : metrics.entrySet()) {
+            AnalyticsModels.HourlyHeatmap heatmap = hourlyHeatmap(filter, entry.getKey());
+            org.apache.poi.ss.usermodel.Row metricRow = sheet.createRow(rowIdx++);
+            metricRow.createCell(0).setCellValue(entry.getValue());
+            metricRow.getCell(0).setCellStyle(sectionStyle);
+            org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(rowIdx++);
+            headerRow.createCell(0).setCellValue("日期");
+            for (int hour = 0; hour < 24; hour++) {
+                org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(hour + 1);
+                cell.setCellValue(String.format(java.util.Locale.ROOT, "%02d:00", hour));
+                cell.setCellStyle(headerStyle);
+            }
+            Map<LocalDate, Map<Integer, Long>> byDate = new HashMap<>();
+            for (AnalyticsModels.HourlyHeatmapPoint point : heatmap.points()) {
+                byDate.computeIfAbsent(point.date(), ignored -> new HashMap<>()).put(point.hourOfDay(), point.value());
+            }
+            for (LocalDate date : heatmap.dates()) {
+                org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx++);
+                row.createCell(0).setCellValue(date.toString());
+                Map<Integer, Long> hours = byDate.getOrDefault(date, Map.of());
+                for (int hour = 0; hour < 24; hour++) {
+                    row.createCell(hour + 1).setCellValue(hours.getOrDefault(hour, 0L));
+                }
+            }
+        }
+        return rowIdx;
     }
 
     private int writeOverviewKpiRows(org.apache.poi.ss.usermodel.Sheet sheet, int rowIdx, AnalyticsModels.Overview overview) {
@@ -838,7 +1007,7 @@ public class AnalyticsQueryService {
             cell.setCellStyle(headerStyle);
         }
         int rowIdx = 1;
-        for (AnalyticsModels.UserUsageRow row : users(filter).items()) {
+        for (AnalyticsModels.UserUsageRow row : allUsers(filter)) {
             org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
             r.createCell(0).setCellValue(displayName(row.username(), row.userId()));
             r.createCell(1).setCellValue(orDash(row.organization()));
@@ -855,7 +1024,7 @@ public class AnalyticsQueryService {
         autoSizeColumns(sheet, headers.length);
     }
 
-    // Token 运营 Sheet：每日 Token + 用户排行两段
+    // Token 运营 Sheet：Token 汇总 + 每日 Token + 用户排行三段
     private void buildTokenSheet(
             org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
             AnalyticsModels.Filter filter,
@@ -864,6 +1033,26 @@ public class AnalyticsQueryService {
         org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Token运营");
         AnalyticsModels.TokenOperations token = tokenOperations(filter);
         int rowIdx = 0;
+
+        // Token 汇总：对应网页顶部 5 个指标卡，先放汇总再放明细，避免导出缺少概览口径
+        org.apache.poi.ss.usermodel.Row summarySection = sheet.createRow(rowIdx++);
+        summarySection.createCell(0).setCellValue("Token 汇总");
+        summarySection.getCell(0).setCellStyle(sectionStyle);
+        String[] summaryHeaders = {"指标", "数值", "说明"};
+        org.apache.poi.ss.usermodel.Row summaryHeader = sheet.createRow(rowIdx++);
+        for (int i = 0; i < summaryHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = summaryHeader.createCell(i);
+            cell.setCellValue(summaryHeaders[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        rowIdx = writeSummaryRow(sheet, rowIdx, "总 Token 使用量", token.totalTokens(), "含主 Token 与缓存读写");
+        rowIdx = writeSummaryRow(sheet, rowIdx, "日人均 Token", formatNumber(token.dailyTokensPerUser()), "仅统计有 Token 使用的人天");
+        rowIdx = writeSummaryRow(sheet, rowIdx, "Token 使用率", formatRate(token.tokenUserRate()), token.tokenUsers() + " / " + token.activeUsers() + " 人");
+        rowIdx = writeSummaryRow(sheet, rowIdx, "重复使用率", formatRate(token.repeatTokenUserRate()), "至少 2 个 Token 使用日");
+        rowIdx = writeSummaryRow(sheet, rowIdx, "缓存 Token", token.cacheReadTokens() + token.cacheWriteTokens(),
+                "读 " + formatNumber((double) token.cacheReadTokens()) + " · 写 " + formatNumber((double) token.cacheWriteTokens()));
+
+        rowIdx++;
         org.apache.poi.ss.usermodel.Row section1 = sheet.createRow(rowIdx++);
         section1.createCell(0).setCellValue("每日 Token 使用");
         section1.getCell(0).setCellStyle(sectionStyle);
@@ -979,7 +1168,7 @@ public class AnalyticsQueryService {
             cell.setCellStyle(headerStyle);
         }
         int rowIdx = 1;
-        for (AnalyticsModels.FeedbackDetail row : feedbackDetails(filter).items()) {
+        for (AnalyticsModels.FeedbackDetail row : allFeedbackDetails(filter)) {
             org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
             r.createCell(0).setCellValue(formatInstant(row.createdAt()));
             r.createCell(1).setCellValue(displayName(row.username(), row.userId()));
@@ -1007,7 +1196,7 @@ public class AnalyticsQueryService {
             cell.setCellStyle(headerStyle);
         }
         int rowIdx = 1;
-        for (AnalyticsModels.ExceptionDetail row : exceptionDetails(filter).items()) {
+        for (AnalyticsModels.ExceptionDetail row : allExceptionDetails(filter)) {
             org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
             r.createCell(0).setCellValue(formatInstant(row.updatedAt()));
             r.createCell(1).setCellValue(row.runId());
@@ -1027,6 +1216,21 @@ public class AnalyticsQueryService {
         } else {
             valueCell.setCellValue(value == null ? "" : value.toString());
         }
+        return rowIdx + 1;
+    }
+
+    // 汇总行：指标 + 数值 + 说明，数值既可能是原始数字也可能是已格式化文本
+    private int writeSummaryRow(
+            org.apache.poi.ss.usermodel.Sheet sheet, int rowIdx, String metric, Object value, String note) {
+        org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx);
+        row.createCell(0).setCellValue(metric);
+        org.apache.poi.ss.usermodel.Cell valueCell = row.createCell(1);
+        if (value instanceof Number number) {
+            valueCell.setCellValue(number.doubleValue());
+        } else {
+            valueCell.setCellValue(value == null ? "" : value.toString());
+        }
+        row.createCell(2).setCellValue(note);
         return rowIdx + 1;
     }
 

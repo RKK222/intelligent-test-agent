@@ -1,5 +1,32 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析导出补齐缺失 Tab 内容并改为取全量
+
+### Why
+
+用户打开导出的 xlsx 发现三处与网页不一致：1) 使用总览缺少网页的「Run 趋势」和「小时热力」；2) Token 运营缺少网页顶部 5 张汇总指标卡；3) 怀疑导出被限制成 20 条、拿不到全量。经排查第 3 点属实：网页 `pageSize`/`topN` 默认 20，导出直接复用同一个 Filter，明细与排行都被截断（实测异常 Run 接口 total=22，导出只有 20 行）。
+
+### What
+
+1. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java)：`exportAllXlsx` 改用新增的 `unlimitedFilter`（page=1、topN=`EXPORT_ROW_LIMIT`、pageSize=`PageRequest.MAX_SIZE`）；明细类新增 `collectAll` 按页翻取直到取满 `total`，并加 `allUsers`/`allFeedbackDetails`/`allExceptionDetails` 三个取全量方法。
+2. 使用总览 Sheet 新增 `writeTrendSection`（Run 趋势，复用 `timeseries()`）和 `writeHeatmapSections`（小时热力，复用 `hourlyHeatmap()`，三种指标各导一张 24 小时矩阵）。
+3. Token 运营 Sheet 顶部新增「Token 汇总」段，对齐网页 5 张卡（总 Token 使用量/日人均/使用率/重复使用率/缓存 Token），新增 `writeSummaryRow` 辅助方法。
+4. [seed-analytics-clickhouse.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-clickhouse.sh)：小时汇总的 `bucketStart` 原来固定落在同一时刻（上海 19:00），热力图只有一列有值；改为按用户基准小时（9/11/13/15/17）+ 按天偏移构造，拆成两层子查询以避开同层别名前向引用。
+5. 同步设计文档 `.trae/documents/analytics-seed-and-xlsx-export.md` 的 Sheet 说明。
+
+### How
+
+- `PageResponse` 构造器硬约束单页 `size` 必须在 1..200（`PageRequest.MAX_SIZE`），所以不能靠放大 pageSize 一次取全量，只能用页码翻页。
+- `hourlyHeatmap` 本身对 >90 天会抛错，导出侧先用 `HEATMAP_MAX_RANGE_DAYS` 判定，超范围只写一行提示，避免整个导出失败。
+- 造数脚本里 `arrayJoin(...) AS tup` 不能与其所在层 SELECT 里引用 `tup` 的表达式同层（别名前向引用），改为在下一层 SELECT 里计算 `bucketStart`。
+
+### Result
+
+- 导出实测 7 个 Sheet 全在：使用总览 159 行 × 25 列（含 Run 趋势 30 个时间点、小时热力 3×30 行矩阵）、Token 运营 48 行（含 5 行汇总）、异常 Run 22 行。
+- 全量校验：异常 Run 接口 total=22 / 导出 22 行，满意度 11/11，用户运营 5/5，与接口 total 完全一致（修复前异常 Run 只导出 20 行）。
+- 小时热力从 1 个时段扩到 8 个时段（本地 9/11/13/15/17/19/21/23 点）。
+- `mvn -pl test-agent-opencode-runtime -am -Dtest='Analytics*Test' test` 28 项全部通过；`backend` 模块编译通过。
+
 ## 2026-09-11 运营分析：本地 ClickHouse 造数 + 一次导出全部 Tab 为中文多 Sheet xlsx
 
 ### Why
