@@ -2677,6 +2677,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
     exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions" | "funnel" | "token-operations" | "capabilities", params: AnalyticsQueryParams = {}) =>
       requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
+    exportAnalyticsXlsx: (params: AnalyticsQueryParams = {}) =>
+      requestBlob(`${analyticsBase}/export-all${query({ ...params })}`, {}, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
     listTraces: (params: TraceQueryParams = {}) =>
       request<PageResponse<TraceCatalog>>(`${traceBase}${query({ ...params })}`),
     getTrace: (traceId: string) =>

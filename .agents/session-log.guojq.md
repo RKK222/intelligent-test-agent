@@ -1,5 +1,46 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析：本地 ClickHouse 造数 + 一次导出全部 Tab 为中文多 Sheet xlsx
+
+### Why
+
+本地运营分析页面 7 个 Tab 全为空：ClickHouse 未启用时查询走 `UnavailableAnalyticsRepository` 直接抛
+`ANALYTICS_UNAVAILABLE`，且没有任何示例数据。原“导出 CSV”按当前 Tab 单类型导出，列头英文，也无法体现网页的
+多 Tab 布局。用户要求：给每个 Tab 造可见数据；导出改成一次导出所有 Tab、标题用对应中文，且样式尽量贴近网页。
+
+### What
+
+1. 新增 [seed-analytics-clickhouse.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-clickhouse.sh)：本地开发造数脚本，覆盖全部 7 个 Tab。
+2. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java#L734-L1020)：新增 `exportAllXlsx(Filter)`，用 POI 构建 7 个中文 Sheet（使用总览/用户运营/Token运营/能力使用/组织分析/满意度/异常Run），复用现有查询方法，不重写取数逻辑。
+3. [AnalyticsController.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-api/src/main/java/com/enterprise/testagent/api/web/platform/AnalyticsController.java#L138)：新增 `GET /export-all`，`produces` 为 xlsx MIME，仅 `SUPER_ADMIN`。
+4. [test-agent-opencode-runtime/pom.xml](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/pom.xml#L77-L84)：加 `poi` + `poi-ooxml`（根 pom 受管 5.5.1）。注意该依赖加在 runtime 模块而非 api 模块，因为 `exportAllXlsx` 在 runtime 的 `AnalyticsQueryService`。
+5. [backend-api/src/index.ts](file:///Users/guo/Developer/intelligent-test-agent/frontend/packages/backend-api/src/index.ts#L2680)：新增 `exportAnalyticsXlsx`。
+6. [AnalyticsManagementPanel.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue#L196)：`exportCsv` 改 `exportAll`，下载 `运营分析-YYYYMMDD.xlsx`，按钮文案“导出 CSV”→“导出 Excel”。
+7. 同步 [docs/api/http-api.md](file:///Users/guo/Developer/intelligent-test-agent/docs/api/http-api.md#L106) 与 [ai-workflow.md](file:///Users/guo/Developer/intelligent-test-agent/docs/guides/ai-workflow.md#L126)，记录 `/export-all` 与造数脚本用法。
+
+### How
+
+- 未改 `.env.local`（遵守 AGENTS.md 规则 21），改用 `./restart-dev-services.sh --profile local --with-clickhouse --skip-frontend-build` 加载 `.tmp/dev-services/clickhouse/clickhouse-backend.env` 里的 4 个 ClickHouse 变量。
+- 造数脚本只按 `KEY=VALUE` 只读 `.tmp/dev-services/clickhouse/clickhouse-dev.env`，先 `TRUNCATE` 再 `INSERT ... SELECT FROM numbers()` 生成数据，幂等可重复；属本地开发脚本，不进 Flyway（规则 14）。
+- 导出复用各 Tab 现有查询方法（`overview/funnel/users/tokenOperations/capabilities/organizations/feedbackDetails/exceptionDetails`），保证与网页数据同源；表头加粗 + 浅灰底以贴近网页表头。
+
+### Result
+
+- 7 张表灌数成功：`user_dimensions=7`、`activity_hourly=150`、`activity_daily=150`、`feedback_facts=12`、`activity_facts=43`、`capability_facts=30`、`watermarks=1`。
+- 超管 token 调用 API 全部 200 且有真实数据：`overview`（registeredUsers=8、successRate≈0.61、p95=85000ms）、`users`（张伟/李娜等 5 人）、`satisfaction`（正向 375 / 负向 215）。
+- `GET /export-all` 返回 200、`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`、12134 字节；解析确认 7 个 Sheet 名与列头均为中文，数据与网页一致。
+- `corepack pnpm --filter @test-agent/agent-web typecheck`（vue-tsc）通过。未新增部署节点，走 release 分支常规范围。
+
+### 关键坑
+
+1. **带 INSERT 列清单的 `SELECT` 里用 `arrayJoin(...) AS tup` 会多出一列**：`arrayJoin` 自身会在结果集中占一列，
+   与显式列清单数量不匹配，报 “Number of columns doesn't match”。改为在 FROM 子查询里构造元组数组，外层用
+   `users[(number % n) + 1].k` 下标取值，列数才对齐。
+2. **`multiIf` 里再嵌套 `arrayJoin` 会按每行展开成多行**：能力事实表原本用 Python 式写法嵌套三处 `arrayJoin`，
+   行数会被放大。改成把候选名字数组放进子查询、外层用下标 + `multiIf` 选值，行数才与 `numbers(n)` 一致。
+3. **重启脚本必须先给 `--profile`**：直接 `./restart-dev-services.sh --with-clickhouse` 会因默认预期 `.env.test`
+   而报 “Missing env file: .env.test” 并立即退出，后端进程不会被重启（PID 不变），需显式 `--profile local`。
+
 ## 2026-09-10 重复代码变更打包（相同源码，产物重建）
 
 ### Why

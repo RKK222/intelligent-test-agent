@@ -193,21 +193,14 @@ function markCustomRange() {
   rangePreset.value = "custom";
 }
 
-function exportType(): "overview" | "users" | "organizations" | "feedback" | "exceptions" | "token-operations" | "capabilities" {
-  if (activeTab.value === "satisfaction") return "feedback";
-  if (activeTab.value === "token") return "token-operations";
-  if (activeTab.value === "capabilities") return "capabilities";
-  if (activeTab.value === "overview") return "overview";
-  return activeTab.value;
-}
-
-async function exportCsv() {
-  const type = exportType();
-  const blob = await api.exportAnalyticsCsv(type, params.value);
+async function exportAll() {
+  const blob = await api.exportAnalyticsXlsx(params.value);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `analytics-${type}.csv`;
+  const date = new Date();
+  const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
+  link.download = `运营分析-${stamp}.xlsx`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -261,7 +254,7 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
       </div>
       <div class="ta-analytics-header-actions">
         <button type="button" class="ta-icon-btn" title="刷新" aria-label="刷新" @click="refresh"><RefreshCw :size="16" /></button>
-        <button type="button" class="ta-export-btn" @click="exportCsv"><Download :size="15" /><span>导出 CSV</span></button>
+        <button type="button" class="ta-export-btn" @click="exportAll"><Download :size="15" /><span>导出 Excel</span></button>
       </div>
     </header>
 

@@ -103,6 +103,7 @@
 | `analytics` | `/api/internal/platform/analytics/satisfaction` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/exceptions` | 无旧 URL |
 | `analytics` | `/api/internal/platform/analytics/export` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/export-all` | 无旧 URL；一次导出所有运营分析 Tab 为多 Sheet xlsx，Sheet 名与列头用中文且与网页表格一致，仅 `SUPER_ADMIN` 可调用 |
 | `xxl-job` | `/api/internal/platform/xxl-job/sso-tickets` | 无旧 URL |
 | `integration/lobehub` | `/api/internal/platform/lobehub-sso/tickets`、`/tickets/redeem`、`/grants/revoke` | 无旧 URL |
 | `model-gateway` | `/api/internal/platform/model-gateway/v1/models`、`/chat/completions` 等固定端点 | 无旧 URL |

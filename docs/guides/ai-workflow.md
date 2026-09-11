@@ -123,6 +123,10 @@ export SYS_DATA_ROOT_DIR="$TESTAGENT/.testagent"
 `--with-memory`。本地 ClickHouse 只监听回环地址，运行密钥和 Java JDBC 配置不写回 `.env.test`；数据由版本化
 Docker volume 保留，停容器或重启平台不得删除该 volume。
 
+本地运营分析页面需要非空数据联调时，在 ClickHouse 就绪后执行 `bash tools/seed-analytics-clickhouse.sh`：该脚本按
+`KEY=VALUE` 只读 `.tmp/dev-services/clickhouse/clickhouse-dev.env`，先 `TRUNCATE` 再灌入覆盖 7 个 Tab 的示例数据，
+可重复执行。它属于本地开发造数脚本，不是 Flyway migration，示例数据不得进入生产迁移。
+
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
 `./restart-dev-services.sh --profile test --env-file .env.test --with-lobehub`。该模式要求同级
 `../lobehub-platform`，生成的密钥只写入 `.tmp/dev-services/lobehub-dev.env`，不修改任何 `.env.local`；开发

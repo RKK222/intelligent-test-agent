@@ -699,8 +699,386 @@ public class AnalyticsQueryService {
         return text;
     }
 
+    // 以下三个格式化方法与前端 AnalyticsManagementPanel 的展示口径保持一致，确保 xlsx 与网页内容一致
+    private static String formatRate(Double value) {
+        return value == null ? "-" : String.format(java.util.Locale.ROOT, "%.1f%%", value * 100);
+    }
+
+    private static String formatNumber(Double value) {
+        if (value == null) {
+            return "-";
+        }
+        String formatted = String.format(java.util.Locale.ROOT, "%,.2f", value);
+        if (formatted.endsWith(".00")) {
+            formatted = formatted.substring(0, formatted.length() - 3);
+        } else if (formatted.endsWith("0")) {
+            formatted = formatted.substring(0, formatted.length() - 1);
+        }
+        return formatted;
+    }
+
+    private static String formatDuration(Long valueMs) {
+        if (valueMs == null) {
+            return "-";
+        }
+        return valueMs < 1000 ? valueMs + "ms" : String.format(java.util.Locale.ROOT, "%.1fs", valueMs / 1000.0);
+    }
+
     public byte[] exportCsvBytes(AnalyticsModels.Filter filter, String type) {
         return exportCsv(filter, type).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * 一次导出所有运营分析 Tab 为多 Sheet xlsx，Sheet 名和列头均用中文且与网页表格一致。
+     * 复用各 Tab 现有查询方法，避免重复实现数据获取逻辑。
+     */
+    public byte[] exportAllXlsx(AnalyticsModels.Filter filter) {
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            org.apache.poi.ss.usermodel.CellStyle headerStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setFillForegroundColor(org.apache.poi.ss.usermodel.IndexedColors.GREY_25_PERCENT.getIndex());
+            headerStyle.setFillPattern(org.apache.poi.ss.usermodel.FillPatternType.SOLID_FOREGROUND);
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle = workbook.createCellStyle();
+            org.apache.poi.ss.usermodel.Font sectionFont = workbook.createFont();
+            sectionFont.setBold(true);
+            sectionFont.setFontHeightInPoints((short) 13);
+            sectionStyle.setFont(sectionFont);
+
+            buildOverviewSheet(workbook, filter, headerStyle, sectionStyle);
+            buildUsersSheet(workbook, filter, headerStyle);
+            buildTokenSheet(workbook, filter, headerStyle, sectionStyle);
+            buildCapabilitiesSheet(workbook, filter, headerStyle);
+            buildOrganizationsSheet(workbook, filter, headerStyle);
+            buildFeedbackSheet(workbook, filter, headerStyle);
+            buildExceptionsSheet(workbook, filter, headerStyle);
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (java.io.IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "导出 xlsx 失败", Map.of(), exception);
+        }
+    }
+
+    // 使用总览 Sheet：KPI 指标卡 + 用户使用漏斗
+    private void buildOverviewSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle,
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("使用总览");
+        int rowIdx = 0;
+        AnalyticsModels.Overview overview = overview(filter);
+        AnalyticsModels.Funnel funnel = funnel(filter);
+
+        org.apache.poi.ss.usermodel.Row sectionRow = sheet.createRow(rowIdx++);
+        sectionRow.createCell(0).setCellValue("核心指标");
+        sectionRow.getCell(0).setCellStyle(sectionStyle);
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(rowIdx++);
+        headerRow.createCell(0).setCellValue("指标");
+        headerRow.createCell(1).setCellValue("数值");
+        for (int i = 0; i <= 1; i++) {
+            headerRow.getCell(i).setCellStyle(headerStyle);
+        }
+        rowIdx = writeOverviewKpiRows(sheet, rowIdx, overview);
+
+        org.apache.poi.ss.usermodel.Row funnelSection = sheet.createRow(rowIdx++);
+        funnelSection.createCell(0).setCellValue("用户使用漏斗");
+        funnelSection.getCell(0).setCellStyle(sectionStyle);
+        org.apache.poi.ss.usermodel.Row funnelHeader = sheet.createRow(rowIdx++);
+        String[] funnelHeaders = {"阶段", "用户数", "转化率", "定义"};
+        for (int i = 0; i < funnelHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = funnelHeader.createCell(i);
+            cell.setCellValue(funnelHeaders[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        writeFunnelRow(sheet.createRow(rowIdx++), "总用户数", funnel.totalUsers(), null, "当前全部平台用户");
+        writeFunnelRow(sheet.createRow(rowIdx++), "活跃用户数", funnel.activeUsers(), funnel.activeRate(), funnel.activeDefinition());
+        writeFunnelRow(sheet.createRow(rowIdx++), "深度用户数", funnel.deepUsers(), funnel.deepRate(), funnel.deepDefinition());
+        sheet.autoSizeColumn(0);
+        sheet.autoSizeColumn(1);
+        sheet.autoSizeColumn(2);
+        sheet.autoSizeColumn(3);
+    }
+
+    private int writeOverviewKpiRows(org.apache.poi.ss.usermodel.Sheet sheet, int rowIdx, AnalyticsModels.Overview overview) {
+        rowIdx = writeMetricRow(sheet, rowIdx, "注册用户", overview.registeredUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "启用用户", overview.enabledUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "登录用户", overview.loginUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "活跃用户", overview.activeUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "有效用户", overview.validUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "深度用户", overview.deepUsers());
+        rowIdx = writeMetricRow(sheet, rowIdx, "会话总数", overview.sessionCount());
+        rowIdx = writeMetricRow(sheet, rowIdx, "活跃会话", overview.activeSessionCount());
+        rowIdx = writeMetricRow(sheet, rowIdx, "用户消息", overview.userMessageCount());
+        rowIdx = writeMetricRow(sheet, rowIdx, "AI 回复", overview.assistantMessageCount());
+        rowIdx = writeMetricRow(sheet, rowIdx, "Run 启动", overview.runCount());
+        rowIdx = writeMetricRow(sheet, rowIdx, "成功率", formatRate(overview.successRate()));
+        rowIdx = writeMetricRow(sheet, rowIdx, "满意率", formatRate(overview.satisfactionRate()));
+        rowIdx = writeMetricRow(sheet, rowIdx, "Diff 采纳率", formatRate(overview.diffAcceptanceRate()));
+        rowIdx = writeMetricRow(sheet, rowIdx, "p95 耗时", formatDuration(overview.p95DurationMs()));
+        rowIdx = writeMetricRow(sheet, rowIdx, "平均耗时", formatDuration(overview.averageDurationMs()));
+        rowIdx = writeMetricRow(sheet, rowIdx, "主 Token 使用量", overview.totalTokens());
+        return rowIdx;
+    }
+
+    // 用户运营 Sheet
+    private void buildUsersSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("用户运营");
+        String[] headers = {"用户", "机构", "研发部", "部门", "登录", "会话", "消息", "Run", "成功率", "满意率", "Token"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.UserUsageRow row : users(filter).items()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(displayName(row.username(), row.userId()));
+            r.createCell(1).setCellValue(orDash(row.organization()));
+            r.createCell(2).setCellValue(orDash(row.rdDepartment()));
+            r.createCell(3).setCellValue(orDash(row.department()));
+            r.createCell(4).setCellValue(row.loginCount());
+            r.createCell(5).setCellValue(row.activeSessionCount());
+            r.createCell(6).setCellValue(row.userMessageCount());
+            r.createCell(7).setCellValue(row.runCount());
+            r.createCell(8).setCellValue(formatRate(row.successRate()));
+            r.createCell(9).setCellValue(formatRate(row.satisfactionRate()));
+            r.createCell(10).setCellValue(row.totalTokens());
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    // Token 运营 Sheet：每日 Token + 用户排行两段
+    private void buildTokenSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle,
+            org.apache.poi.ss.usermodel.CellStyle sectionStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("Token运营");
+        AnalyticsModels.TokenOperations token = tokenOperations(filter);
+        int rowIdx = 0;
+        org.apache.poi.ss.usermodel.Row section1 = sheet.createRow(rowIdx++);
+        section1.createCell(0).setCellValue("每日 Token 使用");
+        section1.getCell(0).setCellStyle(sectionStyle);
+        String[] dailyHeaders = {"日期", "使用用户", "总 Token", "日人均", "主 Token", "缓存读", "缓存写"};
+        org.apache.poi.ss.usermodel.Row dailyHeader = sheet.createRow(rowIdx++);
+        for (int i = 0; i < dailyHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = dailyHeader.createCell(i);
+            cell.setCellValue(dailyHeaders[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        for (AnalyticsModels.TokenDailyPoint point : token.daily()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(point.date() == null ? "" : point.date().toString());
+            r.createCell(1).setCellValue(point.tokenUsers());
+            r.createCell(2).setCellValue(point.totalTokens());
+            r.createCell(3).setCellValue(formatNumber(point.tokensPerUser()));
+            r.createCell(4).setCellValue(point.primaryTokens());
+            r.createCell(5).setCellValue(point.cacheReadTokens());
+            r.createCell(6).setCellValue(point.cacheWriteTokens());
+        }
+
+        rowIdx++;
+        org.apache.poi.ss.usermodel.Row section2 = sheet.createRow(rowIdx++);
+        section2.createCell(0).setCellValue("用户使用排行");
+        section2.getCell(0).setCellStyle(sectionStyle);
+        String[] userHeaders = {"用户", "使用强度", "Token 日", "总 Token", "Token 日均"};
+        org.apache.poi.ss.usermodel.Row userHeader = sheet.createRow(rowIdx++);
+        for (int i = 0; i < userHeaders.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = userHeader.createCell(i);
+            cell.setCellValue(userHeaders[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        for (AnalyticsModels.TokenUserRow row : token.users()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(displayName(row.username(), row.userId()));
+            r.createCell(1).setCellValue(orDash(row.intensityBand()));
+            r.createCell(2).setCellValue(row.tokenDays());
+            r.createCell(3).setCellValue(row.totalTokens());
+            r.createCell(4).setCellValue(formatNumber(row.tokensPerTokenDay()));
+        }
+        autoSizeColumns(sheet, dailyHeaders.length);
+    }
+
+    // 能力使用 Sheet
+    private void buildCapabilitiesSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("能力使用");
+        String[] headers = {"类型", "名称", "使用率", "使用用户", "调用次数", "成功", "失败", "取消", "未完成"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.CapabilityUsage row : capabilities(filter).rows()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(capabilityLabel(row.type()));
+            r.createCell(1).setCellValue(row.name());
+            r.createCell(2).setCellValue(formatRate(row.usageRate()));
+            r.createCell(3).setCellValue(row.userCount());
+            r.createCell(4).setCellValue(row.invocationCount());
+            r.createCell(5).setCellValue(row.succeededCount());
+            r.createCell(6).setCellValue(row.failedCount());
+            r.createCell(7).setCellValue(row.cancelledCount());
+            r.createCell(8).setCellValue(row.incompleteCount());
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    // 组织分析 Sheet
+    private void buildOrganizationsSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("组织分析");
+        String[] headers = {"维度", "名称", "登录用户", "活跃用户", "深度用户", "Run", "成功率", "满意率", "Token"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.OrganizationUsageRow row : organizations(filter, "department")) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(row.dimension());
+            r.createCell(1).setCellValue(row.name());
+            r.createCell(2).setCellValue(row.loginUsers());
+            r.createCell(3).setCellValue(row.activeUsers());
+            r.createCell(4).setCellValue(row.deepUsers());
+            r.createCell(5).setCellValue(row.runCount());
+            r.createCell(6).setCellValue(formatRate(row.successRate()));
+            r.createCell(7).setCellValue(formatRate(row.satisfactionRate()));
+            r.createCell(8).setCellValue(row.totalTokens());
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    // 满意度 Sheet
+    private void buildFeedbackSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("满意度");
+        String[] headers = {"时间", "用户", "组织", "会话", "Run", "反馈", "原因", "备注"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.FeedbackDetail row : feedbackDetails(filter).items()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(formatInstant(row.createdAt()));
+            r.createCell(1).setCellValue(displayName(row.username(), row.userId()));
+            r.createCell(2).setCellValue(joinOrg(row.organization(), row.rdDepartment(), row.department()));
+            r.createCell(3).setCellValue(row.sessionId());
+            r.createCell(4).setCellValue(orDash(row.runId()));
+            r.createCell(5).setCellValue(ratingLabel(row.rating()));
+            r.createCell(6).setCellValue(orDash(reasonLabel(row.reasonCode())));
+            r.createCell(7).setCellValue(orDash(row.comment()));
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    // 异常 Run Sheet
+    private void buildExceptionsSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("异常Run");
+        String[] headers = {"时间", "Run", "用户", "组织", "状态"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.ExceptionDetail row : exceptionDetails(filter).items()) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            r.createCell(0).setCellValue(formatInstant(row.updatedAt()));
+            r.createCell(1).setCellValue(row.runId());
+            r.createCell(2).setCellValue(displayName(row.username(), row.userId()));
+            r.createCell(3).setCellValue(joinOrg(row.organization(), row.rdDepartment(), row.department()));
+            r.createCell(4).setCellValue(row.status());
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    private int writeMetricRow(org.apache.poi.ss.usermodel.Sheet sheet, int rowIdx, String metric, Object value) {
+        org.apache.poi.ss.usermodel.Row row = sheet.createRow(rowIdx);
+        row.createCell(0).setCellValue(metric);
+        org.apache.poi.ss.usermodel.Cell valueCell = row.createCell(1);
+        if (value instanceof Number number) {
+            valueCell.setCellValue(number.doubleValue());
+        } else {
+            valueCell.setCellValue(value == null ? "" : value.toString());
+        }
+        return rowIdx + 1;
+    }
+
+    private void writeFunnelRow(org.apache.poi.ss.usermodel.Row row, String stage, long userCount, Double rate, String definition) {
+        row.createCell(0).setCellValue(stage);
+        row.createCell(1).setCellValue(userCount);
+        row.createCell(2).setCellValue(rate == null ? "-" : formatRate(rate));
+        row.createCell(3).setCellValue(definition == null ? "" : definition);
+    }
+
+    private void autoSizeColumns(org.apache.poi.ss.usermodel.Sheet sheet, int columnCount) {
+        for (int i = 0; i < columnCount; i++) {
+            sheet.autoSizeColumn(i);
+        }
+    }
+
+    private String capabilityLabel(String type) {
+        return "AGENT".equals(type) ? "Agent" : "SKILL".equals(type) ? "Skill" : "TOOL".equals(type) ? "Tool" : type;
+    }
+
+    private String ratingLabel(com.enterprise.testagent.domain.analytics.AiMessageFeedbackRating rating) {
+        return rating == com.enterprise.testagent.domain.analytics.AiMessageFeedbackRating.POSITIVE ? "满意" : "不满意";
+    }
+
+    private String reasonLabel(com.enterprise.testagent.domain.analytics.AiMessageFeedbackReasonCode reasonCode) {
+        return reasonCode == null ? null : reasonCode.name();
+    }
+
+    private String displayName(String username, String userId) {
+        return username != null && !username.isBlank() ? username : userId;
+    }
+
+    private String orDash(String value) {
+        return value == null || value.isBlank() ? "-" : value;
+    }
+
+    private String joinOrg(String organization, String rdDepartment, String department) {
+        List<String> parts = new ArrayList<>();
+        if (organization != null && !organization.isBlank()) {
+            parts.add(organization);
+        }
+        if (rdDepartment != null && !rdDepartment.isBlank()) {
+            parts.add(rdDepartment);
+        }
+        if (department != null && !department.isBlank()) {
+            parts.add(department);
+        }
+        return parts.isEmpty() ? "-" : String.join(" / ", parts);
+    }
+
+    private String formatInstant(Instant instant) {
+        return instant == null ? "" : instant.atZone(ANALYTICS_ZONE).toString();
     }
 
     private static final class Totals {

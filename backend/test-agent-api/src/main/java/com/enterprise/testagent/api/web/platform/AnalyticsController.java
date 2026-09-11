@@ -132,6 +132,22 @@ public class AnalyticsController {
                 .body(body);
     }
 
+    /**
+     * 一次导出所有运营分析 Tab 为多 Sheet xlsx，Sheet 名和列头用中文且与网页表格一致。
+     */
+    @GetMapping(value = "/export-all", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public ResponseEntity<byte[]> exportAll(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        byte[] body = service.exportAllXlsx(filter(params));
+        return ResponseEntity.ok()
+                .contentType(new MediaType("application", "vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename("analytics-export.xlsx")
+                        .build()
+                        .toString())
+                .body(body);
+    }
+
     private void requireSuperAdmin(ServerWebExchange exchange) {
         AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
     }
