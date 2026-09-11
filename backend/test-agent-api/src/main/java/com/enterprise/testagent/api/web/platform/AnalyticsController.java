@@ -8,6 +8,7 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.analytics.AnalyticsModels;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.opencode.runtime.analytics.AnalyticsQueryService;
+import com.enterprise.testagent.opencode.runtime.analytics.AnalyticsSessionUsageQueryService;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
@@ -29,9 +30,13 @@ import org.springframework.web.server.ServerWebExchange;
 public class AnalyticsController {
 
     private final AnalyticsQueryService service;
+    private final AnalyticsSessionUsageQueryService sessionUsageService;
 
-    public AnalyticsController(AnalyticsQueryService service) {
+    public AnalyticsController(
+            AnalyticsQueryService service,
+            AnalyticsSessionUsageQueryService sessionUsageService) {
         this.service = service;
+        this.sessionUsageService = sessionUsageService;
     }
 
     @GetMapping("/overview")
@@ -114,6 +119,18 @@ public class AnalyticsController {
     public ApiResponse<Object> exceptions(QueryParams params, ServerWebExchange exchange) {
         requireSuperAdmin(exchange);
         return ApiResponse.ok(service.exceptionDetails(filter(params)), RuntimeApiSupport.traceId(exchange));
+    }
+
+    /**
+     * 用户×会话发送次数统计；口径依赖业务库的存储模式/来源/归属，直连平台 PostgreSQL，
+     * 与其它只读 ClickHouse 的运营分析端点不同。
+     */
+    @GetMapping("/sessions")
+    public ApiResponse<Object> sessions(QueryParams params, ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        return ApiResponse.ok(
+                sessionUsageService.sessionMessageUsage(filter(params)),
+                RuntimeApiSupport.traceId(exchange));
     }
 
     @GetMapping(value = "/export", produces = "text/csv")

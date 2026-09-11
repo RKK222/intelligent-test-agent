@@ -15,6 +15,7 @@ import type {
   AnalyticsOverview,
   AnalyticsPeaks,
   AnalyticsSatisfaction,
+  AnalyticsSessionUsageRow,
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
@@ -268,6 +269,7 @@ function api() {
       freshness: overview.freshness
     } satisfies AnalyticsSatisfaction),
     getAnalyticsExceptions: vi.fn().mockResolvedValue(pageOf<AnalyticsExceptionDetail>([])),
+    getAnalyticsSessionUsage: vi.fn().mockResolvedValue(pageOf<AnalyticsSessionUsageRow>([])),
     exportAnalyticsXlsx: vi.fn().mockResolvedValue(new Blob(["xlsx"], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }))
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -502,6 +504,41 @@ describe("analytics management panel", () => {
     await fireEvent.click(view.getByRole("button", { name: "异常 Run" }));
     await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(20));
     expect(view.container.querySelector<HTMLElement>(".ta-pagination-stub")?.dataset.total).toBe("96");
+    view.queryClient.clear();
+  });
+
+  it("renders session message usage with truncated long titles and server pagination", async () => {
+    const backendApi = api();
+    const longTitle = "一个用于验证超长展示的会话标题".repeat(8);
+    vi.mocked(backendApi.getAnalyticsSessionUsage).mockResolvedValue({
+      items: [
+        {
+          userId: "u_1",
+          username: "张三",
+          sessionId: "s_1",
+          sessionTitle: longTitle,
+          userMessageCount: 6,
+          firstMessageAt: "2026-09-01T00:00:00Z",
+          lastMessageAt: "2026-09-02T00:00:00Z"
+        } satisfies AnalyticsSessionUsageRow
+      ],
+      page: 1,
+      size: 20,
+      total: 30
+    });
+    const view = renderPanel(backendApi);
+
+    await fireEvent.click(await view.findByRole("button", { name: "会话消息" }));
+    await waitFor(() => expect(view.container.querySelectorAll(".ta-table tbody tr")).toHaveLength(1));
+    // 超长会话名通过 title 属性提供悬浮全称
+    expect(view.container.querySelector<HTMLElement>(".ta-ellipsis")?.getAttribute("title")).toBe(longTitle);
+    expect(view.container.querySelector<HTMLElement>(".ta-pagination-stub")?.dataset.total).toBe("30");
+
+    await fireEvent.click(view.getByRole("button", { name: "下一页" }));
+    await waitFor(() => {
+      const calls = vi.mocked(backendApi.getAnalyticsSessionUsage).mock.calls;
+      expect(calls.at(-1)?.[0]?.page).toBe(2);
+    });
     view.queryClient.clear();
   });
 });

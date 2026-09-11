@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.AnalyticsSessionUsageMapper">
+    <resultMap id="sessionUsageMap" type="com.enterprise.testagent.persistence.mybatis.AnalyticsSessionUsageRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="session_title" javaType="java.lang.String"/>
+            <arg column="user_message_count" javaType="_long"/>
+            <arg column="first_message_at" javaType="java.time.Instant"/>
+            <arg column="last_message_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <!--
+      口径与 tools/query-user-message-statistics.sql 一致：两条按 storage_mode 互斥的发送来源。
+      1) LEGACY_FULL：每条人工 USER 消息计一次，时间取消息 created_at；
+      2) REDIS_SUMMARY：每个 Run 锚点计一次，时间取 Run created_at，不再叠加该 Run 的 USER 消息。
+      两分支都排除 SIDE_QUESTION 会话与 SCHEDULED_TASK 自动来源；人员归属按 消息发送人→Run 发送人→
+      Run 执行人→会话创建人 依次回退，全空时 user_id 为空，由上层归为「未知用户」。
+    -->
+    <sql id="userMessages">
+        select m.session_id,
+               s.title as session_title,
+               coalesce(m.sender_user_id, r.message_sender_user_id,
+                        r.triggered_by_user_id, s.created_by_user_id) as user_id,
+               m.created_at as sent_at
+        from session_messages m
+        join sessions s on s.session_id = m.session_id
+        left join runs r on r.run_id = m.run_id
+        where m.role = 'USER'
+          and m.created_at &gt;= #{startInclusive} and m.created_at &lt; #{endExclusive}
+          and coalesce(r.storage_mode, 'LEGACY_FULL') = 'LEGACY_FULL'
+          and coalesce(r.source_type, m.source_type, 'MANUAL') = 'MANUAL'
+          and coalesce(s.source_type, 'MANUAL') &lt;&gt; 'SIDE_QUESTION'
+        union all
+        select r.session_id,
+               s.title as session_title,
+               coalesce(r.message_sender_user_id, r.triggered_by_user_id,
+                        s.created_by_user_id) as user_id,
+               r.created_at as sent_at
+        from runs r
+        join sessions s on s.session_id = r.session_id
+        where r.storage_mode = 'REDIS_SUMMARY'
+          and r.created_at &gt;= #{startInclusive} and r.created_at &lt; #{endExclusive}
+          and coalesce(r.source_type, 'MANUAL') = 'MANUAL'
+          and coalesce(s.source_type, 'MANUAL') &lt;&gt; 'SIDE_QUESTION'
+    </sql>
+
+    <!-- 按发送人的当前 users 记录做机构/研发部/部门/关键字筛选；未知用户（users 无匹配）在设置组织筛选时自然被排除。 -->
+    <sql id="userFilters">
+        <if test="organization != null and organization != ''">and u.organization = #{organization}</if>
+        <if test="rdDepartment != null and rdDepartment != ''">and u.rd_department = #{rdDepartment}</if>
+        <if test="department != null and department != ''">and u.department = #{department}</if>
+        <if test="userKeyword != null and userKeyword != ''">
+            and (u.username ilike '%' || #{userKeyword} || '%'
+                 or u.unified_auth_id ilike '%' || #{userKeyword} || '%'
+                 or um.user_id ilike '%' || #{userKeyword} || '%')
+        </if>
+    </sql>
+
+    <select id="sessionMessageUsage" resultMap="sessionUsageMap">
+        select um.user_id,
+               coalesce(u.username, um.user_id, '未知用户') as username,
+               um.session_id,
+               um.session_title,
+               count(*) as user_message_count,
+               min(um.sent_at) as first_message_at,
+               max(um.sent_at) as last_message_at
+        from (<include refid="userMessages"/>) um
+        left join users u on u.user_id = um.user_id
+        where 1 = 1
+        <include refid="userFilters"/>
+        group by um.user_id, u.username, um.session_id, um.session_title
+        order by user_message_count desc, last_message_at desc, um.session_id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countSessionMessageUsage" resultType="long">
+        select count(*) from (
+            select um.user_id, um.session_id
+            from (<include refid="userMessages"/>) um
+            left join users u on u.user_id = um.user_id
+            where 1 = 1
+            <include refid="userFilters"/>
+            group by um.user_id, um.session_id
+        ) grouped
+    </select>
+</mapper>

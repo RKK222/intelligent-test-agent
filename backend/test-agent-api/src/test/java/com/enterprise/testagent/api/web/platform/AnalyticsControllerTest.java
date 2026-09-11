@@ -11,11 +11,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.enterprise.testagent.api.web.common.AuthWebSupport;
 import com.enterprise.testagent.api.web.common.GlobalExceptionHandler;
 import com.enterprise.testagent.api.web.common.TraceIdWebFilter;
+import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.analytics.AnalyticsModels;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.opencode.runtime.analytics.AnalyticsQueryService;
+import com.enterprise.testagent.opencode.runtime.analytics.AnalyticsSessionUsageQueryService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -60,7 +62,8 @@ class AnalyticsControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
 
-        WebTestClient.bindToController(new AnalyticsController(service))
+        WebTestClient.bindToController(new AnalyticsController(
+                        service, org.mockito.Mockito.mock(AnalyticsSessionUsageQueryService.class)))
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build()
@@ -126,7 +129,48 @@ class AnalyticsControllerTest {
         assertThat(userKeyword.getValue()).isEqualTo("张");
     }
 
+    @Test
+    void superAdminCanQuerySessionUsageFromBusinessDatabase() {
+        AnalyticsQueryService service = org.mockito.Mockito.mock(AnalyticsQueryService.class);
+        AnalyticsSessionUsageQueryService sessionUsageService =
+                org.mockito.Mockito.mock(AnalyticsSessionUsageQueryService.class);
+        when(sessionUsageService.sessionMessageUsage(any())).thenReturn(new PageResponse<>(
+                List.of(new AnalyticsModels.SessionUsageRow(
+                        "usr_1",
+                        "张三",
+                        "ses_1",
+                        "一个非常长的会话标题用于验证前端截断与悬浮展示",
+                        3,
+                        NOW,
+                        NOW.plusSeconds(120))),
+                1,
+                20,
+                1));
+
+        client(service, sessionUsageService, List.of(Dictionary.ROLE_SUPER_ADMIN))
+                .get()
+                .uri("/api/internal/platform/analytics/sessions?startTime=2026-06-28T00:00:00Z"
+                        + "&endTime=2026-06-29T00:00:00Z&page=1&pageSize=20")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.total").isEqualTo(1)
+                .jsonPath("$.data.items[0].username").isEqualTo("张三")
+                .jsonPath("$.data.items[0].userMessageCount").isEqualTo(3)
+                .jsonPath("$.data.items[0].sessionTitle")
+                .isEqualTo("一个非常长的会话标题用于验证前端截断与悬浮展示");
+    }
+
     private static WebTestClient client(AnalyticsQueryService service, List<String> roles) {
+        return client(service, org.mockito.Mockito.mock(AnalyticsSessionUsageQueryService.class), roles);
+    }
+
+    private static WebTestClient client(
+            AnalyticsQueryService service,
+            AnalyticsSessionUsageQueryService sessionUsageService,
+            List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
                 new UserId("usr_admin1234567890"),
@@ -135,7 +179,7 @@ class AnalyticsControllerTest {
                 roles,
                 NOW,
                 NOW.plusSeconds(3600));
-        return WebTestClient.bindToController(new AnalyticsController(service))
+        return WebTestClient.bindToController(new AnalyticsController(service, sessionUsageService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

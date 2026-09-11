@@ -350,6 +350,20 @@ public final class AnalyticsModels {
             Instant updatedAt) {
     }
 
+    /**
+     * 用户×会话维度的发送次数明细行；口径与人工直查 SQL 一致，
+     * 只读平台业务库的 session_messages/runs/sessions/users。
+     */
+    public record SessionUsageRow(
+            String userId,
+            String username,
+            String sessionId,
+            String sessionTitle,
+            long userMessageCount,
+            Instant firstMessageAt,
+            Instant lastMessageAt) {
+    }
+
     public record Satisfaction(
             long positiveFeedbackCount,
             long negativeFeedbackCount,

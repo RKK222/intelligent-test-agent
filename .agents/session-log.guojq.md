@@ -1,5 +1,29 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析新增「会话消息」Tab（直连业务库统计用户×会话发送次数）
+
+### Why
+
+用户需要在运营分析里按所选时间查看「每位用户在每个会话发送的用户消息条数」，要求会话名超长截断并悬浮显示全称、复用现有筛选表单。口径以既有 `tools/query-user-message-statistics.sql` 为准。
+
+### What
+
+- 领域：`AnalyticsModels.SessionUsageRow`；新端口 `AnalyticsSessionUsageRepository`（独立于 `AnalyticsRepository` 与 ClickHouse 开关）。
+- 持久化：`AnalyticsSessionUsageMapper`(+XML)、`AnalyticsSessionUsageRow`、`MyBatisAnalyticsSessionUsageRepository`；口径为 `LEGACY_FULL` 每条 `role='USER'` 消息、`REDIS_SUMMARY` 每个 Run 锚点（按 `storage_mode` 互斥），排除 `SIDE_QUESTION` 会话与 `SCHEDULED_TASK` 自动来源，归属按 消息发送人 → Run 发送人 → Run 执行人 → 会话创建人 回退，全空归「未知用户」；分页与 count 复用同一 `userMessages`/`userFilters` 片段。
+- 服务/API：新增 `AnalyticsSessionUsageQueryService`（不改 `AnalyticsQueryService` 构造器）；`AnalyticsController` 新增 `GET /sessions`，复用 `service.filter` 做筛选与分页。
+- 前端：`shared-types` 新增 `AnalyticsSessionUsageRow`、`backend-api` 新增 `getAnalyticsSessionUsage`、面板新增「会话消息」Tab（列：用户名/会话名/用户消息数/首次/末次发送时间，`.ta-ellipsis` 截断 + `title` 悬浮，服务端分页）。
+- 文档：`http-api.md` 与 runtime/api/persistence、agent-web/backend-api/shared-types README 记录「仅 `/sessions` 直连平台 PostgreSQL」的例外边界。
+
+### How
+
+- 后端：`mvn -pl test-agent-persistence,test-agent-api,test-agent-opencode-runtime -am -Dtest=... test`；新增 PostgreSQL Testcontainers 集成测试（`postgres:16-alpine` + Flyway）覆盖周期边界、归属回退、存储模式互斥、来源/会话排除、未知用户、组织/部门/关键字筛选与分页。首轮因 `users.username` 唯一约束（同名用户造数冲突）与分页断言写错而失败，修正为不同姓名与按 `userId` 断言后通过。
+- 前端：`corepack pnpm test analytics-management-panel`（10 用例通过）、`corepack pnpm -r typecheck` 全通过。
+
+### Result
+
+- 新增 `GET /api/internal/platform/analytics/sessions`；`AnalyticsControllerTest`、`AnalyticsSessionUsageQueryServiceTest`、`AnalyticsSessionUsagePostgresqlIntegrationTest`（4 用例）与前端 10 用例全部通过，typecheck 通过。
+- 明确记录并同步文档：这是「运营分析只读 ClickHouse」的唯一例外，只有 `/sessions` 读平台 PostgreSQL；不新增 Flyway/表结构、不新增数据库索引，也不纳入 `export-all`。
+
 ## 2026-09-11 优化按人/日期/对话的用户发送次数统计 SQL（合并为单次范围扫描）
 
 ### Why

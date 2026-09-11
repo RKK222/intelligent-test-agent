@@ -13,6 +13,7 @@ import type {
   AnalyticsOverview,
   AnalyticsQueryParams,
   AnalyticsSatisfaction,
+  AnalyticsSessionUsageRow,
   AnalyticsTimeSeriesPoint,
   AnalyticsTokenOperations,
   AnalyticsUserUsageRow,
@@ -21,7 +22,7 @@ import type {
 
 const api = inject<BackendApiClient>("api")!;
 
-type TabKey = "overview" | "users" | "token" | "capabilities" | "organizations" | "satisfaction" | "exceptions";
+type TabKey = "overview" | "users" | "sessions" | "token" | "capabilities" | "organizations" | "satisfaction" | "exceptions";
 type RangePreset = "7" | "30" | "90" | "custom";
 type CapabilityType = "ALL" | "AGENT" | "SKILL" | "TOOL";
 
@@ -43,6 +44,7 @@ const capabilityType = ref<CapabilityType>("ALL");
 const SERVER_PAGE_SIZE = 20;
 const RANK_FETCH_LIMIT = 100;
 const usersPage = ref(1);
+const sessionsPage = ref(1);
 const feedbackPage = ref(1);
 const exceptionsPage = ref(1);
 const organizationPage = ref(1);
@@ -63,6 +65,7 @@ const params = computed<AnalyticsQueryParams>(() => ({
 }));
 // 服务端分页的三个明细列表各自持有页码，避免切换 Tab 时互相串页
 const usersParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: usersPage.value }));
+const sessionsParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: sessionsPage.value }));
 const feedbackParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: feedbackPage.value }));
 const exceptionsParams = computed<AnalyticsQueryParams>(() => ({ ...params.value, page: exceptionsPage.value }));
 const heatmapRangeSupported = computed(() => {
@@ -134,6 +137,12 @@ const exceptionsQuery = useQuery<PageResponse<AnalyticsExceptionDetail>, Error>(
   retry: false,
   queryFn: () => api.getAnalyticsExceptions(exceptionsParams.value)
 });
+const sessionUsageQuery = useQuery<PageResponse<AnalyticsSessionUsageRow>, Error>({
+  queryKey: computed(() => ["analytics-session-usage", sessionsParams.value]),
+  enabled: () => activeTab.value === "sessions",
+  retry: false,
+  queryFn: () => api.getAnalyticsSessionUsage(sessionsParams.value)
+});
 
 const overview = computed(() => overviewQuery.data.value);
 const funnel = computed(() => funnelQuery.data.value);
@@ -193,6 +202,7 @@ watch(rdDepartment, () => {
 // 筛选条件变化后各列表总数会变，页码必须统一回到第 1 页，避免停留在越界页
 function resetListPages() {
   usersPage.value = 1;
+  sessionsPage.value = 1;
   feedbackPage.value = 1;
   exceptionsPage.value = 1;
   organizationPage.value = 1;
@@ -202,6 +212,9 @@ watch(params, resetListPages);
 
 function changeUsersPage(next: number) {
   usersPage.value = next;
+}
+function changeSessionPage(next: number) {
+  sessionsPage.value = next;
 }
 function changeFeedbackPage(next: number) {
   feedbackPage.value = next;
@@ -223,6 +236,7 @@ function refresh() {
   if (heatmapRangeSupported.value) void heatmapQuery.refetch();
   void timeseriesQuery.refetch();
   void usersQuery.refetch();
+  void sessionUsageQuery.refetch();
   void tokenQuery.refetch();
   void capabilitiesQuery.refetch();
   void organizationsQuery.refetch();
@@ -332,6 +346,7 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
     <nav class="ta-analytics-tabs" aria-label="运营分析视图">
       <button :class="{ active: activeTab === 'overview' }" @click="activeTab = 'overview'">使用总览</button>
       <button :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'">用户运营</button>
+      <button :class="{ active: activeTab === 'sessions' }" @click="activeTab = 'sessions'">会话消息</button>
       <button :class="{ active: activeTab === 'token' }" @click="activeTab = 'token'">Token 运营</button>
       <button :class="{ active: activeTab === 'capabilities' }" @click="activeTab = 'capabilities'">能力使用</button>
       <button :class="{ active: activeTab === 'organizations' }" @click="activeTab = 'organizations'">组织分析</button>
@@ -414,6 +429,10 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
       <div v-if="(usersQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="usersPage" :page-size="SERVER_PAGE_SIZE" :total="usersQuery.data.value?.total ?? 0" @current-change="changeUsersPage" /></div>
     </section>
 
+    <section v-else-if="activeTab === 'sessions'" class="ta-panel"><h3>会话消息统计</h3><table class="ta-table"><thead><tr><th>用户名</th><th>会话名</th><th>用户消息数</th><th>首次发送时间</th><th>最后发送时间</th></tr></thead><tbody><tr v-for="row in sessionUsageQuery.data.value?.items ?? []" :key="`${row.userId ?? 'unknown'}-${row.sessionId}`"><td>{{ row.username || row.userId || '未知用户' }}</td><td><span class="ta-ellipsis" :title="row.sessionTitle || '-'">{{ row.sessionTitle || '-' }}</span></td><td>{{ row.userMessageCount }}</td><td>{{ row.firstMessageAt ? new Date(row.firstMessageAt).toLocaleString('zh-CN') : '-' }}</td><td>{{ row.lastMessageAt ? new Date(row.lastMessageAt).toLocaleString('zh-CN') : '-' }}</td></tr></tbody></table>
+      <div v-if="(sessionUsageQuery.data.value?.total ?? 0) > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="sessionsPage" :page-size="SERVER_PAGE_SIZE" :total="sessionUsageQuery.data.value?.total ?? 0" @current-change="changeSessionPage" /></div>
+    </section>
+
     <section v-else-if="activeTab === 'organizations'" class="ta-panel"><h3>组织排行</h3><table class="ta-table"><thead><tr><th>维度</th><th>名称</th><th>登录用户</th><th>活跃用户</th><th>深度用户</th><th>Run</th><th>成功率</th><th>满意率</th><th>Token</th></tr></thead><tbody><tr v-for="row in organizationPageRows" :key="`${row.dimension}-${row.name}`"><td>{{ row.dimension }}</td><td>{{ row.name }}</td><td>{{ row.loginUsers }}</td><td>{{ row.activeUsers }}</td><td>{{ row.deepUsers }}</td><td>{{ row.runCount }}</td><td>{{ formatRate(row.successRate) }}</td><td>{{ formatRate(row.satisfactionRate) }}</td><td>{{ formatNumber(row.totalTokens) }}</td></tr></tbody></table>
       <div v-if="organizationRows.length > SERVER_PAGE_SIZE" class="ta-pagination"><el-pagination background layout="prev, pager, next, total" :current-page="organizationPage" :page-size="SERVER_PAGE_SIZE" :total="organizationRows.length" @current-change="changeOrganizationPage" /></div>
     </section>
@@ -481,6 +500,7 @@ function trendHeight(point: AnalyticsTimeSeriesPoint) {
 .ta-reason-list { flex-wrap:wrap; gap:6px; margin-bottom:8px; }.ta-reason-list span,.ta-band,.ta-type { display:inline-block; padding:3px 6px; border-radius:4px; background:#eef1f4; color:#4c5868; font-size:11px; }
 .ta-type { background:#e8f2f1; color:#176b67; }.ta-rate { color:#a41729; font-weight:600; }
 .ta-table { width:100%; border-collapse:collapse; font-size:12px; }.ta-table th,.ta-table td { padding:8px; border-bottom:1px solid #edf0f3; text-align:left; white-space:nowrap; }.ta-table th { color:#697486; font-weight:600; background:#fafbfc; }
+.ta-ellipsis { display:inline-block; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:bottom; }
 .ta-pagination { display:flex; justify-content:flex-end; margin-top:8px; }
 @media (max-width:900px) { .ta-overview-grid,.ta-two-columns { grid-template-columns:1fr; }.ta-analytics { padding:10px; }.ta-analytics-header { align-items:flex-start; }.ta-analytics-filters { align-items:flex-start; }.ta-search-label { width:100%; }.ta-search { flex:1; }.ta-search input { width:100%; }.ta-panel-heading { align-items:flex-start; flex-wrap:wrap; } }
 </style>

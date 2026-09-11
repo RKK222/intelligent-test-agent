@@ -1895,6 +1895,16 @@ export type AnalyticsExceptionDetail = {
   updatedAt: string;
 };
 
+export type AnalyticsSessionUsageRow = {
+  userId?: string | null;
+  username?: string | null;
+  sessionId: string;
+  sessionTitle?: string | null;
+  userMessageCount: number;
+  firstMessageAt?: string | null;
+  lastMessageAt?: string | null;
+};
+
 export type AnalyticsSatisfaction = {
   positiveFeedbackCount: number;
   negativeFeedbackCount: number;
