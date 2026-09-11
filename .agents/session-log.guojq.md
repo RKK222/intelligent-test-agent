@@ -1,5 +1,25 @@
 # Session Log — guojq
 
+## 2026-09-11 工作台记忆用量查询增加可用性短路，消除 403 控制台噪音
+
+### Why
+
+用户反馈在对话页开启会话后回到运营分析点“刷新”，控制台出现 `POST /api/internal/platform/memory/v1/run-usage/query 403 (Forbidden)`。堆栈显示来自 `AgentWorkbench.loadMemoryUsageForRunIds`（RunEvent SSE 触发的 legacy feedback 恢复），与「会话消息」Tab 及刷新按钮无关。
+
+### What
+
+- 定位根因：`QaMemoryApplicationService.requireEnabled` 在记忆总开关关闭或用户不在灰度名单时抛 `ErrorCode.FORBIDDEN`（“当前用户未开通长期记忆能力”），属于设计内 403；前端已有 `try/catch` 静默，但浏览器仍记录被拒请求。
+- [AgentWorkbench.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/AgentWorkbench.vue#L12592)：`loadMemoryUsageForRunIds` 增加 `if (!memoryAvailable.value) return;`，未开通记忆时不发请求；命中记忆能力的行为不变。
+
+### How
+
+- `memoryAvailable = !shareMode && memoryAccessStore.resolved && memoryAccessStore.allowed` 是页面既有事实源，直接复用，不新增接口/状态。
+- `corepack pnpm test memory AgentWorkbench`（19 用例）通过，`corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+
+### Result
+
+- 未开通记忆的账号不再产生 403 控制台报错；开通记忆时不改变“参考了 N 条记忆”徽标行为。仅前端一处短路，无 API/后端/DB 变更。
+
 ## 2026-09-11 「会话消息」Tab 排序改为最近发送优先（修复新会话不在首页）
 
 ### Why

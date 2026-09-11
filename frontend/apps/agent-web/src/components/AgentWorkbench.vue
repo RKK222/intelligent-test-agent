@@ -12595,6 +12595,8 @@ async function loadMemoryUsageForRunIds(
   interactionIsCurrent: () => boolean = () => true
 ) {
   if (runIds.length === 0) return;
+  // 未开通长期记忆（总开关关闭或不在灰度名单）时不发请求，避免无意义的 403 与浏览器报错噪音。
+  if (!memoryAvailable.value) return;
   const loaded: Record<string, MemoryUsageView[]> = Object.fromEntries(runIds.map((runId) => [runId, []]));
   try {
     for (let index = 0; index < runIds.length; index += 200) {
