@@ -123,6 +123,10 @@ Git worktree 根与运行态工作区根可能不同：`ManagedWorkspaceApplicat
 
 脚本回归在公共配置仓库执行 `python3 -B opencode/skills/skill-creator/evals/test_creation_target.py`；模型行为场景保存在同目录 `evals.json`。脚本和结构校验通过不代表企业模型已执行新规则，企业仍需更新该 Skill 后通过真实对话完成目录与文件读取验收。
 
+同仓库的 `opencode/skills/skill-optimizer` 1.1.1 对现有技能采用同一规则，区分已加载的读取来源与可写目标，写入前后均通过自带校验器携带固定 `--workspace-root` 或 `--public-config-root` 校验；校验器不承担权限鉴定。已明确目标及授权不再重复确认，未提交内容作为优化基线保留；公共运行副本只读，不能仅凭安装路径创建同名应用覆盖或改写公共源。历史错放技能和跨工作区迁移仍需按用户指定范围处理。
+
+优化回归执行 `python3 -B opencode/skills/skill-optimizer/evals/test_optimization_target.py`。企业对话还需覆盖：祖先与两个子工作区均有同名技能但仅修改当前目标、读取公共源但缺少公共个人编辑根时不写入、明确公共编辑根时原位修改、工具 `cd` 不改变目标，以及只评审时不自动迁移。最终同时核对对应配置树正文、真实调用和发布状态；目录脚本通过不代表这些模型行为已经验收。
+
 ### 1.3 OpenCode 如何读取并整合配置
 
 平台不解析或复制多层 OpenCode 配置，也不创建“应用 runtime”。每个用户只有一个受管 OpenCode 进程，配置仍由 OpenCode 原生加载：
