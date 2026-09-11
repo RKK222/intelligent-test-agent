@@ -1,5 +1,24 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析时间窗口补齐秒级精度（修复同一分钟内新会话查不出）
+
+### Why
+
+用户发送「测试5」后刷新/单独筛选都看不到。核对库：`ses_43536…` 15:52:41 的 USER 消息已同步落库（MANUAL/LEGACY_FULL），无采集延迟；但后端请求日志显示面板发出的 `endTime` 是 `15:52:00`，即 `toLocalInput` 只精确到分钟并把上界向下取整，15:52:00–15:52:59 之间产生的消息被排除。
+
+### What
+
+[AnalyticsManagementPanel.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue#L285) `toLocalInput` 输出补齐秒（`YYYY-MM-DDTHH:mm:ss`），滚动窗口的上界不再被截断到整分；`datetime-local` 原生支持秒。
+
+### How
+
+- 只改时间格式化，窗口推进逻辑（`refresh` 调 `applyRangePreset`）沿用上一条修复。
+- `corepack pnpm test analytics-management-panel`（10 用例）与 `agent-web typecheck` 通过；用后端请求日志的 `endTime` 与库内消息 `created_at` 对比定位。
+
+### Result
+
+- 同一分钟内新产生的会话/消息可被刷新与筛选查到；仍保留“最近发送优先”排序与自定义区间不自动推进的语义。仅前端一处格式化改动。
+
 ## 2026-09-11 运营分析刷新按钮推进滚动时间窗口（修复“刷新不出最新会话”）
 
 ### Why

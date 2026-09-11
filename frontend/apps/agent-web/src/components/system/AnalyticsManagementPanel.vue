@@ -284,7 +284,8 @@ function capabilityLabel(type: string) {
 
 function toLocalInput(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  // 精确到秒：只到分钟会把窗口上界向下取整，导致同一分钟内刚产生的消息被排除在查询之外。
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function fromLocalInput(value: string) {
