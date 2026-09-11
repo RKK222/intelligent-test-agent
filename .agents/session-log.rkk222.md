@@ -17404,6 +17404,7 @@
 - 对照固定 1.18.4 schema，JSONC 支持单数 `agent` 配置对象，也支持 `agents/`/`agent/` Markdown 目录；此前“必须迁回 Markdown 目录”的建议不准确。需先读取非法 `agents` 内容及已有 `agent`，再选择改名、逐项合并或按实际结构调整，不能盲删定义。用户号表示 worktree 归属，root 属主不证明写入人，需 Git 历史或对话工具/审计证据。
 - 用户随后提供容器内实际 JSONC：除 schema、references 和 permission 外，仅有 `agents.chat-with-chexiaodai.description`，没有顶层 `agent`。可确认最小修正为顶层 `agents` 改成 `agent`，保留原描述、引用与权限；尚未在企业执行。Agent 用途描述不会自动加载同名 Skill，需本人重载后真实调用验证。
 - 用户 13:47–13:48（北京时间）反馈已改为 `agent`，但同 workspaceId 的平台 agents 请求仍返回 `OPENCODE_BAD_GATEWAY`，traceId=trace_mtwjaam2ddi4o2l6qdf、nodeId=node_ocp_158e2a96824c4183886b7207cc27db00、baseUrl=http://122.233.30.4:14097、上游 status=400。用户贴出的新配置保留 references/permission，但未提供本次原生错误正文，不能认为仍为旧 agents 错误或已恢复。
+- 图片 IMG_7947.HEIC 显示多行 curl 被压成一行后仍保留续行反斜杠，出现 curl (3) URL 格式错误以及 curl (6) 把 HTTP 格式串、directory= 当作主机；照片未提供可判读的原生 /agent 错误正文。上方含 agents 的 cat 输出在 SSH 超时重连之前，不能据此确定当前修改未保存。后续改发无续行符、无 -w 格式串的单行 curl -i 命令。
 - 用户在 worker 容器内确认 PID 2749440 为 root、UID/GID 0/0、命令 node、UTC 02:23:58 启动；Git 为 2.30.2，`/usr/local/bin/rg` 存在且可执行。进程账号已取得，容器内技能文件读取和真实调用仍需复测。
 - 复测命令的 pattern `^**TEST_AGENT_DIAG_20260911_NO_MATCH**$` 本身也不是有效正则；后续搜索复测应使用普通不匹配文本，避免与配置错误混淆。当前 `/find` 在解析配置阶段即返回 400，尚未进入 ripgrep 验证。
 - 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
@@ -17415,6 +17416,7 @@
 - 后续由现场会话创建日志确认部署版本 1.18.4，并对照 SessionProcessor.failToolCall 核实普通 tool-error 只写简化错误到对话、该分支没有完整 cause 日志；对照 snapshot.stage 核实 --sparse 失败只记录 warning。下一步采用现有只读 GET /find 在技能目录验证搜索执行层，并与真实 skill 调用分别验收；该接口不依赖模型响应，但成功空结果不能证明技能已加载或旧故障根因。
 - Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
 - 核对 `OpencodeRuntimeApplicationService.listAgents/listCommands` 与 `DefaultOpencodeClientFacade.toPlatformException`，确认平台 agents/commands 分别调用原生 /agent、/command，平台 400 包装未给出底层配置正文；已提供在同容器 14097 端口、原 workspace 根 directory 下读取 /agent 正文的只读命令。尝试本机直接执行固定源码 schema 校验，因快照 node_modules 缺少 pure-rand 依赖未完成；未安装依赖或修改只读快照，不把源码结构核对当成完整配置执行验证。
+- 使用 macOS sips 将 HEIC 转为本机忽略目录中的 PNG 并目视核对命令；原图及转换图不纳入 Git。单行 curl 通过 bash -n 语法检查，但企业执行仍由用户回传结果验收。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 
 ### Result

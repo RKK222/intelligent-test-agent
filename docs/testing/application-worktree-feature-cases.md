@@ -30,6 +30,7 @@ OpenCode 1.18.4 支持 JSONC 顶层单数 `agent`（按 Agent 名称组织的配
 `agent.<name>.description` 只是 Agent 的用途说明；即使名称与 Skill 相同，也不会自动读取同名 `SKILL.md`。改名可修复该未识别键，但技能恢复仍以真实 `skill(name)` 的 completed 状态与加载正文为准。
 应用个人配置保存后复用本人空闲重载，再在原工作区验证目录与真实 skill 调用；仅修正个人配置时不需要先发布给其他用户。路径中的用户号表示 worktree 归属，root 属主和文件修改时间不能认定实际写入人；已提交内容先查该文件 Git 历史，未提交内容须结合对话工具调用或已有审计证据追溯。
 平台 `/opencode-runtime/agents` 调用原生 `/agent`，`/commands` 调用原生 `/command`。平台 `OPENCODE_BAD_GATEWAY` 的 `details.status=400` 只保留上游状态，不能据此认定仍为原配置错误；在已确认目标容器、端口和原工作区 directory 下用 `curl -sS --get -w '\nHTTP=%{http_code}\n'` 读取原生错误正文，保留 `name/path/issues`，不要加 `-f` 丢失正文。下一步修复以本次错误指向的文件及字段为准；另一份配置、运行态缓存和新的加载错误均须用证据区分。
+现场消息转抄优先使用单行 `curl -i -sS --max-time 15 --get`，同时返回状态头和正文，避免转抄破坏换行或 `-w` 格式串。多行命令合成一行时必须删除续行反斜杠；若 `curl (3)/(6)` 把 `HTTP=%{http_code}` 或 `directory=` 当作 URL/主机报错，应先修正参数分词，不能当作企业 DNS 故障或原生接口响应。
 复测搜索时使用普通无正则文本（例如 `__TEST_AGENT_DIAG_20260911_NO_MATCH__`）；`^**...**$` 不是有效的正则表达式，避免把测试模式错误与配置错误混在一起。
 1.18.4 的 `SessionProcessor.failToolCall` 将简化错误写入对话 part，该分支没有输出完整底层异常的日志调用；
 进程日志没有 ripgrep 错误正文时，不能认定未发生错误，也不应反复扩大同一关键词日志采集来代替实际执行复测。
