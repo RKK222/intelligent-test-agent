@@ -71,6 +71,7 @@
 |---|---|---|
 | 使用总览 | `overview()` + `funnel()` + `timeseries()` + `hourlyHeatmap()` | 指标, 数值（KPI 表）；漏斗：阶段, 用户数, 转化率, 定义；Run 趋势：时间点, Run, 成功, 失败, 取消, 登录用户, 活跃用户, 用户消息, AI 回复；小时热力：日期 + 24 小时矩阵（用户消息 / 主 Token / 缓存 Token 三张） |
 | 用户运营 | `users()` | 用户, 机构, 研发部, 部门, 登录, 会话, 消息, Run, 成功率, 满意率, Token |
+| 会话消息 | `AnalyticsSessionUsageQueryService.sessionMessageUsage()`（业务库） | 用户名, 会话名, 用户消息数, 首次发送时间, 最后发送时间 |
 | Token运营 | `tokenOperations()` | Token 汇总：指标, 数值, 说明（总 Token 使用量/日人均/使用率/重复使用率/缓存 Token，对应网页顶部 5 张卡）；每日 Token：日期, 使用用户, 总 Token, 日人均, 主 Token, 缓存读, 缓存写；用户排行：用户, 使用强度, Token 日, 总 Token, Token 日均 |
 | 能力使用 | `capabilities()` | 类型, 名称, 使用率, 使用用户, 调用次数, 成功, 失败, 取消, 未完成 |
 | 组织分析 | `organizations()` | 维度, 名称, 登录用户, 活跃用户, 深度用户, Run, 成功率, 满意率, Token |

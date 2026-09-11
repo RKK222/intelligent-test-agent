@@ -45,9 +45,22 @@ public class AnalyticsQueryService {
     private static final int HEATMAP_COLUMNS = 25;
 
     private final AnalyticsRepository repository;
+    /**
+     * 「会话消息」Sheet 的口径依赖平台业务库，由独立的 {@link AnalyticsSessionUsageQueryService} 提供。
+     * 单元测试只构造 ClickHouse 仓储时该依赖为 null，导出会跳过该 Sheet 而不是失败。
+     */
+    private final AnalyticsSessionUsageQueryService sessionUsageQueryService;
 
     public AnalyticsQueryService(AnalyticsRepository repository) {
+        this(repository, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AnalyticsQueryService(
+            AnalyticsRepository repository,
+            AnalyticsSessionUsageQueryService sessionUsageQueryService) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.sessionUsageQueryService = sessionUsageQueryService;
     }
 
     /**
@@ -758,6 +771,7 @@ public class AnalyticsQueryService {
 
             buildOverviewSheet(workbook, exportFilter, headerStyle, sectionStyle);
             buildUsersSheet(workbook, exportFilter, headerStyle);
+            buildSessionUsageSheet(workbook, exportFilter, headerStyle);
             buildTokenSheet(workbook, exportFilter, headerStyle, sectionStyle);
             buildCapabilitiesSheet(workbook, exportFilter, headerStyle);
             buildOrganizationsSheet(workbook, exportFilter, headerStyle);
@@ -1020,6 +1034,38 @@ public class AnalyticsQueryService {
             r.createCell(8).setCellValue(formatRate(row.successRate()));
             r.createCell(9).setCellValue(formatRate(row.satisfactionRate()));
             r.createCell(10).setCellValue(row.totalTokens());
+        }
+        autoSizeColumns(sheet, headers.length);
+    }
+
+    /**
+     * 会话消息 Sheet：按「用户 × 会话」统计用户消息条数。
+     * 口径依赖业务库的存储模式与来源类型，数据来自 {@link AnalyticsSessionUsageQueryService}，与其它只读 ClickHouse 的 Sheet 来源不同。
+     */
+    private void buildSessionUsageSheet(
+            org.apache.poi.xssf.usermodel.XSSFWorkbook workbook,
+            AnalyticsModels.Filter filter,
+            org.apache.poi.ss.usermodel.CellStyle headerStyle) {
+        if (sessionUsageQueryService == null) {
+            return;
+        }
+        org.apache.poi.ss.usermodel.Sheet sheet = workbook.createSheet("会话消息");
+        String[] headers = {"用户名", "会话名", "用户消息数", "首次发送时间", "最后发送时间"};
+        org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            org.apache.poi.ss.usermodel.Cell cell = headerRow.createCell(i);
+            cell.setCellValue(headers[i]);
+            cell.setCellStyle(headerStyle);
+        }
+        int rowIdx = 1;
+        for (AnalyticsModels.SessionUsageRow row : collectAll(filter, sessionUsageQueryService::sessionMessageUsage)) {
+            org.apache.poi.ss.usermodel.Row r = sheet.createRow(rowIdx++);
+            String username = displayName(row.username(), row.userId());
+            r.createCell(0).setCellValue(username == null || username.isBlank() ? "未知用户" : username);
+            r.createCell(1).setCellValue(orDash(row.sessionTitle()));
+            r.createCell(2).setCellValue(row.userMessageCount());
+            r.createCell(3).setCellValue(row.firstMessageAt() == null ? "-" : formatInstant(row.firstMessageAt()));
+            r.createCell(4).setCellValue(row.lastMessageAt() == null ? "-" : formatInstant(row.lastMessageAt()));
         }
         autoSizeColumns(sheet, headers.length);
     }

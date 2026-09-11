@@ -10,6 +10,7 @@ import com.enterprise.testagent.domain.analytics.AiMessageFeedbackRating;
 import com.enterprise.testagent.domain.analytics.AiMessageFeedbackReasonCode;
 import com.enterprise.testagent.domain.analytics.AnalyticsModels;
 import com.enterprise.testagent.domain.analytics.AnalyticsRepository;
+import com.enterprise.testagent.domain.analytics.AnalyticsSessionUsageRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -179,6 +180,39 @@ class AnalyticsQueryServiceTest {
                 .digest(canonical.getBytes(StandardCharsets.UTF_8)));
 
         assertThat(digest).isEqualTo("ff77d42df433913e460f2bc281084b50530cfb1dc8bc8f18e2a2e3482b06e012");
+    }
+
+    /**
+     * 「会话消息」Sheet 的数据来自业务库独立查询服务，必须翻页取满全部行，
+     * 不能只导出首页 20 条，也不能因为单页上限 200 就丢掉后续页。
+     */
+    @Test
+    void exportAllIncludesSessionUsageSheetAcrossAllPages() throws Exception {
+        List<AnalyticsModels.SessionUsageRow> sessionRows = java.util.stream.IntStream.range(0, 250)
+                .mapToObj(index -> new AnalyticsModels.SessionUsageRow(
+                        "usr_" + index, "用户" + index, "ses_" + index, "会话" + index, index + 1L,
+                        START.plusSeconds(index), START.plusSeconds(index + 1)))
+                .toList();
+        AnalyticsQueryService service = new AnalyticsQueryService(
+                new FakeAnalyticsRepository(List.of(row())),
+                new AnalyticsSessionUsageQueryService(new FakeSessionUsageRepository(sessionRows)));
+        AnalyticsModels.Filter filter =
+                service.filter(START, END, "day", null, null, null, null, null, null, null, 10, 1, 20, null);
+
+        byte[] xlsx = service.exportAllXlsx(filter);
+
+        try (org.apache.poi.ss.usermodel.Workbook workbook =
+                new org.apache.poi.xssf.usermodel.XSSFWorkbook(new java.io.ByteArrayInputStream(xlsx))) {
+            org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheet("会话消息");
+            assertThat(sheet).isNotNull();
+            // 表头 1 行 + 250 条数据，跨两页取满
+            assertThat(sheet.getLastRowNum()).isEqualTo(250);
+            assertThat(sheet.getRow(0).getCell(0).getStringCellValue()).isEqualTo("用户名");
+            assertThat(sheet.getRow(0).getCell(4).getStringCellValue()).isEqualTo("最后发送时间");
+            assertThat(sheet.getRow(1).getCell(1).getStringCellValue()).isEqualTo("会话0");
+            assertThat(sheet.getRow(250).getCell(2).getNumericCellValue()).isEqualTo(250d);
+            assertThat(sheet.getRow(250).getCell(3).getStringCellValue()).isEqualTo("2026-06-28 08:04:09");
+        }
     }
 
     private static void removePluginAdditiveFields(JsonNode node) {
@@ -385,6 +419,19 @@ class AnalyticsQueryServiceTest {
         @Override
         public List<AnalyticsModels.FilterOption> departments(String organization, String rdDepartment) {
             return List.of(new AnalyticsModels.FilterOption("效能平台", "效能平台"));
+        }
+    }
+
+    /** 按页切片返回业务库会话消息统计，用于验证导出翻页取满。 */
+    private record FakeSessionUsageRepository(List<AnalyticsModels.SessionUsageRow> rows)
+            implements AnalyticsSessionUsageRepository {
+
+        @Override
+        public PageResponse<AnalyticsModels.SessionUsageRow> sessionMessageUsage(AnalyticsModels.Filter filter) {
+            int size = filter.pageSize();
+            int from = Math.min((filter.page() - 1) * size, rows.size());
+            int to = Math.min(from + size, rows.size());
+            return new PageResponse<>(rows.subList(from, to), filter.page(), size, rows.size());
         }
     }
 }

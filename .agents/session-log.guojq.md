@@ -1,5 +1,34 @@
 # Session Log — guojq
 
+## 2026-09-11 导出新增「会话消息」Sheet
+
+### Why
+
+「会话消息」Tab 当初明确不纳入 `export-all`（见本文件上方那条记录）。用户现在要求把该 Tab 也加入导出。
+
+### What
+
+1. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java)：
+   - 新增重载构造器接收 `AnalyticsSessionUsageQueryService`（标 `@Autowired`），保留单参构造器委托 `this(repository, null)`，使两个测试文件里 13 处 `new AnalyticsQueryService(new FakeAnalyticsRepository(...))` 无需改动。
+   - 新增 `buildSessionUsageSheet`，Sheet 名「会话消息」，列头 `用户名 / 会话名 / 用户消息数 / 首次发送时间 / 最后发送时间`，与网页表格一致；放在「用户运营」之后以对齐 Tab 顺序。
+   - 该 Sheet 的数据用 `collectAll(filter, sessionUsageQueryService::sessionMessageUsage)` 翻页取满，不受网页 20 条分页限制；时间列复用上一轮的 `formatInstant`（`yyyy-MM-dd HH:mm:ss`）。
+   - `sessionUsageQueryService` 为 null（单测只注入 ClickHouse 仓储）时跳过该 Sheet，而不是抛错。
+2. [AnalyticsQueryServiceTest.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/test/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryServiceTest.java) 新增 `exportAllIncludesSessionUsageSheetAcrossAllPages`：250 行数据跨两页，断言导出 Sheet 有 1 表头 + 250 行、列头正确、末行时间按上海时区格式化；并新增按页切片的 `FakeSessionUsageRepository`。
+3. 文档同步：`.trae/documents/analytics-session-usage-tab.md` 把「不纳入 export-all」改为已纳入；`.trae/documents/analytics-seed-and-xlsx-export.md` Sheet 表补「会话消息」行；`docs/api/http-api.md` 的 export-all 行列出 8 个 Sheet 并写明「会话消息」来源是业务库；`frontend/apps/agent-web/README.md` 面板段落由「五个列表」改「六个列表」并补导出 Sheet 清单。
+
+### How
+
+- 「会话消息」口径依赖业务库（`storage_mode`/`source_type`/归属链），ClickHouse 事实表没有这些字段，无法塞进 `AnalyticsQueryService` 原有的 ClickHouse 查询路径，只能通过独立的 `AnalyticsSessionUsageQueryService` 注入。
+- 用重载构造器而不是改单参构造器签名，是为了不触碰 13 处既有测试构造点；比 setter 注入更显式，也不需要测试里补调用。
+- 一个 workbook 里混用两种数据源（ClickHouse + 业务库）是本次唯一的结构性取舍，已在该 Sheet 与文档中标注来源差异。
+
+### Result
+
+- 真实环境导出（HTTP 200，29714 字节）由 7 个 Sheet 变 8 个：`使用总览 | 用户运营 | 会话消息 | Token运营 | 能力使用 | 组织分析 | 满意度 | 异常Run`。
+- 会话消息列头与网页一致，实测 2 行（本机业务库该时间窗内只有 2 组用户×会话），时间输出 `2026-09-10 10:37:39` 风格。
+- `mvn -pl test-agent-opencode-runtime,test-agent-api -am -Dtest='Analytics*Test,AnalyticsControllerTest'` → 31 + 5 全通过（`AnalyticsQueryServiceTest` 由 7 项增至 8 项）。
+- 只改后端导出编排 + 测试 + 文档，未改 API 契约、事件、数据库或部署节点。
+
 ## 2026-09-11 修复 360 浏览器（小数设备像素比）下 mermaid 节点长文字不换行
 
 ### Why
