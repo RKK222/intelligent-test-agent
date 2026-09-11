@@ -17397,11 +17397,13 @@
 - 该轮 runtimeKind=SERVER_PROCESS，workspaceId 为 wrk_743b5b466331426c82376cce2521db3e；cwd 仍为个人 worktree 下 F-GCMS-PSN/workspace，不能当作技能实际 location 或公共目录搬移成功的证据。
 - 唯一 skill 调用 chat-with-chexiaodai 的状态为 error，错误为 ripgrep execution failed；后续助手角色回复没有成功工具调用，run.succeeded 不等于技能成功加载。runId=run_4ca8c2d74b284ae08559cf8c1f737794，平台 sessionId=ses_c167ac9e72a448a7ae122e72e219e272，原生 sessionID=ses_f71c80b94ffeoT64FuEb4M1VIq，traceId=trace_mtwbfr7oyw1504h8wzo。
 - 稳定测试文档补充目录可见性、真实 skill 执行、运行目标和客户端能力版本的分别采证，复用现有同步/重载入口，不新增产品实现。
+- 用户补充企业查询：尾号 0912 的 ACTIVE binding 与 RUNNING 进程 ocp_158e2a96824c4183886b7207cc27db00、工作区均归属 test-agent-backend-122-233-30-4，端口 14097、PID 2749440、容器 test-agent-opencode-worker；查询回显 started_at=2026-09-11 10:23:58.819、最近健康检查 10:45:41.596。当前进程晚于附件失败，不能据此还原 10:07 的旧缓存。
+- 用户在企业 shell 请求当前 /skill，chat-with-chexiaodai 的 location 为本人的 F-GCMS-PSN/workspace/.opencode/skills/chat-with-chexiaodai/SKILL.md；该路径下目录 root:root/750、文件 root:root/640，root 的 test -r 成功。已确认当前目录可发现和 root 可读，尚未确认该 shell 是否位于 worker 内、目标进程 UID/GID 与真实 skill 执行结果；不将这组结果当作历史失败已恢复。
 
 ### How
 
 - 按 code-reuse-first 核对 SkillTool、Skill.state、Ripgrep 只读快照、AgentWorkbench commandsQuery/handlePersonalRuntimeReload 和客户端公共能力包机制；固定 1.18.4 先 require 技能再列举目录，空辅助文件列表的退出码 1 被正常处理。
-- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选，尚无企业实际技能 location、底层 cause 或部署版本证据。
+- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选；后续已有企业当前技能 location，但仍缺失败代次的 location、底层 cause 和部署版本证据。
 - Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 

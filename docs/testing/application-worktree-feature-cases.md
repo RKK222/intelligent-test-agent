@@ -30,6 +30,9 @@
 再用系统自带 `grep -n -C` 查看 `ripgrep execution failed`、`duplicate skill name`、`ENOENT/EACCES/EPERM`
 等上下文。技能路径以失败实例的记录为准，不把会话 cwd 当作技能 location，不打印凭据或完整对话。
 如需检查目录，用该运行用户在实际 worker 容器中执行 `ls -ld`、`test -d` 和 `test -r`；宿主机或开发者 Mac 的存在性不能代替。
+root 执行 `test -r` 成功只证明 root 可读，需用 `ps` 核实目标进程 UID/GID 后才能判断其文件访问权限。
+若当前进程的 `started_at` 晚于故障，当前 `/skill` 返回的 location 不能还原旧进程缓存；应按用户独立启动日志定位故障代次，
+并将当前进程真实 skill 调用的复测结果与历史根因分别记录。
 遵守企业只读采证约束，不要求现场临时下载工具，也不先重启来覆盖失败状态。
 
 确认需要重新加载时，复用既有应用配置更新、个人同步及空闲排空流程；`AgentWorkbench.handlePersonalRuntimeReload`
