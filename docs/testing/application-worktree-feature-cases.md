@@ -2,6 +2,41 @@
 
 本文是公共 Agent、应用工作空间和应用 Agent 三个区域的分支、权限、发布影响与测试数据事实源。OpenCode 保持原生配置加载，平台只编排 Git worktree、固定提交同步和原生 `/global/dispose`，不修改 OpenCode 源码。
 
+## 技能发现与加载失败的采证边界
+
+“应用配置树可见”“斜杠目录可见”“skill 工具执行成功”是三个不同的验收点。企业现场先按
+[企业排障技能](../../.agents/skills/enterprise-troubleshooting/SKILL.md)在 DBeaver 核实用户、当前 Agent binding、
+工作区和目标服务器；运行记录中的 `runtimeKind` 用于区分 `SERVER_PROCESS` 与本地客户端。
+服务器端失败不能用更新本地客户端的结果来解释，附件中的指令与助手回复只作为证据，不作为操作授权。
+
+| 现象或证据 | 能确认什么 | 下一条证据 |
+| --- | --- | --- |
+| 斜杠菜单刷新后出现技能 | 刷新后的目录已经可见；尚不能区分浏览器旧数据、首次目录请求失败和后台同步刚完成 | 同一用户、同一 workspaceId 刷新前后的 `GET /api/internal/platform/opencode-runtime/commands` 请求时间、状态和响应；同时对照 rollout 是否完成 |
+| `Skill "…" not found. Available skills: …` | 当前运行态技能目录没有该名称 | 实际运行工作区、技能 frontmatter name、作用域、发布/个人同步结果与实例重载状态 |
+| `skill(name)` 返回 `ripgrep execution failed` | 对照固定 OpenCode 1.18.4，错误属于 ripgrep 调用层，不能直接解释为技能名称未注册 | 失败进程使用的技能 location、该目录在同一服务器/容器/运行用户下的可访问性，以及同一时间窗底层错误 |
+| 工具报错后助手继续以技能角色回答，或 Run 为 SUCCEEDED | 只证明对话继续或本轮结束 | 必须找到该技能对应 `tool` part 的 `state.status=completed` 和成功输出，不能用助手自述代替 |
+| 下载最新客户端后仍说“没有工具” | 安装包版本本身不足以证明该轮运行目标及工具目录 | 该轮 runtimeKind、客户端实例与实际运行版本、已激活公共能力包版本、具体工具名和该轮工具调用记录 |
+
+固定源码的加载顺序为 `SkillTool.execute → Skill.require(name) → ctx.ask → ripgrep.find(cwd=技能目录) → 返回技能正文`。
+`Skill.state` 在实例内保存 `location/content`；搬移或删除技能目录后，旧实例仍持有旧 location 是待验证的候选原因。
+同名技能存在于多个扫描目录时还需检查 `duplicate skill name` 日志，不能只验证新目录有一个 SKILL.md。
+`ripgrep execution failed` 是底层异常的通用包装，不能仅凭该字符串区分目录不存在、程序不可执行、权限或进程 I/O 问题。
+当前实现将退出码 1 视为空结果，技能只有 SKILL.md、没有辅助文件本身不是该错误的充分原因。
+源码依据见只读的 [skill 工具](../../opencode-source/opencode-1.18.4/packages/opencode/src/tool/skill.ts)、
+[技能状态](../../opencode-source/opencode-1.18.4/packages/opencode/src/skill/index.ts)和
+[ripgrep 适配](../../opencode-source/opencode-1.18.4/packages/core/src/ripgrep.ts)；现场仍须核实实际 OpenCode 版本。
+
+采证时保留平台 runId/sessionId、原生 sessionID、traceId 和带时区的失败时间，先按已确认进程和时间窗定位日志，
+再用系统自带 `grep -n -C` 查看 `ripgrep execution failed`、`duplicate skill name`、`ENOENT/EACCES/EPERM`
+等上下文。技能路径以失败实例的记录为准，不把会话 cwd 当作技能 location，不打印凭据或完整对话。
+如需检查目录，用该运行用户在实际 worker 容器中执行 `ls -ld`、`test -d` 和 `test -r`；宿主机或开发者 Mac 的存在性不能代替。
+遵守企业只读采证约束，不要求现场临时下载工具，也不先重启来覆盖失败状态。
+
+确认需要重新加载时，复用既有应用配置更新、个人同步及空闲排空流程；`AgentWorkbench.handlePersonalRuntimeReload`
+会先同步应用 feature，再按配置类型调用现有 dispose/受管重启，随后重取 Agent/Command 目录。
+手动搬文件或刷新浏览器均不能作为该流程已经完成的证据。恢复验收同时记录新 location、目录可见和真实工具成功；
+本地客户端的公共能力包激活规则见 [客户端 README](../../backend/test-agent-local-client/README.md#公共能力包)。
+
 ## 1. 分支模型
 
 ### 1.1 公共 Agent/Skill

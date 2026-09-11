@@ -17383,3 +17383,30 @@
 - 已确认用户提供的技能保存路径与页面工作区根目录不同，服务器归属记录一致；不能以本机状态外推企业目录存在性或请求链路健康。
 - 修正规则和校验脚本已保存于独立公共配置 Git，未推送或发布。需要在企业公共 Agent 个人编辑区更新完整技能包，并通过既有 Diff/提交/发布流程生效；平台 JAR 更新不会自动发布该独立 Git 内容。
 - 企业技能目录迁移与页面刷新验收尚未执行；后续需在当前会话对应的工作区 `.opencode/skills` 检查目标冲突并恢复技能包，再验收应用级目录与文件读取。对话终态只刷新普通文件树的独立缓存缺口不是本次手动刷新无效的充分解释，未据此修改前端。
+
+
+## 2026-09-11 - 区分企业技能目录刷新与实际加载失败
+
+### Why
+
+- 企业反馈：用户尾号 1832 更新客户端后称没有工具；尾号 0912 搬移技能后首轮失败；尾号 7621 切换应用后斜杠不可见，后续用户确认刷新已可见。
+
+### What
+
+- 解压并解析用户提供的对话归档，仅包含 2026-09-11 10:07–10:08（北京时间）的一轮“小黛”，没有早上搬移技能的操作，也没有尾号 1832 的失败记录。原始附件保留在本机 .tmp，不纳入 Git。
+- 该轮 runtimeKind=SERVER_PROCESS，workspaceId 为 wrk_743b5b466331426c82376cce2521db3e；cwd 仍为个人 worktree 下 F-GCMS-PSN/workspace，不能当作技能实际 location 或公共目录搬移成功的证据。
+- 唯一 skill 调用 chat-with-chexiaodai 的状态为 error，错误为 ripgrep execution failed；后续助手角色回复没有成功工具调用，run.succeeded 不等于技能成功加载。runId=run_4ca8c2d74b284ae08559cf8c1f737794，平台 sessionId=ses_c167ac9e72a448a7ae122e72e219e272，原生 sessionID=ses_f71c80b94ffeoT64FuEb4M1VIq，traceId=trace_mtwbfr7oyw1504h8wzo。
+- 稳定测试文档补充目录可见性、真实 skill 执行、运行目标和客户端能力版本的分别采证，复用现有同步/重载入口，不新增产品实现。
+
+### How
+
+- 按 code-reuse-first 核对 SkillTool、Skill.state、Ripgrep 只读快照、AgentWorkbench commandsQuery/handlePersonalRuntimeReload 和客户端公共能力包机制；固定 1.18.4 先 require 技能再列举目录，空辅助文件列表的退出码 1 被正常处理。
+- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选，尚无企业实际技能 location、底层 cause 或部署版本证据。
+- Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
+- 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
+
+### Result
+
+- 只完成附件与源码诊断，企业根因和恢复尚未验证。没有可用企业 DBeaver 应用/连接；未查询企业数据库、访问企业节点、重启进程或改动用户技能。
+- 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话及失败时间窗日志。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
+- 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
