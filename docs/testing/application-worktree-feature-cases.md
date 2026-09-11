@@ -22,6 +22,11 @@
 同名技能存在于多个扫描目录时还需检查 `duplicate skill name` 日志，不能只验证新目录有一个 SKILL.md。
 `ripgrep execution failed` 是底层异常的通用包装，不能仅凭该字符串区分目录不存在、程序不可执行、权限或进程 I/O 问题。
 当前实现将退出码 1 视为空结果，技能只有 SKILL.md、没有辅助文件本身不是该错误的充分原因。
+`permission=skill ... action.action=allow` 只确认技能权限规则放行，不代表磁盘读取或工具执行成功。
+1.18.4 的 `SessionProcessor.failToolCall` 将简化错误写入对话 part，该分支没有输出完整底层异常的日志调用；
+进程日志没有 ripgrep 错误正文时，不能认定未发生错误，也不应反复扩大同一关键词日志采集来代替实际执行复测。
+同窗出现的 `failed to add snapshot files / unknown option 'sparse'` 属于 Git 快照命令不兼容，源码只记录 warning；
+模型 `ProviderHeaderTimeoutError` 属于模型请求超时。分别记录实际发生顺序，不能仅因时间相近就认定它们导致 skill 的 ripgrep 失败。
 源码依据见只读的 [skill 工具](../../opencode-source/opencode-1.18.4/packages/opencode/src/tool/skill.ts)、
 [技能状态](../../opencode-source/opencode-1.18.4/packages/opencode/src/skill/index.ts)和
 [ripgrep 适配](../../opencode-source/opencode-1.18.4/packages/core/src/ripgrep.ts)；现场仍须核实实际 OpenCode 版本。

@@ -17399,16 +17399,19 @@
 - 稳定测试文档补充目录可见性、真实 skill 执行、运行目标和客户端能力版本的分别采证，复用现有同步/重载入口，不新增产品实现。
 - 用户补充企业查询：尾号 0912 的 ACTIVE binding 与 RUNNING 进程 ocp_158e2a96824c4183886b7207cc27db00、工作区均归属 test-agent-backend-122-233-30-4，端口 14097、PID 2749440、容器 test-agent-opencode-worker；查询回显 started_at=2026-09-11 10:23:58.819、最近健康检查 10:45:41.596。当前进程晚于附件失败，不能据此还原 10:07 的旧缓存。
 - 用户在企业 shell 请求当前 /skill，chat-with-chexiaodai 的 location 为本人的 F-GCMS-PSN/workspace/.opencode/skills/chat-with-chexiaodai/SKILL.md；该路径下目录 root:root/750、文件 root:root/640，root 的 test -r 成功。已确认当前目录可发现和 root 可读，尚未确认该 shell 是否位于 worker 内、目标进程 UID/GID 与真实 skill 执行结果；不将这组结果当作历史失败已恢复。
+- 新附件 20260911_105457_input.txt 包含旧代次日志 001350912-20260902T092746.518345612Z-14097.log 的 90 条筛选结果；会话创建行明确 version=1.18.4，原日志 5512 行在 UTC 02:07:14.277 对该技能判定 allow，与附件工具失败时间相邻，确认当时已取得技能记录并通过技能权限规则。日志片段未包含进程账号输出、ripgrep 底层原因或成功 skill 复测。
+- 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
 
 ### How
 
 - 按 code-reuse-first 核对 SkillTool、Skill.state、Ripgrep 只读快照、AgentWorkbench commandsQuery/handlePersonalRuntimeReload 和客户端公共能力包机制；固定 1.18.4 先 require 技能再列举目录，空辅助文件列表的退出码 1 被正常处理。
-- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选；后续已有企业当前技能 location，但仍缺失败代次的 location、底层 cause 和部署版本证据。
+- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选；后续已有企业当前技能 location 和部署版本，仍缺失败代次的 location 与底层 cause。
+- 后续由现场会话创建日志确认部署版本 1.18.4，并对照 SessionProcessor.failToolCall 核实普通 tool-error 只写简化错误到对话、该分支没有完整 cause 日志；对照 snapshot.stage 核实 --sparse 失败只记录 warning。下一步采用现有只读 GET /find 在技能目录验证搜索执行层，并与真实 skill 调用分别验收；该接口不依赖模型响应，但成功空结果不能证明技能已加载或旧故障根因。
 - Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 
 ### Result
 
 - 只完成附件与源码诊断，企业根因和恢复尚未验证。没有可用企业 DBeaver 应用/连接；未查询企业数据库、访问企业节点、重启进程或改动用户技能。
-- 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话及失败时间窗日志。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
+- 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话、实际进程账号和当前搜索/skill 复测；旧日志已收到但未包含 ripgrep 底层原因。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
 - 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
