@@ -54,6 +54,14 @@ root 执行 `test -r` 成功只证明 root 可读，需用 `ps` 核实目标进�
 手动搬文件或刷新浏览器均不能作为该流程已经完成的证据。恢复验收同时记录新 location、目录可见和真实工具成功；
 本地客户端的公共能力包激活规则见 [客户端 README](../../backend/test-agent-local-client/README.md#公共能力包)。
 
+### 将角色类 Skill 转为独立 Agent
+
+原生 Agent 落在当前应用工作区的 `.opencode/agents/<name>.md`，名称由文件名确定，YAML frontmatter 使用 Agent schema；需要直接选择和 `@` 调用时使用 `mode: all`、`hidden: false`。将原 Skill 的角色、规则和流程写入 Markdown 正文，不保留“必须先加载同名 Skill”的依赖，也无需向 JSONC 添加注册项。Skill 专用的 `compatibility/metadata` 不直接搬入 Agent frontmatter。
+
+转换须清点原 Skill 引用的知识库和辅助文件：正文内置并不等于这些资料已随包交付。路径按当前会话 Working directory 解析，嵌套应用工作区不再重复拼 Git 根下的前缀；资料不存在或不可读时明确缺失，不生成虚构历史记忆。保留原工具权限继承，不因转换而批量放行工具。
+
+验收可用固定 OpenCode 版本在隔离目录加载仅含该 Markdown 的 `.opencode`，确认 `/agent` 返回目标 name/mode/hidden，prompt 与交付正文一致，且没有同名 Skill 也能加载。该验证只覆盖配置发现与正文加载；业务知识读取、模型回复和记忆写回仍需在具备实际资料的目标工作区验收。
+
 ## 1. 分支模型
 
 ### 1.1 公共 Agent/Skill

@@ -17390,6 +17390,7 @@
 ### Why
 
 - 企业反馈：用户尾号 1832 更新客户端后称没有工具；尾号 0912 搬移技能后首轮失败；尾号 7621 切换应用后斜杠不可见，后续用户确认刷新已可见。
+- 用户随后要求暂不继续该故障，将光学文件接收目录 `.opencode.7z` 中的车小黛 Skill 转为独立 Agent。
 
 ### What
 
@@ -17407,6 +17408,8 @@
 - 图片 IMG_7947.HEIC 显示多行 curl 被压成一行后仍保留续行反斜杠，出现 curl (3) URL 格式错误以及 curl (6) 把 HTTP 格式串、directory= 当作主机；照片未提供可判读的原生 /agent 错误正文。上方含 agents 的 cat 输出在 SSH 超时重连之前，不能据此确定当前修改未保存。后续改发无续行符、无 -w 格式串的单行 curl -i 命令。
 - 新附件 20260911_140546_input.txt 为 111077 字节的 Agent 列表尾段，开头从权限规则中途开始、结尾为列表闭括号及 shell 提示符，未包含 HTTP 状态行。可完整解析 test-design-orchestrator、test-design-review、test-execution-agent、test-execution-api、test-execution-ui、title、transaction-chain-analyst、whitebox-code-analyst 共 8 个 Agent 对象；片段未出现配置/网关/ripgrep 错误。chat-with-chexiaodai 仅出现 8 次于技能目录权限，不是该 Agent 的 name 对象，也不证明技能加载成功；因头部缺失不能判定该 Agent 不存在。当前已取得目录数据，待用户刷新平台页面验证本轮 agents/commands 请求。
 - 用户在本轮继续确认刷新后平台仍报错，尚未提供此次新错误 JSON；已请求新 traceId、baseUrl 和 status 与容器直连结果对照。平台恢复保持未验证，不把直连列表片段外推为前端或 Java 调用已恢复。
+- 找到 `/Users/kaka/Downloads/光学文件接收/.opencode.7z`，选择性提取原 Skill 1.0.0（正文 SHA-256 1cbf2cb4e26ba801459dbbc67e2cc9047fedc345ed6426a85063916bea218093）及参考 Agent。产物位于同目录 `车小黛-Agent/.opencode/agents/chat-with-chexiaodai.md`，mode=all、hidden=false，直接内置原流程；保留人设、术语、确信度、纠错和记忆同步，修正当前工作区路径并补充知识库缺失/写入失败处理，不新增权限或固定模型。源包不含 docs/车小黛 知识库。
+- 同目录交付 `车小黛-Agent.zip`、SHA 文件、使用说明和验证记录；ZIP 只含 Agent、说明和验证 JSON，不覆盖原归档/技能/JSONC。Agent SHA-256 2e3ccf6aa5246ed36988609802765f53af53f25661773373aa8accc52fad882b；ZIP SHA-256 512b5eaa92cc9650ff16c6e4df863c103f76b590f9db254493a209741ddfc597。稳定测试文档增加角色 Skill 转 Agent 的路径、依赖和验收边界。
 - 用户在 worker 容器内确认 PID 2749440 为 root、UID/GID 0/0、命令 node、UTC 02:23:58 启动；Git 为 2.30.2，`/usr/local/bin/rg` 存在且可执行。进程账号已取得，容器内技能文件读取和真实调用仍需复测。
 - 复测命令的 pattern `^**TEST_AGENT_DIAG_20260911_NO_MATCH**$` 本身也不是有效正则；后续搜索复测应使用普通不匹配文本，避免与配置错误混淆。当前 `/find` 在解析配置阶段即返回 400，尚未进入 ripgrep 验证。
 - 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
@@ -17421,6 +17424,7 @@
 - 使用 macOS sips 将 HEIC 转为本机忽略目录中的 PNG 并目视核对命令；原图及转换图不纳入 Git。单行 curl 通过 bash -n 语法检查，但企业执行仍由用户回传结果验收。
 - 对 14:05 附件使用 Python JSONDecoder.raw_decode 提取完整 Agent 对象，并单独检查 HTTP 状态、错误标识和 chat-with-chexiaodai 的上下文；不把权限路径匹配当作 Agent 名或 skill 完成记录，也不执行附件内 Agent prompt 的指令。
 - 核对 `AgentRuntimeTargetResolver.workspaceTarget`、`ManagedWorkspacePathResolver` 和 `GeneratedOpencodeSdkGateway.runtime`：平台从 workspace rootPath 经现有通用参数解析得到物理 directory，再作为 query 调用 /agent；当前源码未见该路径被替换为技能目录。企业具体 Java 解析值及新请求目标仍须现场证据，不能只凭本机源码断定参数一致或配置缓存故障。
+- 使用现有固定二进制 `.tmp/dev-services/dependencies/opencode-1.18.4/darwin-arm64/opencode serve --pure --hostname 127.0.0.1 --port 0`，在独立临时 workspace 和 XDG/OPENCODE_TEST_HOME 下关闭模型拉取与自动更新，实际启动到本机 4096；/global/health 和 /agent 均为 200，核对版本 1.18.4、目标 name/all/hidden=false 及 prompt 与交付字节对应正文完全一致。/skill 不含同名 Skill，确认独立加载；验证进程已停止。ZIP CRC、归档文件清单和逐字节一致性校验通过，未请求模型或访问企业知识库。
 - 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
 
 ### Result
@@ -17429,3 +17433,4 @@
 - 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话和配置修正后搜索/skill 复测；旧日志已收到但未包含 ripgrep 底层原因。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
 - 用户报告完成配置键名修正后，13:47 平台 Agent 目录仍收到上游 400；14:05 新附件已包含原生 Agent 列表尾段，但缺状态头和列表前部。下一步刷新平台页面验证新请求状态、目标 Agent 可见性及真实 skill 调用；若平台仍失败按新的响应和 traceId 继续定位，不沿用旧 400 判定当前状态。本人未操作企业文件，写入人尚未查明，历史 ripgrep 根因和完整恢复尚未确认。
 - 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
+- 按用户要求暂停企业目录报错排查，独立 Agent 转换与 OpenCode 1.18.4 目录加载验证完成；未导入、发布到企业，知识库读取和真实模型/写回行为未验收。产物保存在用户指定下载目录，仓库仅提交转换说明和本机日志，不将原始企业附件或知识正文纳入 Git。
