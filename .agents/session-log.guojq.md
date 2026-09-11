@@ -11,7 +11,7 @@
 1. [AnalyticsQueryService.java](file:///Users/guo/Developer/intelligent-test-agent/backend/test-agent-opencode-runtime/src/main/java/com/enterprise/testagent/opencode/runtime/analytics/AnalyticsQueryService.java)：`exportAllXlsx` 改用新增的 `unlimitedFilter`（page=1、topN=`EXPORT_ROW_LIMIT`、pageSize=`PageRequest.MAX_SIZE`）；明细类新增 `collectAll` 按页翻取直到取满 `total`，并加 `allUsers`/`allFeedbackDetails`/`allExceptionDetails` 三个取全量方法。
 2. 使用总览 Sheet 新增 `writeTrendSection`（Run 趋势，复用 `timeseries()`）和 `writeHeatmapSections`（小时热力，复用 `hourlyHeatmap()`，三种指标各导一张 24 小时矩阵）。
 3. Token 运营 Sheet 顶部新增「Token 汇总」段，对齐网页 5 张卡（总 Token 使用量/日人均/使用率/重复使用率/缓存 Token），新增 `writeSummaryRow` 辅助方法。
-4. [seed-analytics-clickhouse.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-clickhouse.sh)：小时汇总的 `bucketStart` 原来固定落在同一时刻（上海 19:00），热力图只有一列有值；改为按用户基准小时（9/11/13/15/17）+ 按天偏移构造，拆成两层子查询以避开同层别名前向引用。
+4. [seed-analytics-clickhouse.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-clickhouse.sh)：小时汇总的 `bucketStart` 原来固定落在同一时刻（上海 19:00），热力图只有一列有值；改为按用户基准小时（9/11/13/15/17）+ 按天偏移构造，拆成两层子查询以避开同层别名前向引用。随后整体扩容造数规模，让每张列表都超过网页分页阈值 20，便于独立验证导出是否取全量：用户 30 人、部门 30 个、能力 30 种、满意度 80 条、异常 Run 100 条；规模常量提到脚本头部，SQL 用 `--param_*` + `{name:UInt64}` 参数化。
 5. 同步设计文档 `.trae/documents/analytics-seed-and-xlsx-export.md` 的 Sheet 说明。
 
 ### How
@@ -22,9 +22,18 @@
 
 ### Result
 
-- 导出实测 7 个 Sheet 全在：使用总览 159 行 × 25 列（含 Run 趋势 30 个时间点、小时热力 3×30 行矩阵）、Token 运营 48 行（含 5 行汇总）、异常 Run 22 行。
-- 全量校验：异常 Run 接口 total=22 / 导出 22 行，满意度 11/11，用户运营 5/5，与接口 total 完全一致（修复前异常 Run 只导出 20 行）。
-- 小时热力从 1 个时段扩到 8 个时段（本地 9/11/13/15/17/19/21/23 点）。
+- 导出实测 7 个 Sheet 全在：使用总览 159 行 × 25 列（含 Run 趋势 30 个时间点、小时热力 3×30 行矩阵）、Token 运营 73 行（汇总 5 行 + 每日 30 行 + 排行 30 行）、异常 Run 96 行。
+- 扩容后逐表比对「网页默认分页(20) / 接口上限(100) / 导出实际行数」：
+  | Sheet | 网页默认 | 接口上限 | 导出 | 是否曾被分页截断 |
+  |---|---|---|---|---|
+  | 用户运营 users() | 20/30 | 30 | 30 | 是（pageSize） |
+  | 组织分析 organizations() | 20 | 32 | 32 | 是（topN） |
+  | 能力使用 capabilities() | 30 | 30 | 30 | **否**（SQL 无 LIMIT） |
+  | 满意度 feedbackDetails | 20/77 | 77 | 77 | 是（pageSize） |
+  | 异常Run exceptionDetails | 20/96 | 96 | 96 | 是（pageSize） |
+  | Token运营 用户排行 | 20/30 | 30 | 30 | 是（topN） |
+  结论：7 个 Tab 里只有「能力使用」本来就不受限，其余 5 张列表此前都被截断，现均取满。
+- 小时热力从 1 个时段扩到 8 个时段（本地 8/10/12/14/16/18/20/22 点）。
 - `mvn -pl test-agent-opencode-runtime -am -Dtest='Analytics*Test' test` 28 项全部通过；`backend` 模块编译通过。
 
 ## 2026-09-11 运营分析：本地 ClickHouse 造数 + 一次导出全部 Tab 为中文多 Sheet xlsx
