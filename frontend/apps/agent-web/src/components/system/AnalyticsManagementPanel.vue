@@ -230,6 +230,9 @@ function changeTokenUserPage(next: number) {
 }
 
 function refresh() {
+  // 非自定义区间时先把时间窗口推进到当前时刻，否则刷新只是用旧 endTime 重查，
+  // 刚产生的会话/消息（晚于旧窗口上界）不会被刷出来；自定义区间尊重用户选择，不改动。
+  applyRangePreset();
   void optionsQuery.refetch();
   void overviewQuery.refetch();
   void funnelQuery.refetch();

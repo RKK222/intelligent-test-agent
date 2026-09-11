@@ -1,5 +1,24 @@
 # Session Log — guojq
 
+## 2026-09-11 运营分析刷新按钮推进滚动时间窗口（修复“刷新不出最新会话”）
+
+### Why
+
+用户反馈刚在对话页发出的会话，回到运营分析「会话消息」点刷新仍不出现。核对本地库：15:45–15:50 的 USER 消息均 `MANUAL`/`LEGACY_FULL`、session 也是 `MANUAL`，完全符合口径；但面板请求日志显示 `endTime` 一直固定在 15:34，刷新只是用旧参数重查，晚于该上界的消息永远查不出来。
+
+### What
+
+[AnalyticsManagementPanel.vue](file:///Users/guo/Developer/intelligent-test-agent/frontend/apps/agent-web/src/components/system/AnalyticsManagementPanel.vue#L232) `refresh()` 先调用 `applyRangePreset()`：非自定义快速范围把 `startTime`/`endTime` 推进到当前时刻再刷新；用户手动设置的「自定义」区间保持不动。
+
+### How
+
+- 复用既有 `applyRangePreset()`（函数声明提升，refresh 内可直接调用），未新增状态或接口。
+- `corepack pnpm test analytics-management-panel`（10 用例）与 `agent-web typecheck` 通过；DB 复核最新 6 条 USER 消息口径。
+
+### Result
+
+- 点刷新后窗口推进到当前时刻，刚发出的会话即可出现在「会话消息」首页（仍为最近发送优先排序）。仅前端一处改动，无 API/后端/DB 变更。
+
 ## 2026-09-11 工作台记忆用量查询增加可用性短路，消除 403 控制台噪音
 
 ### Why
