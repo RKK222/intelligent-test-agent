@@ -17356,11 +17356,12 @@
 - How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
 - Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
 
-## 2026-09-10 - 定位技能不可见并修正创建 Skill 的工作区落点
+## 2026-09-10 - 定位技能不可见并修正创建与优化 Skill 的工作区落点
 
 ### Why
 
 - 企业用户在个人 Git worktree 根的 `.opencode/skills` 创建技能，左侧应用 Agent 配置手动刷新后仍不可见。
+- 9 月 11 日用户要求同步调整“技能优化”，避免优化流程沿用错误目录或把公共安装来源当作编辑目标。
 
 ### What
 
@@ -17369,6 +17370,7 @@
 - 本机公共配置副本的 skill-creator 以 `<worktree-root>/.opencode/skills` 描述应用落点，未区分 Git 根与运行态工作区根，存在引导歧义；未核验企业实际安装版本，不能断言现场一定由该提示导致。
 - 用户后续明确要求调整创建技能，已在公共配置仓库现有 `public-usr_test_dev` 分支将 `opencode/skills/skill-creator` 升级至 1.2.1，提交 `a777af57d6ebfa98a139ae48b5e91ebc3452b9f8`。以 OpenCode 的 `Working directory` 固定应用输出根，明确 `Workspace root folder` 是 Git 根，后续 `cd`、祖先已有 `.opencode` 和“公共技能”措辞均不改变应用落点。
 - 扩展既有离线结构校验脚本，增加互斥的 `--workspace-root` / `--public-config-root` 参数；增加临时目录 CLI 测试与模型场景，同步公共配置 README/结构规范及平台 `docs/testing/application-worktree-feature-cases.md`。旧无参数调用仍可校验已有技能结构；未修改另一历史路径下的同名技能。
+- 后续将同一公共配置仓库 `opencode/skills/skill-optimizer` 升级至 1.1.1，提交 `329fcde14ad2c07c058472ad6ecc76678c524845`：固定会话或本人公共编辑根，区分来源与实际编辑目标，写前写后校验；复用已有授权并保留未提交基线，不自动迁移、覆盖公共运行副本或建立同名应用覆盖。同步质量模型、报告模板、README 和 10 个模型场景；目录逻辑复用创建器，但保留优化器接受原非空 metadata.source 的兼容规则。
 
 ### How
 
@@ -17377,11 +17379,13 @@
 - 目录 CLI 测试 8/8、自带结构/落点校验和支持 OpenCode compatibility 的 quick_validate.py 通过；新增模型场景共 9 项，尚未以企业模型逐项执行。未启动或重启企业服务，最相关可运行目标为技能自带 Python 校验器。
 - 平台文档检查 `bash tools/verify-ai-docs.sh` 与两仓库 `git diff --check` 通过，稳定测试文档和本机对应会话日志同步更新。
 - 独立交付包 `.tmp/enterprise-skill-packages/20260910/skill-creator-1.2.1.zip` 从公共配置固定提交归档，根目录为 `SKILL.md`，不含其它 Agent 或公共配置。ZIP CRC、逐文件提交字节一致性及解压后结构/落点校验和 8 项目录测试通过；SHA-256 为 `04354b8299a56043a05385370827b2344d8f2fd097760c71df87a154d69bd46d`。
+- 优化器执行 `python3 -B opencode/skills/skill-optimizer/evals/test_optimization_target.py`，9/9 通过；自带结构/落点校验和 quick_validate.py 通过。独立归档 `.tmp/enterprise-skill-packages/20260911/skill-optimizer-1.1.1.zip` 与固定提交的 6 个文件逐字节一致，ZIP CRC 和解压后结构/落点及 9 项回归通过；SHA-256 为 `914ca44ba7c5eb3bbb19855837b8c891acb420d91e728ebbd2e5ba0d1ff933c7`。最相关可运行目标为独立 Python 校验器，未重启平台服务；模型场景尚未运行。
 
 ### Result
 
 - 已确认用户提供的技能保存路径与页面工作区根目录不同，服务器归属记录一致；不能以本机状态外推企业目录存在性或请求链路健康。
 - 修正规则和校验脚本已保存于独立公共配置 Git，未推送或发布。需要在企业公共 Agent 个人编辑区更新完整技能包，并通过既有 Diff/提交/发布流程生效；平台 JAR 更新不会自动发布该独立 Git 内容。
+- 续改优化器时保持公共配置现有分支与平台 release，不新建或切换分支；平台只提交对应稳定测试说明和本机日志，保留工作区既有 SQL 等无关改动。
 - 企业技能目录迁移与页面刷新验收尚未执行；后续需在当前会话对应的工作区 `.opencode/skills` 检查目标冲突并恢复技能包，再验收应用级目录与文件读取。对话终态只刷新普通文件树的独立缓存缺口不是本次手动刷新无效的充分解释，未据此修改前端。
 
 
