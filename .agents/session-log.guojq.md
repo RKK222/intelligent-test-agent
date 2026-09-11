@@ -1,5 +1,32 @@
 # Session Log — guojq
 
+## 2026-09-11 「会话消息」造数脚本扩容以验证分页
+
+### Why
+
+上一版只造了 3 用户 / 5 会话（共 19 条消息、5 条统计行），低于网页单页 20 条，看不出分页是否正确。用户要求加量以便观察分页问题。
+
+### What
+
+[seed-analytics-session-usage.sh](file:///Users/guo/Developer/intelligent-test-agent/tools/seed-analytics-session-usage.sh) 由写死 VALUES 改为 `generate_series` 按数量生成，并支持 env 调参：
+
+- 新增 `TEST_AGENT_ANALYTICS_SESSION_DEMO_USERS`（默认 8）/ `TEST_AGENT_ANALYTICS_SESSION_DEMO_SESSIONS`（默认 48），通过 `psql -v` 注入 `generate_series`。
+- 用户按「机构 3 种 × 研发部 2 种 × 部门 4 种」循环取值，保证级联筛选有区分度；会话标题按 5 种后缀循环，创建时间按「天 + 小时」双维度错开；每会话 1-5 条 USER 消息。
+- 规模：8 用户 / 48 会话 / 144 条消息 → 48 条统计行，加上真实数据共 51 行，正好跨 3 页。
+- 同步更新 [ai-workflow.md](file:///Users/guo/Developer/intelligent-test-agent/docs/guides/ai-workflow.md#L131) 的规模与新增 env 说明。
+
+### How
+
+- 沿用 `demo_ana_` 前缀幂等清理，扩量后仍可重复执行；`psql -v var` + `<<'SQL'` 组合既能防止 shell 展开，又能让 psql 完成 `:var` 替换（注意 psql 变量替换发生在 psql 侧，与 shell heredoc 引号无关）。
+- 仍使用 `now() at time zone 'Asia/Shanghai'`，与业务库「北京墙上时间」的既有写入约定一致。
+
+### Result
+
+- 脚本执行：`INSERT 0 8`（用户）/`INSERT 0 48`（会话）/`INSERT 0 144`（消息）。
+- 服务端分页逐页核验：`page=1→20`、`page=2→20`、`page=3→11`、`page=4→0`，`total=51` 恒定；三页首尾会话各不相同，无重复无丢失。
+- 导出「会话消息」Sheet = 51 行，与接口 total 一致（未被 20 条分页截断）。
+- 未改后端/前端代码，仅本地脚本与文档。
+
 ## 2026-09-11 新增「会话消息」多用户造数脚本
 
 ### Why

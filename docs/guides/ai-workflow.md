@@ -130,9 +130,10 @@ Docker volume 保留，停容器或重启平台不得删除该 volume。
 「会话消息」Tab 与导出里的「会话消息」Sheet 只读平台业务库（口径依赖 `storage_mode`/`source_type`/人员归属链，
 ClickHouse 事实表没有这些字段），因此 ClickHouse 造数覆盖不到它。需要该 Tab 也有数据时，执行
 `bash tools/seed-analytics-session-usage.sh`：默认通过 `docker exec` 写入 `deploy/local/docker-compose.yml` 起的本地
-PostgreSQL 容器 `test-agent-postgres`（库 `test_agent`），先按 `demo_ana_` 前缀清理旧演示数据再灌入 3 个演示用户 /
-5 个会话 / 19 条用户消息，可重复执行；容器名、库名和用户名可用
-`TEST_AGENT_ANALYTICS_SESSION_DB_CONTAINER`/`_NAME`/`_USER` 覆盖。该脚本同样只是显式本地开发脚本，演示用户使用
+PostgreSQL 容器 `test-agent-postgres`（库 `test_agent`），先按 `demo_ana_` 前缀清理旧演示数据再灌入 8 个演示用户 /
+48 个会话 / 144 条用户消息（默认 48 条统计行，刻意超过网页单页 20 条以便验证服务端分页），可重复执行；容器名、
+库名、用户名可用 `TEST_AGENT_ANALYTICS_SESSION_DB_CONTAINER`/`_NAME`/`_USER` 覆盖，造数规模可用
+`TEST_AGENT_ANALYTICS_SESSION_DEMO_USERS`/`_SESSIONS` 调整。该脚本同样只是显式本地开发脚本，演示用户使用
 非 bcrypt 占位密码，无法登录。
 
 LobeHub 默认不参与本地重启；只有需要企业问答联调时显式执行
