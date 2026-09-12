@@ -995,3 +995,43 @@ Spring Boot 唯一 Flyway Bean 会在启动早期完成 migration；历史工具
 升级到包含公共能力包的首个版本时，不要求管理员先制造一次空提交：后台会读取
 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 当前已检出的 HEAD 并补建基线。若该目录未初始化、依赖不兼容或 Redis 锁不可用，
 补偿保留失败日志并按周期重试；不能把空 commit 冒充客户端已安装版本，也不能为补偿执行 fetch/push。
+
+## TraceWeave 代码知识联动配置
+
+Flyway 首次创建的三个通用参数默认关闭功能。超级管理员在“系统管理 → 通用参数管理”配置每个 Java/worker
+均可访问的 TraceWeave API 地址、用户可打开的 TraceWeave 工作台地址，以及试点范围。地址必须是无 user-info、
+query 和 fragment 的 HTTP/HTTPS URL；服务地址不会下发到 Agent 或 Tool 参数。
+
+`TRACEWEAVE_CODE_KNOWLEDGE_SCOPE` 示例：
+
+```json
+{
+  "enabled": true,
+  "pilotUserIds": ["usr_pilot_1"],
+  "defaultView": "DEV",
+  "repositories": [
+    {
+      "codeRepositoryId": "repo_orders",
+      "traceweaveApplicationGroupId": "orders-group",
+      "traceweaveRepositoryId": "orders-repository",
+      "dependencyRepositoryIds": ["repo_payments"]
+    },
+    {
+      "codeRepositoryId": "repo_payments",
+      "traceweaveApplicationGroupId": "payments-group",
+      "traceweaveRepositoryId": "payments-repository",
+      "dependencyRepositoryIds": []
+    }
+  ]
+}
+```
+
+每个依赖 ID 必须另有完整映射；Mimo ID、TraceWeave 应用组+仓库组合均不得重复。参数在每次查询时读取，调整
+开关、用户、映射和 DEV/PROD 视图后无需重启 Java。公共配置仓库发布 `code_knowledge.ts`、`code_source.ts`、
+`code-knowledge` Skill 和更新后的 `whitebox-code-analyst` 后，既有用户 OpenCode 进程需按现有流程重启一次，获得
+新公共能力与 `TEST_AGENT_CODE_KNOWLEDGE_TOOL_TOKEN`。
+
+代码知识只读取新物化 generation 的独立基线；升级前已有 AppSource 快照会显示不可用，管理员或用户通过现有
+源码准备入口生成新 generation。启用参数不会自动下载源码或触发 TraceWeave 扫描/同步。正式放量前使用同一真实
+业务页面对应的 Java、JSP/JS、XML 和 SQL，在 Mimo `Whitebox Analyze` 对话中核对源码解释、链路、影响和联合追问，
+并用响应中的详情链接在 TraceWeave 工作台以相同版本和参数复核。

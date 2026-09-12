@@ -28,6 +28,7 @@ permission request 属于进程内存态，该固定数据不能用于验证“�
 | 场景 | 可重复入口 | 覆盖内容 |
 | --- | --- | --- |
 | 直接对话 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`direct run projects remote question and permission to the platform session and replies` | 直接 Run、root remote session 映射、question、permission、回复 |
+| 同一对话代码知识 | `CodeKnowledgeScopeControllerTest`、`CodeKnowledgeToolControllerTest`、`TraceWeaveCodeKnowledgeServiceTest`、`CodeSourceQueryServiceTest`、`CodeKnowledgeScopePicker.test.ts`、`workbench-utils.test.ts` | 工作台多仓范围、固定 DEV/PROD 图版本、TraceWeave 映射收窄、源码与图谱联合取证、不可变 generation 基线、旧快照准备入口、撤权/变更失败关闭，以及不切换当前工作区 |
 | 历史运行中继续 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching to a running history maps its remote question event and allows reply` | 历史 Session、运行中 SSE、历史 question、继续回复 |
 | 历史已结束 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`switching history restores assistant documents and the file changes summary` | 历史消息、assistant 文档、Diff、结束态 |
 | 历史置顶与普通会话隔离 | `frontend/apps/agent-web/tests/workbench.spec.ts`：`history drawer pins and unpins sessions through the existing session update API`；`SessionApplicationServiceTest`；`MyBatisSessionHistoryRepositoryIntegrationTest` | 置顶/取消置顶 PATCH、纯置顶保留 `updatedAt`、取消置顶回到原普通组位置、前端即时分组重排、后端置顶优先分页；置顶操作不切换当前会话，普通会话与目标会话的 `aria-current` 和正文互不串线 |
@@ -60,6 +61,7 @@ permission request 属于进程内存态，该固定数据不能用于验证“�
 ```bash
 cd /Users/kaka/Desktop/intelligent-test-agent/frontend
 corepack pnpm test --run \
+  apps/agent-web/tests/CodeKnowledgeScopePicker.test.ts \
   apps/agent-web/tests/workbench-utils.test.ts \
   apps/agent-web/tests/FigmaChatPanel.test.ts \
   apps/agent-web/tests/useSideQuestionRun.test.ts \

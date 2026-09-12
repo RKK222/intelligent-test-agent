@@ -82,6 +82,7 @@ public class OpencodeProcessStartupService {
     private PublicAgentConfigPreviewSourceResolver publicPreviewSourceResolver;
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
+    private CodeKnowledgeToolTokenService codeKnowledgeToolTokenService;
     private OpencodeObservabilityTokenService observabilityTokenService;
     private OpencodeObservabilityGenerationRepository observabilityGenerationRepository;
     private LocalClientLifecycleGateway localClientLifecycleGateway;
@@ -109,6 +110,13 @@ public class OpencodeProcessStartupService {
     void setWorkspaceGitToolTokenService(WorkspaceGitToolTokenService workspaceGitToolTokenService) {
         this.workspaceGitToolTokenService = Objects.requireNonNull(
                 workspaceGitToolTokenService, "workspaceGitToolTokenService must not be null");
+    }
+
+    /** 启动时注入与工作区 Git audience 隔离的代码知识只读凭据。 */
+    @Autowired
+    void setCodeKnowledgeToolTokenService(CodeKnowledgeToolTokenService codeKnowledgeToolTokenService) {
+        this.codeKnowledgeToolTokenService = Objects.requireNonNull(
+                codeKnowledgeToolTokenService, "codeKnowledgeToolTokenService must not be null");
     }
 
     /** 同一公共启动入口注入与进程代次绑定的 Observability 专用凭据。 */
@@ -1009,13 +1017,21 @@ public class OpencodeProcessStartupService {
             environment.put(InternalModelProxyRuntimeSettings.BASE_URL_ENV_NAME, internalProxySettings.sameNodeProxyBaseUrl());
             environment.put(InternalModelProxyRuntimeSettings.UCID_ENV_NAME, unifiedAuthId(request.userId()));
         }
-        if (workspaceGitToolTokenService != null && internalProxySettings != null) {
+        if (internalProxySettings != null
+                && (workspaceGitToolTokenService != null || codeKnowledgeToolTokenService != null)) {
             environment.put(
                     WorkspaceGitToolTokenService.BASE_URL_ENV_NAME,
                     internalProxySettings.sameNodeBaseUrl());
+        }
+        if (workspaceGitToolTokenService != null && internalProxySettings != null) {
             environment.put(
                     WorkspaceGitToolTokenService.TOKEN_ENV_NAME,
                     workspaceGitToolTokenService.issue(request.userId()));
+        }
+        if (codeKnowledgeToolTokenService != null && internalProxySettings != null) {
+            environment.put(
+                    CodeKnowledgeToolTokenService.TOKEN_ENV_NAME,
+                    codeKnowledgeToolTokenService.issue(request.userId()));
         }
         if (observabilityTokenService != null && internalProxySettings != null) {
             environment.put(

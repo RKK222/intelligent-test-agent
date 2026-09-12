@@ -170,9 +170,9 @@ export function buildManualQuestionPrompt(topic: HelpTopicId, question: string):
   const normalizedQuestion = question.trim().slice(0, 500);
   // 常见问题和周更页都覆盖多个场景；dev 周更另含长期记忆，放宽但仍保持单章有界。
   const contextLimit = currentTopic.id === "weekly-updates"
-    ? 7_000
+    ? 7_200
     : currentTopic.id === "faq"
-      ? 5_600
+      ? 5_800
       : 2_800;
   const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [

@@ -43,6 +43,7 @@ import {
 import type {
   AgentInfo,
   AgentMessage,
+  AppSourceRepositorySummary,
   AiFeedbackReasonCode,
   AiFeedbackRating,
   AiRunFeedback,
@@ -75,6 +76,7 @@ import {
 } from '@test-agent/agent-chat'
 import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
 import BatchTestCaseGenerationDialog from './BatchTestCaseGenerationDialog.vue'
+import CodeKnowledgeScopePicker from './CodeKnowledgeScopePicker.vue'
 import ExecutionTimePicker from './ExecutionTimePicker.vue'
 import SessionContextUsage from './SessionContextUsage.vue'
 import PetCompanionAvatar from './PetCompanionAvatar.vue'
@@ -774,6 +776,12 @@ const props =
     agentsError?: string
     /** 当前选中的主 Agent 标识 */
     selectedAgent?: string
+    /** 当前试点用户可在本轮对话中联合查询的应用代码库范围。 */
+    codeKnowledgeScopeAvailable?: boolean
+    codeKnowledgeRepositories?: AppSourceRepositorySummary[]
+    selectedCodeKnowledgeRepositoryIds?: string[]
+    codeKnowledgeScopeLoading?: boolean
+    codeKnowledgeScopeError?: string | null
     /** 终止按钮是否禁用 */
     stopDisabled?: boolean
     /** 终止按钮禁用原因 */
@@ -863,6 +871,11 @@ const props =
     canSelectModel: false,
     commands: () => [],
     agents: () => [],
+    codeKnowledgeScopeAvailable: false,
+    codeKnowledgeRepositories: () => [],
+    selectedCodeKnowledgeRepositoryIds: () => [],
+    codeKnowledgeScopeLoading: false,
+    codeKnowledgeScopeError: null,
     workspaceFileCandidates: () => [],
     workspaceRequirementReferences: () => [],
     batchItemStates: () => ({}),
@@ -935,6 +948,8 @@ const emit =
     (e: 'open-help', topic?: string): void
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
+    (e: 'update-code-knowledge-scope', repositoryIds: string[]): void
+    (e: 'prepare-code-source', repositoryId: string): void
     (e: 'refresh-agents'): void
     (e: 'search-workspace-files', query: string | null): void
     (e: 'load-workspace-requirements'): void
@@ -5975,6 +5990,16 @@ function onCompositionEnd() {
               <Paperclip class="figma-chat-btn-icon figma-chat-icon--attachment" />
             </button>
           </el-tooltip>
+          <CodeKnowledgeScopePicker
+            :available="codeKnowledgeScopeAvailable"
+            :repositories="codeKnowledgeRepositories"
+            :selected-repository-ids="selectedCodeKnowledgeRepositoryIds"
+            :loading="codeKnowledgeScopeLoading"
+            :error="codeKnowledgeScopeError"
+            :disabled="composerInteractionBlocked || resendEditing"
+            @update:selected-repository-ids="emit('update-code-knowledge-scope', $event)"
+            @prepare-source="emit('prepare-code-source', $event)"
+          />
           <!-- 主 Agent 选择：遵循 opencode local.agent.list()，只展示 primary/all 且非 hidden 的 Agent。 -->
           <div class="figma-chat-agent-select-wrapper">
             <el-tooltip

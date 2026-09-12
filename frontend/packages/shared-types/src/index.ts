@@ -3962,6 +3962,14 @@ export type AppSourceRepositorySummary = {
   serverSummaries: AppSourceServerSummary[];
 };
 
+/** 工作台代码知识选择只公开 Mimo 逻辑版本库范围。 */
+export type CodeKnowledgeScope = {
+  available: boolean;
+  reason?: string | null;
+  defaultView?: "DEV" | "PROD" | null;
+  repositoryIds: string[];
+};
+
 export type AppSourceRemoteTreeNode = {
   name: string;
   path: string;

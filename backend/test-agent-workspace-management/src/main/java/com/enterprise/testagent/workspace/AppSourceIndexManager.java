@@ -66,6 +66,41 @@ public class AppSourceIndexManager {
         }
     }
 
+    /**
+     * 只读校验知识基线索引。基线缺失或损坏时失败关闭，不能像可编辑 Workspace 一样现场修复，
+     * 否则旧目录可能被误认成当前 generation 的原始源码。
+     */
+    public void verifyAuthoritativeIndex(Path root, AppSourceSnapshot snapshot) {
+        if (snapshot.indexSha256() == null) {
+            throw baselineIndexConflict();
+        }
+        byte[] expected = canonicalBytes(snapshot);
+        String expectedSha = sha256(expected);
+        if (!expectedSha.equalsIgnoreCase(snapshot.indexSha256())) {
+            throw baselineIndexConflict();
+        }
+        Path safeRoot = AppSourcePathGuard.requireSafe(root);
+        Path index = AppSourcePathGuard.requireSafe(
+                safeRoot.resolve(AppSourceApplicationService.INDEX_FILE_NAME));
+        try {
+            if (!Files.isRegularFile(index, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    || !expectedSha.equalsIgnoreCase(sha256(Files.readAllBytes(index)))) {
+                throw baselineIndexConflict();
+            }
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw baselineIndexConflict();
+        }
+    }
+
+    private PlatformException baselineIndexConflict() {
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "应用源码知识基线索引不可用，请重新准备源码",
+                Map.of("reason", "SOURCE_BASELINE_INDEX_INVALID"));
+    }
+
     public String canonicalSha256(AppSourceSnapshot snapshot) {
         return sha256(canonicalBytes(snapshot));
     }

@@ -329,6 +329,7 @@ import {
   automationReferenceWarnings,
   buildPromptParts,
   chatStateFromSessionTreeSnapshot,
+  codeKnowledgeScopePromptPart,
   completedRunDurationMs,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -1101,6 +1102,14 @@ const appSourcePickerOpen = ref(false);
 const appSourcePickerLoading = ref(false);
 const appSourcePickerError = ref<string | null>(null);
 const appSourceRepositories = shallowRef<AppSourceRepositorySummary[]>([]);
+const codeKnowledgeScopeAvailable = ref(false);
+const codeKnowledgeScopeLoading = ref(false);
+const codeKnowledgeScopeError = ref<string | null>(null);
+const codeKnowledgeConfiguredRepositoryIds = ref<string[]>([]);
+const codeKnowledgeRepositories = shallowRef<AppSourceRepositorySummary[]>([]);
+const selectedCodeKnowledgeRepositoryIds = ref<string[]>([]);
+const codeKnowledgeSelectionByApp = new Map<string, string[]>();
+let codeKnowledgeScopeLoadToken = 0;
 const selectedAppSourceRepository = ref<AppSourceRepositorySummary | null>(null);
 const appSourceDialogOpen = ref(false);
 const appSourceBranches = shallowRef<string[]>([]);
@@ -2156,11 +2165,15 @@ function ensureAppVersionsLoaded(templateId: string) {
   loadedTemplateIds.value = next;
 }
 // 切换应用时同步清空版本缓存，避免异步恢复新工作区后迟到执行并抹掉刚回写的 versionId。
-watch(selectedAppId, () => {
+watch(selectedAppId, (appId) => {
   versionsByTemplateId.value = {};
   loadedTemplateIds.value = new Set();
   loadingVersionTemplateIds.value = new Set();
   currentVersionFromWorkspace.value = undefined;
+  resetCodeKnowledgeScope();
+  if (appId && !shareMode.value) {
+    void loadCodeKnowledgeScope(appId);
+  }
 }, { flush: "sync" });
 
 const sessionsQuery = useQuery({
@@ -4242,6 +4255,9 @@ watch(selectedRuntimeReady, (ready, previous) => {
   void queryClient.invalidateQueries({ queryKey: ["runtime", "mcp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
   refreshAgentsCatalog();
+  if (selectedAppId.value && !shareMode.value) {
+    void loadCodeKnowledgeScope(selectedAppId.value);
+  }
   if (selectedWorkspaceId.value) {
     void refreshWorkspaceView(selectedWorkspaceId.value);
   }
@@ -6256,6 +6272,93 @@ function invalidateAppSourceTreeAuthority() {
   appSourceTreePendingRequests = 0;
 }
 
+function resetCodeKnowledgeScope() {
+  codeKnowledgeScopeLoadToken += 1;
+  codeKnowledgeScopeAvailable.value = false;
+  codeKnowledgeScopeLoading.value = false;
+  codeKnowledgeScopeError.value = null;
+  codeKnowledgeConfiguredRepositoryIds.value = [];
+  codeKnowledgeRepositories.value = [];
+  selectedCodeKnowledgeRepositoryIds.value = [];
+}
+
+function applyCodeKnowledgeRepositories(appId: string, repositories: AppSourceRepositorySummary[]) {
+  if (selectedAppId.value !== appId || !codeKnowledgeScopeAvailable.value) return;
+  const configured = new Set(codeKnowledgeConfiguredRepositoryIds.value);
+  const scoped = repositories.filter((repository) => configured.has(repository.repositoryId));
+  codeKnowledgeRepositories.value = scoped;
+  const remembered = codeKnowledgeSelectionByApp.get(appId) ?? selectedCodeKnowledgeRepositoryIds.value;
+  const visibleIds = new Set(scoped.map((repository) => repository.repositoryId));
+  const retained = remembered.filter((repositoryId) => visibleIds.has(repositoryId));
+  selectedCodeKnowledgeRepositoryIds.value = retained.length > 0
+    ? retained
+    : scoped.map((repository) => repository.repositoryId);
+  if (selectedCodeKnowledgeRepositoryIds.value.length > 0) {
+    codeKnowledgeSelectionByApp.set(appId, [...selectedCodeKnowledgeRepositoryIds.value]);
+  }
+  codeKnowledgeScopeError.value = scoped.length === 0
+    ? "当前应用没有已配置且授权的代码知识版本库。"
+    : null;
+}
+
+/**
+ * 先读取当前用户的配置开关和 Mimo 逻辑范围，再与当前应用已有源码权限取交集。
+ * 进程未就绪时只保留可用标记，待 READY 事件复用同一入口继续加载源码状态。
+ */
+async function loadCodeKnowledgeScope(appId: string) {
+  const requestToken = ++codeKnowledgeScopeLoadToken;
+  codeKnowledgeScopeLoading.value = true;
+  codeKnowledgeScopeError.value = null;
+  let scopeResolved = false;
+  try {
+    const scope = await ordinaryApi.getCodeKnowledgeScope();
+    if (requestToken !== codeKnowledgeScopeLoadToken || selectedAppId.value !== appId) return;
+    scopeResolved = true;
+    codeKnowledgeScopeAvailable.value = scope.available;
+    codeKnowledgeConfiguredRepositoryIds.value = [...new Set(
+      scope.repositoryIds.map((repositoryId) => repositoryId.trim()).filter(Boolean)
+    )];
+    if (!scope.available) {
+      codeKnowledgeRepositories.value = [];
+      selectedCodeKnowledgeRepositoryIds.value = [];
+      return;
+    }
+    if (!selectedRuntimeReady.value) return;
+    const repositories = await api.listAppSourceRepositories(appId);
+    if (requestToken !== codeKnowledgeScopeLoadToken || selectedAppId.value !== appId) return;
+    // 同一份权威响应同时供原有源码管理入口和代码知识选择器使用，避免从选择器准备源码后
+    // 把管理弹窗长期缩成仅含试点仓库的列表。
+    appSourceRepositories.value = repositories;
+    applyCodeKnowledgeRepositories(appId, repositories);
+  } catch (error) {
+    if (requestToken !== codeKnowledgeScopeLoadToken || selectedAppId.value !== appId) return;
+    if (!scopeResolved) codeKnowledgeScopeAvailable.value = false;
+    codeKnowledgeScopeError.value = errorFeedback("加载代码知识范围失败", error).description
+      ?? "暂时无法读取代码知识范围";
+  } finally {
+    if (requestToken === codeKnowledgeScopeLoadToken) codeKnowledgeScopeLoading.value = false;
+  }
+}
+
+function updateCodeKnowledgeScope(repositoryIds: string[]) {
+  const appId = selectedAppId.value;
+  if (!appId) return;
+  const allowed = new Set(codeKnowledgeRepositories.value.map((repository) => repository.repositoryId));
+  const next = codeKnowledgeRepositories.value
+    .map((repository) => repository.repositoryId)
+    .filter((repositoryId) => allowed.has(repositoryId) && repositoryIds.includes(repositoryId));
+  if (next.length === 0) return;
+  selectedCodeKnowledgeRepositoryIds.value = next;
+  codeKnowledgeSelectionByApp.set(appId, [...next]);
+}
+
+function prepareCodeKnowledgeSource(repositoryId: string) {
+  const repository = codeKnowledgeRepositories.value.find((item) => item.repositoryId === repositoryId);
+  if (!repository?.manageable) return;
+  // 复用现有四步源码准备弹窗，不改变当前工作区选择。
+  void openAppSourceDownloadDialog(repository);
+}
+
 /**
  * 源码入口、四步弹窗与进度连接属于同一应用选择；切应用/撤权/返回托管工作区时一次性失效。
  */
@@ -6299,6 +6402,7 @@ async function loadAppSourceRepositories() {
       || selectedWorkspaceKind.value !== workspaceKind
     ) return;
     appSourceRepositories.value = repositories;
+    applyCodeKnowledgeRepositories(appId, repositories);
   } catch (error) {
     if (authority !== appSourceRepositoryListAuthorityToken) return;
     appSourcePickerError.value = errorFeedback("加载应用源码失败", error).description ?? "暂时无法读取源码状态";
@@ -10243,18 +10347,26 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   }
   const routedAttachments = routeWorkspaceAttachmentsForModel(attachments, selectedModelInfo.value);
   const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
+  const codeKnowledgePart = codeKnowledgeScopeAvailable.value
+    ? codeKnowledgeScopePromptPart(codeKnowledgeRepositories.value, selectedCodeKnowledgeRepositoryIds.value)
+    : undefined;
+  const extraPromptParts = [
+    ...chatContextParts,
+    ...diffContextParts.value,
+    ...(codeKnowledgePart ? [codeKnowledgePart] : [])
+  ];
   // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，
   // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
   const selectionContexts = chatContextStore.items.filter((item): item is Extract<ChatContextItem, { type: "selection" }> => item.type === "selection");
-  const displayParts = buildPromptParts(prompt, implicitEditorTab, routedAttachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const displayParts = buildPromptParts(prompt, implicitEditorTab, routedAttachments, extraPromptParts, implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(displayParts);
   const rawSubmitPrompt = prompt.trim() || displayPrompt;
   // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
   const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
   // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
-  const parts = buildPromptParts(submitPrompt, implicitEditorTab, routedAttachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const parts = buildPromptParts(submitPrompt, implicitEditorTab, routedAttachments, extraPromptParts, implicitEditorSelection);
   if (chatContextStore.items.length > 0) {
     console.debug("workspace_context_send_prepared", {
       component: "AgentWorkbench",
@@ -10263,6 +10375,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
       selectionContextCount: selectionContexts.length,
       attachmentsCount: attachments.length,
       diffContextCount: diffContextParts.value.length,
+      codeKnowledgeRepositoryCount: selectedCodeKnowledgeRepositoryIds.value.length,
       partsCount: parts.length,
       promptChars: prompt.trim().length,
       contexts: summarizeChatContextItems(chatContextStore.items),
@@ -13356,6 +13469,11 @@ async function handleLogout() {
           :agents-refreshing="agentsRefreshing"
           :agents-error="agentsError"
           :selected-agent="selectedAgent"
+          :code-knowledge-scope-available="codeKnowledgeScopeAvailable"
+          :code-knowledge-repositories="codeKnowledgeRepositories"
+          :selected-code-knowledge-repository-ids="selectedCodeKnowledgeRepositoryIds"
+          :code-knowledge-scope-loading="codeKnowledgeScopeLoading"
+          :code-knowledge-scope-error="codeKnowledgeScopeError"
           :stop-disabled="!canStopRun"
           :stop-disabled-reason="stopDisabledReason"
           :models="models"
@@ -13380,6 +13498,8 @@ async function handleLogout() {
           @new-conversation="handleNewConversation"
           @native-command="handleNativeTuiCommand"
           @run-shell="handleNativeShellCommand"
+          @update-code-knowledge-scope="updateCodeKnowledgeScope"
+          @prepare-code-source="prepareCodeKnowledgeSource"
           @request-night-slots="requestNightExecutionSlots"
           @request-night-tasks="refreshNightExecutionTasks({ reportError: true })"
           @schedule-night="handleScheduleNight"

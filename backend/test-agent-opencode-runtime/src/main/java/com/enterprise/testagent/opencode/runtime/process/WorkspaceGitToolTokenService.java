@@ -98,6 +98,49 @@ public class WorkspaceGitToolTokenService {
         if (!clock.instant().isBefore(Instant.ofEpochSecond(expiresAt))) {
             throw unauthenticated();
         }
+        return currentPrincipal(userId);
+    }
+
+    /** 为同一进程中的其它只读专用 Tool 签发带 audience 的独立凭据。 */
+    String issueForAudience(UserId userId, String audience) {
+        requireSigningKey();
+        String normalizedAudience = requireAudience(audience);
+        long expiresAt = clock.instant().plus(TOKEN_TTL).getEpochSecond();
+        String payload = normalizedAudience + "\n" + userId.value() + "\n" + expiresAt;
+        String encodedPayload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
+        return encodedPayload + "." + sign(encodedPayload);
+    }
+
+    /** 校验 audience 后实时恢复用户和角色，禁止不同专用 Tool 之间复用凭据。 */
+    WorkspaceGitToolPrincipal authenticateForAudience(String authorization, String audience) {
+        String token = bearerToken(authorization);
+        String[] parts = token.split("\\.", -1);
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()) {
+            throw unauthenticated();
+        }
+        byte[] expected = sign(parts[0]).getBytes(StandardCharsets.US_ASCII);
+        byte[] actual = parts[1].getBytes(StandardCharsets.US_ASCII);
+        if (!MessageDigest.isEqual(expected, actual)) {
+            throw unauthenticated();
+        }
+        String[] payload = decodeAudiencePayload(parts[0]);
+        if (!requireAudience(audience).equals(payload[0])) {
+            throw unauthenticated();
+        }
+        long expiresAt;
+        try {
+            expiresAt = Long.parseLong(payload[2]);
+        } catch (NumberFormatException exception) {
+            throw unauthenticated();
+        }
+        if (!clock.instant().isBefore(Instant.ofEpochSecond(expiresAt))) {
+            throw unauthenticated();
+        }
+        return currentPrincipal(new UserId(payload[1]));
+    }
+
+    private WorkspaceGitToolPrincipal currentPrincipal(UserId userId) {
         User user = userRepository.findByUserId(userId)
                 .filter(User::canLogin)
                 .orElseThrow(this::unauthenticated);
@@ -109,6 +152,27 @@ public class WorkspaceGitToolTokenService {
                 .sorted()
                 .toList();
         return new WorkspaceGitToolPrincipal(user.userId(), roles);
+    }
+
+    private String[] decodeAudiencePayload(String encodedPayload) {
+        try {
+            String decoded = new String(
+                    Base64.getUrlDecoder().decode(encodedPayload), StandardCharsets.UTF_8);
+            String[] values = decoded.split("\\n", -1);
+            if (values.length != 3 || values[0].isBlank() || values[1].isBlank() || values[2].isBlank()) {
+                throw unauthenticated();
+            }
+            return values;
+        } catch (IllegalArgumentException exception) {
+            throw unauthenticated();
+        }
+    }
+
+    private String requireAudience(String audience) {
+        if (audience == null || !audience.matches("[a-z0-9-]{1,64}")) {
+            throw new IllegalArgumentException("tool audience is invalid");
+        }
+        return audience;
     }
 
     private String[] decodePayload(String encodedPayload) {
