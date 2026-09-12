@@ -17471,3 +17471,21 @@
 - Mimo 工作台现已具备按选中逻辑仓库联合查询图谱与固定源码的实现；图谱未收录文件仍可通过 `code_source` 分析，且不会读取用户对 APP_SOURCE 可编辑副本的修改。
 - 新增 1 个普通认证 scope GET、2 个专用只读 Tool POST 和 1 个幂等 Flyway migration。默认关闭使原有对话、源码 Workspace 和 TraceWeave 行为保持兼容；旧快照需重新准备后才有不可变基线。源码搜索和图查询均有显式预算与截断；专用 audience、逻辑路径、实时授权/generation 复核及失败关闭构成安全边界。
 - 实现、自动化门禁和本机真实三服务启动已验证；真实联合业务对话仍为部分验证。当前没有试点用户、仓库映射和 TraceWeave 地址配置，也未获得固定真实 Java/JSP/JS/XML/SQL 页面样本对应的 AppSource 新基线，因此没有启用开关、重备源码或执行真实页面对话/TraceWeave 页面结果比对。
+
+## 2026-09-12 - 修复 100 Jenkins 发布目录的运行时读取权限
+
+### Why
+
+100 上 release23 的 JAR 实际存在且为 `0644`，但 `/data2` 是启用默认权限检查的 FUSE 合并盘，项目、releases、shared 三层父目录为 `0750 jenkins:jenkins`。Jenkins 校验可以读取，固定 UID 1000 的运行容器却无法穿越宿主路径，因此 Java 循环报 `Unable to access jarfile /release/backend.jar`，前端反向代理也返回 500。
+
+### What
+
+服务器只把三个固定父目录增加“其他用户可穿越”权限至 `0751`，不开放目录读取和密钥文件；运行用户、数据目录和环境文件权限均不变。发布清单增加真实 UID 1000 的只读挂载探针，必须能读取 JAR、看到后端源码目录并完成 `jar tf`，否则在停止旧服务前失败；同步 Jenkins 一次性配置说明和静态契约检查。
+
+### How
+
+分别以宿主 UID 1000、容器 UID 1000 和 Jenkins 身份核对路径、文件、FUSE 类型与挂载，确认是父目录穿越而非 JAR 缺失或损坏。现场改为 `0751` 后，同镜像、同 UID 的一次性容器已读到 JAR ZIP 头并可写既有 runtime-temp；`tools/verify-jenkins-release.sh`、两个 Shell 语法和差异检查通过。`release` 从 `ssh://git@192.168.8.100:8022/wrui/intelligent-test-agent.git` 执行 `git pull --ff-only`，结果已是最新提交 `b50b1c7c`；保留用户原有 `tools/query-user-message-statistics.sql` 修改未暂存。
+
+### Result
+
+现场权限和发布前防回退门禁已修复；旧容器是在修复前创建的挂载，仍按项目约定通过 Jenkins `ACTION=DEPLOY` 强制重建，不以 SSH 手工替换或 Compose 重启冒充发布。无业务 API、数据库、鉴权、模型编排或前端行为变化。
