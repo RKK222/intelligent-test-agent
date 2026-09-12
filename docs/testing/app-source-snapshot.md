@@ -77,3 +77,14 @@ corepack pnpm playwright test apps/agent-web/tests/workbench.spec.ts \
 - 每台服务器核对 active 源码、同目录 staging/backup、锁文件和数据库 replica/cleanup；磁盘告警必须早于无法创建同体量 staging，cleanup backlog 持续增长时优先恢复 XXL/executor 和目标 Java，不手工递归删除未知路径。
 - API、WebSocket、广播和日志只允许 operationId、repositoryId、generation、linuxServerId、traceId 与安全摘要；不得出现 SSH 私钥、Authorization、物理源码根、完整命令 stderr、文件正文或堆栈。
 - 工作台操作不得产生新的 Run、Session、RunEvent 或用户级 runtime-state 事件；进度只由 AppSource 独立 WebSocket 传输，普通文件内容继续只走 Workspace 文件 WebSocket。
+
+## 对话代码知识基线验收
+
+新 generation 物化完成后，同一服务器同时存在可编辑 `APP_SOURCE` 和不对工作台暴露的只读知识基线。通过
+`code_knowledge context` 先核对源码可用状态，再用 `code_source read/search` 核对返回的 repository、branch、commit、generation、expiry、已下载目录、行号和 SHA-256；
+随后在工作台编辑同一源码文件，再次查询应仍返回固定提交原文。旧快照没有知识基线时必须返回
+`SOURCE_BASELINE_UNAVAILABLE` 并提示使用现有源码准备入口，不能读取可编辑副本兜底。
+
+切换 generation、让 snapshot 过期、撤销应用成员权限以及在读取过程中替换文件时，查询必须失败且不能拼接不同
+版本结果。清理旧 generation 后旧基线及其标准 staging/backup 应消失，新 generation 基线和可编辑目录保持不变。
+这些查询不触发 Git 下载、TraceWeave 扫描/同步、Run、Session 或源码写入。

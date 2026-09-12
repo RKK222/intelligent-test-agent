@@ -17442,3 +17442,32 @@
 - 用户报告完成配置键名修正后，13:47 平台 Agent 目录仍收到上游 400；14:05 新附件已包含原生 Agent 列表尾段，但缺状态头和列表前部。下一步刷新平台页面验证新请求状态、目标 Agent 可见性及真实 skill 调用；若平台仍失败按新的响应和 traceId 继续定位，不沿用旧 400 判定当前状态。本人未操作企业文件，写入人尚未查明，历史 ripgrep 根因和完整恢复尚未确认。
 - 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
 - 按用户要求暂停企业目录报错排查，独立 Agent 转换与 OpenCode 1.18.4 目录加载验证完成；未导入、发布到企业，知识库读取和真实模型/写回行为未验收。产物保存在用户指定下载目录，仓库仅提交转换说明和本机日志，不将原始企业附件或知识正文纳入 Git。
+
+## 2026-09-12 - 在 Mimo 同一对话接入 TraceWeave 链路与固定源码基线
+
+### Why
+
+- 用户要求实施“代码知识整合”方案：在 intelligent-test-agent（Mimo）工作台同一段对话里查询 TraceWeave 图谱，也能阅读图谱外的版本库源码，并用于实现解释、调用链和变更影响分析。
+- 现有 APP_SOURCE 工作目录允许编辑，不能作为固定提交的知识证据；两个系统仍需独立部署，查询不得隐式触发源码重备、图谱扫描、同步或写入。
+
+### What
+
+- APP_SOURCE 同一次物化新增 generation 专属的隐藏只读知识基线：复用固定 commit 和稀疏目录结果，不二次克隆；移除 Git 元数据后复制、写入权威索引、原子发布，并与可编辑目录、数据库 completion 一起回滚。到期清理按 generation 删除基线、staging 和 backup；旧快照没有基线时明确要求重新准备，不追认可编辑目录。
+- 新增源码只读查询服务，固定支持 `list/search/read`。每次查询及返回前校验应用成员、代码库关联、快照有效期、当前 generation、本机 READY 副本、ACTIVE APP_SOURCE Workspace、配置路径和索引；返回仓库、分支、commit、generation、已选目录、行号和 SHA-256。路径、符号链接、深度、文件数、单文件大小、时间、行数和结果数均有限制。
+- 新增 TraceWeave 只读适配器和三个可编辑通用参数，按请求读取启用开关、试点用户、默认 DEV/PROD、Mimo 逻辑仓库到 applicationGroup/repository 的映射及允许依赖。实现 `context/search/definition/chain/impact`，固定实际图版本，限制响应和遍历预算，校验返回资产范围，并保留扫描、版本、queryId、截断和详情链接证据。配置默认关闭，地址默认 `UNCONFIGURED`。
+- 为两个 OpenCode Tool 增加独立 `code-knowledge-read` audience 的短期签名凭据及两个精确内部 POST 路径；进程启动只注入同节点平台地址和专用 Token。普通用户 Token 过滤器只豁免这两个路径，由专用 Controller 实时恢复用户状态；Tool 不接受物理路径、Workspace ID、TraceWeave 地址或内部映射。
+- 工作台增加当前应用“代码知识范围”多仓选择器，与已有应用源码版本库权限取交集，默认全选并按应用记忆；准备源码复用既有四步弹窗，不切换当前对话 Workspace。每轮发送将精确逻辑仓库列表写入 reference PromptPart。公共 OpenCode 配置新增 `code_knowledge`、`code_source`、`code-knowledge` Skill，并扩展 whitebox-code-analyst 的只读联合取证规则。
+- 同步 API、模块图、部署、数据库、安全、源码快照、对话验收和前端文档。为使当前仓库全量门禁反映生产实现，同时修正了已有模型网关请求头断言、历史 Flyway fixture、帮助中心上下文边界和若干已过期工作台 E2E 探针；保留任务外 `tools/query-user-message-statistics.sql` 改动，不暂存。
+
+### How
+
+- 先按仓库权威索引、研发工作流、自检、后端/前端规范和依赖规则核对已有扩展点；复用 AppSource 物化/清理、Workspace 文件守卫、专用 Tool 签名、通用参数和现有源码准备弹窗。TraceWeave 仓库只读核对真实 Controller/DTO，并完成 JDK 25 下 20 模块 `./mvnw -B -ntp verify`，没有修改 TraceWeave 代码或数据，也没有扫描/同步。
+- Mimo 后端全 reactor 在根门禁及失败后续跑中全部覆盖通过：API 667 项、persistence 374 项（20 项环境跳过）、app 94 项（2 项跳过）；最终 Spring 代理修正后再次运行 integration、opencode-runtime、API 及依赖模块，22 模块成功。前端 lint、typecheck、160 个 Vitest 文件（2282 passed / 1 skipped）、production build 和 181 项 Playwright 逻辑用例通过；其中 180 首轮通过，1 项既有物理采样波动重试通过。公共 OpenCode 配置 Bun build、AI 文档校验、差异检查和新增行高置信凭据/占位扫描通过。
+- 使用项目既有 `.env.test` 和 `test` profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`。首次真实启动暴露新增 `final @Service/@RestController` 与现有 CGLIB 日志切面冲突，移除四个代理 Bean 的 `final` 后重新测试和启动成功；Flyway 将本地共享测试库推进到 `20260912123831`。
+- 当前 backend `http://127.0.0.1:8080`、frontend `http://127.0.0.1:3000`、ClickHouse `http://127.0.0.1:18123` 正在运行；health、readiness 均为 UP，前端返回 200，登录 CORS 预检正常。scope、图谱 Tool、源码 Tool 的无凭据探针均返回 401。启动后的 macOS Netty DNS 本地库降级及历史测试 Workspace 对账告警不影响 readiness；探针之后无新的未解释业务错误。
+
+### Result
+
+- Mimo 工作台现已具备按选中逻辑仓库联合查询图谱与固定源码的实现；图谱未收录文件仍可通过 `code_source` 分析，且不会读取用户对 APP_SOURCE 可编辑副本的修改。
+- 新增 1 个普通认证 scope GET、2 个专用只读 Tool POST 和 1 个幂等 Flyway migration。默认关闭使原有对话、源码 Workspace 和 TraceWeave 行为保持兼容；旧快照需重新准备后才有不可变基线。源码搜索和图查询均有显式预算与截断；专用 audience、逻辑路径、实时授权/generation 复核及失败关闭构成安全边界。
+- 实现、自动化门禁和本机真实三服务启动已验证；真实联合业务对话仍为部分验证。当前没有试点用户、仓库映射和 TraceWeave 地址配置，也未获得固定真实 Java/JSP/JS/XML/SQL 页面样本对应的 AppSource 新基线，因此没有启用开关、重备源码或执行真实页面对话/TraceWeave 页面结果比对。

@@ -107,6 +107,26 @@ class ApiTokenWebFilterTest {
     }
 
     @Test
+    void filterLeavesOnlyExactCodeKnowledgeToolPathsToDedicatedController() {
+        ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
+        for (String path : java.util.List.of(
+                "/api/internal/agent/opencode/code-knowledge-tool",
+                "/api/internal/agent/opencode/code-source-tool")) {
+            MockServerWebExchange exact = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+            final boolean[] called = {false};
+            filter.filter(exact, currentExchange -> {
+                called[0] = true;
+                return Mono.empty();
+            }).block();
+            assertThat(called[0]).as(path).isTrue();
+
+            MockServerWebExchange child = MockServerWebExchange.from(MockServerHttpRequest.post(path + "/extra"));
+            filter.filter(child, currentExchange -> Mono.empty()).block();
+            assertThat(child.getResponse().getStatusCode().value()).as(path + "/extra").isEqualTo(401);
+        }
+    }
+
+    @Test
     void filterExemptsOnlyExactUiTestToolConfigPath() {
         ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
         MockServerWebExchange exact = MockServerWebExchange.from(MockServerHttpRequest.get(

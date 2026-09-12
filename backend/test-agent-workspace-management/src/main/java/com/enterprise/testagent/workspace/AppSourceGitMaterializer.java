@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
@@ -92,6 +94,8 @@ public class AppSourceGitMaterializer {
         Path parent = Objects.requireNonNull(target.getParent(), "target parent must not be null");
         Path staging = parent.resolve("." + target.getFileName() + ".g" + request.generation()
                 + "." + UUID.randomUUID() + ".staging");
+        Path knowledgeBaseline = AppSourceKnowledgeBaseline.root(target, request.generation());
+        Path knowledgeStaging = AppSourceKnowledgeBaseline.staging(target, request.generation());
         try {
             progress.started(AppSourceReplicaStepCatalog.STAGING);
             Files.createDirectories(parent);
@@ -121,10 +125,11 @@ public class AppSourceGitMaterializer {
             progress.started(AppSourceReplicaStepCatalog.WRITE_INDEX);
             byte[] indexBytes = indexBytes(request);
             writeIndexAtomically(staging, indexBytes);
+            copyKnowledgeBaseline(staging, knowledgeStaging);
             progress.succeeded(AppSourceReplicaStepCatalog.WRITE_INDEX);
             Result result = new Result(sha256(indexBytes), shallow);
             progress.started(AppSourceReplicaStepCatalog.ATOMIC_REPLACE);
-            publish(staging, target, result, materialized -> {
+            publish(staging, target, knowledgeStaging, knowledgeBaseline, result, materialized -> {
                 progress.succeeded(AppSourceReplicaStepCatalog.ATOMIC_REPLACE);
                 completion.complete(materialized);
             });
@@ -141,6 +146,7 @@ public class AppSourceGitMaterializer {
                     exception);
         } finally {
             deleteTreeQuietly(staging);
+            deleteTreeQuietly(knowledgeStaging);
         }
     }
 
@@ -319,7 +325,43 @@ public class AppSourceGitMaterializer {
         Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
     }
 
-    private void publish(Path staging, Path target, Result result, Completion completion) throws IOException {
+    /**
+     * 先发布 generation 专属知识基线，再沿用现有可编辑目录发布事务；后者或数据库 completion
+     * 失败时同步恢复旧基线，避免源码证据与 READY 副本状态分叉。
+     */
+    private void publish(
+            Path staging,
+            Path target,
+            Path knowledgeStaging,
+            Path knowledgeBaseline,
+            Result result,
+            Completion completion) throws IOException {
+        AppSourcePathGuard.requireSafe(knowledgeStaging);
+        AppSourcePathGuard.requireSafe(knowledgeBaseline);
+        Path knowledgeBackup = null;
+        if (Files.exists(knowledgeBaseline, LinkOption.NOFOLLOW_LINKS)) {
+            knowledgeBackup = AppSourceKnowledgeBaseline.backup(knowledgeBaseline);
+            Files.move(knowledgeBaseline, knowledgeBackup, StandardCopyOption.ATOMIC_MOVE);
+        }
+        try {
+            Files.move(knowledgeStaging, knowledgeBaseline, StandardCopyOption.ATOMIC_MOVE);
+            makeReadOnly(knowledgeBaseline);
+            publishEditable(staging, target, result, completion);
+        } catch (RuntimeException | IOException failure) {
+            try {
+                deleteTree(knowledgeBaseline);
+                if (knowledgeBackup != null && Files.exists(knowledgeBackup, LinkOption.NOFOLLOW_LINKS)) {
+                    Files.move(knowledgeBackup, knowledgeBaseline, StandardCopyOption.ATOMIC_MOVE);
+                }
+            } catch (IOException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
+            }
+            throw failure;
+        }
+        deleteTreeQuietly(knowledgeBackup);
+    }
+
+    private void publishEditable(Path staging, Path target, Result result, Completion completion) throws IOException {
         AppSourcePathGuard.requireSafe(staging);
         AppSourcePathGuard.requireSafe(target);
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
@@ -362,6 +404,52 @@ public class AppSourceGitMaterializer {
         }
     }
 
+    /** 不跟随符号链接复制已校验且已移除 Git 元数据的 staging。 */
+    private void copyKnowledgeBaseline(Path source, Path destination) throws IOException {
+        AppSourcePathGuard.requireSafe(source);
+        AppSourcePathGuard.requireSafe(destination);
+        Files.walkFileTree(source, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) throws IOException {
+                Path relative = source.relativize(directory);
+                Files.createDirectories(destination.resolve(relative));
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException {
+                Path target = destination.resolve(source.relativize(file));
+                if (Files.isSymbolicLink(file)) {
+                    Files.createSymbolicLink(target, Files.readSymbolicLink(file));
+                } else {
+                    Files.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+
+    /** 基线目录不授予写位；查询服务仍会逐段拒绝符号链接和隐藏索引。 */
+    private void makeReadOnly(Path root) throws IOException {
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                // 源仓库可包含指向根目录外的符号链接；不能跟随链接修改外部目标权限。
+                if (Files.isSymbolicLink(path)) {
+                    continue;
+                }
+                try {
+                    Set<PosixFilePermission> permissions = new java.util.HashSet<>(Files.getPosixFilePermissions(path));
+                    permissions.remove(PosixFilePermission.OWNER_WRITE);
+                    permissions.remove(PosixFilePermission.GROUP_WRITE);
+                    permissions.remove(PosixFilePermission.OTHERS_WRITE);
+                    Files.setPosixFilePermissions(path, permissions);
+                } catch (UnsupportedOperationException exception) {
+                    path.toFile().setWritable(false, false);
+                }
+            }
+        }
+    }
+
     private String sha256(byte[] value) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
     }
@@ -379,6 +467,12 @@ public class AppSourceGitMaterializer {
             return;
         }
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                directory.toFile().setWritable(true);
+                return FileVisitResult.CONTINUE;
+            }
+
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 // git 会把 packed-refs、objects/pack/*.pack 等文件设为只读，

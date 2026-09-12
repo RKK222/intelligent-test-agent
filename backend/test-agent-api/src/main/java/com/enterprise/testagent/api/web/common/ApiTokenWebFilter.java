@@ -45,6 +45,10 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws";
     private static final String WORKSPACE_GIT_TOOL_PATH =
             "/api/internal/agent/opencode/workspace-git-tool";
+    private static final String CODE_KNOWLEDGE_TOOL_PATH =
+            "/api/internal/agent/opencode/code-knowledge-tool";
+    private static final String CODE_SOURCE_TOOL_PATH =
+            "/api/internal/agent/opencode/code-source-tool";
     private static final String OPENCODE_OBSERVABILITY_EVENTS_PATH =
             "/api/internal/agent/opencode-observability/v1/events";
     private static final String OPENCODE_OBSERVABILITY_TRACE_CHUNKS_PATH =
@@ -103,6 +107,8 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_TICKET_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
+                || path.equals(CODE_KNOWLEDGE_TOOL_PATH)
+                || path.equals(CODE_SOURCE_TOOL_PATH)
                 || path.equals(OPENCODE_OBSERVABILITY_EVENTS_PATH)
                 || path.startsWith(OPENCODE_OBSERVABILITY_TRACE_CHUNKS_PATH)
                 || path.equals(UI_TEST_TOOL_CONFIG_PATH)

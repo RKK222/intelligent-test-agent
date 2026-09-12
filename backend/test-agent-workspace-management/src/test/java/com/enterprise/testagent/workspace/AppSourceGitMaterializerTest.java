@@ -43,6 +43,10 @@ class AppSourceGitMaterializerTest {
 
         assertThat(result.shallowClone()).isTrue();
         assertThat(Files.readString(target.resolve("src/Main.java"))).isEqualTo("class Main {}\n");
+        Path knowledgeBaseline = AppSourceKnowledgeBaseline.root(target, 3L);
+        assertThat(knowledgeBaseline.resolve("src/Main.java")).hasContent("class Main {}\n");
+        Files.writeString(target.resolve("src/Main.java"), "class LocallyEdited {}\n");
+        assertThat(knowledgeBaseline.resolve("src/Main.java")).hasContent("class Main {}\n");
         assertThat(target.resolve("docs/guide.md")).doesNotExist();
         assertThat(target.resolve(".git")).doesNotExist();
         Path index = target.resolve(AppSourceApplicationService.INDEX_FILE_NAME);
@@ -261,6 +265,30 @@ class AppSourceGitMaterializerTest {
 
         assertThat(target.resolve("old.txt")).hasContent("old generation\n");
         assertThat(target.resolve("src/Main.java")).doesNotExist();
+        assertThat(AppSourceKnowledgeBaseline.root(target, 8L)).doesNotExist();
+    }
+
+    @Test
+    void databaseCompletionFailureRestoresExistingKnowledgeBaseline() throws Exception {
+        GitFixture fixture = fixture();
+        Path target = tempDir.resolve("appsource/db-baseline-rollback-source");
+        Files.createDirectories(target);
+        Path baseline = AppSourceKnowledgeBaseline.root(target, 18L);
+        Files.createDirectories(baseline);
+        Files.writeString(baseline.resolve("old.txt"), "old immutable baseline\n");
+
+        assertThatThrownBy(() -> new AppSourceGitMaterializer().materialize(
+                        new AppSourceGitMaterializer.Request(
+                                target, fixture.remoteUri(), "main", fixture.commit(),
+                                List.of(new AppSourceSelectedPath("src", AppSourcePathType.DIRECTORY)),
+                                null, 18L, Instant.parse("2026-07-30T04:00:00Z")),
+                        result -> {
+                            throw new IllegalStateException("database completion failed");
+                        }))
+                .hasMessageContaining("database completion failed");
+
+        assertThat(baseline.resolve("old.txt")).hasContent("old immutable baseline\n");
+        assertThat(baseline.resolve("src/Main.java")).doesNotExist();
     }
 
     @Test

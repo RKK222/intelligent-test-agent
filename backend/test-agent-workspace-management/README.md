@@ -169,3 +169,22 @@ manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`
 `pathRef` 为仓库相对路径（Git 返回的 `/` 分隔格式、UTF-8、无末尾换行）的 SHA-256；没有单文件定位时为 `NONE`。仅符号链接/特殊条目拒绝和单文件归档内容变化附带此指纹；全量快照前后不一致不伪造具体文件。未知原因用 `UNCLASSIFIED`，结合日志原因类型排查。错误码和重试/清理状态机不变，无新 API、事件或 schema。
 
 定向测试：`mvn -f backend/pom.xml -pl test-agent-workspace-management -am "-Dtest=PersonalWorkspaceRelocationWorkerTest,PersonalWorkspaceRelocationDiagnosticsTest,PersonalWorkspaceSnapshotDiagnosticsTest,PersonalWorkspaceSnapshotServiceRealGitTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`。
+
+## 对话代码知识源码基线
+
+应用源码物化在删除 staging 的 `.git`、写入权威索引之后，从同一份已校验内容复制一份 generation
+专属知识基线，再分别原子发布知识基线和可编辑 `APP_SOURCE` 目录。知识基线位于同一受控根的隐藏同级目录，
+不再次 clone，也不作为 Workspace 暴露；发布完成后移除写权限。可编辑目录发布或数据库 READY 回写失败时，
+物化器同步恢复上一份知识基线，避免磁盘证据与副本状态分叉。
+
+`CodeSourceQueryService` 是 Agent 查询源码的唯一业务入口。每次 `list/search/read` 都重新校验版本库类型、
+当前 ACTIVE 且未过期的 snapshot、slot generation、本机 READY replica、ACTIVE Runtime Workspace、现有应用
+成员权限、逻辑根和权威索引；请求结束前再做一次完整校验。源码路径只接受仓库内相对路径，逐段拒绝符号链接
+和平台索引。搜索限制深度、文件数、单文件大小、时长和返回数；读取最多 400 行并返回完整文件 SHA-256。
+文件或目录在读取期间发生变化时返回 `SOURCE_CHANGED_DURING_READ`，撤权、过期或 generation 切换不返回旧结果。
+
+旧 generation 没有知识基线时，context 返回原 snapshot 的 commit、generation、已选目录、
+`available=false` 和 `OPEN_APP_SOURCE_PREPARATION`，实际读取仍返回 `SOURCE_BASELINE_UNAVAILABLE`；必须由现有源码准备流程建立新 generation；
+禁止把用户已经修改的 `APP_SOURCE` 目录追认为固定提交原文。清理任务只删除自身 generation 的知识基线及其
+staging/backup，不能删除更新 generation。定向回归由 `AppSourceGitMaterializerTest`、
+`AppSourceCleanupWorkerTest` 和 `CodeSourceQueryServiceTest` 覆盖。

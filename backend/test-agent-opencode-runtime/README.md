@@ -269,3 +269,10 @@ generation 0 持久化；持有连接的 Java 在重连后 CAS 绑定新 generat
 release 的 `requiresRestart` 只描述相对发布时上一全局能力版本的差异。Coordinator 下发通知和安装命令时还必须核对该实例
 `activeDigest` 与 release `changeSummary.previousDigest`：只有两者精确一致才允许沿用 Agent/Skill-only 热加载；客户端跳过
 中间版本、首次摘要缺失或历史摘要不可读时统一保守重启，避免 OpenCode 热加载继续引用旧不可变版本中的 Tool 绝对路径。
+
+## 代码知识只读 Tool 凭据
+
+`CodeKnowledgeToolTokenService` 复用现有签名实现，但使用独立 `code-knowledge-read` audience。用户 OpenCode
+进程启动时获得 `TEST_AGENT_CODE_KNOWLEDGE_TOOL_TOKEN`；该 Token 只被代码知识和源码两个精确内部端点接受，
+不能调用 `workspace-git`、不能替代平台登录 Token，也不能获得写权限。反向使用 Workspace Git audience 同样会被拒绝。
+验证凭据时实时读取用户状态和角色；凭据过期或新增 Tool 发布后，按现有流程重启该用户 OpenCode 进程重新注入。

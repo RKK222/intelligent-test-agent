@@ -135,7 +135,7 @@ describe("help center", () => {
     expect(weekly).toContain("本地客户端失败时导出受限诊断日志");
     expect(weekly).toContain("公共 Agent 发布后按进程有界并行排空");
     expect(prompt).toContain("2026 年 8 月 24 日—8 月 30 日");
-    expect(prompt).toContain("从顶部或左下角直接新增版本");
+    expect(prompt).toContain("已有测试工作空间，直接新增一个版本");
     expect(prompt).toContain("下载本地客户端用户包");
     expect(prompt).toContain("TestAgent-Local-Client");
     expect(prompt).toContain("选择并注册工作区…");

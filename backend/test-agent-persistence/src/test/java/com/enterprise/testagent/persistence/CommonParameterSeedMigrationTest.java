@@ -109,4 +109,22 @@ class CommonParameterSeedMigrationTest {
                 "parameter_english = 'OPENCODE_EXPERIENCE_WORKSPACE_DIR'");
         assertThat(sql).doesNotContain("delete from", "insert into");
     }
+
+    @Test
+    void traceWeaveCodeKnowledgeParametersAreEditableAndDisabledByDefault() throws Exception {
+        String sql = Files.readString(Path.of(
+                "src/main/resources/db/migration/"
+                        + "V20260912123831__common_parameters_add_traceweave_code_knowledge.sql"));
+
+        assertThat(sql).contains(
+                "'TRACEWEAVE_BASE_URL'",
+                "'TRACEWEAVE_WEB_BASE_URL'",
+                "'TRACEWEAVE_CODE_KNOWLEDGE_SCOPE'",
+                "'UNCONFIGURED'",
+                "\"enabled\":false",
+                "\"defaultView\":\"DEV\"",
+                "\"repositories\":[]",
+                "'all'",
+                "true");
+    }
 }

@@ -59,3 +59,23 @@
 ```bash
 mvn -q -DappLogDir=target/log -pl test-agent-integration -am test
 ```
+
+## TraceWeave 代码知识只读适配
+
+`TraceWeaveCodeKnowledgeSettings` 每次请求读取 `TRACEWEAVE_BASE_URL`、`TRACEWEAVE_WEB_BASE_URL` 和
+`TRACEWEAVE_CODE_KNOWLEDGE_SCOPE`，校验启用开关、试点用户、默认 `DEV/PROD` 视图、Mimo 版本库到
+TraceWeave `applicationGroupId/repositoryId` 的唯一映射及显式依赖。地址和映射不进入 Tool 参数或 Agent 提示词。
+登录态工作台只通过 `selectionScope` 取得启用状态、默认视图和 Mimo `repositoryId` 列表；停用或非试点返回
+正常不可用状态，其它配置错误继续失败关闭。
+
+`TraceWeaveCodeKnowledgeService` 只实现 `context/search/definition/chain/impact`。资产搜索只收窄到用户本次选择的
+主版本库；依赖版本库只扩展 definition/chain/impact 的允许资产与遍历上下文。Mimo 不按名称合并跨仓候选，definition
+按配置仓库过滤来源，遍历启用仓库变体隔离；详情与遍历前会先读取资产并核对应用组和仓库。每次操作重新解析实际图版本；默认使用配置视图，显式 `versionKey` 用于历史复查。
+文件影响使用 `FILE_ELEMENTS`，程序影响使用 `EXACT`，上游影响使用 `ENTRY_TO_TARGET`。DEV/PROD 先解析为固定
+`versionKey` 再发起关系查询，结束时再次解析动态视图；期间发生推进时返回 `knowledgeUpdating=true`，不会把两个版本
+拼成一份结果。遍历深度、节点、边、路径、超时和 HTTP 响应体均有硬上限，错误不回显服务地址或上游正文。返回保留
+`context` 保留相关扫描提交；关系结果保留 TraceWeave 原始 query、revision、truncation 字段、实际查询 body 及带固定版本和预算的详情页链接；该适配器
+不包含扫描、同步或写接口。
+
+`TraceWeaveCodeKnowledgeServiceTest` 使用真实 HTTP 协议形状锁定搜索收窄、越权资产拒绝、依赖遍历、DEV 版本证据
+和停用时零网络调用。

@@ -1,6 +1,7 @@
 import { BackendApiError } from "@test-agent/backend-api";
 import type {
   AgentMessage,
+  AppSourceRepositorySummary,
   FileSearchResult,
   FileTreeEntry,
   MessageScope,
@@ -1844,6 +1845,36 @@ export function buildPromptParts(
     parts.push(editorPart);
   }
   return parts;
+}
+
+/**
+ * 将工作台可见的多仓选择固化到本轮 PromptPart。仅提交服务端返回过的逻辑 repositoryId，
+ * 仓库展示名不进入提示词，避免可配置名称改变 Agent 指令语义。
+ */
+export function codeKnowledgeScopePromptPart(
+  repositories: Pick<AppSourceRepositorySummary, "repositoryId">[],
+  selectedRepositoryIds: string[]
+): Extract<PromptPart, { type: "reference" }> | undefined {
+  const selected = new Set(selectedRepositoryIds.map((value) => value.trim()).filter(Boolean));
+  const repositoryIds = repositories
+    .map((repository) => repository.repositoryId.trim())
+    .filter((repositoryId, index, values) =>
+      repositoryId.length > 0
+      && selected.has(repositoryId)
+      && values.indexOf(repositoryId) === index
+    );
+  if (repositoryIds.length === 0) return undefined;
+  return {
+    type: "reference",
+    id: "code-knowledge-scope",
+    label: [
+      "Mimo 工作台已选择代码知识范围。",
+      `调用 code_knowledge（包括 context）时必须传 repositoryIds=${JSON.stringify(repositoryIds)}；`,
+      "调用 code_source 时 repositoryId 必须属于该列表。",
+      "该范围只用于查询，不改变当前工作区。"
+    ].join(""),
+    metadata: { repositoryIds }
+  };
 }
 
 export function promptFromParts(parts: PromptPart[]) {

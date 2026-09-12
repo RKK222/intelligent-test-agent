@@ -17,6 +17,7 @@ import {
   publicConfigGateRefetchInterval,
   shouldRefreshRuntimeCatalogAfterMessageGate,
   chatStateFromSessionTreeSnapshot,
+  codeKnowledgeScopePromptPart,
   completedRunDurationMs,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -106,6 +107,27 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("codeKnowledgeScopePromptPart", () => {
+  it("keeps only selected repository ids from the server-provided workbench scope", () => {
+    const part = codeKnowledgeScopePromptPart(
+      [{ repositoryId: "repo_orders" }, { repositoryId: "repo_payments" }],
+      ["repo_payments", "repo_injected", "repo_payments"]
+    );
+
+    expect(part).toEqual({
+      type: "reference",
+      id: "code-knowledge-scope",
+      label: expect.stringContaining('repositoryIds=["repo_payments"]'),
+      metadata: { repositoryIds: ["repo_payments"] }
+    });
+    expect(part?.label).not.toContain("repo_injected");
+  });
+
+  it("does not add a scope reference when no authorized repository is selected", () => {
+    expect(codeKnowledgeScopePromptPart([{ repositoryId: "repo_orders" }], [])).toBeUndefined();
   });
 });
 

@@ -62,6 +62,23 @@ class WorkspaceGitToolTokenServiceTest {
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.UNAUTHENTICATED));
     }
 
+    @Test
+    void codeKnowledgeTokenHasIndependentAudienceFromWorkspaceGitToken() {
+        Fixture fixture = fixture(Clock.fixed(NOW, ZoneOffset.UTC));
+        CodeKnowledgeToolTokenService codeKnowledge = new CodeKnowledgeToolTokenService(fixture.service());
+        String codeToken = codeKnowledge.issue(USER_ID);
+        String gitToken = fixture.service().issue(USER_ID);
+
+        assertThat(codeKnowledge.authenticate("Bearer " + codeToken).roles())
+                .containsExactly(Dictionary.ROLE_APP_ADMIN);
+        assertThatThrownBy(() -> fixture.service().authenticate("Bearer " + codeToken))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.UNAUTHENTICATED));
+        assertThatThrownBy(() -> codeKnowledge.authenticate("Bearer " + gitToken))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.UNAUTHENTICATED));
+    }
+
     private Fixture fixture(Clock clock) {
         UserRepository userRepository = mock(UserRepository.class);
         UserRoleRepository roleRepository = mock(UserRoleRepository.class);

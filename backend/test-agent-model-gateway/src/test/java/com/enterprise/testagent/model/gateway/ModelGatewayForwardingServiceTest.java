@@ -89,7 +89,8 @@ class ModelGatewayForwardingServiceTest {
 
         assertThat(captured.get().url().toString())
                 .isEqualTo("http://models.internal/v1/chat/completions");
-        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION))
+                .isEqualTo("Bearer provider-secret");
         assertThat(captured.get().headers().getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER))
                 .isEqualTo("provider-secret");
         assertThat(captured.get().headers().getFirst("ucid")).isEqualTo("AUTH_LOBEHUB");
@@ -139,7 +140,8 @@ class ModelGatewayForwardingServiceTest {
         assertThat(captured.get().headers()
                 .getFirst(ModelGatewayForwardingService.EMBEDDING_INPUT_TYPE_HEADER))
                 .isEqualTo("query");
-        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION)).isNull();
+        assertThat(captured.get().headers().getFirst(HttpHeaders.AUTHORIZATION))
+                .isEqualTo("Bearer provider-secret");
         assertThat(captured.get().headers().getFirst(OpenAiUpstreamSupport.AUTH_TOKEN_HEADER))
                 .isEqualTo("provider-secret");
     }

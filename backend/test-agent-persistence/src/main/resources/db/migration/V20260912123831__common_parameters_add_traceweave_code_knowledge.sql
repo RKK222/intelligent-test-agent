@@ -1,0 +1,43 @@
+-- TraceWeave 代码知识联动默认关闭；地址、试点用户和版本库映射由超级管理员在线维护。
+insert into common_parameters(
+    parameter_id,
+    parameter_english,
+    parameter_chinese,
+    parameter_value,
+    platform,
+    editable,
+    created_at,
+    updated_at
+)
+values
+    (
+        'param_traceweave_base_url_all',
+        'TRACEWEAVE_BASE_URL',
+        'TraceWeave服务地址',
+        'UNCONFIGURED',
+        'all',
+        true,
+        current_timestamp,
+        current_timestamp
+    ),
+    (
+        'param_traceweave_web_base_url_all',
+        'TRACEWEAVE_WEB_BASE_URL',
+        'TraceWeave工作台地址',
+        'UNCONFIGURED',
+        'all',
+        true,
+        current_timestamp,
+        current_timestamp
+    ),
+    (
+        'param_traceweave_code_knowledge_scope_all',
+        'TRACEWEAVE_CODE_KNOWLEDGE_SCOPE',
+        'TraceWeave代码知识查询范围',
+        '{"enabled":false,"pilotUserIds":[],"defaultView":"DEV","repositories":[]}',
+        'all',
+        true,
+        current_timestamp,
+        current_timestamp
+    )
+on conflict (parameter_english, platform) do nothing;
