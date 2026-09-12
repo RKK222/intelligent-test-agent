@@ -223,6 +223,21 @@ validate_backend_jar() {
         sh -euc 'jar tf /artifact/backend.jar' >/dev/null
 }
 
+validate_runtime_release_access() {
+    local release_dir=$1
+    # /data2 is a FUSE merge mount on the shared test host.  The runtime UID must be able to
+    # traverse the host-side release path; stat/checksum checks executed as Jenkins do not prove
+    # that Java can open the same bind-mounted JAR.
+    docker run --rm \
+        --user 1000:1000 \
+        --volume "${release_dir}:/release:ro" \
+        --env HOME=/tmp/jenkins-home \
+        --env MAVEN_CONFIG=/tmp/jenkins-home/.m2 \
+        "${MAVEN_IMAGE}" \
+        sh -euc 'test -r /release/backend.jar; test -d /release/source/backend; jar tf /release/backend.jar' \
+        >/dev/null
+}
+
 build_release() {
     validate_host
     echo '==> Verify Flyway migration naming and immutable bytes'
@@ -466,6 +481,7 @@ PY
     (cd "${release_dir}" && sha256sum -c frontend.sha256 >/dev/null)
     (cd "${release_dir}" && sha256sum -c source.sha256 >/dev/null)
     validate_backend_jar "${release_dir}/backend.jar"
+    validate_runtime_release_access "${release_dir}"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
 }
 
