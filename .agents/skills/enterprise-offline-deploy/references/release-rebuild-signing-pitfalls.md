@@ -293,6 +293,26 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 
 只让 worker 变 `included` 而保持 toolbox / 本地客户端 `reuse` 的做法：复制 `.release-component-state.env`，只把其中 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT` 改成任意别的值（或删掉该行），再用 `--component-state-file` 指向该副本跑计划，预期输出为 worker `included` + toolbox/客户端 `reuse`。
 
+## 6.2 现场 worker 指纹已确认、但打包机无法重建 worker 镜像时的做法
+
+现场 `aba0bb06…7687b` 对应 09-02～09-10 的旧 worker 输入（缺 bullseye-security EOL 修复），toolbox 与客户端指纹和本机一致，因此结论是 worker `included`、toolbox/客户端 `reuse`。
+
+**新坑：bullseye（Debian 11）LTS 结束后，worker 镜像在打包机上无法重建。** Dockerfile 第一步 `apt-get install ca-certificates netbase tzdata` 依赖 `bullseye-security` 池，而该池已被上游整体下架，但各源索引仍停留在 u8：
+
+- `mirrors.tuna.tsinghua.edu.cn`／`mirrors.ustc.edu.cn`／`mirrors.aliyun.com`／`security.debian.org`／`archive.debian.org` 的 `pool/updates/.../openssl_1.1.1w-0+deb11u8_amd64.deb` 全部 404；
+- `snapshot.debian.org` 的 `debian-security` 只有索引（`dists/bullseye-security/InRelease` 可 200/302），pool 文件同样 404；
+- `archive.debian.org/debian-security` 目前只到 `buster`，没有 bullseye。
+
+所以 `debian-archive` 或换 security 镜像都救不了；`DISABLE_SECURITY_REPO=true` 分支里被 pin 的 `libc6=2.31-13+deb11u11` 同样已不在任何公共源。此时**不要**改 Dockerfile、不要回退版本、不要伪造指纹——按下面用已构建镜像配 `--zip-only` 重新封装：
+
+1. 确认打包机上仍留有同一批次的镜像与制品：`docker image inspect test-agent-opencode-worker:internal`、`deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar`、`test-agent-programs.tar.gz`、`.worker-runtime-artifact.env`。该目录是**持久制品目录**，不要在下一轮 `dist` 构建前清理。
+2. 校验 tar 与本地镜像确实是同一镜像（`docker save` 现在是 OCI 布局，`.Id` 是 index/manifest 摘要，不能用它直接比）。取出 tar 内 config blob 比 `rootfs.diff_ids`：`tar -xOf <tar> manifest.json` 拿 `Config` 路径 → `tar -xOf <tar> blobs/sha256/<config>` → 与 `docker image inspect -f '{{json .RootFS.Layers}}' test-agent-opencode-worker:internal` 逐项比对，顺序一致即同一镜像；顺便核对 `created` 时间。
+3. 跑平台自带校验，等价替代构建后自动校验：`EXPECTED_PYTHON_VERSION=<env 中的 PYTHON_VERSION> tools/verify-codex-whitebox-worker-image.sh test-agent-opencode-worker:internal`。aarch64 打包机会提示 native sandbox E2E 跳过，这是预期行为，仍需在原生 amd64 worker 节点执行 `deploy/internal/check-codex-whitebox-host.sh`。
+4. 把该 worker tar、`test-agent-programs.tar.gz`、`.worker-runtime-artifact.env` 放进本轮 `--output-dir`，再用 worker `included` 的组件状态文件跑 `--zip-only`。`package_release_zip` 会断言 `.worker-runtime-artifact.env` 的指纹等于本轮计算的 `WORKER_RUNTIME_FINGERPRINT`（本例 `85ea6d01…`），并检查两个制品存在；指纹不匹配会直接报 “Component artifacts are missing or stale”。
+5. `--zip-only` 不会重建 backend/frontend：它按 `--output-dir` 内现有制品重组，因此 backend/frontend 必须是本轮源码构建的产物（普通 full 构建在 worker 镜像阶段失败前已产出，可直接复用）。
+
+包体变化：worker `included` 后内层 ZIP 约 155 MB → 662 MB（+350 MB 镜像 tar +192 MB programs），现场两台后台需要 `docker load` 并重建/重启 manager 与 worker。
+
 ## 7. Flyway 为什么总在启动时失败
 
 常见原因不是 SQL 语法，而是比较基线错误、已执行 migration 字节被改、合并后时间戳倒序，或企业运行目录仍加载旧 `backend/lib/test-agent-persistence-*.jar`。

@@ -1,5 +1,33 @@
 # Session Log — guojq
 
+## 2026-09-14 按现场 worker 指纹重打变更包（worker included，bullseye EOL 用已构建镜像 + --zip-only）
+
+### Why
+
+现场 `.2` 的 `release-component-state.env` 为：
+
+```
+TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT=aba0bb06f75eb56f694f5e630d00ab4787062f7cc549dda2b5c018182127687b
+TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT=35447da08f477dd02e458e4344be9bd870452dba12ba6db32d250c56e9f15040
+```
+
+`aba0bb06…` 命中上一条记录建立的对照表，对应 `37a797cc9`(09-02) ～ `41866c117`(09-10) 之间的 worker 输入（缺 bullseye-security EOL 修复）；toolbox 与本机一致。因此本轮必须让 worker 变 `included`，toolbox 与本地客户端继续 `reuse`（客户端仍锚定现场 `20260907093905` / `4fabde17`）。
+
+### What
+
+1. 用强制 included 的组件状态文件（复制 `deploy/internal/dist/.release-component-state.env`，把 worker 指纹改成别的值）跑到 worker 阶段失败，产出 backend/frontend 制品，产出目录 `/tmp/testagent-dist-code3`。
+2. 失败原因是 **bullseye LTS 结束后 `bullseye-security` 池被上游整体下架**：`ca-certificates/netbase/tzdata` 依赖的 `openssl 1.1.1w-0+deb11u8` 在 tuna/ustc/aliyun/官方 security/archive.debian.org 全部 404，`snapshot.debian.org` 只有索引没有 pool 文件，`DISABLE_SECURITY_REPO=true` 分支 pin 的 `libc6=2.31-13+deb11u11` 同样无源。即**本轮无法在打包机重建 worker 镜像**。
+3. 改为使用打包机 09-10 留下的同批次制品：`deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar`（350 MB）+ `test-agent-programs.tar.gz`（191 MB）+ `.worker-runtime-artifact.env`（指纹 `85ea6d01`，与本轮计算值一致）。先用 tar 内 config blob 的 `rootfs.diff_ids` 与 `docker image inspect test-agent-opencode-worker:internal` 的 `RootFS.Layers` 逐项比对（顺序一致、`created` 同为 2026-09-10T07:30:02Z），确认 tar 与本地镜像同一；再跑 `tools/verify-codex-whitebox-worker-image.sh` 通过（`codex-cli 0.145.0` / `Python 3.13.14`；aarch64 打包机跳过 native sandbox E2E，属预期）。
+4. 把这 3 个制品放进输出目录，用 `--zip-only` + worker included 状态文件重组 ZIP；再走 `package-two-backend-complete.sh` 生成外层包。
+
+### Result
+
+- 源码输入：`release`，HEAD `b519695251`（相对最后成功部署基线 `9529bd3e4` 的更新点仍在 09-14 那版范围内，含 Flyway `V20260912123831__common_parameters_add_traceweave_code_knowledge.sql`）。
+- 交付物（`deploy/internal/dist-code/`）：内层 `test-agent-internal-release.zip` 662 MB，SHA256 `2cacbc164a607ac1e4fc88a0f178d6376273b359a8618a9e92b42eece8efd954`；外层 `test-agent-two-backend-complete.zip` 662 MB，SHA256 `2f6b9c7128d974b3392cfd98ea916520647538618906f16fca3fb5009a92ac20`。
+- 校验：外层内嵌内层 SHA 一致；两层 `unzip -tq` 无错误；`release-components.env` 为 worker `included`(85ea6d01) / toolbox `reuse`(35447da0) / client `reuse`(20260907093905, manifest `8976c932…`)；包内含 `dist/test-agent-opencode-worker_internal-linux-amd64.tar`、`dist/test-agent-programs.tar.gz`，无 `dist/local-opencode-client/`；persistence JAR 内 `V20260912123831` 摘要 `4853be30…d509` 与源码一致，toolbox 迁移字节锁 `777a96…51f2` 未变。
+- 上一版后端/前端 reuse 小包（内层 `fcea3543…5a97`／外层 `4e05000f…0cf1`）已移至 `/tmp/stale-candidates/`，**不要再用**（它会让现场继续报 worker 指纹不匹配）。
+- 现场动作：两台后台需 `docker load` worker 镜像 tar 并重建/重启 manager 与 worker，顺序仍为 `.4 → .114 → .2`；worker 安装后按手册运行 `deploy/internal/check-codex-whitebox-host.sh` 补 native amd64 sandbox E2E。
+
 ## 2026-09-14 定位现场 worker runtime 指纹门禁拦截：建立「指纹 ↔ 源码提交」对照表
 
 ### Why
