@@ -117,6 +117,7 @@ public class AppSourceCleanupWorker {
                     && (readyLocalReplica(task, slot.activeGeneration())
                             || readyLocalReplica(task, slot.pendingGeneration()));
             cleanupGenerationStaging(target, task.generation());
+            cleanupKnowledgeGeneration(target, task.generation());
             // cleanup 与发布共用同一文件锁；拿到锁后的 backup 只可能是已完成发布遗留，且名称不命中 target/staging。
             cleanupBackups(target);
             if (!newerGenerationOwnsSharedRoot) {
@@ -166,6 +167,19 @@ public class AppSourceCleanupWorker {
     private void cleanupGenerationStaging(Path target, long generation) {
         cleanupSiblingMatches(
                 target, "." + target.getFileName() + ".g" + generation + ".", ".staging", ignored -> true);
+    }
+
+    /** 只删除当前清理任务 generation 的不可变知识基线及其发布残留。 */
+    private void cleanupKnowledgeGeneration(Path target, long generation) {
+        Path baseline = AppSourceKnowledgeBaseline.root(target, generation);
+        try {
+            deleteTree(baseline);
+        } catch (IOException exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除应用源码知识基线失败", Map.of(), exception);
+        }
+        String prefix = AppSourceKnowledgeBaseline.generationPrefix(target, generation);
+        cleanupSiblingMatches(target, prefix, ".staging", ignored -> true);
+        cleanupSiblingMatches(target, prefix, ".backup", ignored -> true);
     }
 
     private void cleanupBackups(Path target) {
@@ -240,7 +254,14 @@ public class AppSourceCleanupWorker {
         }
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
             @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                directory.toFile().setWritable(true);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                file.toFile().setWritable(true);
                 Files.deleteIfExists(file);
                 return FileVisitResult.CONTINUE;
             }

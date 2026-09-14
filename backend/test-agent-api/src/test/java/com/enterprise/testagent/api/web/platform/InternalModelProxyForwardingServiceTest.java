@@ -165,7 +165,8 @@ class InternalModelProxyForwardingServiceTest {
                 .verifyComplete();
 
         assertThat(authTokenHeaders).containsExactlyInAnyOrder("qwen-token", "deepseek-token");
-        assertThat(authorizationHeaders).containsOnlyNulls();
+        assertThat(authorizationHeaders)
+                .containsExactlyInAnyOrder("Bearer qwen-token", "Bearer deepseek-token");
     }
 
     @Test

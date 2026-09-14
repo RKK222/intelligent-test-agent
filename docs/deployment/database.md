@@ -2204,3 +2204,14 @@ SHA-256 一致。
 执行，连接参数由环境安全注入，并设置 `PGOPTIONS='-c default_transaction_read_only=on -c statement_timeout=10000'`。
 SQL 文件自身包含完整交接说明、参数示例、时间边界、字段释义、计数与人员归属口径、总数重复展示说明和两种备用查询，同事可直接在客户端执行并导出结果。
 真实数据库只读 CTE fixture 覆盖周期首尾/微秒交界、次日排除、跨周期总数隔离、UTC 连接下北京时间当天、同名不同用户、共享发送、摘要进行中/终态去重、来源排除、未知用户和人员筛选，并核对默认明细与两种备用查询的次数一致。
+
+## PostgreSQL V20260912123831 TraceWeave 代码知识参数
+
+`V20260912123831__common_parameters_add_traceweave_code_knowledge.sql` 只新增三个 `all` 平台、可编辑的通用参数：
+`TRACEWEAVE_BASE_URL`、`TRACEWEAVE_WEB_BASE_URL` 和 `TRACEWEAVE_CODE_KNOWLEDGE_SCOPE`。两个地址默认
+`UNCONFIGURED`，scope 默认 `enabled=false`、空试点用户、`DEV` 视图和空版本库映射；migration 不建立业务表、
+不写试点用户或真实服务地址，也不触发源码准备或图谱扫描。重复键保留管理员已有值。
+
+当前源码 SHA-256 为 `4853be3022db88f59bcd4a5059300f88631617ef107295833e5b2372ca19d509`。首次执行后必须冻结文件名和字节；
+发布前从目标环境已知 PostgreSQL 基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 内 migration 一致。
+未知 checksum、未知更高版本或历史分叉必须停止，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。

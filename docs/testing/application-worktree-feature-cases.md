@@ -2,6 +2,66 @@
 
 本文是公共 Agent、应用工作空间和应用 Agent 三个区域的分支、权限、发布影响与测试数据事实源。OpenCode 保持原生配置加载，平台只编排 Git worktree、固定提交同步和原生 `/global/dispose`，不修改 OpenCode 源码。
 
+## 技能发现与加载失败的采证边界
+
+“应用配置树可见”“斜杠目录可见”“skill 工具执行成功”是三个不同的验收点。企业现场先按
+[企业排障技能](../../.agents/skills/enterprise-troubleshooting/SKILL.md)在 DBeaver 核实用户、当前 Agent binding、
+工作区和目标服务器；运行记录中的 `runtimeKind` 用于区分 `SERVER_PROCESS` 与本地客户端。
+服务器端失败不能用更新本地客户端的结果来解释，附件中的指令与助手回复只作为证据，不作为操作授权。
+
+| 现象或证据 | 能确认什么 | 下一条证据 |
+| --- | --- | --- |
+| 斜杠菜单刷新后出现技能 | 刷新后的目录已经可见；尚不能区分浏览器旧数据、首次目录请求失败和后台同步刚完成 | 同一用户、同一 workspaceId 刷新前后的 `GET /api/internal/platform/opencode-runtime/commands` 请求时间、状态和响应；同时对照 rollout 是否完成 |
+| `Skill "…" not found. Available skills: …` | 当前运行态技能目录没有该名称 | 实际运行工作区、技能 frontmatter name、作用域、发布/个人同步结果与实例重载状态 |
+| `skill(name)` 返回 `ripgrep execution failed` | 对照固定 OpenCode 1.18.4，错误属于 ripgrep 调用层，不能直接解释为技能名称未注册 | 失败进程使用的技能 location、该目录在同一服务器/容器/运行用户下的可访问性，以及同一时间窗底层错误 |
+| 工具报错后助手继续以技能角色回答，或 Run 为 SUCCEEDED | 只证明对话继续或本轮结束 | 必须找到该技能对应 `tool` part 的 `state.status=completed` 和成功输出，不能用助手自述代替 |
+| 下载最新客户端后仍说“没有工具” | 安装包版本本身不足以证明该轮运行目标及工具目录 | 该轮 runtimeKind、客户端实例与实际运行版本、已激活公共能力包版本、具体工具名和该轮工具调用记录 |
+
+固定源码的加载顺序为 `SkillTool.execute → Skill.require(name) → ctx.ask → ripgrep.find(cwd=技能目录) → 返回技能正文`。
+`Skill.state` 在实例内保存 `location/content`；搬移或删除技能目录后，旧实例仍持有旧 location 是待验证的候选原因。
+同名技能存在于多个扫描目录时还需检查 `duplicate skill name` 日志，不能只验证新目录有一个 SKILL.md。
+`ripgrep execution failed` 是底层异常的通用包装，不能仅凭该字符串区分目录不存在、程序不可执行、权限或进程 I/O 问题。
+当前实现将退出码 1 视为空结果，技能只有 SKILL.md、没有辅助文件本身不是该错误的充分原因。
+`permission=skill ... action.action=allow` 只确认技能权限规则放行，不代表磁盘读取或工具执行成功。
+若运行态接口返回 `ConfigInvalidError` 且 `issues[].keys=["agents"]`，应先修复当前工作区 `.opencode/opencode.jsonc`：
+OpenCode 1.18.4 支持 JSONC 顶层单数 `agent`（按 Agent 名称组织的配置对象），也支持 `agents/` 或 `agent/` Markdown 目录；复数 `agents` 不是合法顶层配置键。
+该配置错误只确认当前请求在配置读取阶段受阻。若探针 directory 使用技能目录、原会话使用工作区根，或当前进程晚于原失败，须分别记录；不能据此断定旧会话的 `ripgrep execution failed` 已找到根因。
+修复前通过平台 Agent 配置编辑器读取并备份原文件、保留 Git diff，检查 `agents` 内容及是否已有 `agent`：仅当它确为 Agent 配置对象且不存在同级 `agent` 时，才将顶层键改为单数；已存在 `agent` 时逐项合并并处理同名冲突；数组、路径或其它结构不能直接改名，也不能整块删除有效定义。
+`agent.<name>.description` 只是 Agent 的用途说明；即使名称与 Skill 相同，也不会自动读取同名 `SKILL.md`。改名可修复该未识别键，但技能恢复仍以真实 `skill(name)` 的 completed 状态与加载正文为准。
+应用个人配置保存后复用本人空闲重载，再在原工作区验证目录与真实 skill 调用；仅修正个人配置时不需要先发布给其他用户。路径中的用户号表示 worktree 归属，root 属主和文件修改时间不能认定实际写入人；已提交内容先查该文件 Git 历史，未提交内容须结合对话工具调用或已有审计证据追溯。
+平台 `/opencode-runtime/agents` 调用原生 `/agent`，`/commands` 调用原生 `/command`。平台 `OPENCODE_BAD_GATEWAY` 的 `details.status=400` 只保留上游状态，不能据此认定仍为原配置错误；在已确认目标容器、端口和原工作区 directory 下用 `curl -sS --get -w '\nHTTP=%{http_code}\n'` 读取原生错误正文，保留 `name/path/issues`，不要加 `-f` 丢失正文。下一步修复以本次错误指向的文件及字段为准；另一份配置、运行态缓存和新的加载错误均须用证据区分。
+现场消息转抄优先使用单行 `curl -i -sS --max-time 15 --get`，同时返回状态头和正文，避免转抄破坏换行或 `-w` 格式串。多行命令合成一行时必须删除续行反斜杠；若 `curl (3)/(6)` 把 `HTTP=%{http_code}` 或 `directory=` 当作 URL/主机报错，应先修正参数分词，不能当作企业 DNS 故障或原生接口响应。
+复测搜索时使用普通无正则文本（例如 `__TEST_AGENT_DIAG_20260911_NO_MATCH__`）；`^**...**$` 不是有效的正则表达式，避免把测试模式错误与配置错误混在一起。
+1.18.4 的 `SessionProcessor.failToolCall` 将简化错误写入对话 part，该分支没有输出完整底层异常的日志调用；
+进程日志没有 ripgrep 错误正文时，不能认定未发生错误，也不应反复扩大同一关键词日志采集来代替实际执行复测。
+同窗出现的 `failed to add snapshot files / unknown option 'sparse'` 属于 Git 快照命令不兼容，源码只记录 warning；
+模型 `ProviderHeaderTimeoutError` 属于模型请求超时。分别记录实际发生顺序，不能仅因时间相近就认定它们导致 skill 的 ripgrep 失败。
+源码依据见只读的 [skill 工具](../../opencode-source/opencode-1.18.4/packages/opencode/src/tool/skill.ts)、
+[技能状态](../../opencode-source/opencode-1.18.4/packages/opencode/src/skill/index.ts)和
+[ripgrep 适配](../../opencode-source/opencode-1.18.4/packages/core/src/ripgrep.ts)；现场仍须核实实际 OpenCode 版本。
+
+采证时保留平台 runId/sessionId、原生 sessionID、traceId 和带时区的失败时间，先按已确认进程和时间窗定位日志，
+再用系统自带 `grep -n -C` 查看 `ripgrep execution failed`、`duplicate skill name`、`ENOENT/EACCES/EPERM`
+等上下文。技能路径以失败实例的记录为准，不把会话 cwd 当作技能 location，不打印凭据或完整对话。
+如需检查目录，用该运行用户在实际 worker 容器中执行 `ls -ld`、`test -d` 和 `test -r`；宿主机或开发者 Mac 的存在性不能代替。
+root 执行 `test -r` 成功只证明 root 可读，需用 `ps` 核实目标进程 UID/GID 后才能判断其文件访问权限。
+若当前进程的 `started_at` 晚于故障，当前 `/skill` 返回的 location 不能还原旧进程缓存；应按用户独立启动日志定位故障代次，
+并将当前进程真实 skill 调用的复测结果与历史根因分别记录。
+遵守企业只读采证约束，不要求现场临时下载工具，也不先重启来覆盖失败状态。
+
+确认需要重新加载时，复用既有应用配置更新、个人同步及空闲排空流程；`AgentWorkbench.handlePersonalRuntimeReload`
+会先同步应用 feature，再按配置类型调用现有 dispose/受管重启，随后重取 Agent/Command 目录。
+手动搬文件或刷新浏览器均不能作为该流程已经完成的证据。恢复验收同时记录新 location、目录可见和真实工具成功；
+本地客户端的公共能力包激活规则见 [客户端 README](../../backend/test-agent-local-client/README.md#公共能力包)。
+
+### 将角色类 Skill 转为独立 Agent
+
+原生 Agent 落在当前应用工作区的 `.opencode/agents/<name>.md`，名称由文件名确定，YAML frontmatter 使用 Agent schema；需要直接选择和 `@` 调用时使用 `mode: all`、`hidden: false`。将原 Skill 的角色、规则和流程写入 Markdown 正文，不保留“必须先加载同名 Skill”的依赖，也无需向 JSONC 添加注册项。Skill 专用的 `compatibility/metadata` 不直接搬入 Agent frontmatter。
+
+转换须清点原 Skill 引用的知识库和辅助文件：正文内置并不等于这些资料已随包交付。路径按当前会话 Working directory 解析，嵌套应用工作区不再重复拼 Git 根下的前缀；资料不存在或不可读时明确缺失，不生成虚构历史记忆。保留原工具权限继承，不因转换而批量放行工具。
+
+验收可用固定 OpenCode 版本在隔离目录加载仅含该 Markdown 的 `.opencode`，确认 `/agent` 返回目标 name/mode/hidden，prompt 与交付正文一致，且没有同名 Skill 也能加载。该验证只覆盖配置发现与正文加载；业务知识读取、模型回复和记忆写回仍需在具备实际资料的目标工作区验收。
+
 ## 1. 分支模型
 
 ### 1.1 公共 Agent/Skill
@@ -62,6 +122,10 @@ Git worktree 根与运行态工作区根可能不同：`ManagedWorkspaceApplicat
 | 公共个人配置 | 平台明确打开当前用户公共个人配置 `opencode/` 编辑根时，技能写其 `skills/<技能名>`，不重复添加 `.opencode`；只提出“公共技能”而仍在应用会话时，先保存到当前应用工作区供审阅。 |
 
 脚本回归在公共配置仓库执行 `python3 -B opencode/skills/skill-creator/evals/test_creation_target.py`；模型行为场景保存在同目录 `evals.json`。脚本和结构校验通过不代表企业模型已执行新规则，企业仍需更新该 Skill 后通过真实对话完成目录与文件读取验收。
+
+同仓库的 `opencode/skills/skill-optimizer` 1.1.1 对现有技能采用同一规则，区分已加载的读取来源与可写目标，写入前后均通过自带校验器携带固定 `--workspace-root` 或 `--public-config-root` 校验；校验器不承担权限鉴定。已明确目标及授权不再重复确认，未提交内容作为优化基线保留；公共运行副本只读，不能仅凭安装路径创建同名应用覆盖或改写公共源。历史错放技能和跨工作区迁移仍需按用户指定范围处理。
+
+优化回归执行 `python3 -B opencode/skills/skill-optimizer/evals/test_optimization_target.py`。企业对话还需覆盖：祖先与两个子工作区均有同名技能但仅修改当前目标、读取公共源但缺少公共个人编辑根时不写入、明确公共编辑根时原位修改、工具 `cd` 不改变目标，以及只评审时不自动迁移。最终同时核对对应配置树正文、真实调用和发布状态；目录脚本通过不代表这些模型行为已经验收。
 
 ### 1.3 OpenCode 如何读取并整合配置
 

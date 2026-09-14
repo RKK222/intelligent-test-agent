@@ -16,6 +16,7 @@ import type {
   AppSourceTreeSnapshot,
   AppSourceReplicaRetryPayload,
   AppSourceRepositorySummary,
+  CodeKnowledgeScope,
   AppSourceRetentionUpdatePayload,
   AppSourceRetentionUpdateResult,
   AgentSkillHubAsset,
@@ -2250,6 +2251,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     },
     listAppSourceRepositories: (appId: string) =>
       routedRequest<AppSourceRepositorySummary[]>(appSourceRepositoryBase(appId)),
+    getCodeKnowledgeScope: () =>
+      request<CodeKnowledgeScope>("/api/internal/platform/code-knowledge/scope"),
     listAppSourceBranches: (appId: string, repositoryId: string) =>
       routedRequest<string[]>(
         `${appSourceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/branches`,

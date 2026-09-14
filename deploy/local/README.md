@@ -79,7 +79,9 @@ Flyway validate 失败或 readiness 失败时任务失败，不执行 `repair`�
 - `/usr/local/sbin/test-agent-jenkins-host-control` 是仓库脚本的 root 所有固定副本；sudoers 只允许 Jenkins 无密码
   执行它的 `status` 和 `stop-legacy`，不能允许 Jenkins 以 root 执行工作区脚本。
 - `jenkins` 属于 `docker` 组；发布、日志、共享缓存目录归 `jenkins:jenkins`，运行时临时目录和后端日志允许
-  UID `1000` 的 `abc` 容器用户写入。
+  UID `1000` 的 `abc` 容器用户写入。由于 `/data2` 是启用权限检查的 FUSE 合并盘，
+  `/data2/deploy/intelligent-test-agent`、`releases` 和 `shared` 必须至少允许其他用户穿越（推荐 `0751`）；
+  发布清单会用真实运行 UID 挂载并读取 JAR，父目录权限不满足时在停止旧服务前失败。
 - Jenkins 任务从 SCM 读取根 `Jenkinsfile`，分支固定为 `*/release`，不得改为 `latest`、任意分支或工作区内联脚本。
 
 一次性配置完成后，日常发布只在 Jenkins 参数页选择 `ACTION=DEPLOY`。回滚必须填写已经存在且清单校验通过的

@@ -502,3 +502,21 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 ### 个人工作区搬迁文件诊断日志
 
 为企业现场定位，`personal_workspace_relocation_retry` 的 `filePath` 允许输出仓库相对路径及文件名，仅来源于本模块内部文件异常上下文，不消费外部 details 的路径字段。双引号包围字段，转义引号、反斜线、控制字符、Unicode 格式字符及行分隔符；转义结果最多 2048 字符，超出追加截断标记。无单文件定位时为 `NONE`。不输出绝对根目录、链接目标、文件内容、异常原文或 stderr；数据库安全消息与 API details 仍仅使用路径指纹。日志含业务文件名，应限制运维访问，外发前脱敏；此例外不放宽体验工作区等其他日志安全边界。
+
+## 代码知识与固定源码查询安全边界
+
+- `code_knowledge` 和 `code_source` 共用独立 `code-knowledge-read` audience；其签名密钥留在 Java，OpenCode
+  进程只获得有期限的用户 Token。该 Token 不能调用 Workspace Git、平台用户 API 或任何写入口，反向 audience
+  复用也必须失败。通用 API Token 过滤器只豁免两个精确路径，Controller 随后完成专用鉴权；相邻路径不得豁免。
+- 图谱入口每次从通用参数读取启用状态、试点用户和 Mimo→TraceWeave 映射。Tool 不能传服务地址、应用组或图仓库，
+  搜索只使用本次选择的主仓库；依赖映射只扩展允许的资产与链路遍历上下文。definition/chain/impact 在查询前核对
+  资产的 `applicationGroupId + repositoryId`，避免同名跨仓或伪造 assetId 越界。
+- 源码入口每次复核当前用户状态、现有应用成员权限、代码库关联、ACTIVE 且未过期 snapshot、slot generation、
+  本机 READY replica、ACTIVE Workspace、逻辑根和数据库权威索引；返回前再次复核。Tool 只传逻辑仓库 ID 和相对
+  路径，不能指定 Workspace、服务器或物理根。路径穿越、隐藏索引、符号链接和非普通文件均拒绝。
+- 知识基线由同次物化的已校验 staging 复制，和可编辑 `APP_SOURCE` 分开按 generation 保存并移除写权限。旧快照
+  不允许从可编辑目录补认基线。文件身份、大小或修改时间在读取前后变化时整次请求失败；generation 切换、过期或
+  撤权不能返回已读取正文。搜索和 HTTP 响应均有深度、数量、大小及时间预算。
+- 错误只返回稳定 code、reason、预算和上游 HTTP 状态，不返回 Token、服务 URL、物理路径、上游正文、源码正文
+  或堆栈。成功源码正文只进入本次 Tool 响应并附 commit/generation/path/line/SHA-256；源码和图谱不写入 Mem0。
+  所有操作为只读，不得借查询触发源码准备、TraceWeave 扫描/同步、业务源码写入或测试执行。

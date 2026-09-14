@@ -51,6 +51,14 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
 - 应用源码进度使用独立 WebSocket `app-source-operations/{operationId}/ws`，不复用 RunEvent。HTTP GET、ticket 签发、ticket 消费和后续轮询都按 operation 的 repository 重新检查：TEAM 允许任一当前启用关联应用的有效成员，PERSONAL 仅 owner 或仍满足该成员条件的 `APP_ADMIN`；解除关联、禁用应用或撤销成员立即拒绝。operationId 复用领域值对象，以显式 ECMAScript WhiteSpace + LineTerminator 集合规范化并拒绝精确 `.`/`..` 路径段，保证 NBSP 等输入与前端一致。ticket 短期、并发一次性、有界存储并绑定用户、操作、签发 JVM、精确 canonical Origin、角色事实和 traceId，错误 Origin 不消费正确来源的票。upgrade 同时校验 Origin 白名单和签票 Origin；仅当 CORS 配置恰好为单个 `*` 时与全局 CORS 一致接受任意格式合法的 canonical Origin，ticket 仍绑定实际来源。连接首帧必为数据库快照，随后只轮询数据库中的固定安全 step/server 摘要并发送既有 `step/completed/failed` 判别联合；本轮只改变授权与步骤内容，不改变 API/WebSocket wire。重连必须重新签票并重新取得快照，关闭连接只停止观察，不取消后台物化。
 - 工作区 Git 入口包含 diff/discard、真实 stage/unstage、三方冲突读取、单文件解决和取消/完成 merge。个人 worktree 继续支持本地提交和 feature 发布；体验 Workspace 另由 `POST /workspaces/{workspaceId}/git-commit` 只建立本服务器提交，不接受 personal workspace ID，也没有 push/发布入口。应用 `.opencode/**` 与普通文件共用个人 worktree，因此 `ManagedWorkspaceController` 在个人 commit/publish 入口对该目录再次校验 `APP_ADMIN`（含 `SUPER_ADMIN`）；体验 commit 则复用普通路径权限并由业务层再次确认 `wrk_exp_` 当前绑定。个人工作区提交/发布 DTO 透传可选 `operationId`，体验提交 DTO 仅含 `commitMessage/files`。Agent 配置进度 WebSocket 与其它平台 WebSocket 共用 CORS Origin 配置；本地 test profile 显式使用 `*` 时仍要求一次性 ticket，精确白名单模式继续在消费 ticket 前拒绝非法来源。
 - `WorkspaceGitToolController` 为公共 OpenCode `workspace-git` Tool 提供 agent-scoped 专用入口；只校验 runtime 签发的窄权限凭据和映射请求 DTO，当前 workspace、owner、路径角色与 Git 动作委托 workspace-management，不接受 Tool 指定 workspace ID。该精确路径由通用 API Token 过滤器放行后在 Controller 内完成专用鉴权，仍受统一限流、traceId 和异常响应约束。
+- `CodeKnowledgeToolController` 为公共 OpenCode `code_knowledge` 与 `code_source` Tool 提供两个独立只读入口。Controller
+  只接受 Mimo 逻辑版本库 ID、相对路径、查询条件和有界预算；TraceWeave 地址、应用组、图仓库、Workspace ID、
+  服务器和物理根均由服务端解析。两个精确路径仅跳过通用用户 Token 过滤，随后必须通过
+  `code-knowledge-read` 专用凭据；相邻路径仍按通用鉴权处理。源码调用直达 OpenCode 所在同节点 Java，复用
+  workspace-management 的 APP_SOURCE 权威鉴权和安全文件内核，不建立跨 Java 文件 HTTP 代理。图谱适配器内部的
+  Jackson 2 树在 HTTP 边界转换为普通对象，确保 Spring Boot 4/Jackson 3 codec 输出真实图谱字段，而非树节点类型标志。
+- `CodeKnowledgeScopeController` 为登录态工作台返回当前试点用户可选择的 Mimo 逻辑版本库 ID。前端再与当前应用
+  的源码仓库权限取交集；响应不包含 TraceWeave 地址、应用组或图仓库映射，停用和非试点作为不可用状态返回。
 - `UiTestToolConfigController` 为 `ui_test_execute` 提供无凭据、窄字段只读入口，只返回当前 `configured/baseUrl` 并把数据库读取调度到 `boundedElastic`；不代理独立 UI 平台请求。OpenCode worker 通过同节点 Java 内网地址调用，公共 Nginx 对该精确路径返回 404。
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；新建应用只允许 `SUPER_ADMIN`，应用成员、版本库和工作区管理校验 `APP_ADMIN` 且 `SUPER_ADMIN` 继承该能力。版本库分页列表可选透传 `keyword`，按版本库 ID、中文名、英文名和 Git 地址做服务端模糊检索；版本库类型下拉增量返回 `AUTOMATION_CODE_REPOSITORY`，其它部署模式、`repositoryType`、远端树和工作空间 DTO 仍只做协议转换，旧 `standard` 兼容派生、版本库类型历史守卫、内部模式 SSH 前缀、远端树过滤和别名唯一校验由业务服务处理。工作空间 PATCH DTO 可选透传 `workspaceName/enabled`，至少需要一个字段。设置页保存应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询；分支和远端树加载接口不触发 clone。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。

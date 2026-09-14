@@ -71,16 +71,22 @@ Browser
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、统一认证首次建号默认授予普通用户、登录认证和 Token 管理，以及用户管理组合查询、创建测试用户、手工用户名修正、单人角色调整和按显式用户/筛选快照的批量角色调整；新增外部 API Key 生成、RSA 密文生命周期、不可变 JVM 注册表、常量时间认证和跨 Java 刷新。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、已初始化引用资产库及已有应用源码历史的英文名/类型冻结、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器、参数更新跨实例广播，以及只管理显式 SPI 条目的本机内存参数注册表/诊断响应。 |
 | `test-agent-scheduler` | 保留 `ScheduledTaskHandler`/context/result、Redis 全局锁与旧运行记录清理；不再启动 runner 或创建/执行 `USER_PLAN`，全部周期任务由 XXL adapter 调用业务 handler。 |
-| `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务，以及按统一认证号读取既有用户 SSH Key 并输出 TAEK1 加密信封。 |
+| `test-agent-integration` | 非 opencode 外部系统联动业务边界；当前承载 IT-Tools/OmniTools 版本化离线目录、193 项目录校验、热门 Top 10 和用户/工具 30 秒点击计数服务，按统一认证号读取既有用户 SSH Key 并输出 TAEK1 加密信封，以及按试点用户和版本库映射收窄 TraceWeave 资产、定义、链路与影响的只读适配。 |
 | `test-agent-model-gateway` | 中立的企业模型目录投影、能力探测、OpenAI-compatible 请求准备/流式转发、上游错误脱敏和每日聚合调用；同时提供 OpenCode 内部代理复用的 URL/可信 Header/响应头安全支持，不承载 Controller 或 SQL。 |
 | `test-agent-memory` | 通用长期记忆业务边界；承载个人/团队治理、官方风格 Mem0 REST 端口、证据安全引用、学习 Outbox、2 秒 fail-open 检索和 Skill 提案，不保存聊天正文、不直连记忆 PostgreSQL。 |
 | `test-agent-xxl-job-admin-upstream` | 未做业务修改的 XXL-JOB Admin 3.4.2 源码与资源普通 JAR；只允许整体上游升级。 |
 | `test-agent-xxl-job-integration` | 进程内独立 Servlet Admin、独立 MySQL/Flyway/MyBatis、平台 advertised host 地址派生、由本机 Admin readiness 门控且不阻塞主服务的 executor、统一 handler adapter、一次性 SSO/JIT 用户、平台 session marker 校验和隔离 health。 |
-| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、用户通知分页/已读/fetch SSE、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 8 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
+| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、含 `X-Test-Agent-Linux-Server-Id` 的 CORS 边界、RunEvent SSE 按生产 Java 流式转发入口、用户通知分页/已读/fetch SSE、夜间时段/任务 HTTP 入口、工具盒子目录/点击 HTTP 入口、带 `permissionCount/PERMISSION` 的用户级会话运行态 HTTP/fetch SSE 入口、平台文件 WebSocket route/ticket/RPC 入口（含 workspace 原始文件、引用组合视图、Agent 配置文件及 Hub 制品/引用操作）、应用源码仓库/物化/打开/最近选择/持久化操作快照 HTTP 入口及独立一次性 ticket 进度 WebSocket、代码知识与固定源码的专用只读 Tool 入口、Agent & Skill Hub 浏览/发布/更新 HTTP 入口、应用引用资产库 8 个内部入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史、XXL 一次性 SSO 票据和显式 JVM 内存参数跨 Java 查询/刷新入口、trace Web 入口。 |
 | `test-agent-persistence` | PostgreSQL/Redis/ClickHouse 的 MyBatis XML、Flyway/ClickHouse checksum migration 与 Repository 适配，包括 Run 运行态、应用源码、会话上下文、workspace 归属、Agent & Skill Hub、工具点击、opencode 进程、scheduler/夜间任务、外部 API 凭据，以及脱敏运营事务 outbox、Redis 运营 stream reader、ClickHouse 原始事实/小时日汇总/能力与反馈事实查询。 |
 | `test-agent-event` | 按 RunStorageMode 分流的 RunEvent 追加、SSE、Redis 首帧物化 reset 与 `runtimeVersion` 有序尾流、legacy 数据库回放、全局事件触发流，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，强制 WebFlux 主上下文并装配 XXL Admin 子上下文/executor；只放启动、装配、profile、migration、health 和日志。 |
+
+代码知识联动保持两个产品独立部署：OpenCode 公共 `code_knowledge` Tool 经 `test-agent-api` 的专用只读鉴权调用
+`test-agent-integration`，后者只把配置映射后的 Mimo 版本库转换为 TraceWeave 查询范围；公共 `code_source` Tool
+经同节点 API 调用 `test-agent-workspace-management`，从当前 AppSource generation 的独立只读基线查询。
+`test-agent-opencode-runtime` 只负责向当前用户进程注入独立 audience Token。源码正文和图谱内容不进入领域模型、
+数据库或长期记忆，查询也不触发下载、扫描、同步、代码写入或测试执行。
 
 平台体验工作区按既有模块边界实现：`test-agent-api` 提供无请求体 open 与纯本地 git-commit Controller，并复用用户 TestAgent Java 路由；`test-agent-workspace-management` 负责启动期本机目录/Git 初始化、确定性身份、当前绑定、统一实时权限以及本地 stage/unstage/discard/冲突/commit；`test-agent-opencode-runtime` 在 Session/Run/上下文入口复用该权限；`test-agent-persistence` 仅以 Flyway 和 MyBatis XML 保存通用参数与每服务器当前绑定；`test-agent-app` 的 Runner 在业务可用前触发幂等初始化。前端由 `packages/backend-api` 调用平台 API，`apps/agent-web` 维护 `EXPERIENCE` 选择语义、本地 Git 交互和永久隐藏 push 的门禁。该链路不创建虚拟应用/版本/成员，不直连 OpenCode server，不新增文件 HTTP 代理或 RunEvent 类型。
 

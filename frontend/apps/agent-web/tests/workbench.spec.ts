@@ -255,10 +255,10 @@ test("avatar restart confirms active runs and dispose failure reuses the same cu
   await expect(page.getByText("检测到 2 个运行中的任务。继续重启会先中止这些任务，是否继续？")).toBeVisible();
   await page.getByRole("button", { name: "中止任务并重启" }).click();
   await expect.poll(() => processRestartRequests).toEqual([false, true]);
-  await expect(page.getByText("TestAgent 进程已重启")).toBeVisible();
+  await expect(page.getByText("服务端 OpenCode 已重启")).toBeVisible();
 
   await page.getByTestId("notification-center-trigger").click();
-  await page.getByRole("button", { name: /应用配置生效失败.*重启进程/ }).click();
+  await page.getByRole("button", { name: /智能体配置更新失败.*重启智能体/ }).click();
   await expect(page.getByText("检测到 2 个运行中的任务。继续重启会先中止这些任务，是否继续？")).toBeVisible();
   await page.getByRole("button", { name: "中止任务并重启" }).click();
   await expect.poll(() => processRestartRequests).toEqual([false, true, false, true]);
@@ -722,8 +722,8 @@ test("session share read-only workbench shows sender identity colors and fixed s
     const style = getComputedStyle(element);
     return { backgroundColor: style.backgroundColor, borderStyle: style.borderStyle };
   });
-  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(222, 217, 246)", borderStyle: "none" });
-  expect(ownAppearance).toEqual({ backgroundColor: "rgb(178, 237, 223)", borderStyle: "none" });
+  expect(ownerAppearance).toEqual({ backgroundColor: "rgb(243, 232, 255)", borderStyle: "none" });
+  expect(ownAppearance).toEqual({ backgroundColor: "rgb(230, 244, 255)", borderStyle: "none" });
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await expect(page.locator(".figma-chat-textarea")).toHaveAttribute("title", "当前分享权限为只读，不能修改工作区或发送消息。");
   await expect(page.getByTestId("manage-session-share")).toHaveCount(0);
@@ -5080,7 +5080,8 @@ test("user avatar menu keeps the logout action hidden", async ({ page }) => {
 
   await page.getByRole("button", { name: "当前用户 admin" }).click();
   await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(2);
-  await expect(page.getByText("运行中(server-a / 10.8.0.12:4096)")).toBeVisible();
+  await expect(page.getByText("服务端 OpenCode", { exact: true })).toBeVisible();
+  await expect(page.getByText("服务端实例 · 10.8.0.12:4096")).toBeVisible();
   // 灰显的「应用管理员」角色行应在菜单顶部，且在用户名之前出现。
   const roleRow = page.locator(".figma-user-menu-role");
   await expect(roleRow).toBeVisible();
@@ -5575,11 +5576,8 @@ test("user outside the memory rollout cannot see the entry or open the memories 
   await expect(page.getByTestId("memory-center")).toHaveCount(0);
 });
 
-test("super admin configures generic memory profiles and rollout without clipped controls", async ({ page }, testInfo) => {
+test("super admin configures generic memory profiles without clipped controls", async ({ page }, testInfo) => {
   const memorySettingsRequests: Array<Record<string, unknown>> = [];
-  const memoryWhitelistEnableRequests: string[] = [];
-  const memoryWhitelistDisableRequests: string[] = [];
-  const memoryDirectoryUserQueries: string[] = [];
   await mockBackendApi(page, {
     authRoles: ["SUPER_ADMIN"],
     memoryAdminHealth: {
@@ -5624,17 +5622,7 @@ test("super admin configures generic memory profiles and rollout without clipped
       updatedByUserId: "usr_admin",
       updatedAt: "2026-08-09T00:00:00Z"
     },
-    memoryWhitelist: [{
-      userId: "usr_tester",
-      enabled: true,
-      updatedByUserId: "usr_admin",
-      createdAt: "2026-08-09T00:00:00Z",
-      updatedAt: "2026-08-09T00:00:00Z"
-    }],
     memorySettingsRequests,
-    memoryWhitelistEnableRequests,
-    memoryWhitelistDisableRequests,
-    memoryDirectoryUserQueries,
     memoryInternalModelProviders: {
       providers: [{
         providerId: "enterprise",
@@ -5642,6 +5630,13 @@ test("super admin configures generic memory profiles and rollout without clipped
         baseUrl: "https://models.example.test",
         enabled: true,
         sortOrder: 1,
+        tokenConfigured: true
+      }, {
+        providerId: "cpu",
+        name: "CPU Embedding",
+        baseUrl: "http://memory-embedding:8080",
+        enabled: true,
+        sortOrder: 2,
         tokenConfigured: true
       }],
       tokenConfigured: true
@@ -5672,23 +5667,18 @@ test("super admin configures generic memory profiles and rollout without clipped
         enabled: true,
         declaredCapabilities: ["EMBEDDING"],
         probedCapabilities: ["EMBEDDING"]
+      }],
+      cpu: [{
+        providerId: "cpu",
+        modelId: "memory-bge-small-zh-v1.5",
+        upstreamModelId: "bge-small-zh-v1.5",
+        displayName: "CPU BGE Small ZH",
+        embeddingDimension: 512,
+        enabled: true,
+        declaredCapabilities: ["EMBEDDING"],
+        probedCapabilities: ["EMBEDDING"]
       }]
-    },
-    memoryDirectoryUsers: [{
-      userId: "usr_88",
-      username: "测试用户 88",
-      unifiedAuthId: "AUTH88",
-      status: "ACTIVE",
-      roles: ["USER"],
-      createdAt: "2026-08-09T00:00:00Z"
-    }, {
-      userId: "usr_inactive_88",
-      username: "停用用户 88",
-      unifiedAuthId: "INACTIVE88",
-      status: "DISABLED",
-      roles: ["USER"],
-      createdAt: "2026-08-09T00:00:00Z"
-    }]
+    }
   });
 
   await gotoWorkbench(page, { selectConversation: false });
@@ -5699,15 +5689,13 @@ test("super admin configures generic memory profiles and rollout without clipped
   await expect(page.getByTestId("memory-health-chat")).toContainText("enterprise/chat-model");
   await expect(page.getByTestId("memory-health-queue")).toContainText("2 待处理");
   await expect(page.getByTestId("memory-health-projection")).toContainText("3 待投影");
-  await expect(page.getByText("usr_tester")).toBeVisible();
 
   const panel = page.getByTestId("memory-admin-panel");
   await expect.poll(() => panel.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
   const cards = page.locator(".memory-admin-card");
-  await expect.poll(async () => {
-    const [policy, rollout] = await Promise.all([cards.nth(0).boundingBox(), cards.nth(1).boundingBox()]);
-    return policy && rollout ? Math.round(Math.min(policy.width, rollout.width)) : -1;
-  }).toBeGreaterThanOrEqual(340);
+  await expect(cards).toHaveCount(1);
+  await expect.poll(async () => Math.round((await cards.first().boundingBox())?.width ?? -1))
+    .toBeGreaterThanOrEqual(340);
 
   const modelSelect = page.getByRole("combobox", { name: "选择固定内部 CHAT 模型" });
   await modelSelect.click();
@@ -5724,37 +5712,6 @@ test("super admin configures generic memory profiles and rollout without clipped
     primaryEmbeddingModelId: "enterprise/embedding-only",
     expectedVersion: 3
   });
-
-  await page.getByRole("button", { name: "添加用户", exact: true }).click();
-  let whitelistDialog = page.getByRole("dialog", { name: "添加灰度用户" });
-  let whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择灰度用户" });
-  await whitelistSelect.fill("88");
-  let whitelistListbox = page.getByRole("listbox", { name: "选择灰度用户" });
-  await expect(whitelistListbox.getByRole("option")).toHaveCount(1);
-  await expect(whitelistListbox.getByRole("option")).toContainText("usr_88");
-  const [listboxBox, cancelBox] = await Promise.all([
-    whitelistListbox.boundingBox(),
-    whitelistDialog.getByRole("button", { name: "取消", exact: true }).boundingBox()
-  ]);
-  expect(listboxBox && cancelBox
-    ? Math.max(0, Math.min(listboxBox.y + listboxBox.height, cancelBox.y + cancelBox.height) - Math.max(listboxBox.y, cancelBox.y))
-    : -1).toBe(0);
-  await whitelistDialog.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page.locator(".memory-user-dialog")).toBeHidden();
-
-  await page.getByRole("button", { name: "添加用户", exact: true }).click();
-  whitelistDialog = page.getByRole("dialog", { name: "添加灰度用户" });
-  whitelistSelect = whitelistDialog.getByRole("combobox", { name: "选择灰度用户" });
-  await whitelistSelect.fill("88");
-  whitelistListbox = page.getByRole("listbox", { name: "选择灰度用户" });
-  await whitelistListbox.getByRole("option", { name: /测试用户 88.*AUTH88.*usr_88/ }).click();
-  await whitelistDialog.getByRole("button", { name: "确认添加", exact: true }).click();
-  await expect.poll(() => memoryWhitelistEnableRequests).toEqual(["usr_88"]);
-  await expect(page.getByRole("button", { name: "移出 usr_88" })).toBeVisible();
-  await page.getByRole("button", { name: "移出 usr_88" }).click();
-  await page.getByRole("dialog", { name: "移出灰度名单" }).getByRole("button", { name: "移出", exact: true }).click();
-  await expect.poll(() => memoryWhitelistDisableRequests).toEqual(["usr_88"]);
-  expect(memoryDirectoryUserQueries).toContain("88");
 
   await page.getByRole("button", { name: "查看技术信息", exact: true }).click();
   await expect(page.locator("#embedding-technical-details")).toContainText("fixed-revision");
@@ -5776,16 +5733,8 @@ test("super admin configures generic memory profiles and rollout without clipped
   await page.evaluate(() => document.documentElement.classList.remove("dark"));
 
   await page.setViewportSize({ width: 560, height: 820 });
-  await page.getByRole("button", { name: "添加用户", exact: true }).click();
-  const narrowDialog = page.locator(".memory-user-dialog");
-  await expect(narrowDialog).toBeVisible();
-  const narrowBox = await narrowDialog.boundingBox();
-  expect(narrowBox).not.toBeNull();
-  expect(narrowBox!.x).toBeGreaterThanOrEqual(0);
-  expect(narrowBox!.x + narrowBox!.width).toBeLessThanOrEqual(560);
+  await expect(page.getByRole("button", { name: "保存策略", exact: true })).toBeVisible();
   await expect.poll(() => page.locator("html").evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(0);
-  await page.keyboard.press("Escape");
-  await expect(narrowDialog).toBeHidden();
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(page.locator(".embedding-technical__toggle svg")).toHaveCSS("transition-duration", "0s");
@@ -6230,6 +6179,73 @@ test("new runs use one in-memory conversation context and a client request id", 
     contextToken: "ctx_e2e_1"
   });
   expect(String(runRequests[0]?.clientRequestId)).toMatch(/^req_/);
+});
+
+test("code knowledge scope keeps the workspace and injects only the selected repositories into the run", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const ordersRepository = appSourceRepository({
+    repositoryId: "repo_orders",
+    name: "订单服务代码库",
+    englishName: "orders-service",
+    targetCommit: "orders-commit"
+  });
+  const paymentsRepository = appSourceRepository({
+    repositoryId: "repo_payments",
+    name: "支付服务代码库",
+    englishName: "payments-service",
+    downloadState: "NOT_DOWNLOADED",
+    generation: null,
+    purpose: null,
+    branch: null,
+    targetCommit: null,
+    selectedPaths: [],
+    expiresAt: null,
+    openable: false
+  });
+  await mockBackendApi(page, {
+    ...runnableWorkspaceSetup(),
+    runRequests,
+    codeKnowledgeScope: {
+      available: true,
+      reason: null,
+      defaultView: "DEV",
+      repositoryIds: ["repo_orders", "repo_payments", "repo_without_source_permission"]
+    },
+    appSourceRepositories: {
+      app_gcms: [ordersRepository, paymentsRepository]
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  const scopeTrigger = page.getByTestId("code-knowledge-scope-trigger");
+  await expect(scopeTrigger).toContainText("代码知识 2/2");
+  const workspaceSwitcher = page.locator(".ta-workbench-footer-branch");
+  const workspaceLabel = await workspaceSwitcher.textContent();
+
+  await scopeTrigger.click();
+  await page.getByRole("checkbox", { name: "选择支付服务代码库" }).uncheck();
+  await expect(scopeTrigger).toContainText("代码知识 1/2");
+
+  await page.getByRole("button", { name: "准备支付服务代码库源码" }).click();
+  const sourceDialog = page.getByRole("dialog", { name: "下载应用源码" });
+  await expect(sourceDialog).toBeVisible();
+  await expect(sourceDialog).toContainText("支付服务代码库");
+  await sourceDialog.getByRole("button", { name: "关闭源码弹窗" }).click();
+  await expect(workspaceSwitcher).toHaveText(workspaceLabel ?? "");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")
+    .fill("分析订单提交方法的调用链和回归影响");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  const parts = runRequests[0]?.parts as Array<Record<string, unknown>>;
+  const scopePart = parts.find((part) => part.id === "code-knowledge-scope");
+  expect(scopePart).toMatchObject({
+    type: "reference",
+    metadata: { repositoryIds: ["repo_orders"] }
+  });
+  expect(String(scopePart?.label)).toContain('repositoryIds=["repo_orders"]');
 });
 
 test("batch test cases start isolated runs, retry failures, and create isolated scheduled tasks", async ({ page }) => {
@@ -7509,10 +7525,10 @@ test("a new run replaces one title-pending fetch SSE and ignores the old stream'
   await page.waitForTimeout(700);
   await expect(page.locator(".figma-chat-title")).not.toHaveText("旧 Run 晚到标题");
   expect(await page.evaluate(() => (
-    window as Window & { __titleWatchRunStreams?: Array<{ runId: string; authorization: string | null; closed: boolean }> }
+    window as Window & { __titleWatchRunStreams?: Array<{ runId: string; authorization: string | null; closed: boolean; emittedEventIds: string[] }> }
   ).__titleWatchRunStreams)).toEqual([
-    { runId: "run_1", authorization: "Bearer test-token", closed: true },
-    { runId: "run_2", authorization: "Bearer test-token", closed: false }
+    { runId: "run_1", authorization: "Bearer test-token", closed: true, emittedEventIds: ["evt_title_run_1_1"] },
+    { runId: "run_2", authorization: "Bearer test-token", closed: false, emittedEventIds: [] }
   ]);
 });
 
@@ -10554,8 +10570,8 @@ test("completed write events refresh the changed file without a separate live to
           tool: "write",
           state: {
             status: "completed",
-            input: { filePath: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts" },
-            metadata: { filepath: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts" }
+            input: { filePath: "/Users/huang/workspace/personal-default/tests/checkout.spec.ts" },
+            metadata: { filepath: "/Users/huang/workspace/personal-default/tests/checkout.spec.ts" }
           }
         }
       }),
@@ -10566,7 +10582,7 @@ test("completed write events refresh the changed file without a separate live to
         partID: "part_write",
         files: [
           {
-            path: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts",
+            path: "/Users/huang/workspace/personal-default/tests/checkout.spec.ts",
             patch: "@@ -1 +1,3 @@",
             additions: 3,
             deletions: 1,
@@ -11169,6 +11185,10 @@ async function mockBackendApi(
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processServiceStatus?: "UNASSIGNED" | "NOT_RUNNING";
     processStatusRequests?: string[];
+    /** 当前用户可见的 OpenCode 实例；默认空数组，工作台会继续使用服务端进程状态。 */
+    opencodeEndpoints?: Array<Record<string, unknown>>;
+    /** 当前用户的代码知识逻辑范围；默认关闭，避免无关用例显示选择器。 */
+    codeKnowledgeScope?: Record<string, unknown>;
     processInitializations?: Array<Record<string, unknown>>;
     processRestartRequests?: boolean[];
     processRestartConflictRunningCount?: number;
@@ -11306,11 +11326,22 @@ async function mockBackendApi(
     capture.agentFileFrames?.push(frame);
   });
   if (!capture.skipInitialAuthToken) {
-    await page.addInitScript(({ showOnboarding }) => {
+    await page.addInitScript(({ showOnboarding, acknowledgeExperienceOffer, userId }) => {
       sessionStorage.setItem("test-agent.auth.token", "test-token");
-      // 工作台 E2E 默认跳过首次引导，避免遮罩拦截真实文件树与 tab 点击。
-      if (!showOnboarding) localStorage.setItem("test-agent.onboarding.v7:usr_admin", "seen");
-    }, { showOnboarding: capture.showOnboarding === true });
+      // 工作台 E2E 默认跳过首次引导；只有明确无应用且未测试体验区时才跳过自动体验邀请。
+      if (!showOnboarding) {
+        localStorage.setItem(`test-agent.onboarding.v7:${userId}`, "seen");
+        if (acknowledgeExperienceOffer) {
+          localStorage.setItem(`test-agent.experience-workspace.v1:${userId}`, "acknowledged");
+        }
+      }
+    }, {
+      showOnboarding: capture.showOnboarding === true,
+      acknowledgeExperienceOffer: !capture.experienceWorkspace && (
+        capture.applications?.length === 0 || capture.managedApplications?.length === 0
+      ),
+      userId: capture.authUser?.userId ?? "usr_admin"
+    });
   }
   await page.addInitScript(({
     fileContents,
@@ -12636,6 +12667,39 @@ async function mockBackendApi(
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus, capture.processServiceStatus)));
       return;
     }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/opencode-endpoints/me") {
+      await route.fulfill(json(capture.opencodeEndpoints ?? [{
+        runtimeKind: "SERVER_PROCESS",
+        endpointId: "ocp_1234567890abcdef",
+        displayName: "服务端 OpenCode",
+        online: currentProcessStatus === "READY",
+        processStatus: currentProcessStatus === "READY" ? "RUNNING" : currentProcessStatus,
+        platform: "Linux",
+        architecture: "amd64",
+        clientVersion: null,
+        opencodeVersion: "1.0.0",
+        connectionGeneration: 1,
+        reportedAddresses: ["10.8.0.12"],
+        observedRemoteAddress: null,
+        port: 4096,
+        healthy: currentProcessStatus === "READY",
+        lastHeartbeatAt: "2026-06-24T00:00:00Z",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        serviceAddress: "10.8.0.12",
+        capabilities: {}
+      }]));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/platform/code-knowledge/scope") {
+      await route.fulfill(json(capture.codeKnowledgeScope ?? {
+        available: false,
+        reason: "DISABLED",
+        defaultView: "DEV",
+        repositoryIds: []
+      }));
+      return;
+    }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/restart") {
       const request = JSON.parse(route.request().postData() ?? "{}") as { confirmRunning?: boolean };
       const confirmRunning = request.confirmRunning === true;
@@ -13560,6 +13624,7 @@ function defaultPersonalWorkspace(versionId: string) {
       workspaceId: "wrk_personal_default",
       name: "default",
       rootPath: "/Users/huang/workspace/personal-default",
+      physicalRootPath: "/Users/huang/workspace/personal-default",
       appId: "app_gcms",
       versionId,
       applicationWorkspaceId: "awp_1"

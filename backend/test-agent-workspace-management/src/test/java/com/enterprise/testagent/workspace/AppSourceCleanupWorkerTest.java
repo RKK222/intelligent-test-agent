@@ -103,6 +103,9 @@ class AppSourceCleanupWorkerTest {
                 "." + targetName + ".00000000-0000-0000-0000-000000000003.backup");
         Files.createDirectories(staging);
         Files.createDirectories(backup);
+        Path knowledgeBaseline = AppSourceKnowledgeBaseline.root(root, 1L);
+        Files.createDirectories(knowledgeBaseline);
+        Files.writeString(knowledgeBaseline.resolve("source.txt"), "immutable source");
         Files.writeString(staging.resolve("partial.txt"), "partial");
         Files.writeString(backup.resolve("old.txt"), "old");
         AppSourceCleanupWorker worker = new AppSourceCleanupWorker(
@@ -114,6 +117,7 @@ class AppSourceCleanupWorkerTest {
         assertThat(root.resolve("source.txt")).doesNotExist();
         assertThat(staging).doesNotExist();
         assertThat(backup).doesNotExist();
+        assertThat(knowledgeBaseline).doesNotExist();
         assertThat(sha256(Files.readAllBytes(root.resolve(AppSourceApplicationService.INDEX_FILE_NAME))))
                 .isEqualTo(indexedSnapshot.indexSha256());
     }
@@ -146,6 +150,7 @@ class AppSourceCleanupWorkerTest {
         Path secondRetainedBackup = root.getParent().resolve(
                 "." + targetName + ".00000000-0000-0000-0000-000000000002.backup");
         Path currentStaging = root.getParent().resolve("." + targetName + ".g3.current.staging");
+        Path currentKnowledgeBaseline = AppSourceKnowledgeBaseline.root(root, 3L);
         Path otherRepositoryBackup = root.getParent().resolve("." + targetName + "-other.first.backup");
         Path similarSuffix = root.getParent().resolve("." + targetName + ".first.backup.tmp");
         Path nonUuidBackup = root.getParent().resolve("." + targetName + ".not-a-uuid.backup");
@@ -155,6 +160,8 @@ class AppSourceCleanupWorkerTest {
             Files.createDirectories(directory);
             Files.writeString(directory.resolve("marker.txt"), directory.getFileName().toString());
         }
+        Files.createDirectories(currentKnowledgeBaseline);
+        Files.writeString(currentKnowledgeBaseline.resolve("source.txt"), "generation three baseline");
         AppSourceCleanupWorker worker = new AppSourceCleanupWorker(
                 appSources, paths, indexes, results, new WorkspaceServerIdentity(SERVER_ID.value()),
                 Clock.fixed(NOW, ZoneOffset.UTC), 300L, 32);
@@ -165,6 +172,7 @@ class AppSourceCleanupWorkerTest {
         assertThat(secondRetainedBackup).doesNotExist();
         assertThat(root.resolve("current-generation.txt")).hasContent("generation three");
         assertThat(currentStaging).isDirectory();
+        assertThat(currentKnowledgeBaseline.resolve("source.txt")).hasContent("generation three baseline");
         assertThat(otherRepositoryBackup).isDirectory();
         assertThat(similarSuffix).isDirectory();
         assertThat(nonUuidBackup).isDirectory();

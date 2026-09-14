@@ -17356,11 +17356,12 @@
 - How: 只读核对源码、相关规范及全部会话日志近期条目；前端已有目录树 130 秒预算和 operationId 查询/幂等能力，应复用。后续实施需补真实鉴权拒绝、累计慢请求、超时后原 operationId 恢复以及实际对话验证。
 - Result: 仅形成方案评审，未修改产品代码、环境配置或附件，未运行应用测试或连接企业现场；readtimeout 的实际产生层及企业故障根因仍需现场请求错误码、耗时和同 traceId 日志确认。
 
-## 2026-09-10 - 定位技能不可见并修正创建 Skill 的工作区落点
+## 2026-09-10 - 定位技能不可见并修正创建与优化 Skill 的工作区落点
 
 ### Why
 
 - 企业用户在个人 Git worktree 根的 `.opencode/skills` 创建技能，左侧应用 Agent 配置手动刷新后仍不可见。
+- 9 月 11 日用户要求同步调整“技能优化”，避免优化流程沿用错误目录或把公共安装来源当作编辑目标。
 
 ### What
 
@@ -17369,6 +17370,7 @@
 - 本机公共配置副本的 skill-creator 以 `<worktree-root>/.opencode/skills` 描述应用落点，未区分 Git 根与运行态工作区根，存在引导歧义；未核验企业实际安装版本，不能断言现场一定由该提示导致。
 - 用户后续明确要求调整创建技能，已在公共配置仓库现有 `public-usr_test_dev` 分支将 `opencode/skills/skill-creator` 升级至 1.2.1，提交 `a777af57d6ebfa98a139ae48b5e91ebc3452b9f8`。以 OpenCode 的 `Working directory` 固定应用输出根，明确 `Workspace root folder` 是 Git 根，后续 `cd`、祖先已有 `.opencode` 和“公共技能”措辞均不改变应用落点。
 - 扩展既有离线结构校验脚本，增加互斥的 `--workspace-root` / `--public-config-root` 参数；增加临时目录 CLI 测试与模型场景，同步公共配置 README/结构规范及平台 `docs/testing/application-worktree-feature-cases.md`。旧无参数调用仍可校验已有技能结构；未修改另一历史路径下的同名技能。
+- 后续将同一公共配置仓库 `opencode/skills/skill-optimizer` 升级至 1.1.1，提交 `329fcde14ad2c07c058472ad6ecc76678c524845`：固定会话或本人公共编辑根，区分来源与实际编辑目标，写前写后校验；复用已有授权并保留未提交基线，不自动迁移、覆盖公共运行副本或建立同名应用覆盖。同步质量模型、报告模板、README 和 10 个模型场景；目录逻辑复用创建器，但保留优化器接受原非空 metadata.source 的兼容规则。
 
 ### How
 
@@ -17377,9 +17379,151 @@
 - 目录 CLI 测试 8/8、自带结构/落点校验和支持 OpenCode compatibility 的 quick_validate.py 通过；新增模型场景共 9 项，尚未以企业模型逐项执行。未启动或重启企业服务，最相关可运行目标为技能自带 Python 校验器。
 - 平台文档检查 `bash tools/verify-ai-docs.sh` 与两仓库 `git diff --check` 通过，稳定测试文档和本机对应会话日志同步更新。
 - 独立交付包 `.tmp/enterprise-skill-packages/20260910/skill-creator-1.2.1.zip` 从公共配置固定提交归档，根目录为 `SKILL.md`，不含其它 Agent 或公共配置。ZIP CRC、逐文件提交字节一致性及解压后结构/落点校验和 8 项目录测试通过；SHA-256 为 `04354b8299a56043a05385370827b2344d8f2fd097760c71df87a154d69bd46d`。
+- 优化器执行 `python3 -B opencode/skills/skill-optimizer/evals/test_optimization_target.py`，9/9 通过；自带结构/落点校验和 quick_validate.py 通过。独立归档 `.tmp/enterprise-skill-packages/20260911/skill-optimizer-1.1.1.zip` 与固定提交的 6 个文件逐字节一致，ZIP CRC 和解压后结构/落点及 9 项回归通过；SHA-256 为 `914ca44ba7c5eb3bbb19855837b8c891acb420d91e728ebbd2e5ba0d1ff933c7`。最相关可运行目标为独立 Python 校验器，未重启平台服务；模型场景尚未运行。
 
 ### Result
 
 - 已确认用户提供的技能保存路径与页面工作区根目录不同，服务器归属记录一致；不能以本机状态外推企业目录存在性或请求链路健康。
 - 修正规则和校验脚本已保存于独立公共配置 Git，未推送或发布。需要在企业公共 Agent 个人编辑区更新完整技能包，并通过既有 Diff/提交/发布流程生效；平台 JAR 更新不会自动发布该独立 Git 内容。
+- 续改优化器时保持公共配置现有分支与平台 release，不新建或切换分支；平台只提交对应稳定测试说明和本机日志，保留工作区既有 SQL 等无关改动。
 - 企业技能目录迁移与页面刷新验收尚未执行；后续需在当前会话对应的工作区 `.opencode/skills` 检查目标冲突并恢复技能包，再验收应用级目录与文件读取。对话终态只刷新普通文件树的独立缓存缺口不是本次手动刷新无效的充分解释，未据此修改前端。
+
+
+## 2026-09-11 - 区分企业技能目录刷新与实际加载失败
+
+### Why
+
+- 企业反馈：用户尾号 1832 更新客户端后称没有工具；尾号 0912 搬移技能后首轮失败；尾号 7621 切换应用后斜杠不可见，后续用户确认刷新已可见。
+- 用户随后要求暂不继续该故障，将光学文件接收目录 `.opencode.7z` 中的车小黛 Skill 转为独立 Agent。
+
+### What
+
+- 解压并解析用户提供的对话归档，仅包含 2026-09-11 10:07–10:08（北京时间）的一轮“小黛”，没有早上搬移技能的操作，也没有尾号 1832 的失败记录。原始附件保留在本机 .tmp，不纳入 Git。
+- 该轮 runtimeKind=SERVER_PROCESS，workspaceId 为 wrk_743b5b466331426c82376cce2521db3e；cwd 仍为个人 worktree 下 F-GCMS-PSN/workspace，不能当作技能实际 location 或公共目录搬移成功的证据。
+- 唯一 skill 调用 chat-with-chexiaodai 的状态为 error，错误为 ripgrep execution failed；后续助手角色回复没有成功工具调用，run.succeeded 不等于技能成功加载。runId=run_4ca8c2d74b284ae08559cf8c1f737794，平台 sessionId=ses_c167ac9e72a448a7ae122e72e219e272，原生 sessionID=ses_f71c80b94ffeoT64FuEb4M1VIq，traceId=trace_mtwbfr7oyw1504h8wzo。
+- 稳定测试文档补充目录可见性、真实 skill 执行、运行目标和客户端能力版本的分别采证，复用现有同步/重载入口，不新增产品实现。
+- 用户补充企业查询：尾号 0912 的 ACTIVE binding 与 RUNNING 进程 ocp_158e2a96824c4183886b7207cc27db00、工作区均归属 test-agent-backend-122-233-30-4，端口 14097、PID 2749440、容器 test-agent-opencode-worker；查询回显 started_at=2026-09-11 10:23:58.819、最近健康检查 10:45:41.596。当前进程晚于附件失败，不能据此还原 10:07 的旧缓存。
+- 用户在企业 shell 请求当前 /skill，chat-with-chexiaodai 的 location 为本人的 F-GCMS-PSN/workspace/.opencode/skills/chat-with-chexiaodai/SKILL.md；该路径下目录 root:root/750、文件 root:root/640，root 的 test -r 成功。已确认当前目录可发现和 root 可读，尚未确认该 shell 是否位于 worker 内、目标进程 UID/GID 与真实 skill 执行结果；不将这组结果当作历史失败已恢复。
+- 新附件 20260911_105457_input.txt 包含旧代次日志 001350912-20260902T092746.518345612Z-14097.log 的 90 条筛选结果；会话创建行明确 version=1.18.4，原日志 5512 行在 UTC 02:07:14.277 对该技能判定 allow，与附件工具失败时间相邻，确认当时已取得技能记录并通过技能权限规则。日志片段未包含进程账号输出、ripgrep 底层原因或成功 skill 复测。
+- 用户随后在当前端口 14097 复测 `/find`：返回 HTTP 400 `ConfigInvalidError`，文件为本人应用工作区 `.opencode/opencode.jsonc`，问题为顶层未识别键 `agents`。探针 directory 是技能目录，与原会话 cwd 不同，且当前进程晚于原失败；只能确认本次请求的配置错误，不能据此定因 10:07 的 ripgrep 失败。已纠正此前“根因已明确”的过度判断。
+- 对照固定 1.18.4 schema，JSONC 支持单数 `agent` 配置对象，也支持 `agents/`/`agent/` Markdown 目录；此前“必须迁回 Markdown 目录”的建议不准确。需先读取非法 `agents` 内容及已有 `agent`，再选择改名、逐项合并或按实际结构调整，不能盲删定义。用户号表示 worktree 归属，root 属主不证明写入人，需 Git 历史或对话工具/审计证据。
+- 用户随后提供容器内实际 JSONC：除 schema、references 和 permission 外，仅有 `agents.chat-with-chexiaodai.description`，没有顶层 `agent`。可确认最小修正为顶层 `agents` 改成 `agent`，保留原描述、引用与权限；尚未在企业执行。Agent 用途描述不会自动加载同名 Skill，需本人重载后真实调用验证。
+- 用户 13:47–13:48（北京时间）反馈已改为 `agent`，但同 workspaceId 的平台 agents 请求仍返回 `OPENCODE_BAD_GATEWAY`，traceId=trace_mtwjaam2ddi4o2l6qdf、nodeId=node_ocp_158e2a96824c4183886b7207cc27db00、baseUrl=http://122.233.30.4:14097、上游 status=400。用户贴出的新配置保留 references/permission，但未提供本次原生错误正文，不能认为仍为旧 agents 错误或已恢复。
+- 图片 IMG_7947.HEIC 显示多行 curl 被压成一行后仍保留续行反斜杠，出现 curl (3) URL 格式错误以及 curl (6) 把 HTTP 格式串、directory= 当作主机；照片未提供可判读的原生 /agent 错误正文。上方含 agents 的 cat 输出在 SSH 超时重连之前，不能据此确定当前修改未保存。后续改发无续行符、无 -w 格式串的单行 curl -i 命令。
+- 新附件 20260911_140546_input.txt 为 111077 字节的 Agent 列表尾段，开头从权限规则中途开始、结尾为列表闭括号及 shell 提示符，未包含 HTTP 状态行。可完整解析 test-design-orchestrator、test-design-review、test-execution-agent、test-execution-api、test-execution-ui、title、transaction-chain-analyst、whitebox-code-analyst 共 8 个 Agent 对象；片段未出现配置/网关/ripgrep 错误。chat-with-chexiaodai 仅出现 8 次于技能目录权限，不是该 Agent 的 name 对象，也不证明技能加载成功；因头部缺失不能判定该 Agent 不存在。当前已取得目录数据，待用户刷新平台页面验证本轮 agents/commands 请求。
+- 用户在本轮继续确认刷新后平台仍报错，尚未提供此次新错误 JSON；已请求新 traceId、baseUrl 和 status 与容器直连结果对照。平台恢复保持未验证，不把直连列表片段外推为前端或 Java 调用已恢复。
+- 找到 `/Users/kaka/Downloads/光学文件接收/.opencode.7z`，选择性提取原 Skill 1.0.0（正文 SHA-256 1cbf2cb4e26ba801459dbbc67e2cc9047fedc345ed6426a85063916bea218093）及参考 Agent。产物位于同目录 `车小黛-Agent/.opencode/agents/chat-with-chexiaodai.md`，mode=all、hidden=false，直接内置原流程；保留人设、术语、确信度、纠错和记忆同步，修正当前工作区路径并补充知识库缺失/写入失败处理，不新增权限或固定模型。源包不含 docs/车小黛 知识库。
+- 同目录交付 `车小黛-Agent.zip`、SHA 文件、使用说明和验证记录；ZIP 只含 Agent、说明和验证 JSON，不覆盖原归档/技能/JSONC。Agent SHA-256 2e3ccf6aa5246ed36988609802765f53af53f25661773373aa8accc52fad882b；ZIP SHA-256 90e24593987656a0c5072cec2cd31ec64f966ab0adae3514c098a821fbb4ada1。稳定测试文档增加角色 Skill 转 Agent 的路径、依赖和验收边界。
+- 后续直接读取最新源包内 414 字节 opencode.jsonc，确认只有 $schema/references/permission，无 agent/agents；本次仅新增 Markdown Agent，无需改该配置。纠正此前沿用旧对话配置状态的答复，并同步交付包使用说明、ZIP 校验值；Agent 正文和既有实际加载验证不变。
+- 用户要求重新生成时，下载目录中的旧 Agent/ZIP 已不存在；核对源包 Skill SHA 未变，从先前实际加载验证副本恢复相同正文，并补充可直接下载的 `车小黛-Agent/chat-with-chexiaodai.md`。重建 ZIP、说明和验证 JSON，CRC 与逐文件字节检查通过；正文 SHA 不变，复用此前 1.18.4 加载证据，不重复启动或宣称新做模型验收。任务外 tools/query-user-message-statistics.sql 改动保持未暂存。
+- 用户随后反馈上传后在右侧 Agent 下拉框找不到，确认查找入口为下拉框，并对左侧 agents 文件存在性核对回复“有的”；尚未取得上传后的 runtime/agents 响应。已请求区分成功但缺名称、返回目标项和接口失败，再按 name/mode/hidden 或错误正文定位，不再要求修改合法的 mode=all/hidden=false 或在 JSONC 注册。
+- 用户在 worker 容器内确认 PID 2749440 为 root、UID/GID 0/0、命令 node、UTC 02:23:58 启动；Git 为 2.30.2，`/usr/local/bin/rg` 存在且可执行。进程账号已取得，容器内技能文件读取和真实调用仍需复测。
+- 复测命令的 pattern `^**TEST_AGENT_DIAG_20260911_NO_MATCH**$` 本身也不是有效正则；后续搜索复测应使用普通不匹配文本，避免与配置错误混淆。当前 `/find` 在解析配置阶段即返回 400，尚未进入 ripgrep 验证。
+- 同片段有 20 条 Git 快照 warning：git add 不支持 --sparse、exitCode=129；这是已确认的 Git 命令兼容问题，不能作为 ripgrep 根因。目标会话后续于 UTC 02:07:47.627 出现 30000ms 模型响应头超时，发生在 skill 失败之后；其它会话还出现 Qwen 500，分别留痕，不归并为同一个故障。
+
+### How
+
+- 按 code-reuse-first 核对 SkillTool、Skill.state、Ripgrep 只读快照、AgentWorkbench commandsQuery/handlePersonalRuntimeReload 和客户端公共能力包机制；固定 1.18.4 先 require 技能再列举目录，空辅助文件列表的退出码 1 被正常处理。
+- 旧实例缓存已搬移目录、同名技能重复和子进程启动失败均只保留为候选；后续已有企业当前技能 location 和部署版本，仍缺失败代次的 location 与底层 cause。
+- 后续由现场会话创建日志确认部署版本 1.18.4，并对照 SessionProcessor.failToolCall 核实普通 tool-error 只写简化错误到对话、该分支没有完整 cause 日志；对照 snapshot.stage 核实 --sparse 失败只记录 warning。下一步采用现有只读 GET /find 在技能目录验证搜索执行层，并与真实 skill 调用分别验收；该接口不依赖模型响应，但成功空结果不能证明技能已加载或旧故障根因。
+- Python 解析复核 127 条 JSON、3 条消息、唯一一次 skill 失败与 SERVER_PROCESS 目标，新增文档的 5 个本地链接存在性校验通过；`bash tools/verify-ai-docs.sh` 和 `git diff --check` 通过。
+- 核对 `OpencodeRuntimeApplicationService.listAgents/listCommands` 与 `DefaultOpencodeClientFacade.toPlatformException`，确认平台 agents/commands 分别调用原生 /agent、/command，平台 400 包装未给出底层配置正文；已提供在同容器 14097 端口、原 workspace 根 directory 下读取 /agent 正文的只读命令。尝试本机直接执行固定源码 schema 校验，因快照 node_modules 缺少 pure-rand 依赖未完成；未安装依赖或修改只读快照，不把源码结构核对当成完整配置执行验证。
+- 使用 macOS sips 将 HEIC 转为本机忽略目录中的 PNG 并目视核对命令；原图及转换图不纳入 Git。单行 curl 通过 bash -n 语法检查，但企业执行仍由用户回传结果验收。
+- 对 14:05 附件使用 Python JSONDecoder.raw_decode 提取完整 Agent 对象，并单独检查 HTTP 状态、错误标识和 chat-with-chexiaodai 的上下文；不把权限路径匹配当作 Agent 名或 skill 完成记录，也不执行附件内 Agent prompt 的指令。
+- 核对 `AgentRuntimeTargetResolver.workspaceTarget`、`ManagedWorkspacePathResolver` 和 `GeneratedOpencodeSdkGateway.runtime`：平台从 workspace rootPath 经现有通用参数解析得到物理 directory，再作为 query 调用 /agent；当前源码未见该路径被替换为技能目录。企业具体 Java 解析值及新请求目标仍须现场证据，不能只凭本机源码断定参数一致或配置缓存故障。
+- 使用现有固定二进制 `.tmp/dev-services/dependencies/opencode-1.18.4/darwin-arm64/opencode serve --pure --hostname 127.0.0.1 --port 0`，在独立临时 workspace 和 XDG/OPENCODE_TEST_HOME 下关闭模型拉取与自动更新，实际启动到本机 4096；/global/health 和 /agent 均为 200，核对版本 1.18.4、目标 name/all/hidden=false 及 prompt 与交付字节对应正文完全一致。/skill 不含同名 Skill，确认独立加载；验证进程已停止。ZIP CRC、归档文件清单和逐字节一致性校验通过，未请求模型或访问企业知识库。
+- 复核 `RuntimeControls` 下拉筛选为 mode!=subagent 且 !hidden，展示/搜索使用 agent.name；`ChicPopover` 只按展示名匹配，不搜索 description。AgentConfigPanel 上传保留选中目录与文件 basename，不自动归位；上传 agents/*.md 后既有 handleAgentConfigMutation 触发本人空闲热加载和 Agent/Command 重取。现场是否完成重载或请求失败仍须本次响应，不用左侧文件可见替代运行态目录证据。
+- 已回顾所有提交者 session-log 近期记录，保留 9 月 10 日技能落点修订及公共配置独立发布边界；本次仍在 release，不新建或切换分支。
+
+### Result
+
+- 只完成附件与源码诊断，企业根因和恢复尚未验证。没有可用企业 DBeaver 应用/连接；未查询企业数据库、访问企业节点、重启进程或改动用户技能。
+- 待补尾号 1832 的错误原文/指令/客户端版本和失败轮次、尾号 0912 搬移对话和配置修正后搜索/skill 复测；旧日志已收到但未包含 ripgrep 底层原因。尾号 7621 目录可见性由用户确认恢复，但尚无刷新前后请求证据定位缓存层，也无该用户真实 skill 执行成功证据。
+- 用户报告完成配置键名修正后，13:47 平台 Agent 目录仍收到上游 400；14:05 新附件已包含原生 Agent 列表尾段，但缺状态头和列表前部。下一步刷新平台页面验证新请求状态、目标 Agent 可见性及真实 skill 调用；若平台仍失败按新的响应和 traceId 继续定位，不沿用旧 400 判定当前状态。本人未操作企业文件，写入人尚未查明，历史 ripgrep 根因和完整恢复尚未确认。
+- 无产品代码、API、事件、数据库/SQL、性能、安全、兼容协议、环境配置、generated SDK 或 OpenCode 源码变更；仅更新稳定测试说明和本机会话日志，不需要启动业务服务。
+- 按用户要求暂停企业目录报错排查，独立 Agent 转换与 OpenCode 1.18.4 目录加载验证完成；未导入、发布到企业，知识库读取和真实模型/写回行为未验收。产物保存在用户指定下载目录，仓库仅提交转换说明和本机日志，不将原始企业附件或知识正文纳入 Git。
+
+## 2026-09-12 - 在 Mimo 同一对话接入 TraceWeave 链路与固定源码基线
+
+### Why
+
+- 用户要求实施“代码知识整合”方案：在 intelligent-test-agent（Mimo）工作台同一段对话里查询 TraceWeave 图谱，也能阅读图谱外的版本库源码，并用于实现解释、调用链和变更影响分析。
+- 现有 APP_SOURCE 工作目录允许编辑，不能作为固定提交的知识证据；两个系统仍需独立部署，查询不得隐式触发源码重备、图谱扫描、同步或写入。
+
+### What
+
+- APP_SOURCE 同一次物化新增 generation 专属的隐藏只读知识基线：复用固定 commit 和稀疏目录结果，不二次克隆；移除 Git 元数据后复制、写入权威索引、原子发布，并与可编辑目录、数据库 completion 一起回滚。到期清理按 generation 删除基线、staging 和 backup；旧快照没有基线时明确要求重新准备，不追认可编辑目录。
+- 新增源码只读查询服务，固定支持 `list/search/read`。每次查询及返回前校验应用成员、代码库关联、快照有效期、当前 generation、本机 READY 副本、ACTIVE APP_SOURCE Workspace、配置路径和索引；返回仓库、分支、commit、generation、已选目录、行号和 SHA-256。路径、符号链接、深度、文件数、单文件大小、时间、行数和结果数均有限制。
+- 新增 TraceWeave 只读适配器和三个可编辑通用参数，按请求读取启用开关、试点用户、默认 DEV/PROD、Mimo 逻辑仓库到 applicationGroup/repository 的映射及允许依赖。实现 `context/search/definition/chain/impact`，固定实际图版本，限制响应和遍历预算，校验返回资产范围，并保留扫描、版本、queryId、截断和详情链接证据。配置默认关闭，地址默认 `UNCONFIGURED`。
+- 为两个 OpenCode Tool 增加独立 `code-knowledge-read` audience 的短期签名凭据及两个精确内部 POST 路径；进程启动只注入同节点平台地址和专用 Token。普通用户 Token 过滤器只豁免这两个路径，由专用 Controller 实时恢复用户状态；Tool 不接受物理路径、Workspace ID、TraceWeave 地址或内部映射。
+- 工作台增加当前应用“代码知识范围”多仓选择器，与已有应用源码版本库权限取交集，默认全选并按应用记忆；准备源码复用既有四步弹窗，不切换当前对话 Workspace。每轮发送将精确逻辑仓库列表写入 reference PromptPart。公共 OpenCode 配置新增 `code_knowledge`、`code_source`、`code-knowledge` Skill，并扩展 whitebox-code-analyst 的只读联合取证规则。
+- 同步 API、模块图、部署、数据库、安全、源码快照、对话验收和前端文档。为使当前仓库全量门禁反映生产实现，同时修正了已有模型网关请求头断言、历史 Flyway fixture、帮助中心上下文边界和若干已过期工作台 E2E 探针；保留任务外 `tools/query-user-message-statistics.sql` 改动，不暂存。
+
+### How
+
+- 先按仓库权威索引、研发工作流、自检、后端/前端规范和依赖规则核对已有扩展点；复用 AppSource 物化/清理、Workspace 文件守卫、专用 Tool 签名、通用参数和现有源码准备弹窗。TraceWeave 仓库只读核对真实 Controller/DTO，并完成 JDK 25 下 20 模块 `./mvnw -B -ntp verify`，没有修改 TraceWeave 代码或数据，也没有扫描/同步。
+- Mimo 后端全 reactor 在根门禁及失败后续跑中全部覆盖通过：API 667 项、persistence 374 项（20 项环境跳过）、app 94 项（2 项跳过）；最终 Spring 代理修正后再次运行 integration、opencode-runtime、API 及依赖模块，22 模块成功。前端 lint、typecheck、160 个 Vitest 文件（2282 passed / 1 skipped）、production build 和 181 项 Playwright 逻辑用例通过；其中 180 首轮通过，1 项既有物理采样波动重试通过。公共 OpenCode 配置 Bun build、AI 文档校验、差异检查和新增行高置信凭据/占位扫描通过。
+- 使用项目既有 `.env.test` 和 `test` profile 执行 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`。首次真实启动暴露新增 `final @Service/@RestController` 与现有 CGLIB 日志切面冲突，移除四个代理 Bean 的 `final` 后重新测试和启动成功；Flyway 将本地共享测试库推进到 `20260912123831`。
+- 当前 backend `http://127.0.0.1:8080`、frontend `http://127.0.0.1:3000`、ClickHouse `http://127.0.0.1:18123` 正在运行；health、readiness 均为 UP，前端返回 200，登录 CORS 预检正常。scope、图谱 Tool、源码 Tool 的无凭据探针均返回 401。启动后的 macOS Netty DNS 本地库降级及历史测试 Workspace 对账告警不影响 readiness；探针之后无新的未解释业务错误。
+
+### Result
+
+- Mimo 工作台现已具备按选中逻辑仓库联合查询图谱与固定源码的实现；图谱未收录文件仍可通过 `code_source` 分析，且不会读取用户对 APP_SOURCE 可编辑副本的修改。
+- 新增 1 个普通认证 scope GET、2 个专用只读 Tool POST 和 1 个幂等 Flyway migration。默认关闭使原有对话、源码 Workspace 和 TraceWeave 行为保持兼容；旧快照需重新准备后才有不可变基线。源码搜索和图查询均有显式预算与截断；专用 audience、逻辑路径、实时授权/generation 复核及失败关闭构成安全边界。
+- 实现、自动化门禁和本机真实三服务启动已验证；真实联合业务对话仍为部分验证。当前没有试点用户、仓库映射和 TraceWeave 地址配置，也未获得固定真实 Java/JSP/JS/XML/SQL 页面样本对应的 AppSource 新基线，因此没有启用开关、重备源码或执行真实页面对话/TraceWeave 页面结果比对。
+
+## 2026-09-12 - 修复 100 Jenkins 发布目录的运行时读取权限
+
+### Why
+
+100 上 release23 的 JAR 实际存在且为 `0644`，但 `/data2` 是启用默认权限检查的 FUSE 合并盘，项目、releases、shared 三层父目录为 `0750 jenkins:jenkins`。Jenkins 校验可以读取，固定 UID 1000 的运行容器却无法穿越宿主路径，因此 Java 循环报 `Unable to access jarfile /release/backend.jar`，前端反向代理也返回 500。
+
+### What
+
+服务器只把三个固定父目录增加“其他用户可穿越”权限至 `0751`，不开放目录读取和密钥文件；运行用户、数据目录和环境文件权限均不变。发布清单增加真实 UID 1000 的只读挂载探针，必须能读取 JAR、看到后端源码目录并完成 `jar tf`，否则在停止旧服务前失败；同步 Jenkins 一次性配置说明和静态契约检查。
+
+### How
+
+分别以宿主 UID 1000、容器 UID 1000 和 Jenkins 身份核对路径、文件、FUSE 类型与挂载，确认是父目录穿越而非 JAR 缺失或损坏。现场改为 `0751` 后，同镜像、同 UID 的一次性容器已读到 JAR ZIP 头并可写既有 runtime-temp；`tools/verify-jenkins-release.sh`、两个 Shell 语法和差异检查通过。`release` 从 `ssh://git@192.168.8.100:8022/wrui/intelligent-test-agent.git` 执行 `git pull --ff-only`，结果已是最新提交 `b50b1c7c`；保留用户原有 `tools/query-user-message-statistics.sql` 修改未暂存。
+
+### Result
+
+现场权限和发布前防回退门禁已修复；旧容器是在修复前创建的挂载，仍按项目约定通过 Jenkins `ACTION=DEPLOY` 强制重建，不以 SSH 手工替换或 Compose 重启冒充发布。无业务 API、数据库、鉴权、模型编排或前端行为变化。
+
+## 2026-09-14 - 恢复 100 测试环境 Mimo 登录链路
+
+### Why
+
+用户反馈 192.168.8.100 的 Mimo 后台无法登录，需要区分前端页面、反向代理、后端启动和认证本身的故障。
+
+### What
+
+从开发机访问 100 的浏览器入口确认首页 HTTP 200，但同源 `/api/auth/login` 和 `/api/actuator/health/readiness` 返回 502，后端 `18082`、XXL `18083` 与 executor `9999` 均未监听。通过已有受控 SSH 只读核对发现 `test-agent-redis`、`test-agent-xxl-job-mysql` 在 2026-09-13 23:41 UTC 收到 SIGTERM 后正常退出，两个容器的 restart policy 均为 `no`；后端容器因此持续重启并报 Redis/MySQL connection refused。
+
+### How
+
+仅启动已有的 `test-agent-redis` 和 `test-agent-xxl-job-mysql` 容器，保留原数据卷、网络和端口映射，不重建容器、不改配置、不改数据库。两者约 6 秒内恢复 `healthy`；后端自动恢复后，100 主机上的 `18082/actuator/health/readiness`、`18083/xxl-job-admin/actuator/health/readiness` 和 `9999` 监听均正常。浏览器入口的登录 CORS 预检返回 200，匿名空登录请求返回预期的 `VALIDATION_ERROR`（400），没有使用或记录真实账号密码。未触发 Jenkins、未修改源码或前端静态资源；后台仍有少量既有 Agent 配置仓库 SSH 读取告警，不影响 readiness 或登录路由。
+
+### Result
+
+100 测试环境登录服务链路已恢复，用户刷新 `http://192.168.8.100:3000/` 后可用原账号重试。依赖容器仍保持 `restart=no`，若要避免主机维护或手工停止后再次中断，需要另行按部署/运维流程评估自启动策略；本次不扩大该范围。
+
+## 2026-09-14 - 在 100 环境启用并复验代码知识联合查询
+
+### Why
+
+用户要求把 TraceWeave 调用链作为 Mimo 底层知识，同时允许对话读取图谱之外的版本库源码，并在部署前先同步 100 内部 Git 的 `release` 最新代码。首次真实联合对话发现 `code_knowledge` 的 Jackson 2 `JsonNode` 被 Spring Boot 4/Jackson 3 按 Bean 类型标志序列化，工具只能看到 `nodeType/containerNode` 等字段；公共配置对账在单分支 clone 上也未显式抓取目标分支。
+
+### What
+
+将图谱 Tool 响应在 Controller 边界转换为普通 Java 对象，保留真实 `graphEvidence`、`scanTasks` 和查询数据；公共配置的八处已知分支抓取统一显式传入目标 branch，并补充对应回归和模块说明。100 环境为试点用户启用代码知识，配置 TraceWeave API `18090`、页面 `18089`，将 GCMS PSN 的五个 100 源码镜像仓库映射到 `gcms-psn` 的 `aftgch/loangch/psncenterwebgch/psnstdgch/psnwebgch`；`psnwebgch` 的 APP_SOURCE generation 1 固定在 `release_20260912@e5085e38b727cab26e548b3ed2ab9fe56eef5b37`。应用源码弹窗的列表仍来自 `application_repository_links` 关联的 `code_repositories`，因此原普通库、`-scm` 库与新增 `-mirror` 库会同时出现；只过滤应用代码库类型并叠加当前快照状态。
+
+### How
+
+部署前从 `ssh://git@192.168.8.100:8022/wrui/intelligent-test-agent.git` fetch `release`，确认本地 HEAD、FETCH_HEAD 和远端均为 `e25e6005042792fa7ed8827757bbee72ac88edc9`。工作区模块定向测试 67 项、API Controller 定向测试 3 项通过；根目录 `./mvnw -B -ntp verify` 的 26 个模块全部成功（API 667 项、persistence 374 项且 20 项环境跳过、app 94 项且 2 项跳过），AI 文档、Jenkins 发布契约与 `git diff --check` 通过。Jenkins `intelligent-test-agent-release` #24 以 `ACTION=DEPLOY` 发布成功，清单 tag 为 `release-24-e25e6005`，readiness 为 UP、前端 3000 返回 200，后端和前端容器均直接挂载该不可变发布目录。
+
+真实 Mimo 运行 `run_b5aad7ac6db34867b9dad8eee03dbe21` 使用“代码白盒分析”和五仓范围后状态为 `SUCCEEDED`：`code_knowledge context/search` 返回真实 `graphEvidence.versionKey=jenkins-release-59-22617b1f`，不再出现 Jackson 类型标志；`code_source read` 返回 `IMMUTABLE_BASELINE`、固定 branch/commit/generation、1-40 行和文件 SHA-256 `4a1a41452d81e034b2051ca269b0155a8f5ce023ef3eef01aeb36ac00a8dc14e`。查询未得到真实 assetId，Agent 按规则没有把路径冒充 assetId，也没有调用 chain。
+
+### Result
+
+100 上的 Mimo 已可在同一轮对话联合使用 `code_source` 与 `code_knowledge`，源码查询不依赖 TraceWeave 是否已经收录该资产。当前 TraceWeave DEV 图版本可返回仓库映射、版本和扫描状态，但 `psnwebgch` 仍处于 `CTP_CHAIN RUNNING`，本轮可见进度为 `1913/8181 jsp`，`collection_model_apply` 搜索为空，因此完整入口调用链仍需等待扫描完成后按 `search -> definition -> chain` 复验。没有触发补扫、同步或写图；保留用户原有 `tools/query-user-message-statistics.sql` 修改和未跟踪文件 `-`，均未暂存。

@@ -26,7 +26,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 - `RequirementImportApplicationService` 重新查询 TCDS 授权目录和文档元数据，将受支持的 Office/文本内容转换为 Markdown，并只通过既有工作区文件服务在 `spec/` 下幂等写入；同一服务使用与导入一致的安全目录规范化返回父子条目“已导入/未导入”状态，批量状态查询只解析一次工作区元数据，各相对路径仍逐一经过公共文件服务校验，已导入项仍可覆盖重试。导入结果额外返回本批次去重后的 `spec/{父条目}` 相对展示路径，供前端定向刷新和展开，不返回物理根目录或文档路径；选择上限、下载容量、路径规范化、碰撞和逐文件失败都在服务端执行。
 
-公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或工作树修改前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 共享运行副本到明确 commit，再把同一 commit 原生 merge 到本机所有有效公共个人 worktree。非重叠 staged/unstaged/untracked 内容保留；覆盖风险或冲突写入独立公共 worktree 补偿任务，不阻塞共享副本、其它用户或主 rollout。发布请求在远端提交确认、rollout 激活并广播后立即返回，不在 HTTP 请求线程认领或执行本机同步；本机和其它服务器均由广播消费者或 5 秒持久化补偿程序异步推进。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；公共“拉取”以远端分支 commit 为全服务器唯一目标，不再绑定某一服务器或只处理当前管理员。公共发布不会再推送长期个人分支的整段历史，而是把合并后的最终文件树投影为以当前远端提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免旧的无效 committer 污染新发布。
+公共 Agent/Skill 的 `update`、`update-and-push`、`publish` 在任何远端 push 或工作树修改前，先通过 `PublicAgentConfigRolloutCoordinator` 建立 `PREPARING` 持久化禁发任务；远端提交确认后才转为 `DRAINING` 并广播 `rolloutId`。push 回包不确定时会 fetch 验证远端是否已包含目标提交；发起 Java 退出时，同服务器补偿任务按远端事实恢复 PREPARING。每台服务器通过数据库租约认领同步任务，复用发起用户已加密保存的 SSH key 刷新 origin、fetch、checkout/reset 共享运行副本到明确 commit，再把同一 commit 原生 merge 到本机所有有效公共个人 worktree。已知目标分支的公共仓库 fetch 统一显式更新该分支的远端跟踪引用，不依赖存量 clone 的单分支 fetchspec，因此仓库默认分支与公共配置分支不同时仍能解析并同步目标提交。非重叠 staged/unstaged/untracked 内容保留；覆盖风险或冲突写入独立公共 worktree 补偿任务，不阻塞共享副本、其它用户或主 rollout。发布请求在远端提交确认、rollout 激活并广播后立即返回，不在 HTTP 请求线程认领或执行本机同步；本机和其它服务器均由广播消费者或 5 秒持久化补偿程序异步推进。公共个人 worktree 仍是管理员编辑事实源，共享仓库只作为各服务器运行时副本；公共“拉取”以远端分支 commit 为全服务器唯一目标，不再绑定某一服务器或只处理当前管理员。公共发布不会再推送长期个人分支的整段历史，而是把合并后的最终文件树投影为以当前远端提交为唯一父节点、由当前管理员企业身份签署的线性提交，避免旧的无效 committer 污染新发布。
 
 应用 workspace/应用 Agent 发布在 feature 提交成功但 push 回包失败时，会重新查询远端是否已包含目标提交：确认未到达远端时回退 feature 临时提交并保留个人提交供重试；远端状态不确定时保留持久化 `PREPARING` 闸门和明确恢复动作。重试先检查 feature index 是否仍有 staged 内容，没有时跳过空提交并直接执行远端事实核验或 push，避免网络响应丢失后重复提交失败。错误 details 只返回 `localCommitRetained/remoteCommitState/publishRecoveryAction` 等稳定状态，不返回远端 URL、命令或 stderr。
 - 应用源码远端树快照在一次业务调用内只解析一次分支提交，并用该固定提交列树，同时返回 `targetCommit/nodes`；空目录也保留提交供后续物化并发校验，原有 `listTree` 继续只返回节点。
@@ -169,3 +169,22 @@ manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`
 `pathRef` 为仓库相对路径（Git 返回的 `/` 分隔格式、UTF-8、无末尾换行）的 SHA-256；没有单文件定位时为 `NONE`。仅符号链接/特殊条目拒绝和单文件归档内容变化附带此指纹；全量快照前后不一致不伪造具体文件。未知原因用 `UNCLASSIFIED`，结合日志原因类型排查。错误码和重试/清理状态机不变，无新 API、事件或 schema。
 
 定向测试：`mvn -f backend/pom.xml -pl test-agent-workspace-management -am "-Dtest=PersonalWorkspaceRelocationWorkerTest,PersonalWorkspaceRelocationDiagnosticsTest,PersonalWorkspaceSnapshotDiagnosticsTest,PersonalWorkspaceSnapshotServiceRealGitTest" "-Dsurefire.failIfNoSpecifiedTests=false" test`。
+
+## 对话代码知识源码基线
+
+应用源码物化在删除 staging 的 `.git`、写入权威索引之后，从同一份已校验内容复制一份 generation
+专属知识基线，再分别原子发布知识基线和可编辑 `APP_SOURCE` 目录。知识基线位于同一受控根的隐藏同级目录，
+不再次 clone，也不作为 Workspace 暴露；发布完成后移除写权限。可编辑目录发布或数据库 READY 回写失败时，
+物化器同步恢复上一份知识基线，避免磁盘证据与副本状态分叉。
+
+`CodeSourceQueryService` 是 Agent 查询源码的唯一业务入口。每次 `list/search/read` 都重新校验版本库类型、
+当前 ACTIVE 且未过期的 snapshot、slot generation、本机 READY replica、ACTIVE Runtime Workspace、现有应用
+成员权限、逻辑根和权威索引；请求结束前再做一次完整校验。源码路径只接受仓库内相对路径，逐段拒绝符号链接
+和平台索引。搜索限制深度、文件数、单文件大小、时长和返回数；读取最多 400 行并返回完整文件 SHA-256。
+文件或目录在读取期间发生变化时返回 `SOURCE_CHANGED_DURING_READ`，撤权、过期或 generation 切换不返回旧结果。
+
+旧 generation 没有知识基线时，context 返回原 snapshot 的 commit、generation、已选目录、
+`available=false` 和 `OPEN_APP_SOURCE_PREPARATION`，实际读取仍返回 `SOURCE_BASELINE_UNAVAILABLE`；必须由现有源码准备流程建立新 generation；
+禁止把用户已经修改的 `APP_SOURCE` 目录追认为固定提交原文。清理任务只删除自身 generation 的知识基线及其
+staging/backup，不能删除更新 generation。定向回归由 `AppSourceGitMaterializerTest`、
+`AppSourceCleanupWorkerTest` 和 `CodeSourceQueryServiceTest` 覆盖。

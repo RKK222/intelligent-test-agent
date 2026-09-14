@@ -4547,3 +4547,53 @@ Agent/Skill/Tool 数量、`requiresRestart` 和 `changeSummaryJson`。公共配�
 ## 个人工作区搬迁诊断兼容说明
 
 搬迁诊断不新增 HTTP 入口或修改请求、成功响应、鉴权和 WebSocket 传输。内部搬迁异常 details 可附加受控 `reason`（如 `RELOCATION_IDENTITY_CHANGED`）；源快照异常保留原错误码，并附加 `relocationStage`，文件类错误仅附加相对路径 SHA-256 的 `pathRef`。服务端日志另以 `filePath` 显示内部上下文中的仓库相对路径及文件名，不加入 API details、数据库安全消息或事件。这些信息不得作为客户端状态机或授权依据。重试日志和既有数据库 `safe_error_message` 的消费契约见 `docs/architecture/xxl-job-integration.md`，未开放普通用户手动强制迁移 API。
+
+## OpenCode 代码知识只读 Tool
+
+登录态工作台先读取当前用户的可选范围：
+
+| Method | Path | 说明 |
+|---|---|---|
+| `GET` | `/api/internal/platform/code-knowledge/scope` | 返回 `available/reason/defaultView/repositoryIds`；仅包含 Mimo 逻辑版本库 ID。 |
+
+工作台将这里的 `repositoryIds` 与当前应用已有源码仓库权限取交集，允许用户多选，并把实际选择随本轮消息提交；
+该选择不切换对话工作区。停用或未入试点返回 `available=false`，配置损坏继续失败关闭。TraceWeave 地址、
+`applicationGroupId` 和图仓库 ID 不进入浏览器响应。
+
+以下入口只供当前用户的 OpenCode 进程回调，使用进程启动时注入的
+`TEST_AGENT_CODE_KNOWLEDGE_TOOL_TOKEN`：
+
+| Method | Path | 操作 |
+|---|---|---|
+| `POST` | `/api/internal/agent/opencode/code-knowledge-tool` | `context/search/definition/chain/impact` |
+| `POST` | `/api/internal/agent/opencode/code-source-tool` | `list/search/read` |
+
+专用 Bearer 凭据固定为 `code-knowledge-read` audience，只能访问上述两个精确路径。图谱请求可提交
+`sessionId/operation/repositoryIds/query/assetId/assetTypes/semanticKinds/businessKinds/limit/includeUncertain/versionKey`
+及有界遍历预算；不能提交 TraceWeave 地址、`applicationGroupId` 或图仓库 ID。`repositoryIds` 始终是 Mimo
+版本库 ID，服务端按在线通用参数映射；`context` 可省略以列出试点全部映射，其它操作必须显式提交至少一个版本库。
+`context` 返回映射仓库、实际图版本、相关扫描基线/任务和各仓库源码基线状态。
+
+源码请求为：
+
+```json
+{
+  "sessionId": "ses_example",
+  "operation": "read",
+  "repositoryId": "repo_example",
+  "path": "src/main/java/example/OrderService.java",
+  "startLine": 1,
+  "endLine": 120
+}
+```
+
+`list/search` 可省略 `path` 表示仓库根；`search` 另传 `query`，三类操作都可按协议传 `limit`。`read` 每次最多
+400 行，响应包含固定仓库、branch、commit、generation、expiry、已下载目录范围、相对路径、实际行范围、完整文件 SHA-256 和正文。
+`search` 返回相对路径、1 起始行号、有界片段及 `truncated/truncationReason`。请求不能传 Workspace、服务器或物理目录。
+
+源码 context 在旧快照缺少新式基线时返回 snapshot 的 commit/generation/已下载目录、`available=false` 与
+`preparationAction=OPEN_APP_SOURCE_PREPARATION`；实际读取返回 `CONFLICT` 和 `SOURCE_BASELINE_UNAVAILABLE`。读取期间文件变化返回
+`SOURCE_CHANGED_DURING_READ`。停用、非试点、越权、快照过期、非当前 generation、本机副本未就绪、索引损坏、
+TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `versionKey`，若查询期间视图推进则返回
+`knowledgeUpdating=true` 及 `latestGraphEvidence`；链路结果另返回实际 `queryRequest`，详情 URL 携带同一资产、
+固定版本、不确定关系开关和预算。查询不会准备源码、扫描/同步图谱、写源码、生成测试或执行测试。

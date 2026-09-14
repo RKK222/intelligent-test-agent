@@ -2932,6 +2932,37 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[0]?.[1]?.method).toBeUndefined();
   });
 
+  it("loads the authenticated user's code knowledge scope without a server routing hint", async () => {
+    const scope = {
+      available: true,
+      reason: null,
+      defaultView: "DEV",
+      repositoryIds: ["repo_orders", "repo_payments"]
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: scope
+    }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "pilot-token",
+      routeLinuxServerId: () => "linux-user-node",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getCodeKnowledgeScope()).resolves.toEqual(scope);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/code-knowledge/scope",
+      expect.objectContaining({ headers: expect.any(Headers) })
+    );
+    const headers = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer pilot-token");
+    expect(headers.get(LINUX_SERVER_ROUTE_HEADER)).toBeNull();
+  });
+
   it("does not expose SSH private key content from personal key responses", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
