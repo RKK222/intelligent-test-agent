@@ -264,6 +264,35 @@ awk -F= '$1=="TEST_AGENT_SKILLHUB_ACCESS_KEY" {print length(substr($0,index($0,"
 - `.4` 单节点 `opencode-models.json` 灰度已经成功时，除非用户明确结束灰度，不把灰度文件同步到 `.114`；标准平台发布也不能把“公共模型文件存在于仓库”误解为两台都要重启 worker。
 - release 默认关闭 Workflow/LobeHub 时，包和验收清单都要明确 `disabled`，不能因为当前代码仓库存在相关模块就自动部署。
 
+### 6.1 worker runtime 指纹只跟源码提交走，可用它反查现场版本
+
+`worker_config` 里的每一项（`PLATFORM`、`GO_IMAGE`、`NODE_IMAGE`、`PYTHON_*`、`OPENCODE_*`、`CODEX_*`、`TEST_AGENT_OPENCODE_WORKER_IMAGE`）在 `package-release.sh` 里都有写死的默认值，企业 `.env` 唯一相关的 `TEST_AGENT_OPENCODE_WORKER_IMAGE` 恰好等于默认值。所以 **worker 指纹由打包时工作树里那批文件的内容决定，与打包机、env、机器无关**；只有改动 `opencode-manager/`、`deploy/internal/opencode-worker.Dockerfile`、entrypoint、launcher/plugin `mjs`、`codex-whitebox-*`、`tools/probe-codex-whitebox-e2e.mjs`、`opencode-source/opencode-1.18.4/LICENSE` 才会改变它。
+
+因此现场 `release-component-state.env` 里的 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT` 可以反查到具体源码提交。做法：`git worktree add -q --detach /tmp/fp/<commit> <commit>`，在该 worktree 里跑 `./deploy/internal/package-release.sh --component-plan-only --env-file <仓库 deploy/internal/.env> --output-dir /tmp/fp/out-<commit>`，取 `worker runtime fingerprint` 一行；每个提交约 5 秒，完事 `git worktree prune`。
+
+已知对照（2026-09-14 实测）：
+
+| worker 指纹（前 8 位） | 对应源码提交 | 备注 |
+| --- | --- | --- |
+| `85ea6d01` | `41866c117`(09-10 16:35) 及之后，含当前 HEAD | 含 bullseye-security EOL 修复 |
+| `aba0bb06` | `37a797cc9`(09-02) ～ `41866c117` 前 | 缺 EOL 修复；09-07 企业全量包（源码 `5843fb7f7`）用的就是它 |
+| `a0dfbbff` | `b693150d9`(08-27) | |
+| `877cea18` | `4ae609cb7`(08-24) | |
+| `737f30b2` | `bc14390a1`(08-23) | |
+| `51cbfcc1` | `b03c8a2cf`(08-22) | |
+| `50f56c54` | `16f57089e`(08-07) ～ `57e211de4` | 0813 qwen-gray 基线同值 |
+| `bf7b8e1d` | `d907d4f72`(08-03) | |
+| `efa2c44a` | `a4f7e0a26`(07-30) | |
+
+toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
+
+两条必须记住的判断：
+
+1. **构建机状态自洽不等于现场一致。** `dist/.release-component-state.env` 只记录“最后在本机构建的组件”；它和本机 `--component-plan-only` 算出的指纹恒等，所以本机计划显示 `reuse` 完全不能证明现场能复用。判定现场只能看目标机 `/data/testagent/config/release-component-state.env`。
+2. **worker 输入真的变化时没有“继续复用旧 worker”的合法路径。** `--worker-runtime-baseline-file` 在封包时会断言 `baseline 指纹 == 本轮计算指纹`，所以它只能补登记“已部署指纹与本轮输入相同、只是当时没写状态”的情况。此时只剩两条路：随包带 worker（`included`，会 `docker load` 镜像并重建/重启 manager 与 worker，包体约 +540 MB），或确认现场状态文件确实缺失后用 baseline 补登记（保持小包、不重启）。不要用手改现场状态、改 Dockerfile 回退或 `--skip-worker` 硬过门禁。
+
+只让 worker 变 `included` 而保持 toolbox / 本地客户端 `reuse` 的做法：复制 `.release-component-state.env`，只把其中 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT` 改成任意别的值（或删掉该行），再用 `--component-state-file` 指向该副本跑计划，预期输出为 worker `included` + toolbox/客户端 `reuse`。
+
 ## 7. Flyway 为什么总在启动时失败
 
 常见原因不是 SQL 语法，而是比较基线错误、已执行 migration 字节被改、合并后时间戳倒序，或企业运行目录仍加载旧 `backend/lib/test-agent-persistence-*.jar`。

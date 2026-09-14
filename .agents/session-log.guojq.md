@@ -1,5 +1,31 @@
 # Session Log — guojq
 
+## 2026-09-14 定位现场 worker runtime 指纹门禁拦截：建立「指纹 ↔ 源码提交」对照表
+
+### Why
+
+现场部署 09-14 重打的代码变更包时被拦：后端节点在 `deploy-internal-release.sh:1207` 的 `verify_reused_worker_runtime` 报 `Incremental release worker runtime fingerprint does not match the installed component`。该检查在 `Install backend artifacts`（第 1218 行）与前端更新之前执行，所以 JAR 和前端资源都没换，表现为「无法更新代码」。
+
+包内声明 worker `reuse` + 指纹 `85ea6d01…e7fac`、toolbox `reuse` + `35447da0…f15040`。现场实际登记的 worker 指纹需要目标机 `/data/testagent/config/release-component-state.env` 才能确认，本仓库内没有任何该值的记录。
+
+### What
+
+1. 查清 worker 指纹的输入边界：`worker_config` 的每一项都有 `package-release.sh` 写死的默认值，企业 `.env` 唯一相关的 `TEST_AGENT_OPENCODE_WORKER_IMAGE` 恰好等于默认值，因此 **worker 指纹只由工作树文件内容决定，与打包机和 env 无关**。
+2. 用 `git worktree --detach` + `--component-plan-only` 反查历史提交的 worker 指纹，建立对照表（详见技能参考 6.1）：`85ea6d01`=当前 HEAD、`aba0bb06`=`37a797cc9`(09-02)～`41866c117`(09-10) 前、`a0dfbbff`=08-27、`877cea18`=08-24、`737f30b2`=08-23、`51cbfcc1`=08-22、`50f56c54`=08-07 与 0813 基线、`bf7b8e1d`=08-03、`efa2c44a`=07-30。
+3. 定位差异来源：`5843fb7f7`(09-07，企业客户端 0910 基线的源码提交) 与 HEAD 之间 worker 输入只有 `deploy/internal/opencode-worker.Dockerfile` 变了 20 行（`41866c117` 09-10 16:35 的 bullseye-security EOL 修复），其余 `opencode-manager/` 等输入零变更。这就是 `aba0bb06` → `85ea6d01` 的唯一原因。
+4. 验证可执行路径：复制 `.release-component-state.env` 后只改 `WORKER_RUNTIME_FINGERPRINT`，计划输出为 worker `included` + toolbox/本地客户端 `reuse`，本地客户端仍锚定现场基线 `4fabde17…4023d`（`20260907093905`）。
+
+### How
+
+- 反查命令：`git worktree add -q --detach /tmp/fpTable/<commit> <commit>`，在 worktree 内跑 `./deploy/internal/package-release.sh --component-plan-only --env-file <仓库 deploy/internal/.env> --output-dir /tmp/fpTable/out-<commit>`，完成后 `git worktree prune`（本机 7 个提交约 34 秒）。
+- 只改 worker 模式的验证：`--component-state-file /tmp/state-included-test.env`，其中 worker 指纹替换为占位值。
+
+### Result
+
+- 结论已固化到技能参考 6.1：构建机状态自洽不等于现场一致；worker 输入真变化时 `--worker-runtime-baseline-file` 无法绕过（封包时断言 baseline 指纹 == 本轮指纹），只剩「随包带 worker（约 +540 MB，重启 manager/worker）」或「现场状态确实缺失时用 baseline 补登记」两条路；禁止手改现场状态、回退 Dockerfile 或 `--skip-worker` 过门禁。
+- 待现场提供 `.4`/`.114` 的 `release-component-state.env` 后确定走哪条路；**本轮未重建包、未改交付目录**，`dist-code` 仍是 `4e05000f…0cf1`（外层）/`fcea3543…5a97`（内层）。
+- 未改动任何代码、部署脚本、`.env` 或现场状态；未涉及 API、事件、数据库、Flyway、性能或安全边界。
+
 ## 2026-09-14 修复前端部署中断：按现场已部署客户端基线重打代码变更包
 
 ### Why
