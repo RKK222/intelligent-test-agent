@@ -4177,6 +4177,10 @@ export type WorkspaceGitDiff = {
   applicationTargetCommit?: string | null;
   /** 整个个人仓库内阻塞应用更新的本地变更；可能属于同仓库的其它目录视图。 */
   applicationUpdateBlockingFiles?: WorkspaceGitUpdateBlocker[];
+  /** 本地 origin 跟踪提交到个人 HEAD 的已提交未发布差异；用于跨浏览器会话恢复重新推送。 */
+  pendingPublishFiles?: WorkspaceGitDiffFile[];
+  /** 待发布个人 HEAD 的原始提交说明。 */
+  pendingPublishCommitMessage?: string | null;
 };
 
 export type WorkspaceGitUpdateBlocker = {

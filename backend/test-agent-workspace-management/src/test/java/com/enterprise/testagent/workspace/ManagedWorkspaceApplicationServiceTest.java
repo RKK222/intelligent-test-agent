@@ -1956,6 +1956,145 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceGitDiffRecoversCommittedUnpushedFilesFromOriginTrackingToHeadTree() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        git.nextHeadCommit = "commit_personal_head";
+        git.nextRemoteTrackingCommit = "commit_remote_base";
+        git.nextHeadCommitMessage = "fix: 恢复历史本地提交\n\n补充说明";
+        git.nextTreeNameStatus = String.join("\n",
+                "M\tF-GCMS/workspace/docs/累计修改.md",
+                "A\tF-GCMS/workspace/.opencode/opencode.jsonc",
+                "D\tF-GCMS/workspace/spec/仅本地.md",
+                "R100\tF-GCMS/workspace/docs/旧名称.md\tF-GCMS/workspace/docs/新名称.md",
+                "R100\tF-GCMS/workspace/docs/移出目录.md\tF-GCMS/other/移出目录.md",
+                "R100\tF-GCMS/other/移入目录.md\tF-GCMS/workspace/docs/移入目录.md",
+                "C100\tF-GCMS/other/模板.md\tF-GCMS/workspace/docs/复制文件.md",
+                "M\tF-GCMS/workspace-house/docs/前缀碰撞.md",
+                "M\tF-GCMS/other/不属于当前目录.md");
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+
+        assertThat(diff.files()).isEmpty();
+        assertThat(git.treeDiffFrom).isEqualTo("commit_remote_base");
+        assertThat(git.treeDiffTo).isEqualTo("HEAD");
+        assertThat(diff.pendingPublishCommitMessage()).isEqualTo("fix: 恢复历史本地提交\n\n补充说明");
+        assertThat(diff.pendingPublishFiles())
+                .extracting(
+                        ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::path,
+                        ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse::status)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("docs/累计修改.md", "modified"),
+                        org.assertj.core.groups.Tuple.tuple(".opencode/opencode.jsonc", "added"),
+                        org.assertj.core.groups.Tuple.tuple("docs/旧名称.md", "deleted"),
+                        org.assertj.core.groups.Tuple.tuple("docs/新名称.md", "added"),
+                        org.assertj.core.groups.Tuple.tuple("docs/移出目录.md", "deleted"),
+                        org.assertj.core.groups.Tuple.tuple("docs/移入目录.md", "added"),
+                        org.assertj.core.groups.Tuple.tuple("docs/复制文件.md", "added"));
+        assertThat(diff.pendingPublishFiles()).allSatisfy(file -> {
+            assertThat(file.staged()).isTrue();
+            assertThat(file.patch()).isEmpty();
+            assertThat(file.additions()).isZero();
+            assertThat(file.deletions()).isZero();
+            assertThat(file.path()).doesNotStartWith("spec/");
+        });
+    }
+
+    @Test
+    void workspaceGitDiffReturnsEmptyPendingPublishWhenTargetAndHeadTreesMatch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_personal_head";
+        git.nextTreeNameStatus = "";
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(), new UserId("usr_1"));
+
+        assertThat(diff.pendingPublishFiles()).isEmpty();
+        assertThat(diff.pendingPublishCommitMessage()).isNull();
+    }
+
+    @Test
+    void workspaceGitDiffDoesNotTreatUnmergedApplicationTargetAsPersonalPublish() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_personal_old";
+        git.targetContainedInHead = false;
+        git.nextTreeNameStatus = "M\tF-GCMS/workspace/docs/不应恢复.md";
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(), new UserId("usr_1"));
+
+        assertThat(diff.applicationUpdatePending()).isTrue();
+        assertThat(diff.pendingPublishFiles()).isEmpty();
+        assertThat(git.treeDiffFrom).isNull();
+        assertThat(diff.pendingPublishCommitMessage()).isNull();
+    }
+
+    @Test
+    void workspaceGitDiffKeepsBrowserFallbackWhenPendingPublishRecoveryFails() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        git.nextHeadCommit = "commit_personal_head";
+        git.treeDiffFailure = new PlatformException(ErrorCode.GIT_UNAVAILABLE, "tree diff failed");
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(), new UserId("usr_1"));
+
+        assertThat(diff.files()).isEmpty();
+        assertThat(diff.pendingPublishFiles()).isNull();
+        assertThat(diff.pendingPublishCommitMessage()).isNull();
+    }
+
+    @Test
     void workspaceGitDiffReturnsPseudoPatchForUntrackedOrAddedFiles() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -4443,11 +4582,17 @@ class ManagedWorkspaceApplicationServiceTest {
         private boolean pushedForce;
         private String nextHeadCommit = "commit_base";
         private String nextRemoteCommit;
+        private String nextRemoteTrackingCommit = "commit_base";
         private String fetchedBranch;
         private String resetCommit;
         private Path resetHardRepoRoot;
         private int nextCommitCount;
         private String nextNameStatus = "";
+        private String nextTreeNameStatus = "";
+        private PlatformException treeDiffFailure;
+        private String nextHeadCommitMessage = "历史本地提交";
+        private String treeDiffFrom;
+        private String treeDiffTo;
         private boolean worktreeClean = true;
         private Path dirtyRepoRoot;
         private final List<String> calls = new ArrayList<>();
@@ -4626,6 +4771,11 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public Optional<String> remoteTrackingBranchCommit(Path repoRoot, String branch) {
+            return Optional.ofNullable(nextRemoteTrackingCommit);
+        }
+
+        @Override
         public int countCommits(Path repoRoot, String from, String to) {
             return nextCommitCount;
         }
@@ -4633,6 +4783,21 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public String diffNameStatus(Path repoRoot, String from, String to) {
             return nextNameStatus;
+        }
+
+        @Override
+        public String diffNameStatusBetweenTrees(Path repoRoot, String from, String to) {
+            this.treeDiffFrom = from;
+            this.treeDiffTo = to;
+            if (treeDiffFailure != null) {
+                throw treeDiffFailure;
+            }
+            return nextTreeNameStatus;
+        }
+
+        @Override
+        public String headCommitMessage(Path repoRoot) {
+            return nextHeadCommitMessage;
         }
 
         @Override

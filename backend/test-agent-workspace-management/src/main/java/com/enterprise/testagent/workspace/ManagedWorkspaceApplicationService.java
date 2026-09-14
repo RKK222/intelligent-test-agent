@@ -1763,12 +1763,18 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     context.repoRoot());
             List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> blockingFiles =
                     applicationUpdateBlockingFiles(workspaceId, context.repoRoot(), syncState);
+            PendingWorkspacePublishState pendingPublish = pendingWorkspacePublishState(
+                    workspaceId,
+                    context,
+                    syncState);
             return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(
                     files,
                     syncState.mergeInProgress(),
                     syncState.applicationUpdatePending(),
                     syncState.targetCommit(),
-                    blockingFiles);
+                    blockingFiles,
+                    pendingPublish.files(),
+                    pendingPublish.commitMessage());
         } catch (Exception exception) {
             if (experienceWorkspace) {
                 // 共享体验目录由管理员配置，底层 Git 异常常包含物理路径；该路径不能进入响应或异常日志链。
@@ -1843,6 +1849,121 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             boolean mergeInProgress,
             boolean applicationUpdatePending,
             String targetCommit) {
+    }
+
+    /**
+     * 从本地 origin 跟踪分支提交到个人 HEAD 的完整树差异恢复历史待发布白名单。
+     * 只有应用 target 是 HEAD 祖先且 origin 跟踪提交也是 HEAD 祖先时才恢复，避免把尚未合入的
+     * 应用更新或无法确认远程基线的分叉历史反向识别为个人提交。
+     */
+    private PendingWorkspacePublishState pendingWorkspacePublishState(
+            String workspaceId,
+            WorkspaceGitContext context,
+            WorkspaceFeatureSyncState syncState) {
+        if (syncState.mergeInProgress()
+                || syncState.applicationUpdatePending()
+                || syncState.targetCommit() == null
+                || syncState.targetCommit().isBlank()) {
+            return PendingWorkspacePublishState.empty();
+        }
+        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(
+                new WorkspaceId(workspaceId));
+        if (personal.isEmpty()) {
+            return PendingWorkspacePublishState.empty();
+        }
+        try {
+            if (!gitWorkspaceService.isAncestor(context.repoRoot(), syncState.targetCommit(), "HEAD")) {
+                return PendingWorkspacePublishState.empty();
+            }
+            ApplicationWorkspaceVersion version = existingVersion(personal.get().versionId());
+            Optional<String> remoteTrackingCommit = gitWorkspaceService.remoteTrackingBranchCommit(
+                    context.repoRoot(), version.branch());
+            if (remoteTrackingCommit.isEmpty()) {
+                // 没有本地 origin 跟踪引用时无法确认“已推送基线”，不能用数据库 target 误判。
+                return PendingWorkspacePublishState.unavailable();
+            }
+            String publishBaseCommit = remoteTrackingCommit.get();
+            if (!gitWorkspaceService.isAncestor(context.repoRoot(), publishBaseCommit, "HEAD")) {
+                return PendingWorkspacePublishState.empty();
+            }
+            String nameStatus = gitWorkspaceService.diffNameStatusBetweenTrees(
+                    context.repoRoot(), publishBaseCommit, "HEAD");
+            LinkedHashMap<String, ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = new LinkedHashMap<>();
+            for (GitWorkspaceService.GitNameStatusEntry entry : gitWorkspaceService.parseNameStatus(nameStatus)) {
+                if (entry.status() == 'R') {
+                    addPendingPublishFile(files, entry.oldPath(), context.displayPathPrefix(), "D ", "deleted");
+                    addPendingPublishFile(files, entry.path(), context.displayPathPrefix(), "A ", "added");
+                } else if (entry.status() == 'C') {
+                    addPendingPublishFile(files, entry.path(), context.displayPathPrefix(), "A ", "added");
+                } else {
+                    addPendingPublishFile(
+                            files,
+                            entry.path(),
+                            context.displayPathPrefix(),
+                            entry.status() + " ",
+                            switch (entry.status()) {
+                                case 'A' -> "added";
+                                case 'D' -> "deleted";
+                                default -> "modified";
+                            });
+                }
+            }
+            if (files.isEmpty()) {
+                return PendingWorkspacePublishState.empty();
+            }
+            String commitMessage = gitWorkspaceService.headCommitMessage(context.repoRoot());
+            return new PendingWorkspacePublishState(
+                    List.copyOf(files.values()),
+                    commitMessage == null || commitMessage.isBlank() ? null : commitMessage);
+        } catch (PlatformException exception) {
+            // 只读恢复失败不应遮蔽正常 status/diff；null 表示本次无法判定，让前端保留旧 sessionStorage 兼容快照。
+            LOGGER.warn("恢复个人工作区历史待发布提交失败: workspaceId={}, targetCommit={}",
+                    workspaceId, syncState.targetCommit(), exception);
+            return PendingWorkspacePublishState.unavailable();
+        }
+    }
+
+    private void addPendingPublishFile(
+            Map<String, ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files,
+            String repoPath,
+            String displayPathPrefix,
+            String rawStatus,
+            String status) {
+        if (repoPath == null || repoPath.isBlank()) {
+            return;
+        }
+        String normalizedRepoPath = repoPath.replace('\\', '/');
+        String normalizedPrefix = displayPathPrefix == null ? "" : displayPathPrefix.replace('\\', '/');
+        if (!normalizedPrefix.isBlank() && !normalizedRepoPath.startsWith(normalizedPrefix)) {
+            return;
+        }
+        String displayPath = normalizedPrefix.isBlank()
+                ? normalizedRepoPath
+                : normalizedRepoPath.substring(normalizedPrefix.length());
+        if (displayPath.isBlank() || isLocalOnlySpecPath(displayPath)) {
+            return;
+        }
+        files.put(displayPath, new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
+                displayPath,
+                rawStatus,
+                status,
+                true,
+                "",
+                0,
+                0));
+    }
+
+    private record PendingWorkspacePublishState(
+            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files,
+            String commitMessage) {
+
+        private static PendingWorkspacePublishState empty() {
+            return new PendingWorkspacePublishState(List.of(), null);
+        }
+
+        private static PendingWorkspacePublishState unavailable() {
+            return new PendingWorkspacePublishState(null, null);
+        }
     }
 
     private List<ManagedWorkspaceResponses.WorkspaceGitUpdateBlockerResponse> applicationUpdateBlockingFiles(

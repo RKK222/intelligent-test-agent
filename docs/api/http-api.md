@@ -1894,7 +1894,7 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
 
 ### 工作区本地 Git Diff
 
-`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `files[].path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较仓库版本组 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；待同步但尚未进入 merge 时，会额外执行仓库级 status 生成 `applicationUpdateBlockingFiles`，因此同一仓库其它目录视图的 staged/unstaged/untracked 文件不会被当前 pathspec 隐藏。Diff 查询本身不执行 fetch/merge。该接口不依赖 opencode `/vcs/diff`。
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace、应用版本工作区副本或应用版本工作区记录，使用对应 `repoRootPath` 执行 `git status --porcelain` + `git diff`，应用模板子目录通过 pathspec 限定扫描范围，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计。响应中的 `files[].path` 始终是当前运行态工作区相对路径，例如仓库内 `F-GCMS/workspace/docs/app.md` 返回为 `docs/app.md`。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`。个人 worktree 还只读比较仓库版本组 `targetCommitHash` 与当前 `HEAD` 的祖先关系，返回 merge 是否进行中和 feature 是否待同步；待同步但尚未进入 merge 时，会额外执行仓库级 status 生成 `applicationUpdateBlockingFiles`，因此同一仓库其它目录视图的 staged/unstaged/untracked 文件不会被当前 pathspec 隐藏。Diff 查询本身不执行 fetch/merge。个人 worktree 在版本 target 已合入且不处于 merge 时，还会只读比较 `targetCommitHash..HEAD` 的完整提交树，恢复当前 workspace 中已完成本地提交但尚未发布的文件；这与 `files` 的实时 status/index 差异相互独立。该接口不依赖 opencode `/vcs/diff`。
 
 响应 `WorkspaceGitDiffResponse`：
 
@@ -1922,11 +1922,25 @@ Tool 入口只做对话绑定和动作编排，Git 副作用全部复用现有�
       "additions": 3,
       "deletions": 1
     }
-  ]
+  ],
+  "pendingPublishFiles": [
+    {
+      "path": "docs/legacy.md",
+      "rawStatus": "M ",
+      "status": "modified",
+      "staged": true,
+      "patch": "",
+      "additions": 0,
+      "deletions": 0
+    }
+  ],
+  "pendingPublishCommitMessage": "修复历史本地提交"
 }
 ```
 
 `mergeInProgress=true` 表示仓库存在 `MERGE_HEAD`；`applicationUpdatePending=true` 表示当前个人 `HEAD` 尚未包含版本固定提交。`applicationUpdateBlockingFiles[].path` 是仓库相对路径，不受当前工作空间 pathspec 裁剪；能匹配同应用、同仓库、同分支目录视图时补充工作空间 ID、名称和目录，仓库根级文件则三个归属字段为 `null`。只有 Git 判定会覆盖本地文件、未完成冲突或冲突已解决但尚未点击“完成合并”时才保持 pending；非重叠 dirty/staged/untracked 内容会在原状态保留并完成 merge。非个人工作区或版本尚无目标提交时同步字段为 `false/false/null` 且阻塞列表为空，旧前端可忽略新增字段。
+
+`pendingPublishFiles` 来自本地 Git `refs/remotes/origin/{应用分支}` 跟踪提交到个人 `HEAD` 的树差异；应用版本 `targetCommit` 只用于确认个人 HEAD 已包含应用基线，避免把尚未合入的应用更新误识别为个人待发布提交。缺少本地跟踪引用或 Git 无法判定时不回退使用数据库 target，字段返回 `null`，由前端保留旧 sessionStorage 重试记录。结果限定当前 workspace 目录并排除只允许本地提交的 `spec/**`；rename 返回旧路径 `deleted` 和新路径 `added`，copy 返回新路径 `added`，`.opencode/**` 仍保留在响应中并由前端分流到“应用 Agent”。这些条目只是发布白名单，统一使用 `staged=true`、空 patch 和 0 行统计，不表示当前 index 仍有内容。数组 `[]` 表示后端权威确认没有待发布树差异，前端会清理旧浏览器快照。`pendingPublishCommitMessage` 取个人 HEAD 原提交说明，重新推送只调用 publish，不重复本地 commit。
 
 `POST /workspaces/{workspaceId}/git-discard` 请求体：
 
