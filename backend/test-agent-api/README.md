@@ -55,7 +55,8 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
   只接受 Mimo 逻辑版本库 ID、相对路径、查询条件和有界预算；TraceWeave 地址、应用组、图仓库、Workspace ID、
   服务器和物理根均由服务端解析。两个精确路径仅跳过通用用户 Token 过滤，随后必须通过
   `code-knowledge-read` 专用凭据；相邻路径仍按通用鉴权处理。源码调用直达 OpenCode 所在同节点 Java，复用
-  workspace-management 的 APP_SOURCE 权威鉴权和安全文件内核，不建立跨 Java 文件 HTTP 代理。
+  workspace-management 的 APP_SOURCE 权威鉴权和安全文件内核，不建立跨 Java 文件 HTTP 代理。图谱适配器内部的
+  Jackson 2 树在 HTTP 边界转换为普通对象，确保 Spring Boot 4/Jackson 3 codec 输出真实图谱字段，而非树节点类型标志。
 - `CodeKnowledgeScopeController` 为登录态工作台返回当前试点用户可选择的 Mimo 逻辑版本库 ID。前端再与当前应用
   的源码仓库权限取交集；响应不包含 TraceWeave 地址、应用组或图仓库映射，停用和非试点作为不可用状态返回。
 - `UiTestToolConfigController` 为 `ui_test_execute` 提供无凭据、窄字段只读入口，只返回当前 `configured/baseUrl` 并把数据库读取调度到 `boundedElastic`；不代理独立 UI 平台请求。OpenCode worker 通过同节点 Java 内网地址调用，公共 Nginx 对该精确路径返回 404。

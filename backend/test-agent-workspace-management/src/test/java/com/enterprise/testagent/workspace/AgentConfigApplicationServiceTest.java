@@ -352,6 +352,7 @@ class AgentConfigApplicationServiceTest {
 
         service.retryPendingPublicConfigSync();
 
+        assertThat(git.fetchedBranch).isEqualTo("main");
         assertThat(git.resetCommit).isEqualTo("commit_remote");
         verify(coordinator).markPublicServerSynced(eq(request), anyList());
     }
@@ -2696,6 +2697,7 @@ class AgentConfigApplicationServiceTest {
         private int commandOrder;
         private int originRefreshOrder;
         private int fetchOrder;
+        private String fetchedBranch;
         private String resetCommit;
         private final Map<Path, String> resetCommitsByRoot = new LinkedHashMap<>();
         private String pulledBranch;
@@ -2805,6 +2807,13 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public void fetch(Path repoRoot, String privateKey) {
+            this.fetchCallCount += 1;
+            this.fetchOrder = ++commandOrder;
+        }
+
+        @Override
+        public void fetchBranch(Path repoRoot, String branch, String privateKey) {
+            this.fetchedBranch = branch;
             this.fetchCallCount += 1;
             this.fetchOrder = ++commandOrder;
         }

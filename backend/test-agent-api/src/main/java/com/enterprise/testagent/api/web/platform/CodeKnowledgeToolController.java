@@ -57,7 +57,9 @@ public class CodeKnowledgeToolController {
                         enriched.set("sourceContexts", sourceContexts(principal.userId(), result.repositoryIds()));
                         data = enriched;
                     }
-                    return ApiResponse.ok((Object) data, traceId);
+                    // Spring Boot 4 的 HTTP codec 使用 Jackson 3；Jackson 2 JsonNode 必须先转换为普通对象，
+                    // 否则会按 JavaBean 暴露 isArray/isObject 等类型标志，而不是输出真实图谱字段。
+                    return ApiResponse.ok(mapper.convertValue(data, Object.class), traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
