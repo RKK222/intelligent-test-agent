@@ -1,5 +1,26 @@
 # Session Log — guojq
 
+## 2026-09-14 拒绝「改包内指纹以适配旧 worker 门禁」的做法
+
+### Why
+
+现场 worker 登记值仍为 `aba0bb06…7687b`（旧输入），而本轮 reuse 小包声明 `85ea6d01…e7fac`，门禁不通过。提出的折中是：把包内 `deploy/internal/release-components.env` 的 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT` 改成现场旧值，让 reuse 声明“对得上”。
+
+### What
+
+查证后判定这属于伪造门禁，不予实施：
+
+1. 打包脚本无任何指纹覆盖开关（`usage()` 列出的参数里只有 `--component-state-file`、`--worker-runtime-baseline-file` 等，没有任何 override），所以这类改动只能是手改已产出的 ZIP 内容。
+2. `--worker-runtime-baseline-file` 也走不通：`package-release.sh` 断言 `baseline_worker_fingerprint == WORKER_RUNTIME_FINGERPRINT`，填旧值直接以 `Previously deployed worker runtime fingerprint differs from current build inputs` 退出——这条断言就是防止把内容不同的旧 runtime 宣告成本轮输入。
+3. 后果：手改后现场装完会把 `release-component-state.env` 写成 `85ea6d01`，而机器上跑的仍是 `aba0bb06` 的旧输入，此后每一版都会在这个错误指纹上通过复用校验，旧 runtime 永久升不上去，门禁由一次性绕过变为永久失效。
+4. `--skip-worker`（`deploy-internal-release.sh:281`）是 deploy 侧显式绕过，连 `programs/bin/opencode-manager` 存在性、`verify-opencode-tool-runtime.sh`、worker 健康检查一并跳过，且状态文件不会变正确，同样不作为方案。
+
+### Result
+
+- 未改动任何交付产物：`dist-code` 仍为 reuse 小包（内层 `1c759eb4…442f`／外层 `574721ca…04c1`），归档的 worker included 大包（内层 `2cacbc16…d954`／外层 `2f6b9c71…ac20`）保持可用。
+- 正规处置：该节点先用 worker `included` 全量包装一次，把登记值升到 `85ea6d01`，之后所有版本即可回到 reuse 小包。
+- 技能参考 6.1 第 2 条补充了该伪造做法的判定依据、断言原文与永久失效后果。
+
 ## 2026-09-14 回到常规复用基线重打代码变更包（三组件全 reuse，155 MB）
 
 ### Why

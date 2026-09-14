@@ -291,6 +291,15 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 1. **构建机状态自洽不等于现场一致。** `dist/.release-component-state.env` 只记录“最后在本机构建的组件”；它和本机 `--component-plan-only` 算出的指纹恒等，所以本机计划显示 `reuse` 完全不能证明现场能复用。判定现场只能看目标机 `/data/testagent/config/release-component-state.env`。
 2. **worker 输入真的变化时没有“继续复用旧 worker”的合法路径。** `--worker-runtime-baseline-file` 在封包时会断言 `baseline 指纹 == 本轮计算指纹`，所以它只能补登记“已部署指纹与本轮输入相同、只是当时没写状态”的情况。此时只剩两条路：随包带 worker（`included`，会 `docker load` 镜像并重建/重启 manager 与 worker，包体约 +540 MB），或确认现场状态文件确实缺失后用 baseline 补登记（保持小包、不重启）。不要用手改现场状态、改 Dockerfile 回退或 `--skip-worker` 硬过门禁。
 
+   **“把包内指纹改成现场旧值以适配门禁”不属于适配，属于伪造，必须拒绝。** 具体表现是改 `deploy/internal/release-components.env` 里的 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT`（把本轮的 `85ea6d01…` 换成现场的 `aba0bb06…`）而保留 `WORKER_RUNTIME=reuse`。判定与后果：
+
+   - 打包脚本没有任何指纹覆盖开关（参数只有 `--component-state-file`、`--worker-runtime-baseline-file` 等），所以这类改动只能是手改已产出的 ZIP；
+   - 想走 `--worker-runtime-baseline-file` 也走不通：`package-release.sh` 会断言 `baseline_worker_fingerprint == WORKER_RUNTIME_FINGERPRINT`，填旧值直接报 `Previously deployed worker runtime fingerprint differs from current build inputs` 退出。这条断言正是平台刻意设置的护栏——它保证 baseline 只能用来补写缺失状态，不能把一个内容不同的旧 runtime 宣告成本轮输入；
+   - 手改后的包会让现场装完把 `release-component-state.env` 写成新指纹（`85ea6d01`），而机器上实际跑的仍是旧输入——**此后每一版都会在这个错误指纹上“通过”复用校验，旧 runtime 再也升不上去**，门禁从一次性绕过变成永久失效；
+   - `--skip-worker`（deploy 侧，`deploy-internal-release.sh:281`）同样跳过该检查，但它还连带跳过 `programs/bin/opencode-manager` 等存在性检查、`verify-opencode-tool-runtime.sh` 和 worker 容器健康检查，且状态文件不会因此变正确。属操作层显式绕过，不是修复方案。
+
+   正规处置只有一条：先用 worker `included` 全量包装一次，把现场登记值升到本轮输入值，之后所有版本即可回到 `reuse` 小包。
+
 只让 worker 变 `included` 而保持 toolbox / 本地客户端 `reuse` 的做法：复制 `.release-component-state.env`，只把其中 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT` 改成任意别的值（或删掉该行），再用 `--component-state-file` 指向该副本跑计划，预期输出为 worker `included` + toolbox/客户端 `reuse`。
 
 ## 6.2 现场 worker 指纹已确认、但打包机无法重建 worker 镜像时的做法
