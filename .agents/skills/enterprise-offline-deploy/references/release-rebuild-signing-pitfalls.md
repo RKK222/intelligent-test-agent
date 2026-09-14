@@ -313,6 +313,10 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 
 包体变化：worker `included` 后内层 ZIP 约 155 MB → 662 MB（+350 MB 镜像 tar +192 MB programs），现场两台后台需要 `docker load` 并重建/重启 manager 与 worker。
 
+现场 worker 升级到位（状态文件登记为本轮 `85ea6d01…`）后，下一版应回到常规 `reuse` 小包：`--component-plan-only` 预期输出 worker/toolbox/client 三组件全 `reuse`，不再需要 `--worker-runtime-baseline-file` 或镜像制品。
+
+**不可重建的制品不要按“过期候选”清理。** worker 镜像已无法重建，所以任何装入了该镜像的 worker `included` 成品包都是不可再生资产：不要丢进 `/tmp`（重启即丢），也不要直接删除。做法是改名移入 `deploy/internal/dist-code-archive/`（`worker-included-` 前缀）长期留存；该目录被 `.gitignore` 的 `deploy/internal/dist-*/` 覆盖，不会污染仓库状态。改名后 `.sha256` 文件内的文件名标签要同步重写（摘要值保持原值），否则归档自身的 `sha256sum -c` 会失败。
+
 ## 7. Flyway 为什么总在启动时失败
 
 常见原因不是 SQL 语法，而是比较基线错误、已执行 migration 字节被改、合并后时间戳倒序，或企业运行目录仍加载旧 `backend/lib/test-agent-persistence-*.jar`。
