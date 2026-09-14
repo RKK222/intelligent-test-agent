@@ -17507,3 +17507,23 @@
 ### Result
 
 100 测试环境登录服务链路已恢复，用户刷新 `http://192.168.8.100:3000/` 后可用原账号重试。依赖容器仍保持 `restart=no`，若要避免主机维护或手工停止后再次中断，需要另行按部署/运维流程评估自启动策略；本次不扩大该范围。
+
+## 2026-09-14 - 在 100 环境启用并复验代码知识联合查询
+
+### Why
+
+用户要求把 TraceWeave 调用链作为 Mimo 底层知识，同时允许对话读取图谱之外的版本库源码，并在部署前先同步 100 内部 Git 的 `release` 最新代码。首次真实联合对话发现 `code_knowledge` 的 Jackson 2 `JsonNode` 被 Spring Boot 4/Jackson 3 按 Bean 类型标志序列化，工具只能看到 `nodeType/containerNode` 等字段；公共配置对账在单分支 clone 上也未显式抓取目标分支。
+
+### What
+
+将图谱 Tool 响应在 Controller 边界转换为普通 Java 对象，保留真实 `graphEvidence`、`scanTasks` 和查询数据；公共配置的八处已知分支抓取统一显式传入目标 branch，并补充对应回归和模块说明。100 环境为试点用户启用代码知识，配置 TraceWeave API `18090`、页面 `18089`，将 GCMS PSN 的五个 100 源码镜像仓库映射到 `gcms-psn` 的 `aftgch/loangch/psncenterwebgch/psnstdgch/psnwebgch`；`psnwebgch` 的 APP_SOURCE generation 1 固定在 `release_20260912@e5085e38b727cab26e548b3ed2ab9fe56eef5b37`。应用源码弹窗的列表仍来自 `application_repository_links` 关联的 `code_repositories`，因此原普通库、`-scm` 库与新增 `-mirror` 库会同时出现；只过滤应用代码库类型并叠加当前快照状态。
+
+### How
+
+部署前从 `ssh://git@192.168.8.100:8022/wrui/intelligent-test-agent.git` fetch `release`，确认本地 HEAD、FETCH_HEAD 和远端均为 `e25e6005042792fa7ed8827757bbee72ac88edc9`。工作区模块定向测试 67 项、API Controller 定向测试 3 项通过；根目录 `./mvnw -B -ntp verify` 的 26 个模块全部成功（API 667 项、persistence 374 项且 20 项环境跳过、app 94 项且 2 项跳过），AI 文档、Jenkins 发布契约与 `git diff --check` 通过。Jenkins `intelligent-test-agent-release` #24 以 `ACTION=DEPLOY` 发布成功，清单 tag 为 `release-24-e25e6005`，readiness 为 UP、前端 3000 返回 200，后端和前端容器均直接挂载该不可变发布目录。
+
+真实 Mimo 运行 `run_b5aad7ac6db34867b9dad8eee03dbe21` 使用“代码白盒分析”和五仓范围后状态为 `SUCCEEDED`：`code_knowledge context/search` 返回真实 `graphEvidence.versionKey=jenkins-release-59-22617b1f`，不再出现 Jackson 类型标志；`code_source read` 返回 `IMMUTABLE_BASELINE`、固定 branch/commit/generation、1-40 行和文件 SHA-256 `4a1a41452d81e034b2051ca269b0155a8f5ce023ef3eef01aeb36ac00a8dc14e`。查询未得到真实 assetId，Agent 按规则没有把路径冒充 assetId，也没有调用 chain。
+
+### Result
+
+100 上的 Mimo 已可在同一轮对话联合使用 `code_source` 与 `code_knowledge`，源码查询不依赖 TraceWeave 是否已经收录该资产。当前 TraceWeave DEV 图版本可返回仓库映射、版本和扫描状态，但 `psnwebgch` 仍处于 `CTP_CHAIN RUNNING`，本轮可见进度为 `1913/8181 jsp`，`collection_model_apply` 搜索为空，因此完整入口调用链仍需等待扫描完成后按 `search -> definition -> chain` 复验。没有触发补扫、同步或写图；保留用户原有 `tools/query-user-message-statistics.sql` 修改和未跟踪文件 `-`，均未暂存。
