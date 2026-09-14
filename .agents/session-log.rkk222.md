@@ -17489,3 +17489,21 @@
 ### Result
 
 现场权限和发布前防回退门禁已修复；旧容器是在修复前创建的挂载，仍按项目约定通过 Jenkins `ACTION=DEPLOY` 强制重建，不以 SSH 手工替换或 Compose 重启冒充发布。无业务 API、数据库、鉴权、模型编排或前端行为变化。
+
+## 2026-09-14 - 恢复 100 测试环境 Mimo 登录链路
+
+### Why
+
+用户反馈 192.168.8.100 的 Mimo 后台无法登录，需要区分前端页面、反向代理、后端启动和认证本身的故障。
+
+### What
+
+从开发机访问 100 的浏览器入口确认首页 HTTP 200，但同源 `/api/auth/login` 和 `/api/actuator/health/readiness` 返回 502，后端 `18082`、XXL `18083` 与 executor `9999` 均未监听。通过已有受控 SSH 只读核对发现 `test-agent-redis`、`test-agent-xxl-job-mysql` 在 2026-09-13 23:41 UTC 收到 SIGTERM 后正常退出，两个容器的 restart policy 均为 `no`；后端容器因此持续重启并报 Redis/MySQL connection refused。
+
+### How
+
+仅启动已有的 `test-agent-redis` 和 `test-agent-xxl-job-mysql` 容器，保留原数据卷、网络和端口映射，不重建容器、不改配置、不改数据库。两者约 6 秒内恢复 `healthy`；后端自动恢复后，100 主机上的 `18082/actuator/health/readiness`、`18083/xxl-job-admin/actuator/health/readiness` 和 `9999` 监听均正常。浏览器入口的登录 CORS 预检返回 200，匿名空登录请求返回预期的 `VALIDATION_ERROR`（400），没有使用或记录真实账号密码。未触发 Jenkins、未修改源码或前端静态资源；后台仍有少量既有 Agent 配置仓库 SSH 读取告警，不影响 readiness 或登录路由。
+
+### Result
+
+100 测试环境登录服务链路已恢复，用户刷新 `http://192.168.8.100:3000/` 后可用原账号重试。依赖容器仍保持 `restart=no`，若要避免主机维护或手工停止后再次中断，需要另行按部署/运维流程评估自启动策略；本次不扩大该范围。
