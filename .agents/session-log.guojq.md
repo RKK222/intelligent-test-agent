@@ -1,5 +1,36 @@
 # Session Log — guojq
 
+## 2026-09-14 重新打代码变更包（仅前后端，三组件 reuse）
+
+### Why
+
+用户要求「代码变更打包」：基于当前 `release` 工作树（HEAD `1cf34aae4`，工作树干净）重打只含后端 JAR + 前端 dist 的企业包，worker runtime / toolbox / local OpenCode client 声明 reuse 沿用现网版本。
+
+### What
+
+1. 内层 `deploy/internal/dist-code/test-agent-internal-release.zip`（148 MB，SHA256 `2e16aeac9ad197d1c4c01bf46a4bc03ef274a1091e279ae3f21be9bc70ea1a86`）。
+2. 外层固定名 `deploy/internal/dist-code/test-agent-two-backend-complete.zip`（148 MB，SHA256 `662c7e64aab0aa930b3859f66b5f8c20d66ba43e009da15a09879c7af73e1277`）+ `.sha256`。
+3. 现有 `dist-code` 里 11:22 的「客户端 included」候选（新签发客户端 `20260914112204`）改名为隐藏文件 `.candidate-20260914112204-client-included.zip` 保留，未删除。
+
+### How
+
+- 先 `deploy/internal/package-release.sh --component-plan-only --output-dir deploy/internal/dist-code --component-state-file deploy/internal/dist/.release-component-state.env`，确认三组件全部 reuse 后再正式构建。
+- 正式构建：`deploy/internal/package-release.sh --output-dir deploy/internal/dist-code --component-state-file deploy/internal/dist/.release-component-state.env`（reuse 自动跳过 worker/toolbox/local client，只打 backend + frontend）。
+- 外层封装：`TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY=/Users/guo/mimoclaw/enterprise-build-inputs/mac-build/.secure/local-client-signing-public.pem deploy/internal/package-two-backend-complete.sh --release-archive deploy/internal/dist-code/test-agent-internal-release.zip --nodes-dir /Users/guo/mimoclaw/enterprise-build-inputs/nodes --output-dir deploy/internal/dist-code`。
+
+### Result
+
+- `release-components.env`：`WORKER_RUNTIME=reuse`、`TOOLBOX=reuse`、`LOCAL_OPENCODE_CLIENT=reuse`（声明版本 `20260910162947`，指纹 `33d714af…104e`）、`LOBEHUB=disabled`、`MEMORY=disabled`；ZIP 内无 `dist/local-opencode-client/`。
+- 内层 SHA256 与外层内嵌内层 SHA256 完全一致（`2e16aeac…a1a86`），`unzip -tq` 无错误，`nodes/` 含 `.4/.114/.2` 三套归档与 SHA。
+- 包内 `test-agent-persistence-0.1.0-SNAPSHOT.jar` 与构建目录安装后 JAR 摘要一致（`0dafe756…e293`），其内 toolbox migration `V20260728160800__create_toolbox_click_tracking.sql` SHA256 为 `777a96f12342b0cc049748a6f910e56214a4c8ca52488e1429edb1409adb51f2`，与既定企业基线一致。
+- 产物目录 `deploy/internal/dist-*/` 属 `.gitignore`，本次只提交本日志。
+
+### 关键坑
+
+1. **`dist-code` 下不存在默认组件状态文件时三组件会全部 included**：不传 `--component-state-file` 时 `COMPONENT_STATE_FILE` 默认指向 `dist-code/.release-component-state.env`（该文件不存在）→ 指纹比较基准为空 → worker/toolbox/client 全 included，包会从 148 MB 膨胀到 1.3 GB。代码变更包必须显式指向 `deploy/internal/dist/.release-component-state.env`（其 client 指纹 `33d714af…` 与当前构建输入一致，才是 reuse 的正确基准）。
+2. **reuse 声明的客户端版本必须与 `.2` 现网一致**：本包声明 `20260910162947`。`deploy-internal-frontend.sh` 在 reuse 分支会先对 `/data/testagent/dist/local-opencode-client` 执行 `verify_local_client_root` 逐项校验，版本/摘要不符会在替换前端前直接失败；如现场实际版本不是 `20260910162947`，需先取现网 `stable/manifest.json` 版本与四个摘要再校正基线，不能伪造。
+3. **`dist-code` 里 11:22 的客户端 included 候选只有一份副本**：它包含新签发客户端 `20260914112204` 的 JDK/OpenCode/公共能力归档，本机 `dist/local-opencode-client/` 下并无该版本目录，覆盖即丢失。因此先改名保留，后续如需该客户端交付可直接复用该 ZIP 或重新走 included 构建。
+
 ## 2026-09-11 导出「会话消息」Sheet 补「用户汇总」段
 
 ### Why
