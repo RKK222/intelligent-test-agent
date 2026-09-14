@@ -1282,7 +1282,6 @@ build_opencode_worker_image() {
     --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
     --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
     --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
-    --build-arg "DISABLE_SECURITY_REPO=${DISABLE_SECURITY_REPO:-}" \
     --build-arg "GO_IMAGE=${GO_IMAGE}" \
     --build-arg "MANAGER_BUILD_VERSION=${manager_build_version}" \
     --build-arg "NODE_IMAGE=${NODE_IMAGE}" \

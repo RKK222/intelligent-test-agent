@@ -273,6 +273,30 @@ deploy/internal/package-release.sh \
 客户端内容发生变化并进入 `included` 时，`package-release.sh` 会把组件状态中的已部署版本作为下界传给客户端打包入口；
 新版本还必须高于输出目录中已有的所有 release，否则打包立即停止。客户端组件为 `reuse` 时保持原版本，不因平台重封装递增。
 
+### 企业代码变更包（只改前后端，三组件全部 reuse）
+
+企业侧辅助开发者通常只有代码变更部署权限，不能重建 docker，因此每次交付都必须是 `worker runtime`、`toolbox`、
+本地客户端三组件均为 `reuse`、且指纹逐字等于现场 `/data/testagent/config/release-component-state.env` 登记值的
+代码变更包。手工逐项传参很容易漏掉现场组件基线或客户端受控输入，产出包会声明从未部署的客户端版本（现场在
+`Local client manifest SHA-256 mismatch` 处中断），或被现场以 worker 指纹不符拒绝。固定入口：
+
+```bash
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+```
+
+它做四件事：把 `release-baselines/20260907-enterprise-client-inputs.env`（客户端受控输入）与节点 env 合并成一次
+`--env-file`（节点 env 里的同名客户端键被剔除，避免第二处真值）；用
+`release-baselines/20260907-enterprise-deployed-components.env`（现场已部署 worker/toolbox 指纹）作为
+`--component-state-file`；打包前先跑 `--component-plan-only` 并断言三组件都是 `reuse` 且指纹等于上述基线，不符立即
+停止并指出是哪个组件漂移；构建后重新读包内 `release-components.env` 复核声明值，校验内外层 SHA 一致与
+`unzip -tq`，再把四个交付文件放进 `deploy/internal/dist-code`（上一版移入 `superseded-<时间戳>/`）。加
+`--plan-only` 可只做预检。
+
+现场组件基线里的指纹只能来自现场，不能由本机 `dist/.release-component-state.env` 推断——后者只代表“最后在本机
+构建的组件”，被未部署候选污染后会让包声明错误指纹。worker/toolbox 指纹**真的**变化时（实际运行时输入被改动，
+例如 `opencode-manager/`），预检会失败，此时必须改用 `--include-all-components` 全量组件包，不能用任何方式伪造指纹。
+
 新装机、灾备全量包或状态不可信时强制携带全部组件：
 
 ```bash

@@ -53,8 +53,6 @@ FROM ${NODE_IMAGE} AS python-runtime
 
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
-# bullseye-security pool 在 EOL 迁移期可能不完整；设为 true 时禁用 security 源，仅用主仓库。
-ARG DISABLE_SECURITY_REPO=
 ARG PYTHON_VERSION=3.13.14
 ARG PYTHON_SOURCE_SIZE=23021880
 ARG PYTHON_SOURCE_SHA256=639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690
@@ -76,36 +74,23 @@ RUN set -eux; \
     for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
       if [ -f "${file}" ]; then \
         sed -i \
-          -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
-          -e "s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           "${file}"; \
-        if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then sed -i '/debian-security/d' "${file}"; fi; \
       fi; \
     done; \
     apt-get \
       -o Acquire::ForceIPv4=true \
       -o Acquire::Languages=none \
       -o Acquire::PDiffs=false \
-      -o Acquire::Check-Valid-Until=false \
       update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       netbase \
       tzdata; \
     saved_apt_mark="$(apt-mark showmanual)"; \
-    if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then \
-      # 基础镜像含 bullseye-security 补丁版本（如 libc6 u14、libssl1.1 u8、perl-base u5），
-      # 禁用 security 源后主仓库只有更早的 -dev 包（libc6-dev u11、libssl-dev u1、perl u3），
-      # 需要先把运行时降级到主仓库匹配版本，否则 -dev 包的精确版本依赖无法满足。 \
-      apt-get install -y --allow-downgrades --no-install-recommends \
-        libc6=2.31-13+deb11u11 \
-        libssl1.1=1.1.1w-0+deb11u1 \
-        perl-base=5.32.1-4+deb11u3; \
-    fi; \
     apt-get install -y --no-install-recommends \
       build-essential \
       curl \
@@ -289,7 +274,6 @@ FROM python-runtime
 
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
-ARG DISABLE_SECURITY_REPO=
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG OPENCODE_VERSION=1.18.4
 ARG OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
@@ -315,21 +299,17 @@ RUN set -eux; \
     for file in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
       if [ -f "${file}" ]; then \
         sed -i \
-          -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
-          -e "s|https://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           "${file}"; \
-        if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then sed -i '/debian-security/d' "${file}"; fi; \
       fi; \
     done; \
     apt-get \
       -o Acquire::ForceIPv4=true \
       -o Acquire::Languages=none \
       -o Acquire::PDiffs=false \
-      -o Acquire::Check-Valid-Until=false \
       update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \

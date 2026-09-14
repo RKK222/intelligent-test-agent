@@ -128,6 +128,24 @@ deploy/internal/package-release.sh --output-dir /path/to/dist
 
 以上命令只在外部联网 Mac 重新构建交付物时执行。包已通过 U 盘进入企业内部中转机后，现场步骤从中转机上的 SHA256 校验和 `scp` 开始。
 
+### 只改前后端的代码变更包（企业辅助开发常用）
+
+企业侧辅助开发通常只有代码变更部署权限、不能重建 docker，此时不要手工拼 `package-release.sh` 参数，一律用固定入口：
+
+```bash
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+```
+
+它固定使用现场已部署组件基线（worker `aba0bb06…7687b`、toolbox `35447da0…5040`）与客户端受控输入，打包前先断言
+worker/toolbox/本地客户端三组件都是 `reuse` 且指纹逐字等于现场登记值，然后构建、封外层包、校验内外层 SHA 一致并交付到
+`deploy/internal/dist-code`（上一版移入 `superseded-<时间戳>/`）；加 `--plan-only` 只做预检。现场基线来自现场
+`/data/testagent/config/release-component-state.env`，不要用本机 `dist/.release-component-state.env` 推断。
+
+worker/toolbox 指纹**真的**变化时（运行时输入被有意改动）预检会失败并指出是哪个组件——此时必须改用
+`--include-all-components` 全量组件包；反过来，若漂移只是打包机往受控文件塞的构建环境补丁，要按
+[重复打包、签名与部署常见问题](references/release-rebuild-signing-pitfalls.md) 6.3 移除污染、还原基线字节，而不是伪造指纹。
+
 标准发布 ZIP 与三台节点包齐全后，使用 `deploy/internal/package-two-backend-complete.sh` 生成固定外层完整包。企业内部中转机每次只接收固定名 ZIP 和配套 SHA，不再按日期或版本改变命令。
 内层 ZIP 每次重建后必须重建外层包，并比较当前内层 ZIP 与外层内嵌 ZIP 的 SHA256；不一致时禁止进入企业内部中转机。
 

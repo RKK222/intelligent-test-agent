@@ -274,8 +274,8 @@ awk -F= '$1=="TEST_AGENT_SKILLHUB_ACCESS_KEY" {print length(substr($0,index($0,"
 
 | worker 指纹（前 8 位） | 对应源码提交 | 备注 |
 | --- | --- | --- |
-| `85ea6d01` | `41866c117`(09-10 16:35) 及之后，含当前 HEAD | 含 bullseye-security EOL 修复 |
-| `aba0bb06` | `37a797cc9`(09-02) ～ `41866c117` 前 | 缺 EOL 修复；09-07 企业全量包（源码 `5843fb7f7`）用的就是它 |
+| `aba0bb06` | `37a797cc9`(09-02) ～ `41866c117` 前，**以及 09-14 还原 EOL 补丁后的当前 HEAD** | 09-07 企业全量包（源码 `5843fb7f7`）用的就是它，也是现场 `.4/.114` 已登记值 |
+| `85ea6d01` | 仅 `41866c117`(09-10 16:35) ～ 09-14 还原前 | 差异**只**来自 09-10 为绕 bullseye EOL 往 Dockerfile 加的补丁，`opencode-manager/` 未变，见 6.3 |
 | `a0dfbbff` | `b693150d9`(08-27) | |
 | `877cea18` | `4ae609cb7`(08-24) | |
 | `737f30b2` | `bc14390a1`(08-23) | |
@@ -289,7 +289,23 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 两条必须记住的判断：
 
 1. **构建机状态自洽不等于现场一致。** `dist/.release-component-state.env` 只记录“最后在本机构建的组件”；它和本机 `--component-plan-only` 算出的指纹恒等，所以本机计划显示 `reuse` 完全不能证明现场能复用。判定现场只能看目标机 `/data/testagent/config/release-component-state.env`。
-2. **worker 输入真的变化时没有“继续复用旧 worker”的合法路径。** `--worker-runtime-baseline-file` 在封包时会断言 `baseline 指纹 == 本轮计算指纹`，所以它只能补登记“已部署指纹与本轮输入相同、只是当时没写状态”的情况。此时只剩两条路：随包带 worker（`included`，会 `docker load` 镜像并重建/重启 manager 与 worker，包体约 +540 MB），或确认现场状态文件确实缺失后用 baseline 补登记（保持小包、不重启）。不要用手改现场状态、改 Dockerfile 回退或 `--skip-worker` 硬过门禁。
+2. **worker 输入真的变化时没有“继续复用旧 worker”的合法路径。** `--worker-runtime-baseline-file` 在封包时会断言 `baseline 指纹 == 本轮计算指纹`，所以它只能补登记“已部署指纹与本轮输入相同、只是当时没写状态”的情况。此时只剩两条路：随包带 worker（`included`，会 `docker load` 镜像并重建/重启 manager 与 worker，包体约 +540 MB），或确认现场状态文件确实缺失后用 baseline 补登记（保持小包、不重启）。不要用手改现场状态、回退**真实变化**的运行时输入，或 `--skip-worker` 硬过门禁。
+
+   **但要先分清“真实变化”和“打包机污染”。** 只有运行时输入**真的**变了（`opencode-manager/`、entrypoint、launcher/plugin `mjs`、`codex-whitebox-*` 等被有意改动）才适用上面两条路。若是打包机自己为了绕构建环境问题往受控文件里塞的补丁（典型是往 `opencode-worker.Dockerfile` 加 apt 源兜底或版本 pin），那么指纹漂移是假信号：必须**移除污染、把该文件还原成现场基线字节**，见 6.3。判别方法是看基线提交到当前工作树在**全部** worker 输入路径上的差异，而不是只看总指纹：
+
+   ```bash
+   git diff --stat <现场基线源码提交> HEAD -- \
+     opencode-manager deploy/internal/opencode-worker.Dockerfile \
+     deploy/internal/opencode-worker.Dockerfile.dockerignore \
+     deploy/internal/opencode-worker-entrypoint.sh deploy/internal/validate-opencode-models.sh \
+     deploy/internal/opencode-node-runtime.package.json deploy/internal/opencode-node-runtime.package-lock.json \
+     deploy/internal/opencode-official-launcher.mjs deploy/internal/opencode-observability-plugin.mjs \
+     deploy/internal/opencode-runtime.gitignore deploy/internal/codex-whitebox-mcp-launcher.sh \
+     deploy/internal/codex-whitebox-requirements.toml tools/probe-codex-whitebox-e2e.mjs \
+     opencode-source/opencode-1.18.4/LICENSE
+   ```
+
+   `opencode-manager/` 不在差异里、只差 Dockerfile 的环境补丁时，还原它是修复而不是绕门禁——还原后 `--component-plan-only` 会自己算出等于现场登记的指纹（不是手改出来的值），现场门禁是真通过。
 
    **“把包内指纹改成现场旧值以适配门禁”不属于适配，属于伪造，必须拒绝。** 具体表现是改 `deploy/internal/release-components.env` 里的 `TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT`（把本轮的 `85ea6d01…` 换成现场的 `aba0bb06…`）而保留 `WORKER_RUNTIME=reuse`。判定与后果：
 
@@ -312,7 +328,7 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 - `snapshot.debian.org` 的 `debian-security` 只有索引（`dists/bullseye-security/InRelease` 可 200/302），pool 文件同样 404；
 - `archive.debian.org/debian-security` 目前只到 `buster`，没有 bullseye。
 
-所以 `debian-archive` 或换 security 镜像都救不了；`DISABLE_SECURITY_REPO=true` 分支里被 pin 的 `libc6=2.31-13+deb11u11` 同样已不在任何公共源。此时**不要**改 Dockerfile、不要回退版本、不要伪造指纹——按下面用已构建镜像配 `--zip-only` 重新封装：
+所以 `debian-archive` 或换 security 镜像都救不了；`DISABLE_SECURITY_REPO=true` 分支里被 pin 的 `libc6=2.31-13+deb11u11` 同样已不在任何公共源。此时**不要**为了过构建去改 Dockerfile：这条补丁路线 09-10 试过且**不通**（pin 的版本本身已下架，加了也构建不出来），却会把 worker 指纹从现场的 `aba0bb06…7687b` 永久推到 `85ea6d01…7fac`，让所有代码变更包都被现场门禁拦下——已于 09-14 把 `opencode-worker.Dockerfile` 与 `package-release.sh` 里的配套 build-arg 还原到 `37a797cc9` 字节，见 6.3。正确做法是不改构建输入、不要回退版本、不要伪造指纹，按下面用已构建镜像配 `--zip-only` 重新封装：
 
 1. 确认打包机上仍留有同一批次的镜像与制品：`docker image inspect test-agent-opencode-worker:internal`、`deploy/internal/dist/test-agent-opencode-worker_internal-linux-amd64.tar`、`test-agent-programs.tar.gz`、`.worker-runtime-artifact.env`。该目录是**持久制品目录**，不要在下一轮 `dist` 构建前清理。
 2. 校验 tar 与本地镜像确实是同一镜像（`docker save` 现在是 OCI 布局，`.Id` 是 index/manifest 摘要，不能用它直接比）。取出 tar 内 config blob 比 `rootfs.diff_ids`：`tar -xOf <tar> manifest.json` 拿 `Config` 路径 → `tar -xOf <tar> blobs/sha256/<config>` → 与 `docker image inspect -f '{{json .RootFS.Layers}}' test-agent-opencode-worker:internal` 逐项比对，顺序一致即同一镜像；顺便核对 `created` 时间。
@@ -325,6 +341,53 @@ toolbox 指纹 `35447da0…f15040` 自 08 月起未变，不是排查重点。
 现场 worker 升级到位（状态文件登记为本轮 `85ea6d01…`）后，下一版应回到常规 `reuse` 小包：`--component-plan-only` 预期输出 worker/toolbox/client 三组件全 `reuse`，不再需要 `--worker-runtime-baseline-file` 或镜像制品。
 
 **不可重建的制品不要按“过期候选”清理。** worker 镜像已无法重建，所以任何装入了该镜像的 worker `included` 成品包都是不可再生资产：不要丢进 `/tmp`（重启即丢），也不要直接删除。做法是改名移入 `deploy/internal/dist-code-archive/`（`worker-included-` 前缀）长期留存；该目录被 `.gitignore` 的 `deploy/internal/dist-*/` 覆盖，不会污染仓库状态。改名后 `.sha256` 文件内的文件名标签要同步重写（摘要值保持原值），否则归档自身的 `sha256sum -c` 会失败。
+
+## 6.3 打包机把环境补丁写进受控文件，会把代码变更包永久挡在门外
+
+**2026-09-14 定位到的根因。** 现场 `.4/.114` 登记的 worker 指纹是 `aba0bb06…7687b`，而本机从 `41866c117` 起算出的永远是 `85ea6d01…7fac`，于是每一版代码变更包都在现场 `.4` 的 `verify_reused_worker_runtime` 处被拒（`Incremental release worker runtime fingerprint does not match the installed component`），看起来像是"worker 运行时真的变了，只能打 662 MB 全量组件包"。
+
+反查后结论相反：**漂移不是运行时变化，而是打包机自己造成的污染。**
+
+```bash
+# 现场基线源码提交 5843fb7f7 → 当前 HEAD，在全部 worker 输入路径上只差一个文件、20 行
+git diff --stat 37a797cc9 HEAD -- opencode-manager \
+  deploy/internal/opencode-worker.Dockerfile deploy/internal/opencode-worker-entrypoint.sh \
+  deploy/internal/opencode-node-runtime.package.json deploy/internal/opencode-node-runtime.package-lock.json \
+  deploy/internal/opencode-official-launcher.mjs deploy/internal/opencode-observability-plugin.mjs \
+  deploy/internal/validate-opencode-models.sh deploy/internal/codex-whitebox-mcp-launcher.sh \
+  deploy/internal/codex-whitebox-requirements.toml tools/probe-codex-whitebox-e2e.mjs
+# 输出：deploy/internal/opencode-worker.Dockerfile | 20 ++++++++++++++++++++（仅此一条；opencode-manager/ 零差异）
+```
+
+那 20 行是 09-10 为绕 bullseye-security EOL 塞进 `opencode-worker.Dockerfile` 的 apt 源兜底与 `DISABLE_SECURITY_REPO` 分支（`41866c117`），纯粹是构建环境问题，不改变 worker 运行时行为，而且路线本身不通（6.2 已实证 pin 的包全部 404）。它却让 worker 指纹永久偏离现场登记值。
+
+修复（已执行）：
+
+```bash
+# 把两个受控文件还原成现场基线字节，不是手改指纹
+git checkout 37a797cc9 -- deploy/internal/opencode-worker.Dockerfile deploy/internal/package-release.sh
+./deploy/internal/package-release.sh --component-plan-only --env-file <企业 env> \
+  --local-client-baseline-file deploy/internal/release-baselines/20260910-client-20260907093905-deployed.env \
+  --output-dir /tmp/<scratch>
+# 预期：worker runtime fingerprint: aba0bb06f75eb56f694f5e630d00ab4787062f7cc549dda2b5c018182127687b
+```
+
+指纹由脚本从工作树**重新算出**并等于现场值，所以现场门禁是真通过，不是绕过；这与"把包内指纹手改成旧值"（6.1 判定为伪造）有本质区别。
+
+**防止再犯的三条硬规则：**
+
+1. **任何构建环境兜底都不许写进受控指纹输入文件。** apt 源、镜像加速、代理、超时、版本 pin 都不例外。指纹是文件内容的哈希——**加一行注释、一个默认空值的 `ARG`、一处空白改动都会改指纹**（09-10 的 `ARG DISABLE_SECURITY_REPO=` 默认就是空值，照样把指纹改了）。若某个环境问题确实只能靠改这些文件解决，那就等价于产出了一版新 worker runtime，只能走 `included` 全量组件包并在现场 `docker load`，不能继续宣称 `reuse`。
+2. **现场基线只能来自现场。** 组件基线取现场 `/data/testagent/config/release-component-state.env` 的登记值（worker/toolbox 指纹），客户端取现场已安装的版本与摘要；不得用本机 `deploy/internal/dist/.release-component-state.env` 推断，它只代表“最后在本机构建的组件”，被未部署候选污染后会产出现场不接受的包（6.1、第 3.3 节两次踩过）。
+3. **用固定入口打包，让漂移在打包前就暴露。** 代码变更包一律走 `deploy/internal/package-code-change.sh`：它固定使用现场的
+   `release-baselines/20260907-enterprise-deployed-components.env`（现场 worker/toolbox 指纹）与
+   `release-baselines/20260907-enterprise-client-inputs.env`（客户端受控输入），并在真正构建前先跑组件计划、断言三组件都是
+   `reuse` 且指纹逐字等于现场基线——不符立即停止并指出是哪个组件漂移，不会浪费一次构建，更不会把不合规的包带到现场。
+
+```bash
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+# 只做预检：加 --plan-only
+```
 
 ## 7. Flyway 为什么总在启动时失败
 

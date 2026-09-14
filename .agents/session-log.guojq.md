@@ -1,5 +1,41 @@
 # Session Log — guojq
 
+## 2026-09-14 根治代码变更包的 worker 指纹漂移：还原被打包机污染的受控文件
+
+### Why
+
+现场 worker 登记值 `aba0bb06…7687b` 与本机从 `41866c117` 起算出的 `85ea6d01…7fac` 不符，导致每个代码变更包都在 `.4` 的 `verify_reused_worker_runtime`（`deploy-internal-release.sh:603`）被拒。此前结论是「worker 运行时真的变了，只能打约 662 MB 全量组件包」。用户只有代码变更部署权限、不能重建 docker，要求从根源解决，让每次打包都产出以现场这套指纹生成的代码变更包。
+
+### What
+
+1. 反查根因：`git diff --stat 37a797cc9 HEAD -- <全部 worker 输入路径>` 只有 `deploy/internal/opencode-worker.Dockerfile` 20 行差异，`opencode-manager/` 零差异。那 20 行是 09-10 为绕 bullseye-security EOL 加的 apt 源兜底与 `DISABLE_SECURITY_REPO` 分支——属打包机环境补丁，不改变 worker 运行时行为，且该路线本身不通（pin 的 `libc6`/`libssl1.1`/`perl-base` 已全部下架）。指纹漂移是假信号，不是运行时变化。
+2. 修复：`git checkout 37a797cc9 -- deploy/internal/opencode-worker.Dockerfile deploy/internal/package-release.sh`（连带去掉配套的 `--build-arg DISABLE_SECURITY_REPO`）。改动后 `--component-plan-only` 直接算出 `aba0bb06f75eb56f694f5e630d00ab4787062f7cc549dda2b5c018182127687b`，与现场逐字一致——是脚本从工作树重算的结果，不是手改指纹。
+3. 固化现场基线为仓库文件：`deploy/internal/release-baselines/20260907-enterprise-deployed-components.env`（现场 worker/toolbox 指纹）与 `20260907-enterprise-client-inputs.env`（客户端受控输入 9 项）。
+4. 新增一键入口 `deploy/internal/package-code-change.sh`：合并企业 env 与客户端受控输入（并从节点 env 剔除同名客户端键，因为 `load_dotenv` 是首次赋值生效）；用现场组件基线作 `--component-state-file`；构建前断言三组件 `reuse` 且指纹等于现场基线；构建后回读包内 `release-components.env` 复核、校验内外层 SHA 一致与 `unzip -tq`；交付到 `dist-code/` 并把上一版移入 `superseded-<时间戳>/`。`--plan-only` 只做预检。
+5. `tools/verify-dev-scripts.sh` 增加断言：入口脚本存在、可执行、`bash -n` 通过；两份基线文件存在且指纹为完整 64 位小写 SHA-256。
+6. 文档同步：技能参考新增 6.3（打包机污染受控文件的坑、三条硬规则、反查命令），修正 6.1 对照表与「回退 Dockerfile」的判定前提（区分真实运行时变化与打包机污染），6.2 补记 EOL 补丁路线不通且已还原；`deploy/internal/README.md` 与技能 `SKILL.md` 增加代码变更包入口说明。
+
+### How
+
+```bash
+git checkout 37a797cc9 -- deploy/internal/opencode-worker.Dockerfile deploy/internal/package-release.sh
+deploy/internal/package-code-change.sh --plan-only \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env \
+  --build-dir /tmp/ea/build
+```
+
+漂移告警实测：临时给 Dockerfile 追加一行注释后 `--plan-only` 立即以 `STOP: worker runtime 计划为 'included'，不是 reuse` 停线并给出原因，不再浪费一次构建。
+
+### Result
+
+- 交付：内层 `8c17ac024a8699f45b91fa82dd4fd5bdf0e1c136a1526c2353b9bb531ab1608b`、外层 `2c93c7a7e5b6a055dce8e2a9a48b20e3955f82ee1ad076ec21c90b0bb2ae7cfd`（均约 155 MB）。
+- 包内 `release-components.env`：`WORKER_RUNTIME=reuse`/`aba0bb06…687b`、`TOOLBOX=reuse`/`35447da0…5040`、`LOCAL_OPENCODE_CLIENT=reuse`/`4fabde17…4023d`（版本 `20260907093905`，manifest `8976c932…9ba3`），三者与现场登记值逐字一致；内层无 `dist/local-opencode-client/`、无 worker 镜像 tar 与 programs 包。
+- 外层内嵌内层 SHA 与内层一致，两层 `unzip -tq` 通过，两枚 `.sha256` 自校验 OK；外层含 `.4/.114/.2` 三套节点归档与 SHA。
+- 上一版（声明 `85ea6d01` 的 16:05 包）已移入 `dist-code/superseded-20260914162825/`，未删除。
+- 未改 API、事件、数据库、Flyway、性能或安全边界；`opencode-manager/` 等 worker 运行时源码零改动。后续代码变更包一律走 `package-code-change.sh`，并记住：构建环境兜底不许写进受控指纹输入文件。
+
 ## 2026-09-14 拒绝「改包内指纹以适配旧 worker 门禁」的做法
 
 ### Why

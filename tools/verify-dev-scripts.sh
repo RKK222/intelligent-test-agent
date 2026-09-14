@@ -386,6 +386,21 @@ if ! grep -Fq 'control.buildVersion=${MANAGER_BUILD_VERSION}' "${ROOT_DIR}/deplo
   fail "worker Dockerfile should inject manager buildVersion through linker flags"
 fi
 
+# 企业代码变更包入口必须存在且可解析；现场组件基线必须钉住完整的 64 位指纹，
+# 否则打包前断言会退化成空值比较，把“指纹漂移”静默放行。
+CODE_CHANGE_SCRIPT="${ROOT_DIR}/deploy/internal/package-code-change.sh"
+[[ -x "${CODE_CHANGE_SCRIPT}" ]] || fail "code change packaging entry missing or not executable: ${CODE_CHANGE_SCRIPT}"
+bash -n "${CODE_CHANGE_SCRIPT}"
+COMPONENTS_BASELINE="${ROOT_DIR}/deploy/internal/release-baselines/20260907-enterprise-deployed-components.env"
+[[ -f "${COMPONENTS_BASELINE}" ]] || fail "deployed component baseline missing: ${COMPONENTS_BASELINE}"
+for baseline_key in TEST_AGENT_RELEASE_WORKER_RUNTIME_FINGERPRINT TEST_AGENT_RELEASE_TOOLBOX_FINGERPRINT; do
+  if ! grep -Eq "^${baseline_key}=[0-9a-f]{64}$" "${COMPONENTS_BASELINE}"; then
+    fail "deployed component baseline should pin ${baseline_key} as a full lowercase SHA-256"
+  fi
+done
+CLIENT_INPUTS="${ROOT_DIR}/deploy/internal/release-baselines/20260907-enterprise-client-inputs.env"
+[[ -f "${CLIENT_INPUTS}" ]] || fail "enterprise client inputs baseline missing: ${CLIENT_INPUTS}"
+
 if grep -q "OPENCODE_MANAGER_LINUX_SERVER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject OPENCODE_MANAGER_LINUX_SERVER_ID"
 fi
