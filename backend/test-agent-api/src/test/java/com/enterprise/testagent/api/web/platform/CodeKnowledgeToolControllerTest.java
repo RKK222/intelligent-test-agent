@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
@@ -49,6 +50,7 @@ class CodeKnowledgeToolControllerTest {
 
         var response = controller.executeGraph(request, exchange()).block();
 
+        assertThat(response.data()).isInstanceOf(Map.class);
         assertThat(mapper.valueToTree(response.data()).path("sourceContexts").get(0)
                 .path("evidence").path("generation").asLong()).isEqualTo(7L);
         verify(tokens).authenticate("Bearer scoped-code-token");

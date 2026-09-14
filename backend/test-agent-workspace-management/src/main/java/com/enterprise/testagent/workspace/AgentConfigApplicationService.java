@@ -622,7 +622,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey, commitIdentity);
             } else {
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-                gitWorkspaceService.fetch(repoRoot, privateKey);
+                gitWorkspaceService.fetchBranch(repoRoot, normalizedBranch, privateKey);
                 progress.step(AgentConfigOperationStep.COMMITTING);
                 gitWorkspaceService.stageAll(repoRoot, privateKey);
                 if (!gitWorkspaceService.isWorktreeClean(repoRoot) || hasStagedChanges(repoRoot)) {
@@ -1800,7 +1800,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             progress.branch(branch);
             String previousCommitHash = gitWorkspaceService.headCommit(sharedRepoRoot);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-            gitWorkspaceService.fetch(personalRepoRoot, privateKey);
+            gitWorkspaceService.fetchBranch(personalRepoRoot, branch, privateKey);
             progress.step(AgentConfigOperationStep.MERGING);
             try {
                 gitWorkspaceService.mergeBranch(
@@ -2046,7 +2046,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                             request.discardSharedRuntimeChanges(),
                             PublicRepositorySyncTarget.SHARED_RUNTIME);
                 }
-                gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+                gitWorkspaceService.fetchBranch(config.gitRoot(), request.branch(), privateKey);
                 if (!publicConfigRolloutCoordinator.renewServerSync(request)) {
                     return;
                 }
@@ -2223,7 +2223,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             if (initiator != null) {
                 ensurePublicRepositoryOriginReady(config.gitRoot(), config);
             }
-            gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+            gitWorkspaceService.fetchBranch(config.gitRoot(), branch, privateKey);
             gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, privateKey);
             gitWorkspaceService.resetHardToCommit(config.gitRoot(), commitHash);
             if (rolloutId != null && publicConfigRolloutCoordinator != null) {
@@ -2340,7 +2340,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         Path gitRoot = config.gitRoot();
         if (gitWorkspaceService.isGitRepository(gitRoot)) {
             ensureExistingRepositoryReadyForSync(gitRoot, config, discardLocalChanges);
-            gitWorkspaceService.fetch(gitRoot, privateKey);
+            gitWorkspaceService.fetchBranch(gitRoot, branch, privateKey);
             gitWorkspaceService.checkoutTrackingBranch(gitRoot, branch, privateKey);
             gitWorkspaceService.pullFastForward(gitRoot, branch, privateKey);
             requireInitializedConfigDirectory(config);
@@ -2361,7 +2361,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             throw publicRepositoryUninitialized(config.gitRoot());
         }
         ensureExistingCleanRepository(config.gitRoot(), config);
-        gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+        gitWorkspaceService.fetchBranch(config.gitRoot(), branch, privateKey);
         gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, privateKey);
         gitWorkspaceService.pullFastForward(config.gitRoot(), branch, privateKey);
         requireInitializedConfigDirectory(config);
@@ -3275,7 +3275,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             String expectedCommitHash,
             String privateKey) {
         try {
-            gitWorkspaceService.fetch(repoRoot, privateKey);
+            gitWorkspaceService.fetchBranch(repoRoot, branch, privateKey);
             String remoteRef = "origin/" + branch;
             String remoteCommit = gitWorkspaceService.resolveCommit(repoRoot, remoteRef);
             return expectedCommitHash.equals(remoteCommit)
@@ -3314,7 +3314,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                 ensurePublicRepositoryReady(config, preparation.branch(), privateKey);
             } else {
                 ensurePublicRepositoryOriginReady(config.gitRoot(), config);
-                gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+                gitWorkspaceService.fetchBranch(config.gitRoot(), preparation.branch(), privateKey);
             }
             String remoteRef = "origin/" + preparation.branch();
             String remoteCommit = gitWorkspaceService.resolveCommit(config.gitRoot(), remoteRef);
