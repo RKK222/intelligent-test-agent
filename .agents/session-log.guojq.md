@@ -1,5 +1,28 @@
 # Session Log — guojq
 
+## 2026-09-15 修复待推送状态下提交说明丢失问题
+
+### Why
+
+用户反馈：点击"提交"（仅本地提交，不推送）后，提交说明输入框被清空，看不到原说明，也不知道"重新推送"会复用什么提交说明。
+
+### What
+
+1. `handleCommit` 末尾不再无条件清空 `commitMessage`，有待推送状态时保留原值。
+2. `applyWorkspaceDiffRefresh` 和 `applyWorkspaceAgentDiffRefresh` 在合并待推送快照时回填 `pending.commitMessage`，覆盖页面刷新场景。
+3. 同次提交包含预置的 `unstageWorkspaceFiles` 跳过待推送文件改动及其测试。
+
+### How
+
+- `frontend/apps/agent-web/src/components/GitChangesPanel.vue`：三处改动
+- `frontend/apps/agent-web/tests/git-changes-panel.test.ts`：两个待推送取消暂存测试
+
+### Result
+
+- `vue-tsc --noEmit` 类型检查通过；`vitest` 64 tests passed。
+- 不涉及 API、事件、数据库、安全或兼容性变更。
+- 提交 `362918c31`，分支 `release`。
+
 ## 2026-09-15 在合并后的 HEAD 复检无漂移并重打代码变更包
 
 ### Why
