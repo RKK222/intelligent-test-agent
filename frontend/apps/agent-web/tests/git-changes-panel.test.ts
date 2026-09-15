@@ -2411,6 +2411,61 @@ describe("GitChangesPanel", () => {
     }));
   });
 
+  it("skips locally committed workspace files when unstaging all changes", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/edited.ts", status: "modified", rawStatus: "M ", staged: true, patch: "patch", additions: 1, deletions: 0 }],
+        pendingPublishFiles: [
+          { path: "docs/moved-away.md", status: "deleted", rawStatus: "D ", staged: true, patch: "", additions: 0, deletions: 0 }
+        ],
+        pendingPublishCommitMessage: "fix: 移动目录"
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("待推送")).toBeTruthy();
+    await fireEvent.click(await view.findByRole("button", { name: "全部回退到未暂存" }));
+
+    await waitFor(() => expect(apiClientMock.unstageWorkspaceGitFiles)
+      .toHaveBeenCalledWith("wrk_1234567890abcdef", ["src/edited.ts"]));
+    expect(await view.findByText(/已完成本地提交，请使用“重新推送”继续发布/)).toBeTruthy();
+  });
+
+  it("keeps unstaging a no-op when every staged file is already locally committed", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [],
+      pendingPublishFiles: [
+        { path: "docs/moved-away.md", status: "deleted", rawStatus: "D ", staged: true, patch: "", additions: 0, deletions: 0 }
+      ],
+      pendingPublishCommitMessage: "fix: 移动目录"
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("待推送")).toBeTruthy();
+    await fireEvent.click(await view.findByRole("button", { name: "全部回退到未暂存" }));
+
+    await waitFor(() => expect(view.getByText(/已完成本地提交，请使用“重新推送”继续发布/)).toBeTruthy());
+    expect(apiClientMock.unstageWorkspaceGitFiles).not.toHaveBeenCalled();
+  });
+
   it("restores committed unpushed application Agent files into the Agent scope", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({

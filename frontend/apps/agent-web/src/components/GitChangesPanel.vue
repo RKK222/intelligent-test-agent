@@ -1085,6 +1085,10 @@ function applyWorkspaceAgentDiffRefresh(files: AgentConfigDiffFile[]) {
     return;
   }
   workspaceAgentDiffs.value = [...files, ...pending.diffFiles];
+  // 从待推送快照回填提交说明，便于用户查看并按需修改后重新推送
+  if (pending.commitMessage && !commitMessage.value.trim()) {
+    commitMessage.value = pending.commitMessage;
+  }
 }
 
 /** clean status 仍叠加已完成本地提交的发布白名单；同一路径再次产生真实改动时取消旧快照。 */
@@ -1104,6 +1108,10 @@ function applyWorkspaceDiffRefresh(files: WorkspacePanelDiffFile[], stagedPaths:
   }
   workspaceDiffFiles.value = [...files, ...pending.diffFiles];
   stagedWorkspacePaths.value = new Set([...stagedPaths, ...pending.files]);
+  // 从待推送快照回填提交说明，便于用户查看并按需修改后重新推送
+  if (pending.commitMessage && !commitMessage.value.trim()) {
+    commitMessage.value = pending.commitMessage;
+  }
 }
 
 /**
@@ -1314,11 +1322,24 @@ async function stageAllWorkspaceChanges() {
   }
 }
 
+// 待推送文件已完成本地提交，既不在 index 也不在 HEAD；Git 会整批报 "pathspec did not match"，
+// 因此取消暂存必须像单文件按钮那样跳过它们。
+const PENDING_PUBLISH_UNSTAGE_HINT = "这些 workspace 文件已完成本地提交，请使用“重新推送”继续发布。";
+
 // 单文件和批量取消暂存也复用同一 index 更新链路，确保两个分组的 all 操作完全对称。
 async function unstageWorkspaceFiles(paths: string[]) {
   if (!canMutateWorkspaceGit.value || !props.workspaceId || paths.length === 0) return;
-  const pendingPaths = paths.filter((path) => !updatingWorkspaceIndexPaths.value.has(path));
-  if (pendingPaths.length === 0) return;
+  const pendingPublishPaths = new Set(currentPendingWorkspacePublish()?.files ?? []);
+  const skippedPendingPublish = paths.filter((path) => pendingPublishPaths.has(path));
+  const pendingPaths = paths.filter(
+    (path) => !pendingPublishPaths.has(path) && !updatingWorkspaceIndexPaths.value.has(path)
+  );
+  if (pendingPaths.length === 0) {
+    if (skippedPendingPublish.length > 0) {
+      errorMessage.value = PENDING_PUBLISH_UNSTAGE_HINT;
+    }
+    return;
+  }
   errorMessage.value = "";
   updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, ...pendingPaths]);
   try {
@@ -1326,16 +1347,20 @@ async function unstageWorkspaceFiles(paths: string[]) {
       const next = new Set(stagedWorkspacePaths.value);
       pendingPaths.forEach((path) => next.delete(path));
       stagedWorkspacePaths.value = next;
-      return;
+    } else {
+      await api.unstageWorkspaceGitFiles(props.workspaceId, pendingPaths);
+      await refreshChanges();
     }
-    await api.unstageWorkspaceGitFiles(props.workspaceId, pendingPaths);
-    await refreshChanges();
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "取消暂存工作区文件失败");
   } finally {
     const next = new Set(updatingWorkspaceIndexPaths.value);
     pendingPaths.forEach((path) => next.delete(path));
     updatingWorkspaceIndexPaths.value = next;
+  }
+  // refreshChanges 会清空提示文案，跳过待推送文件的说明必须在刷新完成后补回。
+  if (skippedPendingPublish.length > 0 && !errorMessage.value) {
+    errorMessage.value = PENDING_PUBLISH_UNSTAGE_HINT;
   }
 }
 
@@ -2367,7 +2392,10 @@ async function handleCommit(push = false) {
       }
     }
 
-    commitMessage.value = "";
+    // 有待推送状态时保留原提交说明，便于用户查看并按需修改后重新推送
+    if (!activePublishPending.value) {
+      commitMessage.value = "";
+    }
     recordCommitResult(operationScope, {
       committedFiles: plannedCommittedFileCount,
       pushedFiles: remotePublishCompleted ? plannedPushedFileCount : 0,
