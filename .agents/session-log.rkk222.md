@@ -17527,3 +17527,21 @@
 ### Result
 
 100 上的 Mimo 已可在同一轮对话联合使用 `code_source` 与 `code_knowledge`，源码查询不依赖 TraceWeave 是否已经收录该资产。当前 TraceWeave DEV 图版本可返回仓库映射、版本和扫描状态，但 `psnwebgch` 仍处于 `CTP_CHAIN RUNNING`，本轮可见进度为 `1913/8181 jsp`，`collection_model_apply` 搜索为空，因此完整入口调用链仍需等待扫描完成后按 `search -> definition -> chain` 复验。没有触发补扫、同步或写图；保留用户原有 `tools/query-user-message-statistics.sql` 修改和未跟踪文件 `-`，均未暂存。
+
+## 2026-09-15 - 核对 Skill 统计 SQL 漏掉平台未发布推送
+
+### Why
+
+用户反馈 Skill 统计数量偏少，怀疑平台自身推送的数据没有纳入。审阅用户提供的 SQL 与平台 Skill Hub 的实际 push、publish 和浏览查询链路。
+
+### What
+
+确认 SQL 的平台分支要求 `latest_published_revision_id is not null`，会排除“已 push、尚未 publish”的平台应用 Skill。实际 push 事务只更新 `latest_pushed_revision_id`，publish 是后续独立动作；平台浏览查询只要求来源可用且最新 pushed 修订未删除。修正版应以 `source_available = true`、`latest_pushed_revision_id is not null` 和 pushed 修订未删除为平台资产可见条件，并用 pushed 修订回退展示名称/描述；`content_available` 仍可保留为是否已发布的独立字段。
+
+### How
+
+对照 `AgentSkillHubApplicationService`、`MyBatisAgentSkillHubRepository`、`AgentSkillHubMapper.xml` 及相关迁移/测试，仅做只读代码与 SQL 静态核对；未修改业务代码、数据库或用户提供的附件文件。
+
+### Result
+
+旧 SQL 会漏掉平台新推送/待发布 Skill；同一 `technical_id` 在多个应用工作空间仍按 `asset_id` 分行统计，若要统计去重技能名需另行明确口径。本次工作区无产品代码变更，仅保留该诊断记录。
