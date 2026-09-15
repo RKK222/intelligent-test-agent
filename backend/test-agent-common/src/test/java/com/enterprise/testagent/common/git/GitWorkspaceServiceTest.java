@@ -282,6 +282,24 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void parseNameStatusPreservesChineseRenameAndCopyPaths() {
+        GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
+
+        List<GitWorkspaceService.GitNameStatusEntry> entries = service.parseNameStatus(String.join("\n",
+                "M\tF-GCMS/workspace/需求说明.md",
+                "R100\tF-GCMS/workspace/旧名称.md\tF-GCMS/workspace/新名称.md",
+                "C087\tF-GCMS/workspace/模板.md\tF-GCMS/workspace/模板副本.md"));
+
+        assertThat(entries).containsExactly(
+                new GitWorkspaceService.GitNameStatusEntry(
+                        'M', "M", null, "F-GCMS/workspace/需求说明.md"),
+                new GitWorkspaceService.GitNameStatusEntry(
+                        'R', "R100", "F-GCMS/workspace/旧名称.md", "F-GCMS/workspace/新名称.md"),
+                new GitWorkspaceService.GitNameStatusEntry(
+                        'C', "C087", "F-GCMS/workspace/模板.md", "F-GCMS/workspace/模板副本.md"));
+    }
+
+    @Test
     void parseStatusPorcelainMarksUnmergedEntriesAsConflict() {
         GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
 
@@ -441,6 +459,28 @@ class GitWorkspaceServiceTest {
         assertThat(executor.calls).containsExactly(new Call(
                 List.of("git", "-C", tempDir.toString(), "rev-parse", "--abbrev-ref", "HEAD"),
                 null));
+    }
+
+    @Test
+    void readsOriginTrackingCommitWithoutFetching() {
+        RecordingExecutor executor = new RecordingExecutor("abc123\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.remoteTrackingBranchCommit(tempDir, "feature/testagent")).contains("abc123");
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "show-ref", "--verify", "--quiet",
+                        "refs/remotes/origin/feature/testagent"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "rev-parse",
+                        "refs/remotes/origin/feature/testagent"), null));
+    }
+
+    @Test
+    void returnsEmptyWhenOriginTrackingCommitDoesNotExist() {
+        GitWorkspaceService service = new GitWorkspaceService((command, privateKey, timeout) -> {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "ref not found", Map.of("exitCode", 1));
+        });
+
+        assertThat(service.remoteTrackingBranchCommit(tempDir, "feature/testagent")).isEmpty();
     }
 
     @Test

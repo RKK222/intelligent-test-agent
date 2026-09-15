@@ -496,10 +496,22 @@ public final class ManagedWorkspaceResponses {
             boolean mergeInProgress,
             boolean applicationUpdatePending,
             String applicationTargetCommit,
-            List<WorkspaceGitUpdateBlockerResponse> applicationUpdateBlockingFiles) {
+            List<WorkspaceGitUpdateBlockerResponse> applicationUpdateBlockingFiles,
+            List<WorkspaceGitDiffFileResponse> pendingPublishFiles,
+            String pendingPublishCommitMessage) {
 
         public WorkspaceGitDiffResponse(List<WorkspaceGitDiffFileResponse> files) {
-            this(files, false, false, null, List.of());
+            this(files, false, false, null, List.of(), List.of(), null);
+        }
+
+        public WorkspaceGitDiffResponse(
+                List<WorkspaceGitDiffFileResponse> files,
+                boolean mergeInProgress,
+                boolean applicationUpdatePending,
+                String applicationTargetCommit,
+                List<WorkspaceGitUpdateBlockerResponse> applicationUpdateBlockingFiles) {
+            this(files, mergeInProgress, applicationUpdatePending, applicationTargetCommit,
+                    applicationUpdateBlockingFiles, List.of(), null);
         }
     }
 

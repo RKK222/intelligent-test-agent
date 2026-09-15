@@ -577,3 +577,66 @@
 ### Result
 - 文件名可直接在源端运维日志查看，外发日志需脱敏；没有部署或推送，现场仍需源 Java 使用新版本后重试确认根因。
 - Windows 符号链接权限受限的既有真实链接测试本次未执行，保留后续目标环境补验要求。
+
+## 2026-09-14 - 修复前端本地提交后无法重新推送
+
+### Why
+
+- 企业用户在前端选择“提交”而未立即推送后，个人 worktree 已经完成本地提交，Git 工作区变为 clean；刷新 Git Diff 后变更未暂存和已暂存均为空，页面因此失去后续推送入口。
+
+- 用户随后反馈“重新推送”失败；桌面截图入口为 `127.0.0.1:3000`，需区分本机开发链路与企业 `.4` 现场，不能沿用企业归因。
+
+### What
+
+- 普通应用 Workspace 在仅本地提交成功后保存个人 worktree、工作区、文件白名单、提交说明及 Diff 元数据到既有待推送状态。
+- 应用 Agent 在仅本地提交成功后保存待发布文件白名单，继续复用既有“重新推送”流程；推送成功仍清理待推送状态，`spec/**` 仍只本地提交不发布。
+- 新增回归测试，覆盖本地提交后显示“待推送”并通过“重新推送”发布原提交文件。
+
+- 结合本机 `.tmp/dev-services/backend.log` 确认，两次重试已到达后端，在应用 feature 副本 `PREPARE_REMOTE` 的 `fetch origin` 阶段因 `ssh: Could not resolve hostname gitee.com: Name or service not known` 失败，归类 `NETWORK_UNAVAILABLE` / `GIT_UNAVAILABLE`，尚未进入这两次请求的投影、提交或 push。
+
+- 继续核对地址来源：运行副本 `.git/config` 的 `remote.origin.url` 实际指向 Gitee；配置链路为“设置 → 版本库管理 → 版本库地址” → `code_repositories.git_url` → clone 后写入 origin。现有内部模式仅按操作人拼接 SSH 用户名前缀，已有副本继续校验 origin 与平台保存地址一致。
+
+### How
+
+- 目标分支为 `release`，本次不新增部署节点，不修改后端 API、事件、数据库、部署配置或 OpenCode 源码。
+- 定向 Vitest `apps/agent-web/tests/git-changes-panel.test.ts`：59/59 通过。
+- `@test-agent/agent-web` typecheck：通过；`git diff --check`：通过。
+- 提交前回顾全部 `.agents/session-log*.md`，保留其它提交者的既有记录和工作区成果。
+
+- 通过桌面截图 OCR、日志 trace 精确筛选、工作副本只读 Git 状态及脱敏 origin 主机核对定位；2026-09-14 10:48:26、10:48:42（UTC+8）的 trace 分别为 `trace_e9dbfe10982d476aafb1fd1ec9eb8f4e`、`trace_6abd7c4afbc44c7ca9c141e10851ff15`。10:58 本机 PowerShell DNS 已能解析该域名，但未验证后端 Git 子进程当前链路或重新执行发布。
+- 同日志 10:34:23 的较早请求返回 `PUBLISHED` / `remotePushed=true`；其个人副本同步受本地文件阻挡的警告与 10:48 DNS 失败不同，不能据此断言本次待推送文件已经发布。
+
+- 使用 `git remote get-url origin`、`git config --show-origin --get-regexp` 只读核对副本配置来源，未发现 Git URL 重写规则；审计版本库表单、领域对象、MyBatis mapper 及副本准备代码。未查询数据库当前行，未修改实际仓库地址。
+
+### Result
+
+- 仅本地提交后，前端不再依赖 clean 状态下重新读取 Git Diff，而是通过 sessionStorage 恢复待推送上下文，用户可刷新页面后点击“重新推送”完成发布。
+- 当前未进行企业 `.4` 现场部署或真实浏览器验收，需按既有发布流程部署后在企业环境验证实际推送链路。
+- 本次重试失败的直接原因是当时 Git/SSH 域名解析失败，并非前端入口未触发；DNS 失败的具体诱因仍未确认。确认目标仓库配置正确且本机实际后端链路恢复后可使用既有“重新推送”，无需重复提交、reset 或强推；此次只补充诊断，不修改业务代码、环境配置或 Git 配置，不执行 fetch/push，也不把本机结果外推为企业验收。
+- 用户指出期望目标可能不是 Gitee；DNS 日志只证明访问现有 origin 失败，不能证明目标配置正确，需先核对应用关联与期望克隆地址。版本库 URL 创建后不可编辑，不能仅 `git remote set-url` 绕过平台记录或删除含本地提交的 worktree；具体地址修复方案需在确认目标后制定。
+
+## 2026-09-14 - 按 Git 跟踪记录恢复存量已提交未推送文件
+
+### Why
+
+- 企业用户反馈 `F-BASE/workspace/docs/功能模块/测试案例_模板.md` 本地与远程不一致，但 Git Changes 的未暂存和已暂存列表都没有显示；浏览器 sessionStorage 只能恢复当前浏览器本次操作，不能覆盖存量提交、刷新会话或换浏览器后的状态。
+
+### What
+
+- 只读核对目标个人 worktree：个人 `HEAD=07f1c85f0f2fb857b9faad55afbacf3a064e4ce6`，本地 `refs/remotes/origin/feature_testagent_20260812=7be834b4286c173212c1e74a13df3bd89c759f86`；目标文件在两提交树之间为 `M`，但工作树和 index 对该文件均无状态，因此原页面只读 `git status` 必然漏掉。
+- `GitWorkspaceService` 增加本地 origin 跟踪提交读取、HEAD 提交说明读取和 name-status 解析；不执行 fetch，不访问网络，也不使用数据库 target 冒充远程状态。
+- 工作区 Git Diff 在应用 target 与本地 origin 跟踪提交均已进入个人 HEAD、无待合入更新且不在 merge 中时，返回 origin 跟踪提交到个人 HEAD 的 `pendingPublishFiles/pendingPublishCommitMessage`；目录范围、`spec/**` 排除和 rename/copy 投影保持受控。
+- 前端把后端返回的待推送文件分流到“应用工作空间”或“应用 Agent”，显示“待推送”并复用 publish 接口重新推送，不重复本地 commit；权威空数组清理旧浏览器快照，字段缺失或 `null` 时兼容旧后端和只读恢复失败。
+- 同步 workspace-management README、frontend README、HTTP API、共享类型和应用 worktree 验收案例。
+
+### How
+
+- 目标分支为 `release`，不新增部署节点，不切换或新建分支；只修改 Git 状态投影、前端恢复入口、相关测试与稳定文档。
+- 按用户要求未运行 Maven、Vitest、typecheck、构建、服务重启或真实推送，由用户自行验证；仅静态回顾差异与全部 `.agents/session-log*.md` 近期条目。
+- 两个根目录 OCR 临时文件 `chi_sim.traineddata`、`eng.traineddata` 与本次无关，不纳入提交。
+
+### Result
+
+- clean 的工作树/index 不再等同于“没有待推送文件”；只要本地已知的 origin 跟踪提交落后于个人 HEAD，当前工作区内的已提交差异就能重新出现在“待推送”列表。
+- 本地 origin 跟踪引用只是最近一次 fetch/push 后的 Git 快照，不保证等于实时远程；引用缺失或无法安全判定时后端返回不可判定，不误清理前端兼容记录。
+- API 仅向响应增加可选字段，兼容旧前端；不涉及事件、数据库、Flyway、部署拓扑、性能模型、安全权限、环境配置、generated SDK 或 OpenCode 源码。未推送远程。

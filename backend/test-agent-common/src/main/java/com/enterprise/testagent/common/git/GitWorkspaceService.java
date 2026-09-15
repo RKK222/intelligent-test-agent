@@ -378,6 +378,45 @@ public class GitWorkspaceService {
         return result.stdoutText().trim();
     }
 
+    /** 读取当前 HEAD 的完整提交说明，供已提交未推送记录恢复原发布说明。 */
+    public String headCommitMessage(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-c", "log.showSignature=false", "-C", repoRoot.toString(),
+                        "log", "-1", "--format=%B", "HEAD"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText().trim();
+    }
+
+    /**
+     * 读取指定应用分支在本地仓库中的 origin 跟踪提交；不执行 fetch，也不访问网络。
+     *
+     * <p>该引用是本地 Git 对远程状态的事实快照，适合只读 Diff 判断本地 HEAD 是否包含
+     * 已知远程提交。引用不存在时返回空，调用方不能用数据库 target commit 冒充远程事实。</p>
+     */
+    public Optional<String> remoteTrackingBranchCommit(Path repoRoot, String branch) {
+        String normalizedBranch = Objects.requireNonNull(branch, "branch must not be null").trim();
+        if (normalizedBranch.isEmpty()
+                || normalizedBranch.indexOf('\r') >= 0
+                || normalizedBranch.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("branch is invalid");
+        }
+        String ref = "refs/remotes/origin/" + normalizedBranch;
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "show-ref", "--verify", "--quiet", ref),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return Optional.of(resolveCommit(repoRoot, ref));
+        } catch (PlatformException exception) {
+            Object exitCode = exception.details().get("exitCode");
+            if (exitCode instanceof Number number && number.intValue() == 1) {
+                return Optional.empty();
+            }
+            throw exception;
+        }
+    }
+
     /**
      * 顺序读取本地 origin 跟踪引用中的最近提交者证据；不执行 fetch，也不访问网络。
      * 调用方必须设置有界 maxCount，并在多个仓库间串行调度，避免夜间任务放大磁盘压力。
@@ -797,6 +836,39 @@ public class GitWorkspaceService {
                 gitNoQuotedPath(repoRoot, "diff", "--name-status", "-M", from, to),
                 null,
                 DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    /**
+     * 解析 name-status；rename/copy 同时保留旧路径和新路径，调用方可据此正确投影删除与新增。
+     */
+    public List<GitNameStatusEntry> parseNameStatus(String nameStatus) {
+        if (nameStatus == null || nameStatus.isBlank()) {
+            return List.of();
+        }
+        List<GitNameStatusEntry> entries = new ArrayList<>();
+        for (String line : nameStatus.split("\\R")) {
+            if (line.isBlank()) {
+                continue;
+            }
+            String[] fields = line.split("\\t", -1);
+            if (fields.length < 2 || fields[0].isBlank()) {
+                continue;
+            }
+            char status = fields[0].charAt(0);
+            String oldPath = null;
+            String path;
+            if ((status == 'R' || status == 'C') && fields.length >= 3) {
+                oldPath = unquotePorcelainPath(fields[1]);
+                path = unquotePorcelainPath(fields[2]);
+            } else {
+                path = unquotePorcelainPath(fields[1]);
+            }
+            if (path.isBlank()) {
+                continue;
+            }
+            entries.add(new GitNameStatusEntry(status, fields[0], oldPath, path));
+        }
+        return List.copyOf(entries);
     }
 
     /**
@@ -2104,6 +2176,14 @@ public class GitWorkspaceService {
             String patch,
             int additions,
             int deletions) {
+    }
+
+    /** 两提交树之间的一条 name-status 记录；非 rename/copy 时 oldPath 为空。 */
+    public record GitNameStatusEntry(
+            char status,
+            String rawStatus,
+            String oldPath,
+            String path) {
     }
 
     private static final class DiffAccumulator {

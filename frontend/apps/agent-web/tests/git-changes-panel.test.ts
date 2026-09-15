@@ -2344,6 +2344,158 @@ describe("GitChangesPanel", () => {
     expect(view.getByText("FAILED")).toBeTruthy();
   });
 
+  it("keeps publishable workspace files available after local-only commit", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/committed-only.ts", status: "modified", rawStatus: "M ", staged: true, patch: "patch", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: commit before publish");
+    await fireEvent.click(await view.findByRole("button", { name: "提交" }));
+
+    expect(await view.findByText("待推送")).toBeTruthy();
+    expect(view.getByRole("button", { name: "重新推送" })).toBeTruthy();
+
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.commitPersonalWorkspace).toHaveBeenCalledTimes(1));
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1);
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      files: ["src/committed-only.ts"]
+    }));
+  });
+
+  it("restores committed unpushed workspace files from backend git tree state", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [],
+        pendingPublishFiles: [
+          { path: "docs/legacy.md", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 0, deletions: 0 },
+          { path: "spec/local-only.md", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 0, deletions: 0 }
+        ],
+        pendingPublishCommitMessage: "fix: 历史本地提交"
+      })
+      .mockResolvedValue({ files: [], pendingPublishFiles: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("legacy.md")).toBeTruthy();
+    expect(view.queryByText("local-only.md")).toBeNull();
+    expect(view.getByText("待推送")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1));
+    expect(apiClientMock.commitPersonalWorkspace).not.toHaveBeenCalled();
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      commitMessage: "fix: 历史本地提交",
+      files: ["docs/legacy.md"]
+    }));
+  });
+
+  it("restores committed unpushed application Agent files into the Agent scope", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [],
+        pendingPublishFiles: [{
+          path: ".opencode/opencode.jsonc",
+          status: "modified",
+          rawStatus: "M ",
+          staged: true,
+          patch: "",
+          additions: 0,
+          deletions: 0
+        }],
+        pendingPublishCommitMessage: "fix: 历史 Agent 提交"
+      })
+      .mockResolvedValue({ files: [], pendingPublishFiles: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        canManageAgentConfig: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("opencode.jsonc", { exact: false })).toBeTruthy();
+    expect(view.getByRole("tab", { name: /应用Agent/ }).getAttribute("aria-selected")).toBe("true");
+    expect(view.getByText("待推送")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重新推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledTimes(1));
+    expect(apiClientMock.commitPersonalWorkspace).not.toHaveBeenCalled();
+    expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      commitMessage: "fix: 历史 Agent 提交",
+      files: [".opencode/opencode.jsonc"]
+    }));
+  });
+
+  it("clears stale browser pending snapshots when backend reports no pending tree diff", async () => {
+    window.sessionStorage.setItem(
+      "test-agent.git.pending-workspace-publish.v1:psw_default:wrk_1234567890abcdef",
+      JSON.stringify({
+        personalWorkspaceId: "psw_default",
+        workspaceId: "wrk_1234567890abcdef",
+        files: ["docs/stale.md"],
+        commitMessage: "stale",
+        diffFiles: [{ path: "docs/stale.md", status: "modified", staged: true, patch: "", additions: 0, deletions: 0 }]
+      })
+    );
+    window.sessionStorage.setItem(
+      "test-agent.git.pending-workspace-agent-publish.v1:psw_default:wrk_1234567890abcdef",
+      JSON.stringify({
+        personalWorkspaceId: "psw_default",
+        agentConfigWorkspaceId: "wrk_1234567890abcdef",
+        files: [".opencode/stale.md"],
+        commitMessage: "stale agent",
+        diffFiles: [{ path: "stale.md", status: "modified", staged: true, patch: "" }]
+      })
+    );
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({ files: [], pendingPublishFiles: [] });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitDiff).toHaveBeenCalled());
+    expect(view.queryByText("stale.md")).toBeNull();
+    expect(view.queryByRole("button", { name: "重新推送" })).toBeNull();
+    expect(window.sessionStorage.getItem(
+      "test-agent.git.pending-workspace-publish.v1:psw_default:wrk_1234567890abcdef"
+    )).toBeNull();
+    expect(window.sessionStorage.getItem(
+      "test-agent.git.pending-workspace-agent-publish.v1:psw_default:wrk_1234567890abcdef"
+    )).toBeNull();
+  });
+
   it("finishes the progress step after a successful local workspace commit", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({

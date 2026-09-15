@@ -50,6 +50,7 @@ type PendingWorkspaceAgentPublish = {
   personalWorkspaceId: string;
   agentConfigWorkspaceId: string;
   files: string[];
+  commitMessage: string;
   diffFiles: WorkspaceAgentDiffFile[];
 };
 type PendingWorkspacePublish = {
@@ -259,6 +260,7 @@ function currentPendingWorkspaceAgentPublish(): PendingWorkspaceAgentPublish | n
 function rememberPendingWorkspaceAgentPublish(
   personalWorkspaceId: string,
   files: string[],
+  commitMessage: string,
   diffFiles: AgentPanelDiffFile[]
 ) {
   const agentConfigWorkspaceId = effectiveAgentConfigWorkspaceId.value;
@@ -267,6 +269,7 @@ function rememberPendingWorkspaceAgentPublish(
     personalWorkspaceId,
     agentConfigWorkspaceId,
     files: [...files],
+    commitMessage,
     diffFiles: diffFiles.map((file) => ({
       path: file.path,
       status: file.status,
@@ -298,6 +301,65 @@ function clearPendingWorkspaceAgentPublish() {
   pendingWorkspaceAgentPublish.value = null;
   if (personalWorkspaceId && workspaceId) {
     writePendingPublish(pendingWorkspaceAgentStorageKey(personalWorkspaceId, workspaceId), null);
+  }
+}
+
+/**
+ * 新后端以本地 origin 跟踪提交到个人 HEAD 的真实树差异作为待发布权威状态。
+ * 字段存在时覆盖浏览器旧快照；字段缺失时继续兼容旧后端的 sessionStorage 重试记录。
+ */
+function applyAuthoritativeWorkspacePendingPublish(
+  files: WorkspaceGitDiffFile[],
+  commitMessage?: string | null
+) {
+  const personalWorkspaceId = props.personalWorkspaceId;
+  const workspaceId = props.workspaceId;
+  const message = commitMessage?.trim() || "重新发布已完成的本地提交";
+  const publishableFiles = files.filter((file) => !isLocalOnlySpecPath(file.path));
+  const workspaceFiles = publishableFiles
+    .filter((file) => !isWorkspaceAgentConfigPath(file.path))
+    .map((file): WorkspacePanelDiffFile => ({
+      path: file.path,
+      rawStatus: file.rawStatus,
+      status: file.status,
+      patch: file.patch ?? "",
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0
+    }));
+  const workspaceAgentFiles = publishableFiles.flatMap((file): AgentPanelDiffFile[] => {
+    if (!isWorkspaceAgentConfigPath(file.path)) return [];
+    const path = normalizeWorkspaceAgentDiffPath(file.path);
+    if (!path) return [];
+    return [{
+      path,
+      status: file.status,
+      staged: true,
+      patch: file.patch ?? "",
+      scope: "WORKSPACE"
+    }];
+  });
+
+  if (personalWorkspaceId && workspaceId && workspaceFiles.length > 0) {
+    rememberPendingWorkspacePublish(
+      personalWorkspaceId,
+      workspaceId,
+      workspaceFiles.map((file) => file.path),
+      message,
+      workspaceFiles
+    );
+  } else {
+    clearPendingWorkspacePublish();
+  }
+
+  if (personalWorkspaceId && workspaceAgentFiles.length > 0) {
+    rememberPendingWorkspaceAgentPublish(
+      personalWorkspaceId,
+      workspaceAgentFiles.map((file) => workspaceAgentPersonalPath(file.path)),
+      message,
+      workspaceAgentFiles
+    );
+  } else {
+    clearPendingWorkspaceAgentPublish();
   }
 }
 
@@ -934,6 +996,10 @@ function selectInitialDiffScope() {
     activeDiffScope.value = "WORKSPACE";
     return;
   }
+  if (currentPendingWorkspaceAgentPublish()) {
+    activeDiffScope.value = "AGENT_WORKSPACE";
+    return;
+  }
   if (currentPendingPublicAgentPublish()) {
     activeDiffScope.value = "PUBLIC";
     return;
@@ -1089,6 +1155,12 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
         workspaceApplicationUpdateBlockingFiles.value = Array.isArray(gitDiff.applicationUpdateBlockingFiles)
           ? gitDiff.applicationUpdateBlockingFiles
           : [];
+        if (Array.isArray(gitDiff.pendingPublishFiles)) {
+          applyAuthoritativeWorkspacePendingPublish(
+            gitDiff.pendingPublishFiles,
+            gitDiff.pendingPublishCommitMessage
+          );
+        }
         // `.opencode` 与普通文件同属个人 worktree，但在“应用Agent”视图单独展示和提交。
         const workspaceFiles = gitDiff.files
           .filter((f) => !isWorkspaceAgentConfigPath(f.path))
@@ -1987,6 +2059,7 @@ async function handleCommit(push = false) {
   }
   const msg = commitMessage.value.trim()
     || retryingWorkspacePublish?.commitMessage
+    || retryingWorkspaceAgentPublish?.commitMessage
     || "重新发布已完成的本地提交";
   if (!commitMessage.value.trim() && !retryingWorkspacePublish && !retryingWorkspaceAgentPublish && !retryingPublicAgentPublish) {
     errorMessage.value = "请输入提交说明";
@@ -2108,18 +2181,19 @@ async function handleCommit(push = false) {
         });
         workspaceLocalCommitCompleted = true;
       }
+      // 仅本地提交也要保留发布白名单；Git status 此时已 clean，否则刷新后无法再找到可推送文件。
+      if (!retryingWorkspacePublish && publishableFiles.length > 0 && operationPersonalWorkspaceId && operationWorkspaceId) {
+        const publishablePathSet = new Set(publishableFiles);
+        rememberPendingWorkspacePublish(
+          operationPersonalWorkspaceId,
+          operationWorkspaceId,
+          publishableFiles,
+          msg,
+          operationWorkspaceStaged.filter((file) => publishablePathSet.has(file.path))
+        );
+      }
       if (push && publishableFiles.length > 0) {
         publishAttempted = true;
-        if (!retryingWorkspacePublish) {
-          const publishablePathSet = new Set(publishableFiles);
-          rememberPendingWorkspacePublish(
-            operationPersonalWorkspaceId!,
-            operationWorkspaceId!,
-            publishableFiles,
-            msg,
-            operationWorkspaceStaged.filter((file) => publishablePathSet.has(file.path))
-          );
-        }
         progressMessage.value = "正在从个人 HEAD 投影并推送 feature 分支...";
         commitStep.value = 3;
         const publishOperationId = newOperationId();
@@ -2246,13 +2320,13 @@ async function handleCommit(push = false) {
           operationId: newOperationId()
         });
         workspaceAgentLocalCommitCompleted = true;
-        if (push) {
-          rememberPendingWorkspaceAgentPublish(
-            operationPersonalWorkspaceId,
-            workspaceStagedFiles,
-            workspaceStagedPanelFiles
-          );
-        }
+        // 应用 Agent 与普通文件共用个人 worktree；仅本地提交后同样必须保留待发布白名单。
+        rememberPendingWorkspaceAgentPublish(
+          operationPersonalWorkspaceId,
+          workspaceStagedFiles,
+          msg,
+          workspaceStagedPanelFiles
+        );
       }
       commitStep.value = 2;
       if (push) {
