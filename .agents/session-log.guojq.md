@@ -1,5 +1,39 @@
 # Session Log — guojq
 
+## 2026-09-15 在合并后的 HEAD 复检无漂移并重打代码变更包
+
+### Why
+
+用户要求再打一个代码变更包。相比上一版（基于 `850736828`），本轮 HEAD 已推进到合并提交 `fd45559f8`（含 `b026a94af 修复工作区本地提交后的重新推送`）。合并可能把 09-10 的打包机补丁重新带回受控输入，必须先反查再打包，否则会重演 worker 指纹漂移导致现场门禁失败。
+
+### What
+
+1. 漂移反查：`git diff --stat 37a797cc9 HEAD -- <全部 worker 输入路径>` 输出为空，确认合并未重新引入 `deploy/internal/opencode-worker.Dockerfile` 与 `deploy/internal/package-release.sh` 的打包机补丁，`opencode-manager/` 亦零改动。
+2. `package-code-change.sh --plan-only` 预检：三组件 `reuse`，指纹等于现场基线（worker `aba0bb06…687b`、toolbox `35447da0…5040`、client `4fabde17…4023d`），基线源提交 `5843fb7f72925f3193f3fcd72b68e592dc76baf7`。
+3. 正式打包并在构建后做产物核验：内层 `deploy/internal/release-components.env` 声明 `TEST_AGENT_RELEASE_WORKER_RUNTIME=reuse`、`TOOLBOX=reuse`、`LOCAL_OPENCODE_CLIENT=reuse`，指纹逐字等于现场基线；客户端版本 `20260907093905`、manifest `8976c9327e99d4be2f3a7e852936dbd220f996d06bdd700abbb12998ea859ba3`（与现场 09-10 备份记录一致）。
+4. 复用特征核验：内层不含 worker 镜像 tar、不含 `dist/local-opencode-client/`；外层含 `nodes/` 下 `.4`/`.114`/`.2` 三套节点归档（各含 `deploy-multi-backend-node.sh` 与 `config/{backend,toolbox,docker}.env`）加内层 zip 及其 `.sha256`；两层 `unzip -tq` 通过，两枚 `.sha256` 自校验 OK。
+5. 记录一个非致命坑：沙箱对 `~/Library/pnpm/_tmp_*/` 的 `file-write-unlink` 拦截会让后台任务被标记 failed，但打包脚本自身仍以 0 退出且构建后复核全过——判断成败要看日志尾部的交付摘要与 SHA 自校验，不要因沙箱这一条拦截就重打。
+
+### How
+
+```bash
+git diff --stat 37a797cc9 HEAD -- \
+  opencode-manager deploy/internal/opencode-worker.Dockerfile \
+  deploy/internal/package-release.sh deploy/internal/worker-entrypoint.sh
+deploy/internal/package-code-change.sh --plan-only \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env \
+  --build-dir /tmp/ea/build
+```
+
+### Result
+
+- 交付：内层 `b066e260dc68d36c1043bc985d00bd0e38e8790327590571d1db01ffde14c5fb`、外层 `1d11ffe37318a5debdb0b2efb41f21edaca404bb4e595707191880ad9320e289`（均约 155 MB），位于 `deploy/internal/dist-code/`（该目录被 `.gitignore` 忽略，包不入库）。
+- 上一版包（内层 `8c17ac02…608b`／外层 `2c93c7a7…7cfd`）已移入 `dist-code/superseded-20260915140634/`，未删除。
+- 本轮无源码改动，未改 API、事件、数据库、Flyway、性能或安全边界；`opencode-manager/` 等 worker 运行时源码零改动。
+- 待现场确认事项（承接上一轮）：现场 `local-opencode-client` 目录损坏，已给出「校验通过才换入 `.bak.20260910144526` 备份」的恢复脚本，尚未收到执行结果；换入成功后前台 `reuse` 校验才会通过。
+
 ## 2026-09-14 根治代码变更包的 worker 指纹漂移：还原被打包机污染的受控文件
 
 ### Why
