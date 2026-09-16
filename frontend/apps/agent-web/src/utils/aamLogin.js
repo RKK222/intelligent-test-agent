@@ -1,4 +1,4 @@
-export const DEFAULT_AAM_LOGIN_BASE_URL = "http://zfw.sdc.cs.icbc/aam/onlyLogin/";
+export const DEFAULT_AAM_LOGIN_BASE_URL = "http://tcds-prod.sdc.icbc/aam/onlyLogin/";
 
 export function resolveAamLoginBaseUrl(baseURL) {
   const configured = typeof baseURL === "string" ? baseURL.trim() : "";

@@ -18,7 +18,7 @@ Java 前必须从每个后台节点验证 Redis TCP。值为 `0` 时，Docker DN
 
 应用默认使用现场确认的企业局域网基础地址 `http://tcds-prod.sdc.icbc:9080`；所有 Java 节点仍应在 `backend.env` 显式配置相同的 `TEST_AGENT_TCDS_BASE_URL`，便于部署审计和后续环境切换。覆盖值必须是 HTTP/HTTPS 绝对地址，相对地址或其它协议会使 Spring 启动失败，错误不回显实际地址。登录、用户、需求导入、任务类型和案例维护等全部 TCDS 同源请求统一通过共享请求构造器携带 `toolId: 66f36bfa5c1c6105572b0118880261d6`；企业内外网隔离由部署网络策略负责。
 
-AAM 验真由每个 Java 节点直接访问统一 origin。`backend.env` 必须显式配置相同的 `TEST_AGENT_AAM_BASE_URL=http://zfw.sdc.cs.icbc`，只允许 HTTP/HTTPS origin，不能包含账号、密码、路径、query 或 fragment；固定 `/aam/checkLogin` 由后端追加。默认 `TEST_AGENT_AAM_CONNECT_TIMEOUT=3s`、`TEST_AGENT_AAM_REQUEST_TIMEOUT=5s`、`TEST_AGENT_AAM_MAX_RESPONSE_BYTES=65536`，不重试。发布时先升级并验收全部 Java，最后一台旧 Java 退出流量后才视为 Redis v1 旧登录态全面失效，再发布前端静态资源；回滚顺序相反，回滚 Java 会重新引入旧 AAM Token 未验真的风险，必须经过明确应急批准。本改造不涉及数据库、Flyway、RunEvent 或 generated SDK。
+AAM 验真由每个 Java 节点直接访问统一 origin。`backend.env` 必须显式配置相同的 `TEST_AGENT_AAM_BASE_URL=http://tcds-prod.sdc.icbc`，只允许 HTTP/HTTPS origin，不能包含账号、密码、路径、query 或 fragment；固定 `/aam/checkLogin` 由后端追加。默认 `TEST_AGENT_AAM_CONNECT_TIMEOUT=3s`、`TEST_AGENT_AAM_REQUEST_TIMEOUT=5s`、`TEST_AGENT_AAM_MAX_RESPONSE_BYTES=65536`，不重试。发布时先升级并验收全部 Java，最后一台旧 Java 退出流量后才视为 Redis v1 旧登录态全面失效，再发布前端静态资源；回滚顺序相反，回滚 Java 会重新引入旧 AAM Token 未验真的风险，必须经过明确应急批准。本改造不涉及数据库、Flyway、RunEvent 或 generated SDK。
 
 本变更同时改变普通 Workspace `rootPath/physicalRootPath` 语义和前端 iframe 路由，必须按“全部 Java 节点配置变量并升级 → 验证目录 API/文件 WebSocket → 升级前端”的顺序同批发布。回滚时先回滚前端，再回滚全部 Java；旧 Java 需要恢复旧配置和旧路径响应语义，不能长期混跑。旧 9900 服务只在新版本完成真实 TCDS 查询、重复覆盖、部分失败和文件树刷新验收后由运维另行停用，本仓库不再调用该端口。
 

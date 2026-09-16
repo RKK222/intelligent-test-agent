@@ -6,7 +6,7 @@
 
 应用默认使用企业局域网 TCDS 入口 `http://tcds-prod.sdc.icbc:9080`，所有 Java 节点仍必须在 `backend.env` 显式填写同一个 `TEST_AGENT_TCDS_BASE_URL` HTTP/HTTPS 绝对地址，便于部署审计和环境切换；非法覆盖值会使 Java 启动失败。全部 TCDS 后台接口请求统一携带现场约定的 `toolId` header。升级时先为全部节点核对变量，再升级全部 Java 和前端；回滚时先回滚前端，再回滚全部 Java，禁止长期混跑新旧 `rootPath` 语义。旧 9900 服务仅在同源需求导入完成真实查询、目录写入、重复覆盖、部分失败和文件树刷新验收后由运维另行停用。
 
-AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagent/config/backend.env` 使用相同 `TEST_AGENT_AAM_BASE_URL=http://zfw.sdc.cs.icbc`，并先完成 Java 全节点升级；最后一台旧 Java 退出后，旧 Redis v1 会话才全部不可认证。随后再更新 `.2` 前端静态资源和 Nginx，SPA fallback 关闭访问日志并返回 `Referrer-Policy: no-referrer`。验收需覆盖新旧用户登录、AAM 拒绝/不可用、平台 Token 鉴权、刷新和登出；回滚先前端后 Java，Java 回滚会恢复旧认证风险，只能作为批准的应急动作。
+AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagent/config/backend.env` 使用相同 `TEST_AGENT_AAM_BASE_URL=http://tcds-prod.sdc.icbc`，并先完成 Java 全节点升级；最后一台旧 Java 退出后，旧 Redis v1 会话才全部不可认证。随后再更新 `.2` 前端静态资源和 Nginx，SPA fallback 关闭访问日志并返回 `Referrer-Policy: no-referrer`。验收需覆盖新旧用户登录、AAM 拒绝/不可用、平台 Token 鉴权、刷新和登出；回滚先前端后 Java，Java 回滚会恢复旧认证风险，只能作为批准的应急动作。
 
 企业 SkillHub 固定使用接口文档的测试环境 `http://ai-code.sdc.icbc/icbc/skill`。企业 `backend.env` 显式设置 `TEST_AGENT_SKILLHUB_ENABLED=true`，两台 Java 使用同一个 `TEST_AGENT_SKILLHUB_ACCESS_KEY`；密钥只存在于敏感节点包或目标机 `/data/testagent/config/backend.env`，不得进入 Git、普通发布 ZIP、命令行或日志。复用旧节点包时，外层封装写入目标机继承标记，`deploy-backend-node.sh` 在覆盖配置前从已安装文件继承；缺失、重复或长度不足会在 Java 停启前失败。本地 `.env.test/.env.local` 不读取企业模板，应用默认仍为关闭；即使企业地址暂时不可达，Java 也先正常启动，后台目录同步失败只记录脱敏告警并按周期重试。
 
