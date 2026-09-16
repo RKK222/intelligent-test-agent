@@ -1,5 +1,78 @@
 # Session Log — guojq
 
+## 2026-09-16 打含「Agent 配置目录上传」的代码变更包，并恢复被合并丢掉的上一版日志
+
+### Why
+
+用户要求再打一个代码变更包。本轮 HEAD 推进到合并提交 `e68b8b6e2`（把 `90f7ae2dc 支持Agent配置目录上传` 合入 `02c9b091d`）。准备阶段发现一件必须记录的事：**上一版打包后我提交的 `221662435`（只含 `.agents/session-log.guojq.md` 与 `.workbuddy/memory/2026-09-16.md`，无代码）已不在分支历史中**——`git merge-base --is-ancestor 221662435 HEAD` 为假，`git branch -a --contains` 为空，`git log --all` 也搜不到。原因是这次合并的父提交是 `90f7ae2dc` 与 `02c9b091d`，而 `221662435` 挂在 `02c9b091d` 之上，合并方显然是从未包含该提交的检出点做的合并，把它留成了游离对象。若不恢复，规则 22/23 要求的会话日志链条会断档。
+
+### What
+
+1. 丢失排查与恢复：确认 `221662435` 仍可按 SHA 取到（游离但未 gc），且它对 `.agents/session-log.guojq.md` / `.workbuddy/memory/2026-09-16.md` 相对 `02c9b091d` 无他人改动，遂用 `git checkout 221662435 -- <两文件>` 精确恢复，再在其上追加本轮条目。
+2. 漂移反查与预检：`git diff --stat 37a797cc9 HEAD -- <全部 worker 输入路径>` 为空；`--plan-only` 三组件 `reuse` 且指纹等于现场基线。
+3. 打包：内层 `e9a70f39d16d6ffaa051dec2d5767e7d863c9932b6e24e4b39ee9004bbc24ca1`、外层 `92fbf4672dcf0bb57890287a7095c0abbf988d8541c71a13751f4b1f3312f10f`（约 155 MB），上一版移入 `dist-code/superseded-20260916161453/`。
+4. 载荷差分核验（这次做到了「与上一版逐项对比」）：
+   - 后端：新版 `lib/test-agent-workspace-management-0.1.0-SNAPSHOT.jar` 的 `AgentConfigApplicationService.class` 含新方法 `ensureAgentUploadParent`，上一版同名 class **0 命中**。
+   - 前端：`AgentWorkbench` chunk 中 `webkitdirectory` 由 **6 → 7** 处、`allow-directory-upload` 由 **5 → 6** 处；`ts.worker` chunk 哈希不变。265 个 JS 资源里 166 个未变、99 个因入口 chunk 内容变化连带重哈希。
+5. 澄清一个易误判的核验方法：`webkitdirectory` / `allow-directory-upload` 在上一版就已存在（工作区上传、markdown 图片上传在用），**不能当差异标记**，必须比「出现次数」或「与上一版同名 chunk 对比」，只看「是否命中」会误判。
+
+### How
+
+```bash
+git merge-base --is-ancestor 221662435 HEAD || echo "上一版打包提交已游离"
+git branch -a --contains 221662435
+git checkout 221662435 -- .agents/session-log.guojq.md .workbuddy/memory/2026-09-16.md
+
+deploy/internal/package-code-change.sh --plan-only \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env \
+  --build-dir /tmp/ea/build
+```
+
+### Result
+
+- 交付：内层 `e9a70f39…24ca1`、外层 `92fbf467…2f10f`，位于 `deploy/internal/dist-code/`；组件声明 worker/toolbox/client 全 `reuse` 且指纹逐字等于现场基线；两枚 `.sha256` 自校验 OK；内层不含 worker 镜像 tar 与 `dist/local-opencode-client/`。
+- 恢复的日志与记忆随本次提交一并保留，规则 22/23 的记录链条不再断档。
+- 未改 API、事件、数据库、Flyway、性能或安全边界；worker 运行时源码零改动。
+- 提醒后续会话：合并前先确认本地提交是否已被纳入，`git log --all | grep <sha>` 与 `git branch --contains` 是判断提交是否游离的可靠手段；游离提交不会报错，只会静默消失。
+
+## 2026-09-16 用包含 AAM 基址改动的 HEAD 打代码变更包并做端到端内容复核
+
+### Why
+
+用户要求再打一个代码变更包。本轮 HEAD 已推进到 `02c9b091d`（含 AAM 基址 `zfw.sdc.cs.icbc` → `tcds-prod.sdc.icbc` 的后端/打包/部署/文档改动，以及 `GitChangesPanel.vue` 待推送提交说明修复）。除例行的 worker 指纹反查外，这一版首次需要确认「改动本身确实落进了包的前后端产物和节点配置」——因为 AAM 值不是构建期 `--env-file` 可覆盖的普通变量，而是由打包脚本 `normalize_backend_node_archive()` 硬编码写入节点 `config/backend.env`，打包侧与部署侧各有一处精确断言，改漏一处现场就会被门禁拦下。
+
+### What
+
+1. 漂移反查：`git diff --stat 37a797cc9 HEAD -- <全部 worker 输入路径>` 输出为空，本轮新提交未触碰 worker 受控输入；`--plan-only` 三组件 `reuse`，指纹等于现场基线。
+2. 打包并做端到端内容复核（此前几版只复核组件声明，本轮补齐「载荷是否进包」）：
+   - 内层 `deploy/internal/release-components.env`：worker/toolbox/client 全 `reuse`，指纹与现场基线逐字一致。
+   - 前端 `dist/test-agent-frontend-dist.tar.gz`：`tcds-prod.sdc.icbc` 命中 7 处、`zfw.sdc.cs.icbc` 命中 0 处。
+   - 后端 `dist/backend/test-agent-app.jar` 的 `BOOT-INF/classes/application.yml`：`aam.base-url` 与 `TEST_AGENT_TCDS_BASE_URL` 默认值均为新主机。
+   - 外层节点归档：`.4`/`.114` 的 `config/backend.env` 均为 `TEST_AGENT_AAM_BASE_URL=http://tcds-prod.sdc.icbc`，与 `deploy-multi-backend-node.sh:289` 的 `require_exact_value` 一致；`.2` 为 Nginx 节点，只有 `nginx.env`，无 AAM 项，符合设计。
+3. 澄清两点既有设计，避免后续误判：内层包会带 6 个 `.agents/session-log*.md`，是 `package-release.sh:1867` 的**有意设计**（会话日志作为交付基线便于内网追溯），不是泄漏；`.workbuddy/` 不入包。
+
+### How
+
+```bash
+git diff --stat 37a797cc9 HEAD -- opencode-manager deploy/internal/opencode-worker.Dockerfile \
+  deploy/internal/package-release.sh deploy/internal/worker-entrypoint.sh
+deploy/internal/package-code-change.sh --plan-only \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env
+deploy/internal/package-code-change.sh \
+  --env-file /Users/guo/mimoclaw/enterprise-build-inputs/mac-build/deploy/internal/.env \
+  --build-dir /tmp/ea/build
+```
+
+坑：`tar -xzf <包> -O --wildcards '*/config/backend.env'` 在 macOS bsdtar 下会**静默输出空**，据此会误判「节点配置里没有 AAM 项」。核对节点配置必须先用 `-C` 解到临时目录再 `cat`，不要依赖 `-O` + 通配符。另：沙箱对 `~/Library/pnpm/_tmp_*` 的 `file-write-unlink` 拦截会让后台任务显示 failed，但打包脚本实际退出 0 且自带构建后复核全过，判定成败要看日志尾部交付摘要与两枚 `.sha256` 自校验。
+
+### Result
+
+- 交付：内层 `0a6c4bf542980002daeae67b472004120dcbf4a3f67adb7e5596bd82f3ebdab6`、外层 `98b3be4fbe826859e9f90d533676985024a9b3beef82dc919b357819d22e2814`（均约 155 MB），位于 `deploy/internal/dist-code/`；上一版移入 `superseded-20260916111517/`。
+- 未改 API、事件、数据库、Flyway、性能或安全边界；`opencode-manager/` 等 worker 运行时源码零改动。
+- 承接风险（非本轮引入）：新 AAM 主机 `http://tcds-prod.sdc.icbc` 的 80 端口是否真的提供 `/aam/checkLogin` 验真接口尚未验证，现场升级前需与 AAM 侧确认，否则登录会 503。
+
 ## 2026-09-15 修复待推送状态下提交说明丢失问题
 
 ### Why

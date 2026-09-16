@@ -422,3 +422,45 @@ deploy/internal/package-code-change.sh \
 7. `.4 → .114 → .2` 的逐机命令、每步停止条件和浏览器功能验收。
 8. 独立数据面、manager、灰度 models 和客户端是否需要动作；没有变化时明确“不重启/不重装/不重复同步”。
 9. 企业命令只使用 `grep`、`awk`、`sed`、`find`、`sha256sum` 等基础工具，不使用 `rg`、`jq`。
+
+### 9.1 载荷差分核验：不能只验组件声明
+
+`release-components.env` 只证明"组件复用声明正确"，**不证明本轮改动真的进了包**。企业集成地址（如 `TEST_AGENT_AAM_BASE_URL`）由 `normalize_backend_node_archive()` 硬编码写入节点 `config/backend.env`，打包侧与部署侧各有一处精确断言，改漏一处现场才停线；更一般的代码改动若构建缓存异常或打包路径漏项，声明依旧"正确"。因此交付前必须与上一版包逐项对比载荷：
+
+```bash
+# 上一版包就在 dist-code/superseded-*/ 里，不要另找
+unzip -p superseded-<ts>/test-agent-internal-release.zip 'dist/backend/lib/<模块>.jar' -d /tmp/prev
+
+# 后端：新版 class 应含新方法名，上一版应为 0
+unzip -p <新版 jar> <类路径>.class | strings | grep -c '<新方法名>'
+unzip -p <上一版 jar> <类路径>.class | strings | grep -c '<新方法名>'
+
+# 前端：比同名 chunk 里标记串的"出现次数"，不是"是否命中"
+grep -ro 'webkitdirectory' <解包后的 frontend> | wc -l
+```
+
+三条判定规则：
+
+1. **只看"是否命中"会误判**。`webkitdirectory`、`allow-directory-upload` 这类串在旧版就已存在（工作区上传、markdown 图片上传在用），必须比出现次数或与上一版同名 chunk 对比。
+2. 前端资源哈希大面积变化是正常的：入口 chunk 内容一变，与之共享模块的 chunk 会因内容哈希级联重算。265 个 JS 资源里 166 个未变、99 个变，属正常范围；异常的是**资源数量**突变或出现未预期的整包替换。
+3. 节点配置核对**不要用** `tar -xzf <包> -O --wildcards '*/config/backend.env'`：macOS bsdtar 下会静默输出空，据此会误判"节点配置里没有该项"。必须 `-C` 解到临时目录再 `cat`。
+
+### 9.2 会话日志提交可能被合并静默丢弃
+
+本仓库的合并常由"从某个检出点拉取远端再合并"完成，若该检出点不包含本地刚提交的会话日志提交，它会变成**游离对象**：`git status` 不报错、`git log --all` 也搜不到，规则 22/23 的记录链条静默断档。2026-09-16 的 `221662435` 就是这样丢的（该合并的父提交是 `90f7ae2dc` 与 `02c9b091d`，而它挂在 `02c9b091d` 之上）。
+
+打包后若还要合并/同步，提交完立即自查：
+
+```bash
+git branch -a --contains <sha>   # 为空 = 已游离
+git log --all --oneline | grep <sha>
+```
+
+发现游离后，先确认该提交对这些文件相对当前 HEAD 无他人改动，再精确恢复：
+
+```bash
+git diff --stat <sha> HEAD -- <文件>     # 空 = 可安全恢复
+git checkout <sha> -- <文件>
+```
+
+不要用 `git cherry-pick` 复活一个只含文档/日志的游离提交，直接取文件内容更可控。
