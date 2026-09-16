@@ -640,3 +640,22 @@
 - clean 的工作树/index 不再等同于“没有待推送文件”；只要本地已知的 origin 跟踪提交落后于个人 HEAD，当前工作区内的已提交差异就能重新出现在“待推送”列表。
 - 本地 origin 跟踪引用只是最近一次 fetch/push 后的 Git 快照，不保证等于实时远程；引用缺失或无法安全判定时后端返回不可判定，不误清理前端兼容记录。
 - API 仅向响应增加可选字段，兼容旧前端；不涉及事件、数据库、Flyway、部署拓扑、性能模型、安全权限、环境配置、generated SDK 或 OpenCode 源码。未推送远程。
+
+## 2026-09-16 - Agent 配置树支持上传目录
+
+### Why
+- 用户希望参考工作空间目录加号的“上传目录”能力，在 Agent 配置树的可写文件夹中上传整个目录，并保留目录内部层级。
+
+### What
+- Agent 配置树的可写目录创建弹框显式开放“上传目录”，复用浏览器 `webkitdirectory` 选择器和工作空间上传相对路径规则：去掉最外层所选目录名，保留内部文件层级；普通多文件上传行为不变。
+- 公共 Agent 与应用 Agent 的分片上传在 begin 前通过统一 `WorkspaceFileService.createDirectory` 创建缺失的安全父目录，继续复用根目录锚定、符号链接和越界校验。
+- 补充前后端定向测试，并同步 agent-web、file-explorer、workspace-management README/PACKAGE 及 HTTP API 语义说明；浏览器不能表达纯空目录，因此空目录不会被单独创建。
+
+### How
+- agent-web 定向 Vitest 41/41 通过，agent-web typecheck 通过；workspace-management 新增的公共/应用 Agent 嵌套父目录测试 2/2 通过；`git diff --check` 通过。
+- 完整 `AgentConfigApplicationServiceTest` 曾受 Windows 既有符号链接权限与 `SecureWorkspaceMover winError=87` 影响，改为定向验证本次新增能力；未修改相关环境、搬移实现或既有测试。
+- 目标分支为 `release`，不新增部署节点，不新建或切换分支；提交前回顾全部 `.agents/session-log*.md` 近期条目，并保留工作区原有 OCR 数据文件，不纳入提交。
+
+### Result
+- Agent 可写文件夹加号菜单现可上传目录；嵌套文件会在安全创建父目录后按原层级上传。
+- 不新增 API 路径、DTO、事件、数据库或 Flyway 变更，不涉及部署拓扑、性能模型或权限放宽；目录上传为向后兼容的新增 UI 能力，路径安全仍由统一文件服务保证。

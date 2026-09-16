@@ -1565,6 +1565,35 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void workspaceAgentChunkUploadCreatesMissingNestedDirectories() throws Exception {
+        Path workspaceRoot = root.resolve("project-upload");
+        Files.createDirectories(workspaceRoot);
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project_upload"),
+                        "project-upload",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace_upload")));
+
+        WorkspaceFileUpload upload = service.beginWorkspaceAgentFileUpload(
+                "wrk_project_upload", "skills/payment/assets/example.bin", 2L, null);
+
+        assertThat(Files.isDirectory(workspaceRoot.resolve(".opencode/skills/payment/assets"))).isTrue();
+        upload.abort();
+    }
+
+    @Test
     void workspaceAgentFilesExposeOpencodeRootForAgentAndSkillPackages() throws Exception {
         Path workspaceRoot = root.resolve("project");
         Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));
@@ -1907,6 +1936,39 @@ class AgentConfigApplicationServiceTest {
         assertThat(Files.exists(worktreeRoot.resolve("opencode/agents/review.md"))).isFalse();
         assertThat(Files.readString(worktreeRoot.resolve("opencode/agents/moved-review.md"))).isEqualTo("review");
         assertThat(Files.exists(worktreeRoot.resolve("opencode/skills/shared-review.md"))).isFalse();
+    }
+
+    @Test
+    void publicAgentChunkUploadCreatesMissingNestedDirectories() throws Exception {
+        Path worktreeRoot = root.resolve(".configdev/public-upload");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_upload",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "public-upload",
+                "public-upload",
+                worktreeRoot.toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        WorkspaceFileUpload upload = service.beginPublicAgentFileUpload(
+                "skills/payment/assets/example.bin", 2L, "agw_public_upload", ADMIN);
+
+        assertThat(Files.isDirectory(worktreeRoot.resolve("opencode/skills/payment/assets"))).isTrue();
+        upload.abort();
     }
 
     @Test

@@ -872,6 +872,49 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(view.queryByTestId("file-upload-overlay")).toBeNull());
   });
 
+  it("uploads an Agent directory from a selected folder and preserves its internal hierarchy", async () => {
+    apiClientMock.listWorkspaceAgentFiles.mockImplementation(async (_workspaceId: string, path: string) => path === ""
+      ? [{ path: "skills", name: "skills", type: "directory" }]
+      : []);
+    const { view } = renderPanel();
+
+    await fireEvent.click(view.getByRole("button", { name: /^应用级/ }));
+    await fireEvent.click(await view.findByRole("button", { name: "在 skills 中新建或上传文件" }));
+    const dialog = await view.findByRole("dialog", { name: "新建或上传文件" });
+    await fireEvent.click(within(dialog).getByRole("radio", { name: "上传目录" }));
+    expect(dialog.textContent).toContain("保留文件夹内部层级");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "选择文件夹" }));
+
+    const skill = new File(["# Payment"], "SKILL.md", { type: "text/markdown" });
+    const asset = new File(["{}"], "example.json", { type: "application/json" });
+    Object.defineProperty(skill, "webkitRelativePath", { value: "payment/SKILL.md" });
+    Object.defineProperty(asset, "webkitRelativePath", { value: "payment/assets/example.json" });
+    const input = view.getByLabelText<HTMLInputElement>("选择要上传到 Agent 配置的文件夹");
+    await fireEvent.change(input, { target: { files: [skill, asset] } });
+
+    await waitFor(() => expect(apiClientMock.uploadWorkspaceAgentFile).toHaveBeenNthCalledWith(
+      1,
+      "wrk_1234567890abcdef",
+      "skills/SKILL.md",
+      skill,
+      undefined,
+      expect.any(Function)
+    ));
+    expect(apiClientMock.uploadWorkspaceAgentFile).toHaveBeenNthCalledWith(
+      2,
+      "wrk_1234567890abcdef",
+      "skills/assets/example.json",
+      asset,
+      undefined,
+      expect.any(Function)
+    );
+    await waitFor(() => expect((view.emitted("files-mutated")?.at(-1) as unknown[] | undefined)?.[0]).toEqual({
+      scope: "WORKSPACE",
+      paths: ["skills/SKILL.md", "skills/assets/example.json"],
+      workspaceId: "wrk_1234567890abcdef"
+    }));
+  });
+
   it("creates a public OpenCode Skill from the same root create dialog", async () => {
     const { view } = renderPanel();
 

@@ -851,6 +851,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
             UserId userId) {
         Path agentRoot = publicAgentRootForWrite(worktreeId, userId);
         ensureDirectory(agentRoot);
+        ensureAgentUploadParent(agentRoot, relativePath);
         return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
     }
 
@@ -1120,7 +1121,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         requireWorkspaceAgentUploadPath(relativePath);
         Path agentRoot = workspaceAgentRootForWrite(workspaceId, worktreeId);
         ensureDirectory(agentRoot);
+        ensureAgentUploadParent(agentRoot, relativePath);
         return fileService.beginUpload(agentRoot.toString(), relativePath, expectedBytes);
+    }
+
+    /** 浏览器目录上传会一次提交多层文件；父目录仍通过统一文件服务做根目录和符号链接安全校验。 */
+    private void ensureAgentUploadParent(Path agentRoot, String relativePath) {
+        String normalizedPath = relativePath == null ? "" : relativePath.replace('\\', '/');
+        int separator = normalizedPath.lastIndexOf('/');
+        if (separator > 0) {
+            fileService.createDirectory(agentRoot.toString(), normalizedPath.substring(0, separator));
+        }
     }
 
     private void requireWorkspaceAgentUploadPath(String relativePath) {

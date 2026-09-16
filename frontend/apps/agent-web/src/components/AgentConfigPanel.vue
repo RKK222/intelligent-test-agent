@@ -44,6 +44,7 @@ import {
   initialFileUploadOverlayState,
   type FileUploadOverlayState
 } from "./fileUploadOverlayState";
+import { browserUploadRelativePath } from "./markdown-workspace-images";
 import type { AgentConfigMutation } from "./agentFileLoad";
 
 type Scope = "PUBLIC" | "WORKSPACE";
@@ -111,6 +112,7 @@ const rootCreateEntryDialog = ref<InstanceType<typeof FileEntryCreateDialog> | n
 const createEntryScope = ref<Scope>("WORKSPACE");
 const uploadDirectory = ref("");
 const uploadInput = ref<HTMLInputElement | null>(null);
+const uploadDirectoryInput = ref<HTMLInputElement | null>(null);
 const uploadOverlay = ref<FileUploadOverlayState | null>(null);
 const deleteEntryDialog = ref<InstanceType<typeof FileEntryDeleteDialog> | null>(null);
 const deleteEntryScope = ref<Scope>("WORKSPACE");
@@ -1704,17 +1706,14 @@ async function createAgentTemplate(
   }
 }
 
-/** 上传入口与工作区一致，浏览器仅提交 basename，后端继续负责重名和越界校验。 */
-function requestAgentUpload(directory: string) {
+/** 普通多选使用 basename；目录选择去掉最外层目录名并保留内部层级。 */
+function requestAgentUpload(directory: string, mode: "files" | "directory" = "files") {
   uploadDirectory.value = directory;
-  if (uploadInput.value) {
-    uploadInput.value.value = "";
-    uploadInput.value.click();
+  const input = mode === "directory" ? uploadDirectoryInput.value : uploadInput.value;
+  if (input) {
+    input.value = "";
+    input.click();
   }
-}
-
-function uploadedFileName(name: string) {
-  return name.split(/[\\/]+/).filter(Boolean).at(-1) ?? name;
 }
 
 async function uploadAgentFiles(files: File[]) {
@@ -1737,7 +1736,7 @@ async function uploadAgentFiles(files: File[]) {
         fileBytes: file.size,
         completedBytes
       };
-      const path = agentEntryPath(directory, uploadedFileName(file.name));
+      const path = agentEntryPath(directory, browserUploadRelativePath(file));
       if (scope === "WORKSPACE" && !isWorkspaceAgentDiffPath(path)) {
         failures.push(`${file.name}：应用配置路径必须位于当前 .opencode 根目录内`);
         completedBytes += file.size;
@@ -2261,6 +2260,7 @@ defineExpose({
     <FileEntryCreateDialog
       ref="createEntryDialog"
       :allow-upload="true"
+      allow-directory-upload
       :root-label="createEntryScope === 'PUBLIC' ? '公共 Agent 根目录' : '应用 Agent 根目录'"
       @create-entry="createAgentEntry"
       @request-upload="requestAgentUpload"
@@ -2277,6 +2277,15 @@ defineExpose({
       @request-upload="requestAgentUpload"
     />
     <input ref="uploadInput" type="file" multiple hidden @change="handleAgentUploadChange" />
+    <input
+      ref="uploadDirectoryInput"
+      type="file"
+      multiple
+      webkitdirectory=""
+      hidden
+      aria-label="选择要上传到 Agent 配置的文件夹"
+      @change="handleAgentUploadChange"
+    />
     <FileEntryDeleteDialog
       ref="deleteEntryDialog"
       @confirm="deleteAgentEntry"
