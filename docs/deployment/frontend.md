@@ -56,7 +56,7 @@ FRONTEND_OPENCODE_REAL_API_BASE_URL=http://127.0.0.1:8080 corepack pnpm e2e:real
 
 ```bash
 VITE_TEST_AGENT_API_BASE_URL=https://<frontend-entry>   # agent-web backend-api 的统一 base URL；同域部署可留空走 /api
-VITE_AAM_BASE_URL=http://zfw.sdc.cs.icbc/aam/onlyLogin/ # AAM 完整登录入口；变更后必须重新构建
+VITE_AAM_BASE_URL=http://tcds-prod.sdc.icbc/aam/onlyLogin/ # AAM 完整登录入口；变更后必须重新构建
 VITE_TEST_AGENT_LOBEHUB_ENABLED=false                   # 仅显式 true 时开放通用问答入口和路由
 VITE_ENV=production                                     # 除 localhost 外均使用 AAM 统一认证
 ```

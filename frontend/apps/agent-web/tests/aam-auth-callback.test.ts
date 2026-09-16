@@ -99,7 +99,7 @@ describe("AAM callback", () => {
     expect(normalizeAamRetryPath("//evil.example/path")).toBe("/workbench");
     expect(normalizeAamRetryPath("/auth/aam-error?retry=/system")).toBe("/workbench");
     expect(getAamUrl("https://agent.internal/workbench")).toMatch(
-      /^http:\/\/zfw\.sdc\.cs\.icbc\/aam\/onlyLogin\/[A-Za-z0-9_-]+$/
+      /^http:\/\/tcds-prod\.sdc\.icbc\/aam\/onlyLogin\/[A-Za-z0-9_-]+$/
     );
   });
 

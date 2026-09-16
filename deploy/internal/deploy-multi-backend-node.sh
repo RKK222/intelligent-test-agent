@@ -289,7 +289,7 @@ validate_backend_config() {
   require_exact_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     http://tcds-prod.sdc.icbc:9080
   require_exact_value "${backend_env}" TEST_AGENT_AAM_BASE_URL \
-    http://zfw.sdc.cs.icbc
+    http://tcds-prod.sdc.icbc
   require_exact_value "${backend_env}" TEST_AGENT_AAM_CONNECT_TIMEOUT 3s
   require_exact_value "${backend_env}" TEST_AGENT_AAM_REQUEST_TIMEOUT 5s
   require_exact_value "${backend_env}" TEST_AGENT_AAM_MAX_RESPONSE_BYTES 65536

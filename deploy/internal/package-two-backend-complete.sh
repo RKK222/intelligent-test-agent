@@ -727,7 +727,7 @@ normalize_backend_node_archive() {
   replace_or_append_env_value "${backend_env}" TEST_AGENT_TCDS_BASE_URL \
     'http://tcds-prod.sdc.icbc:9080'
   replace_or_append_env_value "${backend_env}" TEST_AGENT_AAM_BASE_URL \
-    'http://zfw.sdc.cs.icbc'
+    'http://tcds-prod.sdc.icbc'
   replace_or_append_env_value "${backend_env}" TEST_AGENT_AAM_CONNECT_TIMEOUT 3s
   replace_or_append_env_value "${backend_env}" TEST_AGENT_AAM_REQUEST_TIMEOUT 5s
   replace_or_append_env_value "${backend_env}" TEST_AGENT_AAM_MAX_RESPONSE_BYTES 65536
@@ -857,7 +857,7 @@ validate_mysql_cluster_config() {
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_4}"
   grep -Fxq 'TEST_AGENT_TCDS_BASE_URL=http://tcds-prod.sdc.icbc:9080' "${backend_114}"
   for expected in \
-    'TEST_AGENT_AAM_BASE_URL=http://zfw.sdc.cs.icbc' \
+    'TEST_AGENT_AAM_BASE_URL=http://tcds-prod.sdc.icbc' \
     'TEST_AGENT_AAM_CONNECT_TIMEOUT=3s' \
     'TEST_AGENT_AAM_REQUEST_TIMEOUT=5s' \
     'TEST_AGENT_AAM_MAX_RESPONSE_BYTES=65536'; do

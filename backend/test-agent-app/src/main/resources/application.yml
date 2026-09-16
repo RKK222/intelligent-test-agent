@@ -138,7 +138,7 @@ test-agent:
     base-url: ${TEST_AGENT_TCDS_BASE_URL:http://tcds-prod.sdc.icbc:9080}
   aam:
     # 仅配置 AAM HTTP/HTTPS origin；固定验真路径由后端适配器追加，禁止携带凭据、query 或 fragment。
-    base-url: ${TEST_AGENT_AAM_BASE_URL:http://zfw.sdc.cs.icbc}
+    base-url: ${TEST_AGENT_AAM_BASE_URL:http://tcds-prod.sdc.icbc}
     connect-timeout: ${TEST_AGENT_AAM_CONNECT_TIMEOUT:3s}
     request-timeout: ${TEST_AGENT_AAM_REQUEST_TIMEOUT:5s}
     max-response-bytes: ${TEST_AGENT_AAM_MAX_RESPONSE_BYTES:65536}
