@@ -659,3 +659,25 @@
 ### Result
 - Agent 可写文件夹加号菜单现可上传目录；嵌套文件会在安全创建父目录后按原层级上传。
 - 不新增 API 路径、DTO、事件、数据库或 Flyway 变更，不涉及部署拓扑、性能模型或权限放宽；目录上传为向后兼容的新增 UI 能力，路径安全仍由统一文件服务保证。
+
+## 2026-09-17 - 优化问题排查会话标识与工作区检索
+
+### Why
+- 用户要求在“问题排查只读访问”页面的用户首页视角中，选择会话后在 Session ID 下补充 Workspace ID，并让同级工作区列表支持按 ID 搜索。
+- 工作区列表采用后端分页，不能只过滤前端当前加载的 30 条，否则会漏掉其它分页中的目标工作区。
+
+### What
+- 会话排查标识新增 Workspace ID 展示与复制，继续复用既有只读诊断样式和剪贴板逻辑。
+- 工作区页签新增名称或 Workspace ID 搜索框；HTTP 列表接口增加可选 `q`，MyBatis XML 在数据库分页前对工作区名称和 ID 做不区分大小写的模糊过滤，列表与总数使用同一条件。
+- backend-api client 支持新的对象参数，同时保留旧 `(page, size)` 数字调用兼容；同步前后端、模块 README、HTTP API 文档及定向测试。
+
+### How
+- 前端定向 Vitest 2 个文件共 133 项通过；agent-web 与 backend-api typecheck 通过。
+- persistence PostgreSQL 集成测试 13 项通过；test-agent-api 及依赖模块编译通过；新增 workspace-management 查询透传测试 1 项通过。
+- 完整 `UserWorkspaceQueryServiceTest` 仍有两个既有 Windows 路径断言失败：期望 `/data/...`，实际被解析为 `E:\data\...`；与本次查询参数透传无关，故对新增能力采用单项定向验证。
+- 目标分支为 `release`，不新增部署节点、不新建或切换分支；提交前回顾全部 `.agents/session-log*.md` 近期条目，并保留根目录两个 OCR 临时文件不纳入提交。
+
+### Result
+- 超级管理员排查页面可直接复制会话关联的 Workspace ID，并能跨分页按工作区名称或 ID 定位目标。
+- `q` 为可选增量参数，不传时保持原分页行为；查询仍限定在目标用户归因范围内，继续复用既有 grant、审计和只读安全边界。
+- 不涉及 RunEvent/SSE、数据库结构、Flyway、部署拓扑、环境配置、generated SDK 或 OpenCode 源码；模糊查询在分页前执行，未新增索引。

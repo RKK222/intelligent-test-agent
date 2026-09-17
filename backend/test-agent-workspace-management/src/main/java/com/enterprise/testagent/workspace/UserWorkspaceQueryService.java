@@ -79,7 +79,15 @@ public class UserWorkspaceQueryService {
 
     /** 用户范围过滤完成后仍解析托管逻辑路径，保持 Workspace API 返回物理绝对路径。 */
     public PageResponse<Workspace> listUserWorkspaces(UserId userId, PageRequest pageRequest) {
-        PageResponse<Workspace> page = repository.findUserWorkspaces(userId, pageRequest);
+        return listUserWorkspaces(userId, null, pageRequest);
+    }
+
+    /** 排查列表可按工作区名称或 ID 过滤，且仍复用同一用户归因范围。 */
+    public PageResponse<Workspace> listUserWorkspaces(
+            UserId userId,
+            String query,
+            PageRequest pageRequest) {
+        PageResponse<Workspace> page = repository.findUserWorkspaces(userId, query, pageRequest);
         return new PageResponse<>(
                 page.items().stream().map(pathResolver::withResolvedRootPath).toList(),
                 page.page(),

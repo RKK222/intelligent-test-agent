@@ -38,6 +38,22 @@ class UserWorkspaceQueryServiceTest {
             "/data/.testagent/agent-opencode/workspace/personalworktree/20260806/usr_workspace_owner/demo/feature_usr_default/F-DEMO/workspace";
 
     @Test
+    void forwardsWorkspaceQueryBeforeResolvingPaths() {
+        PageRequest pageRequest = new PageRequest(1, 20);
+        UserWorkspaceQueryRepository repository = mock(UserWorkspaceQueryRepository.class);
+        when(repository.findUserWorkspaces(USER_ID, "wrk_target", pageRequest))
+                .thenReturn(new PageResponse<>(List.of(), 1, 20, 0));
+        UserWorkspaceQueryService service = new UserWorkspaceQueryService(
+                repository,
+                mock(WorkspaceRepository.class),
+                mock(ConversationWorkspaceAccessAuthorizer.class),
+                new ManagedWorkspacePathResolver(parameters()));
+
+        assertThat(service.listUserWorkspaces(USER_ID, "wrk_target", pageRequest).items()).isEmpty();
+        verify(repository).findUserWorkspaces(USER_ID, "wrk_target", pageRequest);
+    }
+
+    @Test
     void resolvesPersonalWorktreeLogicalPathForListAndDetailResponses() {
         Workspace stored = new Workspace(
                 WORKSPACE_ID,
@@ -194,7 +210,10 @@ class UserWorkspaceQueryServiceTest {
     private record FixedRepository(Workspace workspace) implements UserWorkspaceQueryRepository {
 
         @Override
-        public PageResponse<Workspace> findUserWorkspaces(UserId userId, PageRequest pageRequest) {
+        public PageResponse<Workspace> findUserWorkspaces(
+                UserId userId,
+                String query,
+                PageRequest pageRequest) {
             List<Workspace> workspaces = workspace == null ? List.of() : List.of(workspace);
             return new PageResponse<>(workspaces, pageRequest.page(), pageRequest.size(), workspaces.size());
         }

@@ -10,10 +10,13 @@ public interface UserWorkspaceQueryMapper {
 
     List<UserWorkspaceRow> findUserWorkspaces(
             @Param("userId") String userId,
+            @Param("queryPattern") String queryPattern,
             @Param("limit") int limit,
             @Param("offset") long offset);
 
-    long countUserWorkspaces(@Param("userId") String userId);
+    long countUserWorkspaces(
+            @Param("userId") String userId,
+            @Param("queryPattern") String queryPattern);
 
     UserWorkspaceRow findUserWorkspace(
             @Param("userId") String userId,

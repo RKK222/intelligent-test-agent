@@ -68,6 +68,7 @@ const detailsAvailableUntil = ref<string | null>(null);
 const transcriptTraceIds = ref<string[]>([]);
 const copiedDiagnosticValue = ref("");
 
+const workspaceQuery = ref("");
 const workspaces = ref<PageResponse<Workspace>>({ items: [], page: 1, size: 30, total: 0 });
 const workspacesLoading = ref(false);
 const selectedWorkspace = ref<Workspace | null>(null);
@@ -391,8 +392,11 @@ async function loadWorkspaces(page = workspaces.value.page) {
     workspaces.value = await api.listSupportAccessWorkspaces(
       grant.value.grantToken,
       targetUser.value.userId,
-      page,
-      30
+      {
+        q: workspaceQuery.value.trim() || undefined,
+        page,
+        size: 30
+      }
     );
   } catch (error) {
     errorMessage.value = errorText(error);
@@ -723,6 +727,13 @@ function resetTranscriptState() {
                         </button>
                       </div>
                       <div class="diagnostic-id">
+                        <span>工作区 WORKSPACE ID</span>
+                        <code :title="selectedSession.workspaceId">{{ selectedSession.workspaceId }}</code>
+                        <button type="button" @click="copyDiagnosticValue(selectedSession.workspaceId)">
+                          {{ copiedDiagnosticValue === selectedSession.workspaceId ? '已复制' : '复制' }}
+                        </button>
+                      </div>
+                      <div class="diagnostic-id">
                         <span>最近 TRACE ID</span>
                         <code :class="{ muted: !primaryTraceId }" :title="primaryTraceId || undefined">{{ primaryTraceId || '暂无可恢复 Trace' }}</code>
                         <button v-if="primaryTraceId" type="button" @click="copyDiagnosticValue(primaryTraceId)">
@@ -756,6 +767,7 @@ function resetTranscriptState() {
 
               <div v-else class="workspace-layout">
                 <section class="resource-list">
+                  <div class="inline-search"><input v-model="workspaceQuery" placeholder="名称或 Workspace ID" @keyup.enter="loadWorkspaces(1)" /><button @click="loadWorkspaces(1)">查询</button></div>
                   <div v-if="workspacesLoading" class="empty">加载中…</div>
                   <button v-for="workspace in workspaces.items" :key="workspace.workspaceId" :class="['resource-row', { active: selectedWorkspace?.workspaceId === workspace.workspaceId }]" :disabled="workspace.backendAvailability !== 'ONLINE'" @click="selectWorkspace(workspace)">
                     <strong>{{ workspace.name }}</strong><span>{{ workspace.workspaceId }}</span>

@@ -253,6 +253,19 @@ class MyBatisSessionHistoryRepositoryIntegrationTest {
     }
 
     @Test
+    void userWorkspaceQueryFiltersByWorkspaceIdBeforePagination() {
+        var page = workspaceQueryRepository.findUserWorkspaces(
+                CURRENT_USER,
+                "HISTORY_UNMANAGED",
+                new PageRequest(1, 30));
+
+        assertThat(page.total()).isEqualTo(1);
+        assertThat(page.items())
+                .extracting(workspace -> workspace.workspaceId().value())
+                .containsExactly("wrk_history_unmanaged");
+    }
+
+    @Test
     void revokedCredentialHidesLocalWorkspaceEvenWhenAnActiveSessionStillReferencesIt() {
         jdbcClient.sql("""
                 insert into sessions(

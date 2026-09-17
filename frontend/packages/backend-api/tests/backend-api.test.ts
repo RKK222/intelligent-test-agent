@@ -479,10 +479,16 @@ describe("backend-api", () => {
       "ses_archived",
       true
     );
+    await client.listSupportAccessWorkspaces("support-token", "usr_target", {
+      q: "wrk_target",
+      page: 2,
+      size: 10
+    });
 
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "http://api/api/internal/platform/system-management/support-access/targets/usr_target/sessions?includeArchived=true&page=2&size=30",
-      "http://api/api/internal/platform/system-management/support-access/targets/usr_target/sessions/ses_archived/session-tree/messages?includeArchived=true"
+      "http://api/api/internal/platform/system-management/support-access/targets/usr_target/sessions/ses_archived/session-tree/messages?includeArchived=true",
+      "http://api/api/internal/platform/system-management/support-access/targets/usr_target/workspaces?q=wrk_target&page=2&size=10"
     ]);
   });
 

@@ -128,6 +128,21 @@ describe("support access panel incident suggestion", () => {
       size: 30,
       total: 1
     });
+    const listSupportAccessWorkspaces = vi.fn().mockResolvedValue({
+      items: [{
+        workspaceId: "wrk_offline",
+        name: "离线工作区",
+        rootPath: "/tmp/offline",
+        status: "ACTIVE",
+        linuxServerId: "server-old",
+        backendAvailability: "OFFLINE",
+        createdAt: "2026-08-05T00:00:00Z",
+        updatedAt: "2026-08-05T00:00:00Z"
+      }],
+      page: 1,
+      size: 30,
+      total: 1
+    });
     const api = {
       getSupportAccessIncidentSuggestion: vi.fn().mockResolvedValue({ incidentId: "sai_1", source: "GENERATED" }),
       listUsers,
@@ -145,21 +160,7 @@ describe("support access panel incident suggestion", () => {
         status: "ACTIVE"
       }),
       listSupportAccessSessions,
-      listSupportAccessWorkspaces: vi.fn().mockResolvedValue({
-        items: [{
-          workspaceId: "wrk_offline",
-          name: "离线工作区",
-          rootPath: "/tmp/offline",
-          status: "ACTIVE",
-          linuxServerId: "server-old",
-          backendAvailability: "OFFLINE",
-          createdAt: "2026-08-05T00:00:00Z",
-          updatedAt: "2026-08-05T00:00:00Z"
-        }],
-        page: 1,
-        size: 30,
-        total: 1
-      })
+      listSupportAccessWorkspaces
     } as Partial<BackendApiClient> as BackendApiClient;
     const view = renderPanel(api);
 
@@ -186,6 +187,13 @@ describe("support access panel incident suggestion", () => {
       expect.objectContaining({ includeArchived: true, page: 1 })
     ));
     await fireEvent.click(view.getByRole("button", { name: /工作区（1）/ }));
+    await fireEvent.update(view.getByPlaceholderText("名称或 Workspace ID"), "wrk_offline");
+    await fireEvent.click(view.getByRole("button", { name: "查询" }));
+    await waitFor(() => expect(listSupportAccessWorkspaces).toHaveBeenLastCalledWith(
+      "grant-token",
+      "usr_target",
+      { q: "wrk_offline", page: 1, size: 30 }
+    ));
 
     const offlineWorkspace = view.getByRole("button", { name: /离线工作区/ });
     expect(offlineWorkspace).toHaveProperty("disabled", true);
@@ -309,8 +317,10 @@ describe("support access panel incident suggestion", () => {
     const diagnosticContext = within(view.getByLabelText("会话排查标识"));
     expect(diagnosticContext.getByText("排查标识")).toBeTruthy();
     expect(diagnosticContext.getByText("会话 SESSION ID")).toBeTruthy();
+    expect(diagnosticContext.getByText("工作区 WORKSPACE ID")).toBeTruthy();
     expect(diagnosticContext.getByText("最近 TRACE ID")).toBeTruthy();
     expect(diagnosticContext.getByText("ses_target")).toBeTruthy();
+    expect(diagnosticContext.getByText("wrk_target")).toBeTruthy();
     expect(diagnosticContext.getByText("trace_test")).toBeTruthy();
   });
 });

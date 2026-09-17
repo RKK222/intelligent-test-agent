@@ -8,6 +8,7 @@ import com.enterprise.testagent.domain.workspace.Workspace;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.WorkspaceStatus;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
@@ -22,19 +23,31 @@ public class MyBatisUserWorkspaceQueryRepository implements UserWorkspaceQueryRe
     }
 
     @Override
-    public PageResponse<Workspace> findUserWorkspaces(UserId userId, PageRequest pageRequest) {
-        var rows = mapper.findUserWorkspaces(userId.value(), pageRequest.size(), pageRequest.offset());
+    public PageResponse<Workspace> findUserWorkspaces(
+            UserId userId,
+            String query,
+            PageRequest pageRequest) {
+        String queryPattern = searchPattern(query);
+        var rows = mapper.findUserWorkspaces(
+                userId.value(), queryPattern, pageRequest.size(), pageRequest.offset());
         return new PageResponse<>(
                 rows.stream().map(this::toDomain).toList(),
                 pageRequest.page(),
                 pageRequest.size(),
-                mapper.countUserWorkspaces(userId.value()));
+                mapper.countUserWorkspaces(userId.value(), queryPattern));
     }
 
     @Override
     public Optional<Workspace> findUserWorkspace(UserId userId, WorkspaceId workspaceId) {
         return Optional.ofNullable(mapper.findUserWorkspace(userId.value(), workspaceId.value()))
                 .map(this::toDomain);
+    }
+
+    private String searchPattern(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        return "%" + query.trim().toLowerCase(Locale.ROOT) + "%";
     }
 
     private Workspace toDomain(UserWorkspaceRow row) {

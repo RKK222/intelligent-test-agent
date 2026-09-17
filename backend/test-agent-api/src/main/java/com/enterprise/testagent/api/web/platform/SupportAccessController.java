@@ -225,6 +225,7 @@ public class SupportAccessController {
     @GetMapping("/targets/{targetUserId}/workspaces")
     public ApiResponse<PageResponse<SupportAccessDtos.WorkspaceResponse>> listWorkspaces(
             @PathVariable String targetUserId,
+            @RequestParam(required = false, name = "q") String query,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             @RequestHeader(name = SupportAccessApplicationService.HEADER_NAME, required = false) String grantToken,
@@ -243,7 +244,7 @@ public class SupportAccessController {
                 context,
                 () -> supportWorkspacePage(
                         userWorkspaceQueryService.listUserWorkspaces(
-                                target, RuntimeApiSupport.pageRequest(page, size)),
+                                target, query, RuntimeApiSupport.pageRequest(page, size)),
                         context.traceId()));
         return ApiResponse.ok(result, context.traceId());
     }

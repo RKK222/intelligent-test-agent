@@ -90,6 +90,12 @@
                w.trace_id, w.created_at, w.updated_at
         from workspaces w
         <include refid="UserWorkspaceWhere"/>
+        <if test="queryPattern != null">
+            and (
+              lower(coalesce(nullif(trim(w.name), ''), w.workspace_id)) like #{queryPattern}
+              or lower(w.workspace_id) like #{queryPattern}
+            )
+        </if>
         order by w.updated_at desc, w.id desc
         limit #{limit} offset #{offset}
     </select>
@@ -97,6 +103,12 @@
     <select id="countUserWorkspaces" resultType="long">
         select count(*) from workspaces w
         <include refid="UserWorkspaceWhere"/>
+        <if test="queryPattern != null">
+            and (
+              lower(coalesce(nullif(trim(w.name), ''), w.workspace_id)) like #{queryPattern}
+              or lower(w.workspace_id) like #{queryPattern}
+            )
+        </if>
     </select>
 
     <select id="findUserWorkspace" resultMap="WorkspaceRowMap">

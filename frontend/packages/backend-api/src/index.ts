@@ -3362,13 +3362,22 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     listSupportAccessWorkspaces: (
       grantToken: string,
       targetUserId: string,
-      page = 1,
-      size = 30
-    ) => request<PageResponse<Workspace>>(
-      `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
-        + `/workspaces${query({ page, size })}`,
-      { headers: supportHeaders(grantToken) }
-    ),
+      paramsOrPage: { q?: string; page?: number; size?: number } | number = {},
+      legacySize = 30
+    ) => {
+      const params = typeof paramsOrPage === "number"
+        ? { page: paramsOrPage, size: legacySize }
+        : paramsOrPage;
+      return request<PageResponse<Workspace>>(
+        `${systemManagementBase}/support-access/targets/${encodeURIComponent(targetUserId)}`
+          + `/workspaces${query({
+            q: params.q,
+            page: params.page ?? 1,
+            size: params.size ?? 30
+          })}`,
+        { headers: supportHeaders(grantToken) }
+      );
+    },
     listSupportAccessAuditEvents: (params: SupportAccessAuditQuery = {}) =>
       request<PageResponse<SupportAccessAuditEvent>>(
         `${systemManagementBase}/support-access/audit-events${query({

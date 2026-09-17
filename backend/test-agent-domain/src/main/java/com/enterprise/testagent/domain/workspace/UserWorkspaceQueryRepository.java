@@ -10,7 +10,12 @@ import java.util.Optional;
  */
 public interface UserWorkspaceQueryRepository {
 
-    PageResponse<Workspace> findUserWorkspaces(UserId userId, PageRequest pageRequest);
+    /** 按名称或 Workspace ID 过滤用户关联工作区；空查询保持原分页语义。 */
+    PageResponse<Workspace> findUserWorkspaces(UserId userId, String query, PageRequest pageRequest);
+
+    default PageResponse<Workspace> findUserWorkspaces(UserId userId, PageRequest pageRequest) {
+        return findUserWorkspaces(userId, null, pageRequest);
+    }
 
     Optional<Workspace> findUserWorkspace(UserId userId, WorkspaceId workspaceId);
 }
