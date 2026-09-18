@@ -148,6 +148,10 @@ describe("help center", () => {
     expect(weekly).toContain("多选/目录上传和工作区图片预览");
     expect(weekly).toContain("超级管理员独立“应用运行态更新”页签");
     expect(weekly).toContain("删除已提交的 Agent 或 Skill 后改变主意");
+    expect(weekly).toContain("RTK_COMMAND_REWRITE_ENABLED");
+    expect(weekly).toContain("默认关闭");
+    expect(weekly).toContain("concise-output");
+    expect(weekly).toContain("没有与“通用参数 → RTK 命令改写开关”完全一致的脱敏真实截图");
     expect(prompt.length).toBeLessThan(8_100);
   });
 
@@ -175,6 +179,9 @@ describe("help center", () => {
     expect(settings).toContain("记忆灰度");
     expect(settings).toContain("不会互相开启");
     expect(settings).toContain("不停止客户端、不重启本地 OpenCode，也不撤销 client key");
+    expect(settings).toContain("按需启用 RTK 命令改写");
+    expect(settings).toContain("RTK_COMMAND_REWRITE_ENABLED");
+    expect(settings).toContain("history.db");
     expect(overview).toContain("平台全局记忆配置可用");
     expect(overview).toContain("本地 OpenCode 客户端");
     expect(overview).toContain("来自 SkillHub 的 Skill 卡片和详情会显示“创建人”");
@@ -182,6 +189,8 @@ describe("help center", () => {
     expect(overview).toContain("客户端重新连接后会自动核验并恢复");
     expect(overview).toContain("先普通点击一个文件或目录建立锚点");
     expect(overview).toContain("点击“取消删除”恢复文件并清除对应 Diff");
+    expect(overview).toContain("RTK 0.49.0");
+    expect(overview).toContain("concise-output");
     expect(faq).toContain("为什么看不到“下载本地客户端”");
     expect(faq).toContain("客户端灰度与记忆灰度相互独立");
     expect(faq).toContain("为什么下载的是压缩包，而不是 DEB 安装包？");
@@ -194,6 +203,8 @@ describe("help center", () => {
     expect(faq).toContain("怎样连续选择一段工作区文件？");
     expect(faq).toContain("为什么 Markdown 中显示“图片未上传”？");
     expect(faq).toContain("为什么看不到“应用运行态更新”？");
+    expect(faq).toContain("RTK 命令改写在哪里开，为什么没有立即生效？");
+    expect(faq).toContain("为什么输入 `/` 看不到 concise-output？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {

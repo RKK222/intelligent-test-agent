@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-18 - 同步 RTK 与 concise-output 用户手册
+
+- Why: `release` 在最近一次手册同步提交 `ff30ed2f3` 后交付 RTK 命令改写和 Caveman `concise-output` Skill，需要按真实入口、权限、数据边界和截图事实更新内置帮助中心。
+- What: 更新每周新功能、设置、功能总览、Agent/Skill、FAQ 和手册 README；补充 `RTK_COMMAND_REWRITE_ENABLED` 的超级管理员入口、默认关闭/重连生效、Bash/Shell 范围、fail-open 及 `history.db` 留存边界，说明 `concise-output` 是 MIT Skill-only 集成。帮助中心主题类型补上既有 `local-client`，修复 Vite 类型检查。
+- How: 首次测试发现新增内容挤出 FAQ/周报上下文；将 FAQ 放到既有排查段后，并在周报置顶摘要保留长期记忆前置，维持原有 7,200 字符边界。`help-center.test.ts` 17/17、user-manual VitePress build、agent-web typecheck、操作截图引用/娱乐内容扫描及 `git diff --check` 全部通过。
+- Result: 未新增 API、事件、数据库、性能或安全协议；未修改环境配置、generated SDK 或 OpenCode 只读源码。新流程暂无真实截图，手册明确要求人工补拍“通用参数 RTK 开关”和“对话 `/` 候选”两处页面。
+
 ### 2026-09-10 - 按明确要求将客户端完整制品纳入企业包
 
 - Why: 用户在现场复用基线纠正后明确要求“把客户端的改动一起封进去”；本次交付范围由仅前端补部署扩大到 `.2` 同时更新客户端分发目录，保留现网 `20260907093905` 作为已部署事实。
