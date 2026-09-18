@@ -50,6 +50,7 @@ export default defineConfig({
           { text: "首次使用前准备", link: "/guide/first-time-setup" },
           { text: "设置与权限内操作", link: "/guide/settings" },
           { text: "初始化 TestAgent 进程", link: "/guide/process-initialization" },
+          { text: "本地 OpenCode 客户端", link: "/guide/local-client" },
           { text: "应用版本与个人工作区", link: "/guide/workspace" },
           { text: "引用配置", link: "/guide/reference-config" },
           { text: "开发与测试目录", link: "/guide/directory-mapping" },

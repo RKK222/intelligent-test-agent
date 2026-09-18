@@ -23,6 +23,7 @@ corepack pnpm --filter @test-agent/user-manual build
 - `docs/guide/weekly-updates.md`：按自然周把已在当前交付版本开放的新功能置顶汇总；每项从用户场景、使用前配置、操作入口、使用步骤、操作截图和权限/数据边界说明，并链接回稳定专题。截图与稳定章节复用 `docs/guide/images/operations/` 中的脱敏真实组件状态，并使用明确替代文本；更新时不得写入尚未交付的能力。
 - `docs/guide/feature-overview.md`：按真实工作台入口汇总文件与编辑器、通知、对话协作、本地 OpenCode 客户端、长期记忆、Git、Agent/Skill、Hub、引用配置和帮助能力，并链接到各专题章节；客户端和记忆的账号灰度边界必须与用户管理页面保持一致。
 - `docs/guide/first-time-setup.md`：首次使用的角色、SSH、应用、工作空间和进程准备顺序；操作入口必须与当前权限和页面文案一致。
+- `docs/guide/local-client.md`：本地 OpenCode 客户端（麒麟 ARM64）的下载安装、Client key 接入、托盘菜单、本地工作区、更新确认、重新接入、命令速查、排查和卸载的稳定用户操作说明；Windows 仍为候选包，未完成签名和真机验收前不得写入正式步骤。
 - `docs/guide/settings.md`：按普通用户与应用管理员权限说明设置弹窗中的 SSH、应用成员、版本库关联和工作空间操作；同时说明超级管理员在用户管理中独立维护客户端灰度与记忆灰度，以及各自的可见性和运行影响。
 - `docs/guide/workspace.md`：应用、版本与个人工作区的选择关系，文件操作、Git 提交与发布，以及测试设计/测试执行资料批量跳转到外部页面的稳定操作说明。
 - `docs/guide/conversation.md`：主对话、上下文、批量子条目案例选择与会话创建进度、失败重试和主动结束批次、夜间执行时段、协作分享、待执行任务、会话锁定、宠物旁路和历史对话的稳定用户操作说明。

@@ -5,6 +5,7 @@ import faqManual from "../../../user-manual/docs/guide/faq.md?raw";
 import featureOverviewManual from "../../../user-manual/docs/guide/feature-overview.md?raw";
 import firstTimeSetupManual from "../../../user-manual/docs/guide/first-time-setup.md?raw";
 import gettingStartedManual from "../../../user-manual/docs/guide/getting-started.md?raw";
+import localClientManual from "../../../user-manual/docs/guide/local-client.md?raw";
 import memoryManual from "../../../user-manual/docs/guide/memory.md?raw";
 import processInitializationManual from "../../../user-manual/docs/guide/process-initialization.md?raw";
 import referenceConfigManual from "../../../user-manual/docs/guide/reference-config.md?raw";
@@ -82,6 +83,13 @@ export const HELP_TOPICS: HelpTopic[] = [
     description: "分配、启动与失败处理",
     path: "guide/process-initialization.html",
     content: processInitializationManual
+  },
+  {
+    id: "local-client",
+    label: "本地 OpenCode 客户端",
+    description: "下载安装、接入与日常使用",
+    path: "guide/local-client.html",
+    content: localClientManual
   },
   {
     id: "workspace",

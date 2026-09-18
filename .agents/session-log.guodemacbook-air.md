@@ -99,3 +99,24 @@
   旧客户端与旧后端仍可忽略新增来源元数据。
 - **未验证项**：未做 Windows 客户端真机验证（`E:\` 盘符路径下客户端 OpenCode 用相对路径读取附件），
   已把该项写入 `docs/deployment/local-opencode-client.md` 的现场验收清单。
+
+### 2026-09-18 - 新增本地 OpenCode 客户端用户手册章节并接入帮助中心
+
+- Why:
+  - 用户手册缺少本地客户端专题章节，原有内容只有 FAQ 零散问答；需要一份面向最终用户的使用说明并进入网页帮助中心，
+    平台范围以麒麟 ARM64 正式包为准（Windows 仍为候选，不写正式步骤）。
+- What:
+  - 新增 `frontend/apps/user-manual/docs/guide/local-client.md`：下载安装、Client key 接入、托盘菜单、本地工作区、
+    更新确认、凭据失效重新接入、命令速查、排查与卸载。
+  - `help-center.ts` 新增 `local-client` 主题（import/HelpTopicId/HELP_TOPICS，置于“初始化进程”之后）；
+    VitePress `config.ts` 侧边栏同步；FAQ 三条问答追加指向新章节的链接；user-manual README 内容边界补条目。
+- How:
+  - 内容全部取自代码事实源：`install.sh.template`、`LocalClientMain/LocalClientEnrollment/LocalClientTrayPopup/
+    LocalClientLogExporter`、windows-launcher、`SettingsPersonalPanel.vue` 及架构/部署文档，未杜撰菜单项与路径。
+  - 复用现有截图 `settings-local-client-key.png`、`settings-local-workspace-picker.png`，满足“每章节至少一张操作截图”
+    的测试约束；避免与既有 FAQ/feature-overview 断言文案冲突。
+  - `help-center.test.ts` 17 passed（含章节截图存在性校验与全文游戏内容扫描）；`@test-agent/user-manual` vitepress
+    build 通过并生成 `public/help/guide/local-client.html`。
+- Result:
+  - 纯前端文档变更，不改任何运行行为；不涉及 API/事件/数据库/generated SDK/环境配置。
+  - 帮助中心宠物问答事实源同步扩展到本地客户端章节。
