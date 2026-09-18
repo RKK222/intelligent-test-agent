@@ -17,6 +17,7 @@ import {
 const execFileAsync = promisify(execFile)
 
 async function createRuntime(root) {
+  await mkdir(join(root, "bin"), { recursive: true })
   await mkdir(join(root, "node_modules", "@opencode-ai", "plugin"), { recursive: true })
   await mkdir(join(root, "node_modules", "@opencode-ai", "sdk"), { recursive: true })
   await mkdir(join(root, "node_modules", "effect"), { recursive: true })
@@ -46,6 +47,9 @@ async function createRuntime(root) {
   )
   await writeFile(join(root, "VERSION"), "1.18.4\n")
   await writeFile(join(root, "opencode-observability-plugin.mjs"), "export default async () => ({})\n")
+  await writeFile(join(root, "opencode-rtk-plugin.mjs"), "export default async () => ({})\n")
+  await writeFile(join(root, "bin", "rtk"), "#!/bin/sh\nexit 0\n")
+  await chmod(join(root, "bin", "rtk"), 0o755)
 }
 
 async function assertToolDependencyLinks(directory, runtimeRoot) {
@@ -396,6 +400,29 @@ test("does not inject unsupported subagent depth into the 1.17 rollback runtime"
       theme: "dark",
       plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`],
     })
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("prepares the opt-in RTK runtime without changing the default-off path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-rtk-"))
+  try {
+    const runtimeRoot = join(root, "runtime")
+    await createRuntime(runtimeRoot)
+    const prepared = await prepareOfflineRuntime({
+      cwd: root,
+      env: { HOME: join(root, "home"), TEST_AGENT_RTK_ENABLED: "true" },
+      runtimeRoot,
+    })
+
+    assert.equal(prepared.TEST_AGENT_RTK_BIN, join(runtimeRoot, "bin", "rtk"))
+    assert.equal(prepared.RTK_TELEMETRY_DISABLED, "1")
+    assert.equal(prepared.RTK_RECALL, "0")
+    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT).plugin, [
+      `file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`,
+      `file://${join(runtimeRoot, "opencode-rtk-plugin.mjs")}`,
+    ])
   } finally {
     await rm(root, { force: true, recursive: true })
   }

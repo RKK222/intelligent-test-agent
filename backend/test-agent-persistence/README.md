@@ -1,5 +1,7 @@
 # test-agent-persistence
 
+- `V20260918120000__common_parameters_add_rtk_command_rewrite.sql` 初始化生产必需通用参数 `RTK_COMMAND_REWRITE_ENABLED=false`（`platform=all`、可编辑）。该参数是 RTK 命令改写的唯一管理开关，默认关闭；修改由既有通用参数管理 API、审计和跨实例刷新机制承载，不在 migration 中写入测试或演示数据。
+
 - 体验工作区迁移创建按 `linux_server_id` 唯一的 `experience_workspace_bindings` 当前绑定表；`V20260812144051__common_parameters_default_experience_workspace.sql` 只把仍为 `UNCONFIGURED` 的默认参数更新为 `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/experience`，不覆盖自定义路径，也不创建物理目录、Git 仓库或演示 Workspace。`ExperienceWorkspaceMapper.xml` / `MyBatisExperienceWorkspaceRepository` 使用数据库原子 CAS 幂等登记 Workspace 与当前绑定，换目录只更新绑定并保留历史 Workspace，多 Java 实例的迟到旧配置不能覆盖新绑定。旧体验分支已执行的 `V20260809210000` 原始字节继续按既有 compatibility location 锁定，不启用 `outOfOrder`。
 - `V20260809110000__create_external_api_credentials.sql` 创建外部工具凭据与 scope 表，不写默认工具数据；`ExternalApiCredentialMapper.xml` / `MyBatisExternalApiCredentialRepository` 承载分页、整表加载、CRUD 和 scope 原子替换，数据库仅保存 RSA 密文、指纹和掩码提示。已执行 QA Memory 历史的个人库由 `DatabaseMigrationCompatibilityCustomizer` 加载原始字节兼容目录，并改走更高版本的外部 API 前向 migration。
 - `V20260809170000__session_shares_create_collaboration_share.sql` 与 `V20260809170001__session_messages_add_delegated_attribution.sql` 创建会话协作分享、成员、审计结构和代操作消息归属字段；已执行 `V20260809230000`/`V20260810090000` QA Memory 扩展历史的个人库不倒序执行这两版，而由 `db/migration-compat/qa-memory-extended` 保留已执行 SQL 原始字节并通过 `V20260810110001`/`V20260810110002` 的同字节前向副本补齐结构。

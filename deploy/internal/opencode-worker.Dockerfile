@@ -176,6 +176,13 @@ ARG OPENCODE_ASSET_SIZE=59265643
 ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
 ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
 ARG OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+ARG RTK_VERSION=0.49.0
+ARG RTK_ASSET_NAME=rtk-x86_64-unknown-linux-musl.tar.gz
+ARG RTK_ASSET_SIZE=4791180
+ARG RTK_ASSET_SHA256=7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f
+ARG RTK_BINARY_SHA256=a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe
+ARG RTK_RELEASE_BASE_URL=https://github.com/rtk-ai/rtk/releases/download
+ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd
 
 RUN set -eux; \
     asset_url="${OPENCODE_RELEASE_BASE_URL}/v${OPENCODE_VERSION}/${OPENCODE_ASSET_NAME}"; \
@@ -206,7 +213,21 @@ RUN set -eux; \
       printf '%s  %s\n' "${OPENCODE_BINARY_SHA256}" /out/opencode | sha256sum -c -; \
     fi; \
     chmod +x /out/opencode; \
-    test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"
+    test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"; \
+    rtk_url="${RTK_RELEASE_BASE_URL}/v${RTK_VERSION}/${RTK_ASSET_NAME}"; \
+    curl -fsSL --retry 3 --retry-delay 2 "${rtk_url}" -o /tmp/rtk.tar.gz; \
+    test "$(stat -c '%s' /tmp/rtk.tar.gz)" = "${RTK_ASSET_SIZE}"; \
+    printf '%s  %s\n' "${RTK_ASSET_SHA256}" /tmp/rtk.tar.gz | sha256sum -c -; \
+    mkdir -p /tmp/rtk; \
+    tar -xzf /tmp/rtk.tar.gz -C /tmp/rtk; \
+    test -f /tmp/rtk/rtk; \
+    printf '%s  %s\n' "${RTK_BINARY_SHA256}" /tmp/rtk/rtk | sha256sum -c -; \
+    install -m 0755 /tmp/rtk/rtk /out/rtk; \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "https://raw.githubusercontent.com/rtk-ai/rtk/v${RTK_VERSION}/LICENSE" \
+      -o /out/RTK-LICENSE; \
+    printf '%s  %s\n' "${RTK_LICENSE_SHA256}" /out/RTK-LICENSE | sha256sum -c -; \
+    /out/rtk --version
 
 # Codex 使用官方 Linux amd64 musl 发布包；摘要、许可证和 NOTICE 均固定到同一 0.145.0 标签。
 FROM ${GO_IMAGE} AS codex-download
@@ -281,6 +302,13 @@ ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
 ARG OPENCODE_ASSET_SIZE=59265643
 ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
 ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+ARG RTK_VERSION=0.49.0
+ARG RTK_ASSET_NAME=rtk-x86_64-unknown-linux-musl.tar.gz
+ARG RTK_ASSET_SIZE=4791180
+ARG RTK_ASSET_SHA256=7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f
+ARG RTK_BINARY_SHA256=a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe
+ARG RTK_RELEASE_BASE_URL=https://github.com/rtk-ai/rtk/releases/download
+ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd
 ARG CODEX_VERSION=0.145.0
 ARG CODEX_ASSET_NAME=codex-x86_64-unknown-linux-musl.tar.gz
 ARG CODEX_ASSET_SIZE=113724150
@@ -343,22 +371,31 @@ RUN npm config set registry "${NPM_REGISTRY}" \
     && npm cache clean --force
 
 COPY --from=opencode-download /out/opencode ./bin/opencode-official
+COPY --from=opencode-download /out/rtk ./bin/rtk
 COPY opencode-source/opencode-1.18.4/LICENSE ./LICENSE
+COPY --from=opencode-download /out/RTK-LICENSE ./RTK-LICENSE
 COPY deploy/internal/opencode-runtime.gitignore ./opencode-runtime.gitignore
 COPY deploy/internal/opencode-observability-plugin.mjs ./opencode-observability-plugin.mjs
+COPY deploy/internal/opencode-rtk-plugin.mjs ./opencode-rtk-plugin.mjs
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
 RUN set -eux; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \
-    printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\n' \
+    printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\nrtk_version=%s\nrtk_asset=%s\nrtk_archive_size=%s\nrtk_archive_sha256=%s\nrtk_license_sha256=%s\n' \
       "${OPENCODE_VERSION}" \
       "${OPENCODE_ASSET_NAME}" \
       "${OPENCODE_ASSET_SIZE}" \
       "${OPENCODE_ASSET_SHA256}" \
       "${OPENCODE_BINARY_SHA256}" \
-      "${OPENCODE_RELEASE_COMMIT}" > ./RELEASE; \
+      "${OPENCODE_RELEASE_COMMIT}" \
+      "${RTK_VERSION}" \
+      "${RTK_ASSET_NAME}" \
+      "${RTK_ASSET_SIZE}" \
+      "${RTK_ASSET_SHA256}" \
+      "${RTK_LICENSE_SHA256}" > ./RELEASE; \
     chmod +x ./bin/opencode ./bin/opencode-official; \
     ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
+    ./bin/rtk --version; \
     node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool and MCP client runtime ok")'; \
     git --version; \
     ssh -V; \

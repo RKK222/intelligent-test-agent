@@ -26,6 +26,13 @@ JDK_WINDOWS_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_ARCHIVE:-}"
 OPENCODE_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_URL:-https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-windows-x64-baseline.zip}"
 OPENCODE_WINDOWS_SHA="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_SHA256:-3bfb70c41d0278221d1fbc58efe77f79615491252498ff3f5a82db64266234e0}"
 OPENCODE_WINDOWS_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_ARCHIVE:-}"
+RTK_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_URL:-https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-pc-windows-msvc.zip}"
+RTK_WINDOWS_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_SHA256:-cb971046598e8f0bd51f6c27780fcdd2c39a4c459a811bd95b0d77ba8c0d7c9f}"
+RTK_WINDOWS_BINARY_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_BINARY_SHA256:-90905cbcb1f1fcd167452518386e1312950bb8c9814c5e2400d3e027f68a7d61}"
+RTK_WINDOWS_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_ARCHIVE:-}"
+RTK_LICENSE_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_URL:-https://raw.githubusercontent.com/rtk-ai/rtk/v0.49.0/LICENSE}"
+RTK_LICENSE_FILE="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE:-}"
+RTK_LICENSE_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256:-4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd}"
 
 usage() {
   cat <<'USAGE'
@@ -156,21 +163,36 @@ normalize_windows_jdk() {
 }
 
 normalize_windows_opencode() {
-  local archive="$1" output="$2" work="$3" executable stage
+  local archive="$1" output="$2" work="$3" rtk_archive="$4" rtk_license="$5" executable rtk_binary stage
   mkdir -p "${work}/extract"
   unzip -q "${archive}" -d "${work}/extract"
   executable="$(find "${work}/extract" -type f -iname opencode.exe | sort | head -n 1)"
   [[ -n "${executable}" ]] || { echo "OpenCode archive lacks opencode.exe" >&2; exit 1; }
+  mkdir -p "${work}/rtk-extract"
+  unzip -q "${rtk_archive}" -d "${work}/rtk-extract"
+  rtk_binary="$(find "${work}/rtk-extract" -type f -iname rtk.exe | sort | head -n 1)"
+  [[ -n "${rtk_binary}" ]] || { echo "RTK archive lacks rtk.exe" >&2; exit 1; }
+  [[ "$(sha256_file "${rtk_binary}")" == "${RTK_WINDOWS_BINARY_SHA}" ]] || {
+    echo "RTK Windows binary SHA-256 mismatch" >&2
+    exit 1
+  }
   stage="${work}/stage"
   mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins"
   cp "${executable}" "${stage}/opencode/bin/opencode.exe"
+  cp "${rtk_binary}" "${stage}/opencode/bin/rtk.exe"
   chmod 0755 "${stage}/opencode/bin/opencode.exe"
+  chmod 0755 "${stage}/opencode/bin/rtk.exe"
   cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
     "${stage}/opencode/plugins/test-agent-observability.mjs"
+  cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
+    "${stage}/opencode/plugins/test-agent-rtk.mjs"
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
   fi
+  cp "${rtk_license}" "${stage}/opencode/RTK-LICENSE"
   chmod 0644 "${stage}/opencode/plugins/test-agent-observability.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk.mjs"
+  chmod 0644 "${stage}/opencode/RTK-LICENSE"
   normalize_runtime_metadata "${stage}/opencode"
   archive_create_runtime_tar_gz "${output}" "${stage}" opencode
 }
@@ -275,13 +297,16 @@ trap cleanup EXIT
 mkdir -p "${TEMP_DIR}/sources" "${OUTPUT_DIR}/releases"
 fetch_source "${JDK_WINDOWS_ARCHIVE}" "${JDK_WINDOWS_URL}" "${JDK_WINDOWS_SHA}" "${TEMP_DIR}/sources/jdk-windows.zip"
 fetch_source "${OPENCODE_WINDOWS_ARCHIVE}" "${OPENCODE_WINDOWS_URL}" "${OPENCODE_WINDOWS_SHA}" "${TEMP_DIR}/sources/opencode-windows.zip"
+fetch_source "${RTK_WINDOWS_ARCHIVE}" "${RTK_WINDOWS_URL}" "${RTK_WINDOWS_SHA}" "${TEMP_DIR}/sources/rtk-windows.zip"
+fetch_source "${RTK_LICENSE_FILE}" "${RTK_LICENSE_URL}" "${RTK_LICENSE_SHA}" "${TEMP_DIR}/sources/rtk-license"
 
 STAGING_DIR="${OUTPUT_DIR}/releases/.${VERSION}.windows-build.$$"
 mkdir -p "${STAGING_DIR}"
 cp "${CLIENT_JAR}" "${STAGING_DIR}/test-agent-local-client.jar"
 cp "${PUBLIC_CAPABILITY_BUNDLE}" "${STAGING_DIR}/public-capabilities.tar.gz"
 normalize_windows_jdk "${TEMP_DIR}/sources/jdk-windows.zip" "${STAGING_DIR}/jdk.tar.gz" "${TEMP_DIR}/jdk-windows"
-normalize_windows_opencode "${TEMP_DIR}/sources/opencode-windows.zip" "${STAGING_DIR}/opencode.tar.gz" "${TEMP_DIR}/opencode-windows"
+normalize_windows_opencode "${TEMP_DIR}/sources/opencode-windows.zip" "${STAGING_DIR}/opencode.tar.gz" "${TEMP_DIR}/opencode-windows" \
+  "${TEMP_DIR}/sources/rtk-windows.zip" "${TEMP_DIR}/sources/rtk-license"
 
 for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz public-capabilities.tar.gz; do
   openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${STAGING_DIR}/${artifact}.sig" "${STAGING_DIR}/${artifact}"
@@ -298,7 +323,7 @@ jq -n \
   --argjson jdkSize "$(file_size "${STAGING_DIR}/jdk.tar.gz")" \
   --argjson opencodeSize "$(file_size "${STAGING_DIR}/opencode.tar.gz")" \
   --argjson capabilitySize "$(file_size "${STAGING_DIR}/public-capabilities.tar.gz")" \
-  '{schemaVersion:2,version:$version,publishedAt:$publishedAt,platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"1.18.4",artifacts:[
+  '{schemaVersion:2,version:$version,publishedAt:$publishedAt,platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"1.18.4",rtkVersion:"0.49.0",artifacts:[
     {kind:"CLIENT_JAR",path:("releases/"+$version+"/test-agent-local-client.jar"),size:$clientSize,sha256:$clientSha,signaturePath:("releases/"+$version+"/test-agent-local-client.jar.sig")},
     {kind:"JDK",path:("releases/"+$version+"/jdk.tar.gz"),size:$jdkSize,sha256:$jdkSha,signaturePath:("releases/"+$version+"/jdk.tar.gz.sig")},
     {kind:"OPENCODE",path:("releases/"+$version+"/opencode.tar.gz"),size:$opencodeSize,sha256:$opencodeSha,signaturePath:("releases/"+$version+"/opencode.tar.gz.sig")},

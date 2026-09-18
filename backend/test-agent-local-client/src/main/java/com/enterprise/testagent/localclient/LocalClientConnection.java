@@ -316,6 +316,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             stateStore.clearReEnrollmentRequirement();
             modelRelay.updateGrant(registered.modelGrant());
             supervisor.configureManagedModel(registered.managedModelConfig());
+            supervisor.configureManagedRuntime(registered.managedRuntimeConfig());
             startHeartbeat();
             startVersionChecks();
             startObservabilityUpload();

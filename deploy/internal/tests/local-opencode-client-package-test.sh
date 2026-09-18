@@ -41,7 +41,8 @@ mkdir -p "${TEST_ROOT}/inputs/jdk/fake-jdk/bin" \
   "${TEST_ROOT}/java21-javac17/bin" \
   "${TEST_ROOT}/split-java/bin" \
   "${TEST_ROOT}/split-javac/bin" \
-  "${TEST_ROOT}/inputs/opencode"
+  "${TEST_ROOT}/inputs/opencode" \
+  "${TEST_ROOT}/inputs/rtk"
 cat >"${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" <<'JAVA'
 #!/usr/bin/env sh
 [ -z "${TEST_FAKE_JAVA_LOG:-}" ] || printf '%s\n' "$*" >>"${TEST_FAKE_JAVA_LOG}"
@@ -95,6 +96,8 @@ echo 'javac 21.0.9'
 exit 0
 JAVAC
 printf '#!/usr/bin/env sh\nexit 0\n' >"${TEST_ROOT}/inputs/opencode/opencode"
+printf '#!/usr/bin/env sh\nif [ "${1:-}" = "--version" ]; then echo "rtk 0.49.0"; fi\nexit 0\n' >"${TEST_ROOT}/inputs/rtk/rtk"
+printf 'Apache License 2.0 test license\n' >"${TEST_ROOT}/rtk-license"
 chmod 0755 "${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" \
   "${TEST_ROOT}/inputs/jdk/fake-jdk/bin/javac" \
   "${TEST_ROOT}/system-jdk/bin/java" \
@@ -109,9 +112,11 @@ chmod 0755 "${TEST_ROOT}/inputs/jdk/fake-jdk/bin/java" \
   "${TEST_ROOT}/java-only/bin/java" \
   "${TEST_ROOT}/java17/bin/java" \
   "${TEST_ROOT}/java17/bin/javac" \
-  "${TEST_ROOT}/inputs/opencode/opencode"
+  "${TEST_ROOT}/inputs/opencode/opencode" \
+  "${TEST_ROOT}/inputs/rtk/rtk"
 tar -C "${TEST_ROOT}/inputs/jdk" -czf "${TEST_ROOT}/jdk-linux.tar.gz" fake-jdk
 tar -C "${TEST_ROOT}/inputs/opencode" -czf "${TEST_ROOT}/opencode-linux.tar.gz" opencode
+tar -C "${TEST_ROOT}/inputs/rtk" -czf "${TEST_ROOT}/rtk-linux.tar.gz" rtk
 printf 'test client jar\n' >"${TEST_ROOT}/test-agent-local-client.jar"
 mkdir -p "${TEST_ROOT}/public-capabilities/public-capabilities/agents"
 printf '%s\n' 'public test agent' >"${TEST_ROOT}/public-capabilities/public-capabilities/agents/test.md"
@@ -153,6 +158,11 @@ package_release() {
   TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
   TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
   TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/rtk-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/rtk-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256="$(sha256_file "${TEST_ROOT}/inputs/rtk/rtk")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE="${TEST_ROOT}/rtk-license" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256="$(sha256_file "${TEST_ROOT}/rtk-license")" \
     "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
       --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
       --version "${VERSION}" \
@@ -173,6 +183,11 @@ package_relative_output_release() {
     TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
     TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
     TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/rtk-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/rtk-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256="$(sha256_file "${TEST_ROOT}/inputs/rtk/rtk")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE="${TEST_ROOT}/rtk-license" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256="$(sha256_file "${TEST_ROOT}/rtk-license")" \
       "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
         --output-dir relative-dist/local-opencode-client \
         --version "${RELATIVE_OUTPUT_VERSION}" \
@@ -192,6 +207,11 @@ package_upgrade_release() {
   TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
   TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
   TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/rtk-linux.tar.gz" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/rtk-linux.tar.gz")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256="$(sha256_file "${TEST_ROOT}/inputs/rtk/rtk")" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE="${TEST_ROOT}/rtk-license" \
+  TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256="$(sha256_file "${TEST_ROOT}/rtk-license")" \
     "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
       --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
       --version "${UPGRADE_VERSION}" \
@@ -212,6 +232,11 @@ if TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/jdk-linux
     TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/jdk-linux.tar.gz")" \
     TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/opencode-linux.tar.gz" \
     TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/opencode-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_ARCHIVE="${TEST_ROOT}/rtk-linux.tar.gz" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256="$(sha256_file "${TEST_ROOT}/rtk-linux.tar.gz")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256="$(sha256_file "${TEST_ROOT}/inputs/rtk/rtk")" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE="${TEST_ROOT}/rtk-license" \
+    TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256="$(sha256_file "${TEST_ROOT}/rtk-license")" \
       "${ROOT_DIR}/deploy/internal/package-local-opencode-client.sh" \
         --output-dir "${TEST_ROOT}/dist/local-opencode-client" \
         --version "${OLDER_VERSION}" \

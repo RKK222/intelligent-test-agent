@@ -142,7 +142,11 @@ function withRequiredConfig(env, supportsSubagentDepth, runtimeRoot) {
   const config = { ...inherited }
   const observabilityPlugin = new URL(`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`).href
   const inheritedPlugins = Array.isArray(config.plugin) ? config.plugin : []
-  config.plugin = [...new Set([...inheritedPlugins, observabilityPlugin])]
+  const plugins = [...inheritedPlugins, observabilityPlugin]
+  if (env.TEST_AGENT_RTK_ENABLED === "true") {
+    plugins.push(new URL(`file://${join(runtimeRoot, "opencode-rtk-plugin.mjs")}`).href)
+  }
+  config.plugin = [...new Set(plugins)]
   if (supportsSubagentDepth) {
     config.subagent_depth = 2
   } else {
@@ -204,6 +208,19 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   const resolvedRuntimeRoot = resolve(runtimeRoot)
   const resolvedCwd = resolve(cwd)
   const prepared = { ...env, ...OFFLINE_DEFAULTS }
+  if (prepared.TEST_AGENT_RTK_ENABLED === "true") {
+    // 运行包内固定二进制是平台交付边界，不允许父进程环境把 RTK 替换成任意路径。
+    prepared.TEST_AGENT_RTK_BIN = join(resolvedRuntimeRoot, "bin", process.platform === "win32" ? "rtk.exe" : "rtk")
+    prepared.RTK_TELEMETRY_DISABLED = "1"
+    prepared.RTK_RECALL = "0"
+    if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-rtk-plugin.mjs")))) {
+      throw new Error("RTK plugin is missing from the offline OpenCode runtime")
+    }
+    const rtkBinaryInfo = await lstat(prepared.TEST_AGENT_RTK_BIN)
+    if (!rtkBinaryInfo.isFile() || (rtkBinaryInfo.mode & 0o111) === 0) {
+      throw new Error("RTK binary is missing or not executable in the offline OpenCode runtime")
+    }
+  }
   prepared.OPENCODE_CONFIG_CONTENT = withRequiredConfig(
     prepared,
     await runtimeSupportsSubagentDepth(resolvedRuntimeRoot),

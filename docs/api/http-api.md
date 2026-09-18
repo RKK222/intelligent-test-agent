@@ -962,6 +962,8 @@ Base URL：`/api/internal/platform/configuration-management`。除设置页保�
 
 通用参数（`common_parameters`）保存跨模块共享的稳定运行参数（如 `SYS_DATA_ROOT_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PUBLIC_AGENT_GIT_URL`、`UITEST_BASE_URL` 等路径、Git 与外部平台地址参数）。管理接口只允许已认证用户且角色包含 `SUPER_ADMIN` 访问：未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法平台值或空参数值返回 `VALIDATION_ERROR`，参数不存在返回 `NOT_FOUND`。**接口仅提供列表查询与「仅修改 value」的更新，不提供新增/删除**，保证通用参数集合稳定。
 
+其中 `RTK_COMMAND_REWRITE_ENABLED`（`platform=all`，默认 `false`、可编辑）是受管 OpenCode 的 RTK 命令改写开关。通用参数页对该行提供布尔开关；改动沿用同一修改历史和跨实例刷新广播，不新增专用 HTTP API。服务端和本地客户端均只接受明确的字符串 `true` 才启用，旧客户端或未声明 `MANAGED_RTK_CONFIG_V1` 时不下发运行时字段。
+
 公共 Agent Git 地址只保留 `OPENCODE_PUBLIC_AGENT_GIT_URL` 一个参数。前端通用参数页复用 `GET /api/internal/platform/configuration-management/repository-deployment-options` 展示当前默认部署模式，修改弹窗允许选择外部/内部模式；内部模式输入框展示当前管理员 `ssh://{unifiedAuthId}@` 前缀，但实际只保存 `host[:port]/path`。Java 后端按该参数保存值形态判断：完整 SSH/HTTPS Git URL 直接使用，`host[:port]/path` 片段在公共 Agent Git 操作时按当前管理员统一认证号拼接 `ssh://{unifiedAuthId}@...`，不通过新增 `OPENCODE_PUBLIC_AGENT_GIT_URL_INTERNAL` 参数选择。
 
 参数值支持变量引用：值中可使用 `${englishName}` 引用其他通用参数的值，读取时按调用方指定的上下文平台展开；`platform=all` 的参数可由调用方以当前 JVM 平台或目标平台作为上下文，因此也能引用平台参数。循环引用、缺失引用或超深度嵌套（上限 16 层）时保留字面 `${...}` 占位符不展开，不抛异常。运行态默认通过 `RepositoryCommonParameterValues` 直接查询数据库，不把通用参数缓存在 JVM 或 Redis 中；夜间容量是明确例外，`NightExecutionCapacityRegistry` 在启动和参数刷新事件到达时查库，只把已校验的正整数保存在本机内存。数据库修改后通过 `common-parameter.refresh-requested` 广播通知其他后端实例直接查库联动。

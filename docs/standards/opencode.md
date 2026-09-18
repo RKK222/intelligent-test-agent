@@ -22,6 +22,15 @@ Codex 白盒分析使用 worker 内固定的官方 Codex CLI，启动器直接�
 企业兼容预检和回滚见
 `docs/deployment/codex-whitebox-mcp.md`。
 
+## RTK 命令改写边界
+
+RTK 只作为受控 OpenCode 运行时的可选命令改写器接入，不修改 `opencode-source/`，也不把 RTK
+作为平台 MCP、Agent 或 Tool 能力暴露。后端通过通用参数 `RTK_COMMAND_REWRITE_ENABLED` 统一决定是否启用，
+本地客户端仅向声明 `MANAGED_RTK_CONFIG_V1` 的新版本下发该布尔值。插件只处理 bash/shell 工具的 command，
+调用失败、超时或 deny 必须 fail-open 保留原命令；默认关闭，运行制品缺少固定版本二进制、插件或许可证时 fail-closed
+拒绝启动该受管运行时。RTK 的本地 history.db 仍属于其运行行为，telemetry/recall/retriever 关闭不等于无本地记录，
+企业上线前必须单独完成隐私与留存评审。
+
 ## 生成 SDK 边界
 
 `backend/test-agent-opencode-sdk-generated/` 同样禁止手工修改 generated Java 源码。SDK 变更必须通过 `tools/generate-opencode-java-sdk.sh` 重新生成，再按模块文档同步。

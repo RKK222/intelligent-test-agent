@@ -5,6 +5,8 @@ import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
 import com.enterprise.testagent.domain.user.UserId;
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
+import com.enterprise.testagent.domain.configuration.RtkRuntimePolicy;
 import com.enterprise.testagent.domain.user.UserRepository;
 import com.enterprise.testagent.domain.trace.TraceCatalogRepository;
 import com.enterprise.testagent.domain.opencodeprocess.BackendProcessId;
@@ -80,6 +82,7 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     private LocalClientPublicCapabilityCoordinator publicCapabilityCoordinator;
     private ModelCatalogApplicationService modelCatalogService;
     private LocalClientManagedModelConfigService managedModelConfigService;
+    private CommonParameterValues commonParameterValues;
 
     /** 方法注入保持既有 handler 单测构造器兼容，同时让生产连接具备 Trace 归档能力。 */
     @Autowired
@@ -112,6 +115,12 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
     @Autowired
     void setManagedModelConfigService(LocalClientManagedModelConfigService service) {
         this.managedModelConfigService = Objects.requireNonNull(service);
+    }
+
+    /** RTK 运行时配置只读通用参数；旧客户端不声明能力时不会收到该字段。 */
+    @Autowired(required = false)
+    void setCommonParameterValues(CommonParameterValues commonParameterValues) {
+        this.commonParameterValues = commonParameterValues;
     }
 
     public LocalClientConnectionWebSocketHandler(
@@ -279,6 +288,12 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                 ? modelCatalogService.localClientProviderConfig()
                                 : managedModelConfigService.managedProviderConfig();
                     }
+                    boolean managedRtkConfigSupported = payload.capabilities() != null
+                            && payload.capabilities().contains("MANAGED_RTK_CONFIG_V1");
+                    Map<String, Object> managedRuntimeConfig = managedRtkConfigSupported
+                            ? Map.of(RtkRuntimePolicy.MANAGED_CONFIG_FIELD,
+                            commonParameterValues != null && RtkRuntimePolicy.enabled(commonParameterValues))
+                            : null;
                     emit(outbound, new LocalClientFrame(
                             LocalClientProtocol.VERSION,
                             LocalClientFrameType.REGISTERED,
@@ -290,7 +305,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                                     registration.rawModelGrant(),
                                     registration.modelGrantExpiresAt(),
                                     Instant.now(),
-                                    managedModelConfig))), closeSignal);
+                                    managedModelConfig,
+                                    managedRuntimeConfig))), closeSignal);
                     LOGGER.info(
                             "local_client_connected clientInstanceId={} userId={} generation={} backendProcessId={} traceId={}",
                             state.clientInstanceId().value(),

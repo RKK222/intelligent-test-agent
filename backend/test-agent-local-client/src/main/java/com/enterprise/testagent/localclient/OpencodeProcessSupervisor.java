@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
@@ -48,6 +49,8 @@ final class OpencodeProcessSupervisor {
     private final HttpClient httpClient = loopbackHttpClient();
     private volatile String managedModelConfigContent;
     private volatile boolean managedModelRestartRequired;
+    private volatile boolean managedRtkEnabled;
+    private volatile boolean managedRtkRestartRequired;
 
     OpencodeProcessSupervisor(
             LocalClientConfiguration configuration,
@@ -103,14 +106,24 @@ final class OpencodeProcessSupervisor {
         }
     }
 
+    /** 保存服务端下发的 RTK 开关；只接受布尔开关，不允许通过协议注入路径或插件。 */
+    synchronized void configureManagedRuntime(Map<String, Object> config) {
+        boolean enabled = validateManagedRtkConfig(config);
+        if (managedRtkEnabled != enabled) {
+            managedRtkEnabled = enabled;
+            managedRtkRestartRequired = true;
+            LOGGER.info("local_opencode_managed_rtk_config_changed enabled={} restartRequired=true", enabled);
+        }
+    }
+
     synchronized LocalClientPayloads.LifecycleResult start(Integer preferredPort) {
         long startedNanos = System.nanoTime();
         LocalClientPayloads.LifecycleResult current = status();
-        LOGGER.info("local_opencode_start_requested preferredPort={} currentStatus={} currentProcessId={} currentPort={} currentHealthy={} modelRestartRequired={}",
+        LOGGER.info("local_opencode_start_requested preferredPort={} currentStatus={} currentProcessId={} currentPort={} currentHealthy={} modelRestartRequired={} rtkEnabled={} rtkRestartRequired={}",
                 preferredPort, current.processStatus(), current.processId(), current.opencodePort(),
-                current.opencodeHealthy(), managedModelRestartRequired);
+                current.opencodeHealthy(), managedModelRestartRequired, managedRtkEnabled, managedRtkRestartRequired);
         if (current.success() && "RUNNING".equals(current.processStatus()) && current.opencodeHealthy()) {
-            if (!managedModelRestartRequired) {
+            if (!managedModelRestartRequired && !managedRtkRestartRequired) {
                 LOGGER.info("local_opencode_start_reused processId={} port={} durationMs={}",
                         current.processId(), current.opencodePort(),
                         LocalClientDiagnostics.elapsedMillis(startedNanos));
@@ -396,6 +409,7 @@ final class OpencodeProcessSupervisor {
             if (configContent != null) {
                 builder.environment().put("OPENCODE_CONFIG_CONTENT", configContent);
             }
+            configureRtkRuntime(builder.environment(), executable);
             if (observabilityRelay != null) {
                 String generation = "lcg_" + UUID.randomUUID().toString().replace("-", "");
                 Path plugin = executable.getParent().getParent()
@@ -436,6 +450,7 @@ final class OpencodeProcessSupervisor {
                 throw new IllegalStateException("OpenCode loopback health did not become ready");
             }
             managedModelRestartRequired = false;
+            managedRtkRestartRequired = false;
             LOGGER.info("local_opencode_process_healthy processId={} port={} healthTimeoutSeconds={} durationMs={}",
                     handle.pid(), port, HEALTH_TIMEOUT.toSeconds(),
                     LocalClientDiagnostics.elapsedMillis(startedNanos));
@@ -471,6 +486,11 @@ final class OpencodeProcessSupervisor {
 
     /** 只追加共享插件 URI，保留用户已有 OPENCODE_CONFIG_CONTENT 和其它插件顺序。 */
     String withObservabilityPlugin(String inherited, String pluginUri) {
+        return withPlugin(inherited, pluginUri);
+    }
+
+    /** 追加插件 URI 时复用同一份 JSON 校验和去重逻辑，避免 RTK 引入第二套配置合并器。 */
+    String withPlugin(String inherited, String pluginUri) {
         try {
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode root = inherited == null || inherited.isBlank()
@@ -488,6 +508,46 @@ final class OpencodeProcessSupervisor {
         } catch (Exception exception) {
             throw new IllegalStateException("OPENCODE_CONFIG_CONTENT is invalid", exception);
         }
+    }
+
+    private void configureRtkRuntime(Map<String, String> environment, Path executable) {
+        environment.put("TEST_AGENT_RTK_ENABLED", Boolean.toString(managedRtkEnabled));
+        if (!managedRtkEnabled) {
+            environment.remove("TEST_AGENT_RTK_BIN");
+            environment.remove("RTK_TELEMETRY_DISABLED");
+            environment.remove("RTK_RECALL");
+            return;
+        }
+        Path runtimeRoot = executable.toAbsolutePath().normalize().getParent() == null
+                ? executable.toAbsolutePath().normalize()
+                : executable.toAbsolutePath().normalize().getParent().getParent();
+        Path plugin = runtimeRoot.resolve("plugins/test-agent-rtk.mjs").normalize();
+        String executableName = executable.getFileName() == null
+                ? ""
+                : executable.getFileName().toString().toLowerCase(Locale.ROOT);
+        Path binary = executable.toAbsolutePath().normalize().getParent()
+                .resolve(executableName.endsWith(".exe") ? "rtk.exe" : "rtk")
+                .normalize();
+        if (!Files.isRegularFile(plugin) || !Files.isExecutable(binary)) {
+            throw new IllegalStateException("OpenCode RTK runtime is missing");
+        }
+        environment.put("TEST_AGENT_RTK_BIN", binary.toString());
+        environment.put("RTK_TELEMETRY_DISABLED", "1");
+        environment.put("RTK_RECALL", "0");
+        String current = environment.get("OPENCODE_CONFIG_CONTENT");
+        environment.put("OPENCODE_CONFIG_CONTENT", withPlugin(current, plugin.toUri().toString()));
+    }
+
+    static boolean validateManagedRtkConfig(Map<String, Object> config) {
+        if (config == null || config.isEmpty()) return false;
+        if (config.keySet().stream().anyMatch(key -> !"rtkEnabled".equals(key))) {
+            throw new IllegalArgumentException("managed runtime config field is not allowed");
+        }
+        Object value = config.get("rtkEnabled");
+        if (!(value instanceof Boolean)) {
+            throw new IllegalArgumentException("managed runtime config rtkEnabled must be boolean");
+        }
+        return (Boolean) value;
     }
 
     static String validateManagedModelConfig(Map<String, Object> config) {

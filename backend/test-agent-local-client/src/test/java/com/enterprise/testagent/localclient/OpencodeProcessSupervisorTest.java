@@ -56,6 +56,19 @@ class OpencodeProcessSupervisorTest {
     }
 
     @Test
+    void managedRtkConfigAcceptsOnlyExplicitBooleanField() {
+        assertThat(OpencodeProcessSupervisor.validateManagedRtkConfig(null)).isFalse();
+        assertThat(OpencodeProcessSupervisor.validateManagedRtkConfig(Map.of("rtkEnabled", true))).isTrue();
+        assertThat(OpencodeProcessSupervisor.validateManagedRtkConfig(Map.of("rtkEnabled", false))).isFalse();
+        assertThatThrownBy(() -> OpencodeProcessSupervisor.validateManagedRtkConfig(Map.of("rtkEnabled", "true")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("must be boolean");
+        assertThatThrownBy(() -> OpencodeProcessSupervisor.validateManagedRtkConfig(Map.of("plugin", "unsafe")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not allowed");
+    }
+
+    @Test
     void loopbackCatalogClientDisablesUnsupportedH2cUpgrade() {
         assertThat(OpencodeProcessSupervisor.loopbackHttpClient().version())
                 .isEqualTo(HttpClient.Version.HTTP_1_1);

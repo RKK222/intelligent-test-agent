@@ -23,12 +23,13 @@ sha256_file() {
 VERSION=20260827210000
 PUBLIC_CONFIG_COMMIT=0123456789abcdef0123456789abcdef01234567
 OUTPUT_DIR="${TEST_ROOT}/dist/local-opencode-client"
-mkdir -p "${TEST_ROOT}/jdk/jdk-21/bin" "${TEST_ROOT}/opencode" \
+mkdir -p "${TEST_ROOT}/jdk/jdk-21/bin" "${TEST_ROOT}/opencode" "${TEST_ROOT}/rtk" \
   "${TEST_ROOT}/public-capabilities/public-capabilities/agents" "${OUTPUT_DIR}"
 printf 'fake java PE\n' >"${TEST_ROOT}/jdk/jdk-21/bin/java.exe"
 printf 'fake javaw PE\n' >"${TEST_ROOT}/jdk/jdk-21/bin/javaw.exe"
 printf 'fake javac PE\n' >"${TEST_ROOT}/jdk/jdk-21/bin/javac.exe"
 printf 'fake opencode PE\n' >"${TEST_ROOT}/opencode/opencode.exe"
+printf 'fake rtk PE\n' >"${TEST_ROOT}/rtk/rtk.exe"
 (
   cd "${TEST_ROOT}/jdk"
   zip -qr "${TEST_ROOT}/jdk-windows.zip" jdk-21
@@ -37,12 +38,17 @@ printf 'fake opencode PE\n' >"${TEST_ROOT}/opencode/opencode.exe"
   cd "${TEST_ROOT}/opencode"
   zip -q "${TEST_ROOT}/opencode-windows.zip" opencode.exe
 )
+(
+  cd "${TEST_ROOT}/rtk"
+  zip -q "${TEST_ROOT}/rtk-windows.zip" rtk.exe
+)
 printf 'test local client jar\n' >"${TEST_ROOT}/test-agent-local-client.jar"
 printf 'public test agent\n' \
   >"${TEST_ROOT}/public-capabilities/public-capabilities/agents/test.md"
 printf '{"schemaVersion":1,"sourceCommit":"%s"}\n' "${PUBLIC_CONFIG_COMMIT}" \
   >"${TEST_ROOT}/public-capabilities/public-capabilities/manifest.json"
 tar -C "${TEST_ROOT}/public-capabilities" -czf "${TEST_ROOT}/public-capabilities.tar.gz" public-capabilities
+printf 'Apache License 2.0 test license\n' >"${TEST_ROOT}/rtk-license"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
   -out "${TEST_ROOT}/signing-private.pem" >/dev/null 2>&1
 openssl pkey -in "${TEST_ROOT}/signing-private.pem" -pubout \
@@ -52,6 +58,11 @@ TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_ARCHIVE="${TEST_ROOT}/jdk-windows.zip" \
 TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_SHA256="$(sha256_file "${TEST_ROOT}/jdk-windows.zip")" \
 TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_ARCHIVE="${TEST_ROOT}/opencode-windows.zip" \
 TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_SHA256="$(sha256_file "${TEST_ROOT}/opencode-windows.zip")" \
+TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_ARCHIVE="${TEST_ROOT}/rtk-windows.zip" \
+TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_SHA256="$(sha256_file "${TEST_ROOT}/rtk-windows.zip")" \
+TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_BINARY_SHA256="$(sha256_file "${TEST_ROOT}/rtk/rtk.exe")" \
+TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE="${TEST_ROOT}/rtk-license" \
+TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256="$(sha256_file "${TEST_ROOT}/rtk-license")" \
   "${ROOT_DIR}/deploy/internal/package-local-opencode-client-windows.sh" \
     --output-dir "${OUTPUT_DIR}" \
     --version "${VERSION}" \

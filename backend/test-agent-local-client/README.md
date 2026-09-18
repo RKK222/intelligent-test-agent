@@ -113,6 +113,14 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - 客户端升级或重连时如果发现已有 OpenCode 尚未应用新配置，下一次启动命令会先按 PID/启动时间/命令身份停止旧进程，
   再用新配置重启；配置不变时保持幂等，不额外重启。
 
+## RTK 命令改写
+
+- 新客户端声明 `MANAGED_RTK_CONFIG_V1`。服务端仅在注册客户端具备该能力时返回
+  `REGISTERED.managedRuntimeConfig.rtkEnabled`，值来自通用参数 `RTK_COMMAND_REWRITE_ENABLED`，缺失或非 `true` 时按关闭处理。
+- 受管运行目录必须同时包含固定版本 RTK 可执行文件 `opencode/bin/rtk`、`opencode/plugins/test-agent-rtk.mjs` 和
+  `RTK-LICENSE`。插件只拦截 `bash`/`shell` 工具，调用 `rtk rewrite` 失败或返回 deny 时保持原命令，且不把命令正文写入平台日志。
+- 管理员开关默认关闭；修改只在本地客户端下一次受控 OpenCode 重启时生效。客户端没有该能力或仍使用旧协议时保持四字段 `REGISTERED` 兼容形状。
+
 ## 版本策略兼容
 
 - 客户端 release 版本使用固定宽度北京时间时间戳。签名打包入口要求新版本严格高于整包发布传入的已部署版本及当前分发目录中的所有版本；相同版本或更低版本失败关闭。客户端组件未变化时继续复用原 release，不仅为版本递增而重复发布。

@@ -48,6 +48,8 @@ LOBEHUB_RELEASE_FORWARD_MIGRATION_RESOURCE="db/migration-compat/lobehub-missing-
 LOBEHUB_RELEASE_FORWARD_MIGRATION_SHA256="b73b06fb14f407979646df32a8342603ab957c2f4812a4013ab9635cdfdcce64"
 SUPPORT_ACCESS_MIGRATION_RESOURCE="db/migration/V20260805132000__create_support_access_audit.sql"
 SUPPORT_ACCESS_MIGRATION_SHA256="54cea9a84948f8e4cee14d630772b8ee0668c2a7e5fc897ede5e792a15edd761"
+RTK_COMMAND_REWRITE_MIGRATION_RESOURCE="db/migration/V20260918120000__common_parameters_add_rtk_command_rewrite.sql"
+RTK_COMMAND_REWRITE_MIGRATION_SHA256="15b951e95b104534d534ded02c8b015da41c3800754f7afc255234c989b34925"
 SKILL_HUB_CLASSIFICATION_MIGRATION_RESOURCE="db/migration/V20260806143000__classify_skill_hub_assets.sql"
 SKILL_HUB_CLASSIFICATION_MIGRATION_SHA256="f59f641527fdabaf21393319cd70ed578c6f75a55decae4d8839bc2b561ac06d"
 PUBLIC_SKILL_HUB_SNAPSHOT_MIGRATION_RESOURCE="db/migration/V20260806190000__persist_public_skill_hub_snapshots.sql"
@@ -681,6 +683,8 @@ verify_release_flyway_migrations_jar() {
   verify_release_flyway_resource "${jar}" "${label}" \
     "${SUPPORT_ACCESS_MIGRATION_RESOURCE}" "${SUPPORT_ACCESS_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
+    "${RTK_COMMAND_REWRITE_MIGRATION_RESOURCE}" "${RTK_COMMAND_REWRITE_MIGRATION_SHA256}"
+  verify_release_flyway_resource "${jar}" "${label}" \
     "${SKILL_HUB_CLASSIFICATION_MIGRATION_RESOURCE}" "${SKILL_HUB_CLASSIFICATION_MIGRATION_SHA256}"
   verify_release_flyway_resource "${jar}" "${label}" \
     "${PUBLIC_SKILL_HUB_SNAPSHOT_MIGRATION_RESOURCE}" "${PUBLIC_SKILL_HUB_SNAPSHOT_MIGRATION_SHA256}"
@@ -963,14 +967,14 @@ plan_release_components() {
   local current_local_client_mode current_local_client_fingerprint
   local baseline_version baseline_source_commit baseline_release_sha256 baseline_worker_fingerprint
   local client_baseline_version client_baseline_source_commit client_baseline_fingerprint
-  worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
+  worker_config="schema=2|platform=${PLATFORM}|image=${TEST_AGENT_OPENCODE_WORKER_IMAGE}|go=${GO_IMAGE}|node=${NODE_IMAGE}|python=${PYTHON_VERSION}|pythonSourceSize=${PYTHON_SOURCE_SIZE}|pythonSourceSha=${PYTHON_SOURCE_SHA256}|pythonSourceBase=${PYTHON_SOURCE_BASE_URL}|opencode=${OPENCODE_VERSION}|opencodeCommit=${OPENCODE_RELEASE_COMMIT}|opencodeAsset=${OPENCODE_ASSET_SHA256}|opencodeBinary=${OPENCODE_BINARY_SHA256}|rtk=${RTK_VERSION}|rtkAsset=${RTK_ASSET_SHA256}|rtkLicense=${RTK_LICENSE_SHA256}|codex=${CODEX_VERSION}|codexAsset=${CODEX_ASSET_SHA256}|bwrap=${CODEX_BWRAP_ASSET_SHA256}|bwrapBinary=${CODEX_BWRAP_BINARY_SHA256}|runtimePackage=${OPENCODE_RUNTIME_PACKAGE_JSON}|runtimeLock=${OPENCODE_RUNTIME_PACKAGE_LOCK}"
   toolbox_config="schema=1|platform=${PLATFORM}|it=${TEST_AGENT_TOOLBOX_IT_TOOLS_IMAGE}|omni=${TEST_AGENT_TOOLBOX_OMNI_TOOLS_IMAGE}|node=${TEST_AGENT_TOOLBOX_NODE_BASE_IMAGE}|nginx=${TEST_AGENT_TOOLBOX_NGINX_BASE_IMAGE}"
   public_capability_bundle_sha="missing"
   if [[ -n "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE:-}" \
     && -f "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}" ]]; then
     public_capability_bundle_sha="$(sha256_file "${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CAPABILITY_BUNDLE}")"
   fi
-  local_client_config="schema=6|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
+  local_client_config="schema=7|version=${TEST_AGENT_LOCAL_CLIENT_VERSION:-}|downloadBase=${TEST_AGENT_LOCAL_CLIENT_DOWNLOAD_BASE_URL:-}|server=${TEST_AGENT_LOCAL_CLIENT_SERVER_URL:-}|allowInsecure=${TEST_AGENT_LOCAL_CLIENT_ALLOW_INSECURE_CONTROL:-false}|jdkLinux=${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-default}|opencodeLinux=${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-default}|rtkLinux=${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256:-default}|rtkLinuxBinary=${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256:-default}|rtkWindows=${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_SHA256:-default}|rtkWindowsBinary=${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_BINARY_SHA256:-default}|rtkVersion=0.49.0|rtkLicense=${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256:-default}|publicKey=${TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY:-derived}|publicCommit=${TEST_AGENT_LOCAL_CLIENT_PUBLIC_CONFIG_COMMIT:-}|publicBundleSha=${public_capability_bundle_sha}"
 
   WORKER_RUNTIME_FINGERPRINT="$(component_fingerprint "${worker_config}" \
     opencode-manager/go.mod \
@@ -986,6 +990,7 @@ plan_release_components() {
     deploy/internal/opencode-node-runtime.package-lock.json \
     deploy/internal/opencode-official-launcher.mjs \
     deploy/internal/opencode-observability-plugin.mjs \
+    deploy/internal/opencode-rtk-plugin.mjs \
     deploy/internal/opencode-runtime.gitignore \
     deploy/internal/codex-whitebox-mcp-launcher.sh \
     deploy/internal/codex-whitebox-requirements.toml \
@@ -1003,7 +1008,9 @@ plan_release_components() {
     deploy/internal/build-local-opencode-client-user-package.sh \
     deploy/internal/local-opencode-client/bootstrap \
     deploy/internal/package-local-opencode-client.sh \
+    deploy/internal/package-local-opencode-client-windows.sh \
     deploy/internal/opencode-observability-plugin.mjs \
+    deploy/internal/opencode-rtk-plugin.mjs \
     deploy/internal/local-opencode-client/install.sh.template \
     deploy/internal/archive-common.sh \
     frontend/apps/agent-web/src/assets/pets/radar-bunny.png \
@@ -1296,6 +1303,13 @@ build_opencode_worker_image() {
     --build-arg "OPENCODE_ASSET_SHA256=${OPENCODE_ASSET_SHA256}" \
     --build-arg "OPENCODE_BINARY_SHA256=${OPENCODE_BINARY_SHA256}" \
     --build-arg "OPENCODE_RELEASE_BASE_URL=${OPENCODE_RELEASE_BASE_URL}" \
+    --build-arg "RTK_VERSION=${RTK_VERSION}" \
+    --build-arg "RTK_ASSET_NAME=${RTK_ASSET_NAME}" \
+    --build-arg "RTK_ASSET_SIZE=${RTK_ASSET_SIZE}" \
+    --build-arg "RTK_ASSET_SHA256=${RTK_ASSET_SHA256}" \
+    --build-arg "RTK_BINARY_SHA256=${RTK_BINARY_SHA256}" \
+    --build-arg "RTK_RELEASE_BASE_URL=${RTK_RELEASE_BASE_URL}" \
+    --build-arg "RTK_LICENSE_SHA256=${RTK_LICENSE_SHA256}" \
     --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
     --build-arg "CODEX_ASSET_NAME=${CODEX_ASSET_NAME}" \
     --build-arg "CODEX_ASSET_SIZE=${CODEX_ASSET_SIZE}" \
@@ -1974,6 +1988,13 @@ OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-59265643}"
 OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
 OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5}"
 OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://github.com/anomalyco/opencode/releases/download}"
+RTK_VERSION="${RTK_VERSION:-0.49.0}"
+RTK_ASSET_NAME="${RTK_ASSET_NAME:-rtk-x86_64-unknown-linux-musl.tar.gz}"
+RTK_ASSET_SIZE="${RTK_ASSET_SIZE:-4791180}"
+RTK_ASSET_SHA256="${RTK_ASSET_SHA256:-7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a6411100c8f}"
+RTK_BINARY_SHA256="${RTK_BINARY_SHA256:-a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe}"
+RTK_RELEASE_BASE_URL="${RTK_RELEASE_BASE_URL:-https://github.com/rtk-ai/rtk/releases/download}"
+RTK_LICENSE_SHA256="${RTK_LICENSE_SHA256:-4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd}"
 CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
 CODEX_ASSET_NAME="${CODEX_ASSET_NAME:-codex-x86_64-unknown-linux-musl.tar.gz}"
 CODEX_ASSET_SIZE="${CODEX_ASSET_SIZE:-113724150}"

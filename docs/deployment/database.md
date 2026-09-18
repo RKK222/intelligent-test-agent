@@ -2170,6 +2170,18 @@ SHA-256 一致。
 `flyway_schema_history`，从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中该 migration 字节一致；
 未知 checksum、未知更高版本或历史分叉必须停止，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
 
+## V20260918120000 通用参数种子 RTK_COMMAND_REWRITE_ENABLED
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260918120000__common_parameters_add_rtk_command_rewrite.sql` 初始化 RTK 命令改写的生产开关：
+
+| 参数 | 平台 | 默认值 | 说明 |
+|---|---|---|---|
+| `RTK_COMMAND_REWRITE_ENABLED` | `all` | `false` | 是否在受管 OpenCode 的 bash/shell 工具执行前调用固定版本 RTK 改写命令；默认关闭。 |
+
+该参数复用既有超级管理员通用参数管理 API、修改历史和 `common-parameter.refresh-requested` 广播。后端把参数值转换为受控布尔配置，在服务器启动和本地客户端 REGISTERED 响应中下发；本地客户端检测到变更后只在下一次受控 OpenCode 重启应用。开关打开但运行包缺少 RTK 二进制或插件时，客户端拒绝启动该运行时并记录安全错误，避免静默执行未验证命令改写。
+
+RTK 运行时固定为 `v0.49.0`，worker 与本地客户端制品都校验上游发布包 SHA-256，并随制品分发 Apache-2.0 LICENSE。官方 RTK 仍会在本地维护命令历史数据库；本项目关闭 telemetry、recall 和 retriever，但在完成隐私评审前不能把它表述为“无本地记录”。
+
 ### 搬迁安全错误说明兼容性
 
 个人工作区搬迁诊断复用 `personal_workspace_relocations.safe_error_message`（512 字符），写入受控 stage/reason/pathRef 和固定中文提示；`safe_error_code`、表结构、状态机、重试与租约字段不变，无新增 migration。历史通用说明仅在新版本处理下一次失败时更新，禁止为补诊断手工更新记录。

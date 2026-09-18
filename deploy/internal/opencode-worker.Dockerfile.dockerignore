@@ -7,6 +7,7 @@
 !deploy/internal/validate-opencode-models.sh
 !deploy/internal/opencode-official-launcher.mjs
 !deploy/internal/opencode-observability-plugin.mjs
+!deploy/internal/opencode-rtk-plugin.mjs
 !deploy/internal/codex-whitebox-mcp-launcher.sh
 !deploy/internal/codex-whitebox-requirements.toml
 !deploy/internal/opencode-runtime.gitignore

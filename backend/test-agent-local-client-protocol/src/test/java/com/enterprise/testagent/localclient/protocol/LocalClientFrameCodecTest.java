@@ -25,6 +25,14 @@ class LocalClientFrameCodecTest {
                 now,
                 Map.of("model", "provider/model")))
                 .has("managedModelConfig")).isTrue();
+        assertThat(codec.payload(new LocalClientPayloads.Registered(
+                7L,
+                "grant",
+                now,
+                now,
+                Map.of("model", "provider/model"),
+                Map.of("rtkEnabled", false)))
+                .path("managedRuntimeConfig").path("rtkEnabled").booleanValue()).isFalse();
     }
 
     @Test

@@ -75,7 +75,18 @@ public final class LocalClientPayloads {
             String modelGrant,
             Instant modelGrantExpiresAt,
             Instant serverTime,
-            @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> managedModelConfig) {
+            @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> managedModelConfig,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Map<String, Object> managedRuntimeConfig) {
+
+        /** 保留仅协商模型配置的五字段构造；运行时配置仍按能力单独下发。 */
+        public Registered(
+                long connectionGeneration,
+                String modelGrant,
+                Instant modelGrantExpiresAt,
+                Instant serverTime,
+                Map<String, Object> managedModelConfig) {
+            this(connectionGeneration, modelGrant, modelGrantExpiresAt, serverTime, managedModelConfig, null);
+        }
 
         /** 保留未协商 MANAGED_MODEL_CONFIG_V1 的旧服务端/客户端四字段构造。 */
         public Registered(
@@ -83,7 +94,7 @@ public final class LocalClientPayloads {
                 String modelGrant,
                 Instant modelGrantExpiresAt,
                 Instant serverTime) {
-            this(connectionGeneration, modelGrant, modelGrantExpiresAt, serverTime, null);
+            this(connectionGeneration, modelGrant, modelGrantExpiresAt, serverTime, null, null);
         }
     }
 

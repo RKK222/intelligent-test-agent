@@ -25,6 +25,13 @@ JDK_LINUX_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE:-}"
 OPENCODE_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_URL:-https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-arm64.tar.gz}"
 OPENCODE_LINUX_SHA="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-eba87efba3976d533a24cca0316f8ef375b5f8e797c0a95c25ee919700b7ba35}"
 OPENCODE_LINUX_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE:-}"
+RTK_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_URL:-https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-aarch64-unknown-linux-gnu.tar.gz}"
+RTK_LINUX_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_SHA256:-c8ea4b6560841e73157c134fd4a3293914c6ede42e786ee985cf491fde691ba7}"
+RTK_LINUX_BINARY_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_BINARY_SHA256:-4fa443857061b1226a21a8503112adba078a5c7ca3f7fd5919782afacf5566ca}"
+RTK_LINUX_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_ARCHIVE:-}"
+RTK_LICENSE_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_URL:-https://raw.githubusercontent.com/rtk-ai/rtk/v0.49.0/LICENSE}"
+RTK_LICENSE_FILE="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_FILE:-}"
+RTK_LICENSE_SHA="${TEST_AGENT_LOCAL_CLIENT_RTK_LICENSE_SHA256:-4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd}"
 
 usage() {
   cat <<'USAGE'
@@ -217,21 +224,37 @@ normalize_jdk() {
 }
 
 normalize_opencode() {
-  local archive="$1" output="$2" work="$3" executable stage
+  local archive="$1" output="$2" work="$3" rtk_archive="$4" rtk_license="$5" executable rtk_binary stage
   mkdir -p "${work}/extract"
   tar -C "${work}/extract" -xzf "${archive}"
   executable="$(find "${work}/extract" -type f -name opencode | sort | head -n 1)"
   [[ -n "${executable}" ]] || { echo "OpenCode archive does not contain the opencode executable" >&2; exit 1; }
+  mkdir -p "${work}/rtk-extract"
+  tar -C "${work}/rtk-extract" -xzf "${rtk_archive}"
+  rtk_binary="$(find "${work}/rtk-extract" -type f -name rtk | sort | head -n 1)"
+  [[ -n "${rtk_binary}" ]] || { echo "RTK archive does not contain the rtk executable" >&2; exit 1; }
+  [[ "$(sha256_file "${rtk_binary}")" == "${RTK_LINUX_BINARY_SHA}" ]] || {
+    echo "RTK Linux binary SHA-256 mismatch" >&2
+    exit 1
+  }
   stage="${work}/stage"
   mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins"
   cp -a "${executable}" "${stage}/opencode/bin/opencode"
+  cp -a "${rtk_binary}" "${stage}/opencode/bin/rtk"
   chmod 0755 "${stage}/opencode/bin/opencode"
+  chmod 0755 "${stage}/opencode/bin/rtk"
   cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
     "${stage}/opencode/plugins/test-agent-observability.mjs"
+  cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
+    "${stage}/opencode/plugins/test-agent-rtk.mjs"
   chmod 0644 "${stage}/opencode/plugins/test-agent-observability.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk.mjs"
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
+    chmod 0644 "${stage}/opencode/LICENSE"
   fi
+  cp "${rtk_license}" "${stage}/opencode/RTK-LICENSE"
+  chmod 0644 "${stage}/opencode/RTK-LICENSE"
   normalize_runtime_metadata "${stage}/opencode"
   archive_create_runtime_tar_gz "${output}" "${stage}" opencode
 }
@@ -291,13 +314,16 @@ trap cleanup EXIT
 mkdir -p "${TEMP_DIR}/sources" "${OUTPUT_DIR}/releases"
 fetch_source "${JDK_LINUX_ARCHIVE}" "${JDK_LINUX_URL}" "${JDK_LINUX_SHA}" "${TEMP_DIR}/sources/jdk-linux.tar.gz"
 fetch_source "${OPENCODE_LINUX_ARCHIVE}" "${OPENCODE_LINUX_URL}" "${OPENCODE_LINUX_SHA}" "${TEMP_DIR}/sources/opencode-linux.tar.gz"
+fetch_source "${RTK_LINUX_ARCHIVE}" "${RTK_LINUX_URL}" "${RTK_LINUX_SHA}" "${TEMP_DIR}/sources/rtk-linux.tar.gz"
+fetch_source "${RTK_LICENSE_FILE}" "${RTK_LICENSE_URL}" "${RTK_LICENSE_SHA}" "${TEMP_DIR}/sources/rtk-license"
 
 STAGING_DIR="${OUTPUT_DIR}/releases/.${VERSION}.build.$$"
 mkdir -p "${STAGING_DIR}"
 cp "${CLIENT_JAR}" "${STAGING_DIR}/test-agent-local-client.jar"
 cp "${PUBLIC_CAPABILITY_BUNDLE}" "${STAGING_DIR}/public-capabilities.tar.gz"
 normalize_jdk "${TEMP_DIR}/sources/jdk-linux.tar.gz" "${STAGING_DIR}/jdk.tar.gz" "${TEMP_DIR}/jdk-linux"
-normalize_opencode "${TEMP_DIR}/sources/opencode-linux.tar.gz" "${STAGING_DIR}/opencode.tar.gz" "${TEMP_DIR}/opencode-linux"
+normalize_opencode "${TEMP_DIR}/sources/opencode-linux.tar.gz" "${STAGING_DIR}/opencode.tar.gz" "${TEMP_DIR}/opencode-linux" \
+  "${TEMP_DIR}/sources/rtk-linux.tar.gz" "${TEMP_DIR}/sources/rtk-license"
 
 for artifact in test-agent-local-client.jar jdk.tar.gz opencode.tar.gz public-capabilities.tar.gz; do
   openssl dgst -sha256 -sign "${SIGNING_KEY}" -out "${STAGING_DIR}/${artifact}.sig" "${STAGING_DIR}/${artifact}"
@@ -319,6 +345,7 @@ MANIFEST="${STAGING_DIR}/manifest.json"
   printf '  "launcherVersionMax": 1,\n'
   printf '  "protocolVersion": "local-opencode-client.v1",\n'
   printf '  "opencodeVersion": "1.18.4",\n'
+  printf '  "rtkVersion": "0.49.0",\n'
   printf '  "artifacts": [\n'
   printf '    {"kind": "CLIENT_JAR", "path": "releases/%s/test-agent-local-client.jar", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/test-agent-local-client.jar.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/test-agent-local-client.jar")" "${CLIENT_SHA}" "${VERSION}"
   printf '    {"kind": "JDK", "path": "releases/%s/jdk.tar.gz", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/jdk.tar.gz.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/jdk.tar.gz")" "${JDK_SHA}" "${VERSION}"

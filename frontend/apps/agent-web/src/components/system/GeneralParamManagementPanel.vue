@@ -2,7 +2,7 @@
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Clock, Monitor } from "@element-plus/icons-vue";
-import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
+import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag, ElSwitch } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
@@ -16,6 +16,7 @@ import type {
 
 const PUBLIC_AGENT_GIT_PARAM = "OPENCODE_PUBLIC_AGENT_GIT_URL";
 const UI_TEST_PLATFORM_BASE_URL_PARAM = "UITEST_BASE_URL";
+const RTK_COMMAND_REWRITE_PARAM = "RTK_COMMAND_REWRITE_ENABLED";
 const EXTERNAL_DEPLOYMENT_MODE = "EXTERNAL";
 const INTERNAL_DEPLOYMENT_MODE = "INTERNAL";
 const DEFAULT_REPOSITORY_DEPLOYMENT_OPTIONS: RepositoryDeploymentOptions = {
@@ -48,6 +49,7 @@ const editingParam = ref<GeneralParameter | null>(null);
 const editingValue = ref("");
 const editPublicAgentGitDeploymentMode = ref(EXTERNAL_DEPLOYMENT_MODE);
 const saving = ref(false);
+const switchingRtk = ref(false);
 
 // 修改历史抽屉状态
 const changeLogsDrawerOpen = ref(false);
@@ -323,6 +325,23 @@ function isUiTestPlatformBaseUrlParam(param?: GeneralParameter | null) {
   return param?.englishName === UI_TEST_PLATFORM_BASE_URL_PARAM;
 }
 
+function isRtkCommandRewriteParam(param?: GeneralParameter | null) {
+  return param?.englishName === RTK_COMMAND_REWRITE_PARAM;
+}
+
+async function toggleRtkCommandRewrite(param: GeneralParameter, value: boolean | string | number) {
+  if (!isRtkCommandRewriteParam(param) || !param.editable || switchingRtk.value) return;
+  switchingRtk.value = true;
+  try {
+    await updateMutation.mutateAsync({ parameterId: param.parameterId, value: value === true ? "true" : "false" });
+    ElMessage.success(`RTK 命令改写已${value === true ? "启用" : "停用"}，本地客户端下次连接时生效`);
+  } catch {
+    // mutation 统一展示安全错误，失败时保留数据库中的旧值。
+  } finally {
+    switchingRtk.value = false;
+  }
+}
+
 function editValuePlaceholder(param?: GeneralParameter | null) {
   if (isUiTestPlatformBaseUrlParam(param)) return "http://uitest-host:7788";
   if (isPublicAgentGitParam(param)) return "Git URL";
@@ -519,7 +538,17 @@ function formatError(error: unknown) {
               </td>
               <td><span class="ta-common-param-tag">{{ param.platform }}</span></td>
               <td>
+                <div v-if="isRtkCommandRewriteParam(param)" class="ta-common-param-val-cell">
+                  <el-switch
+                    :model-value="param.parameterValue.trim().toLowerCase() === 'true'"
+                    :disabled="!param.editable || switchingRtk"
+                    active-text="启用"
+                    inactive-text="停用"
+                    @change="(value) => toggleRtkCommandRewrite(param, value)"
+                  />
+                </div>
                 <div
+                  v-else
                   class="ta-common-param-val-cell"
                   :class="{ 'is-readonly': !param.editable }"
                   @click="openEditDialog(param)"

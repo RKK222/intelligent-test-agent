@@ -17545,3 +17545,28 @@
 ### Result
 
 旧 SQL 会漏掉平台新推送/待发布 Skill；同一 `technical_id` 在多个应用工作空间仍按 `asset_id` 分行统计，若要统计去重技能名需另行明确口径。本次工作区无产品代码变更，仅保留该诊断记录。
+
+## 2026-09-18 - 集成 Caveman Skill 与 RTK 命令改写
+
+### Why
+
+- 用户要求将 Caveman 和 RTK 集成到当前项目；约束为只引入 Caveman 的 MIT Skill、RTK 默认关闭并通过管理页控制，不能直接修改 OpenCode 源码。
+
+### What
+
+- 在公共 Agent 配置仓库增加中文 `concise-output` Skill，并补充 Caveman MIT 归属与第三方许可证；不引入 Caveman BSL 运行时、代理、MCP 或执行引擎。
+- 集成固定版本 RTK 0.49.0：worker 和 Linux/Windows 本地客户端随包提供二进制、许可证和摘要；OpenCode 仅对 bash/shell 工具按需执行 fail-open 改写插件。
+- 增加 `RTK_COMMAND_REWRITE_ENABLED` 幂等参数迁移，默认 `false`；管理页增加开关；服务端通过注册协议下发 managed runtime 配置，启动器和本地客户端不接受调用方环境变量越权覆盖。
+- 增加二进制、插件、协议、启动监督、打包和前端回归测试及部署/数据库/OpenCode 边界文档。
+
+### How
+
+- Java 定向 Maven 测试 26 项启动服务、18 项本地客户端和 9 项协议测试通过；Node 启动器/RTK 测试 13 项通过；agent-web typecheck 通过。
+- Linux/Windows 本地客户端打包验收脚本通过；`.env.test` PostgreSQL 对 migration 做事务插入/回滚演练；worker Dockerfile `opencode-download` 真实构建通过，OpenCode 与 RTK 归档、二进制、许可证 SHA-256 校验通过并输出 `rtk 0.49.0`。
+- 未修改 `.env.local`、generated SDK 或 OpenCode 只读源码；保留无关未跟踪演示 PPT，不纳入提交。
+
+### Result
+
+- 实现默认关闭、可通过系统参数页开启的 RTK 命令改写链路，以及 Caveman 的 MIT Skill-only 集成。
+- RTK 官方运行时即使关闭遥测/Recall/retriever 仍会在本地维护 `history.db` 命令记录；企业隐私、留存和供应链审批仍需在启用前完成，不能将当前实现表述为隐私无记录方案。
+- 本次未执行完整企业 worker 镜像发布、Jenkins 部署或真实客户端连接验收；migration 只做事务演练，尚未应用到持久测试库。

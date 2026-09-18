@@ -6,6 +6,7 @@ import com.enterprise.testagent.common.id.RuntimeIdGenerator;
 import com.enterprise.testagent.domain.configuration.CommonParameterValues;
 import com.enterprise.testagent.domain.configuration.ParameterPlatform;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigPreviewSourceResolver;
+import com.enterprise.testagent.domain.configuration.RtkRuntimePolicy;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.domain.node.ExecutionNodeId;
 import com.enterprise.testagent.domain.node.ExecutionNodeRepository;
@@ -1009,6 +1010,8 @@ public class OpencodeProcessStartupService {
      */
     private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
+        // RTK 是平台策略能力，调用方传入的同名环境变量不能覆盖数据库中的全局开关。
+        environment.put("TEST_AGENT_RTK_ENABLED", Boolean.toString(RtkRuntimePolicy.enabled(commonParameterValues)));
         injectOptionalPathParameter(environment, OPENCODE_REFERENCES_DIR_PARAM);
         // 新引用统一使用 OPENCODE_REFERENCES_DIR；旧根参数仅保留给历史 JSONC 的滚动兼容。
         injectOptionalPathParameter(environment, OPENCODE_APP_WORKSPACE_ROOT_PARAM);

@@ -19,6 +19,7 @@ public record LocalClientBuildInfo(
     public static final String OBSERVABILITY_CAPABILITY = "OPENCODE_OBSERVABILITY_V1";
     public static final String PUBLIC_CAPABILITY_SYNC = "PUBLIC_CAPABILITY_SYNC_V1";
     public static final String MANAGED_MODEL_CONFIG = "MANAGED_MODEL_CONFIG_V1";
+    public static final String MANAGED_RTK_CONFIG = "MANAGED_RTK_CONFIG_V1";
     public static final String WORKSPACE_GIT_ACCESS = "WORKSPACE_GIT_ACCESS_V1";
     public static final String LOCAL_BROWSER = "LOCAL_BROWSER_V1";
     private static final String DEVELOPMENT_VERSION = "0.1.0-dev";
@@ -52,6 +53,7 @@ public record LocalClientBuildInfo(
                             OBSERVABILITY_CAPABILITY,
                             PUBLIC_CAPABILITY_SYNC,
                             MANAGED_MODEL_CONFIG,
+                            MANAGED_RTK_CONFIG,
                             WORKSPACE_GIT_ACCESS,
                             LOCAL_BROWSER),
                     false);
@@ -65,6 +67,7 @@ public record LocalClientBuildInfo(
                         OBSERVABILITY_CAPABILITY,
                         PUBLIC_CAPABILITY_SYNC,
                         MANAGED_MODEL_CONFIG,
+                        MANAGED_RTK_CONFIG,
                         WORKSPACE_GIT_ACCESS,
                         LOCAL_BROWSER),
                 true);
