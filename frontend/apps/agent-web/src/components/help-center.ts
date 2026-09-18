@@ -19,6 +19,7 @@ export type HelpTopicId =
   | "feature-overview"
   | "first-time-setup"
   | "process-initialization"
+  | "local-client"
   | "settings"
   | "workspace"
   | "reference-config"

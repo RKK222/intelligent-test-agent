@@ -1289,6 +1289,7 @@ build_opencode_worker_image() {
     --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
     --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
     --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
+    --build-arg "DISABLE_SECURITY_REPO=${DISABLE_SECURITY_REPO}" \
     --build-arg "GO_IMAGE=${GO_IMAGE}" \
     --build-arg "MANAGER_BUILD_VERSION=${manager_build_version}" \
     --build-arg "NODE_IMAGE=${NODE_IMAGE}" \
@@ -1310,6 +1311,7 @@ build_opencode_worker_image() {
     --build-arg "RTK_BINARY_SHA256=${RTK_BINARY_SHA256}" \
     --build-arg "RTK_RELEASE_BASE_URL=${RTK_RELEASE_BASE_URL}" \
     --build-arg "RTK_LICENSE_SHA256=${RTK_LICENSE_SHA256}" \
+    --build-arg "RTK_LICENSE_BASE_URL=${RTK_LICENSE_BASE_URL}" \
     --build-arg "CODEX_VERSION=${CODEX_VERSION}" \
     --build-arg "CODEX_ASSET_NAME=${CODEX_ASSET_NAME}" \
     --build-arg "CODEX_ASSET_SIZE=${CODEX_ASSET_SIZE}" \
@@ -1976,6 +1978,9 @@ NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
 DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.ustc.edu.cn/debian}"
 DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.ustc.edu.cn/debian-security}"
+# bullseye 已 EOL，各镜像的 debian-security 池文件已被裁剪（索引仍在但 deb 全部 404），
+# 默认移除 security 源并降级到主仓库匹配版本；仅当内网镜像确有完整 bullseye-security 时设为 false。
+DISABLE_SECURITY_REPO="${DISABLE_SECURITY_REPO:-true}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.13.14}"
 PYTHON_SOURCE_SIZE="${PYTHON_SOURCE_SIZE:-23021880}"
 PYTHON_SOURCE_SHA256="${PYTHON_SOURCE_SHA256:-639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690}"
@@ -1995,6 +2000,8 @@ RTK_ASSET_SHA256="${RTK_ASSET_SHA256:-7278231dfd7e6a730a4ab7f847b195bcf02289c2d5
 RTK_BINARY_SHA256="${RTK_BINARY_SHA256:-a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe}"
 RTK_RELEASE_BASE_URL="${RTK_RELEASE_BASE_URL:-https://github.com/rtk-ai/rtk/releases/download}"
 RTK_LICENSE_SHA256="${RTK_LICENSE_SHA256:-4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd}"
+# RTK 许可证在源码树而非 release 附件，单独一个可覆盖基址；默认走上游 raw，网络不稳时可指向本地/内网镜像。
+RTK_LICENSE_BASE_URL="${RTK_LICENSE_BASE_URL:-https://raw.githubusercontent.com/rtk-ai/rtk}"
 CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
 CODEX_ASSET_NAME="${CODEX_ASSET_NAME:-codex-x86_64-unknown-linux-musl.tar.gz}"
 CODEX_ASSET_SIZE="${CODEX_ASSET_SIZE:-113724150}"

@@ -53,6 +53,12 @@ FROM ${NODE_IMAGE} AS python-runtime
 
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
+# bullseye 已 EOL：各镜像的 debian-security 索引仍在但池文件已被裁剪（openssl 1.1.1w-0+deb11u8、
+# libc6-dev 2.31-13+deb11u14、perl/perl-modules 5.32.1-4+deb11u5、xz-utils/liblzma5 等全部 404），
+# 直接安装必然失败；Debian 官方 archive 尚未收录 bullseye-security，snapshot 的 Release 也已过期。
+# 设为 true 时移除 security 源、全部改用主仓库版本，并把基础镜像里带 security 补丁号的运行时包
+# 降级到主仓库匹配版本，否则主仓库 -dev 包的精确版本依赖无法满足。
+ARG DISABLE_SECURITY_REPO=true
 ARG PYTHON_VERSION=3.13.14
 ARG PYTHON_SOURCE_SIZE=23021880
 ARG PYTHON_SOURCE_SHA256=639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690
@@ -79,19 +85,29 @@ RUN set -eux; \
           -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           "${file}"; \
+        if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then sed -i '/debian-security/d' "${file}"; fi; \
       fi; \
     done; \
     apt-get \
       -o Acquire::ForceIPv4=true \
       -o Acquire::Languages=none \
       -o Acquire::PDiffs=false \
+      -o Acquire::Check-Valid-Until=false \
       update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       netbase \
       tzdata; \
     saved_apt_mark="$(apt-mark showmanual)"; \
-    apt-get install -y --no-install-recommends \
+    if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then \
+      # 基础镜像自带 bullseye-security 补丁版本（libc6 u14、libssl1.1 u8、perl-base u5），
+      # 移除 security 源后主仓库只有更早版本，需先把运行时降级到主仓库匹配版本，否则 -dev 包依赖冲突。
+      apt-get install -y --allow-downgrades --no-install-recommends \
+        "libc6=2.31-13+deb11u11" \
+        "libssl1.1=1.1.1w-0+deb11u1" \
+        "perl-base=5.32.1-4+deb11u3"; \
+    fi; \
+    apt-get install -y --allow-downgrades --no-install-recommends \
       build-essential \
       curl \
       dpkg-dev \
@@ -183,6 +199,9 @@ ARG RTK_ASSET_SHA256=7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a64111
 ARG RTK_BINARY_SHA256=a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe
 ARG RTK_RELEASE_BASE_URL=https://github.com/rtk-ai/rtk/releases/download
 ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd
+# RTK 许可证不在 release 附件里（上游放在源码树），单独留一个可覆盖基址。
+# 默认走 raw.githubusercontent.com；网络不稳定或内网构建时可指向本地/内网镜像，内容仍由下面的摘要校验。
+ARG RTK_LICENSE_BASE_URL=https://raw.githubusercontent.com/rtk-ai/rtk
 
 RUN set -eux; \
     asset_url="${OPENCODE_RELEASE_BASE_URL}/v${OPENCODE_VERSION}/${OPENCODE_ASSET_NAME}"; \
@@ -224,7 +243,7 @@ RUN set -eux; \
     printf '%s  %s\n' "${RTK_BINARY_SHA256}" /tmp/rtk/rtk | sha256sum -c -; \
     install -m 0755 /tmp/rtk/rtk /out/rtk; \
     curl -fsSL --retry 3 --retry-delay 2 \
-      "https://raw.githubusercontent.com/rtk-ai/rtk/v${RTK_VERSION}/LICENSE" \
+      "${RTK_LICENSE_BASE_URL}/v${RTK_VERSION}/LICENSE" \
       -o /out/RTK-LICENSE; \
     printf '%s  %s\n' "${RTK_LICENSE_SHA256}" /out/RTK-LICENSE | sha256sum -c -; \
     /out/rtk --version
@@ -295,6 +314,8 @@ FROM python-runtime
 
 ARG DEBIAN_MIRROR=https://mirrors.ustc.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
+# 同 python-runtime：bullseye-security 池文件已下架，移除 security 源并允许降级到主仓库版本。
+ARG DISABLE_SECURITY_REPO=true
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG OPENCODE_VERSION=1.18.4
 ARG OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
@@ -309,6 +330,7 @@ ARG RTK_ASSET_SHA256=7278231dfd7e6a730a4ab7f847b195bcf02289c2d57622b0dab75a64111
 ARG RTK_BINARY_SHA256=a051b22361c7cfa36022bc3f06bb41cdc88e58a07263dc340d8bd3468c41befe
 ARG RTK_RELEASE_BASE_URL=https://github.com/rtk-ai/rtk/releases/download
 ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd
+ARG RTK_LICENSE_BASE_URL=https://raw.githubusercontent.com/rtk-ai/rtk
 ARG CODEX_VERSION=0.145.0
 ARG CODEX_ASSET_NAME=codex-x86_64-unknown-linux-musl.tar.gz
 ARG CODEX_ASSET_SIZE=113724150
@@ -332,14 +354,16 @@ RUN set -eux; \
           -e "s|https://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
           -e "s|https://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
           "${file}"; \
+        if [ "${DISABLE_SECURITY_REPO}" = "true" ]; then sed -i '/debian-security/d' "${file}"; fi; \
       fi; \
     done; \
     apt-get \
       -o Acquire::ForceIPv4=true \
       -o Acquire::Languages=none \
       -o Acquire::PDiffs=false \
+      -o Acquire::Check-Valid-Until=false \
       update; \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y --allow-downgrades --no-install-recommends \
       ca-certificates \
       curl \
       git \
