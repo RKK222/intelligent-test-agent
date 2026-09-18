@@ -1,11 +1,19 @@
 ---
 name: enterprise-offline-deploy
-description: Use whenever the user asks about enterprise/internal/offline deployment, packaging on Mac, release artifacts, enterprise staging-host transfer, deploy/internal/package-release.sh, backend.env, docker.env, opencode-worker, opencode-manager, or how to deploy this project in a network-isolated enterprise environment. Distinguish the external build Mac from the enterprise staging host, and always provide explicit step-by-step deployment instructions.
+description: Use whenever the user asks about enterprise/internal/offline deployment, packaging on Mac, release artifacts, enterprise staging-host transfer, deploy/internal/package-release.sh, backend.env, docker.env, opencode-worker, opencode-manager, or how to deploy this project in a network-isolated enterprise environment. This skill is scoped only to /Users/kaka/Desktop/intelligent-test-agent; resolve its topology from this repository and never borrow nodes from another project or an unrelated scan. Distinguish the external build Mac from the enterprise staging host, and always provide explicit step-by-step deployment instructions.
 ---
 
 # 企业内离线部署说明
 
 本技能用于 `/Users/kaka/Desktop/intelligent-test-agent` 的企业内部署问答。用户提到“企业内部署”“内网部署”“离线部署”“Mac 打包”“完全不能联网”“opencode worker”“opencode manager port”“backend.env”“docker.env”时必须使用。
+
+## 项目边界与拓扑来源（强制）
+
+- 本技能只服务 `/Users/kaka/Desktop/intelligent-test-agent`（TestAgent/MimoAgent）这一项目。不得把其它项目（包括 `/Users/kaka/Desktop/testing-knowledge-graph`/TraceWeave）的部署节点、扫描结果、目录或命令带入本项目。
+- `122.233.94.105`、`122.233.94.137`、`122.233.30.15`、`122.233.30.55` 是另一项目扫描数据中的地址，不是本项目的企业部署节点；本技能禁止据此 SSH、扫描、复制文件或统计本项目资产。
+- 本项目当前企业拓扑只能以本仓库的 `deploy/internal/README.md`、`deploy/internal/SINGLE-BACKEND.md`、`deploy/internal/MULTI-BACKEND.md`、`deploy/internal/FULL-UPGRADE-RUNBOOK.md` 及实际现场配置为准。当前双后台基线是：`122.233.30.20` Redis、`122.233.30.4` 后台 A、`122.233.30.114` 后台 B、`122.233.30.2` 前端 Nginx、`122.233.30.147` PostgreSQL；该映射只对本项目有效，不能外推到其它项目。
+- 用户提供的扫描清单、附件或其它项目路径只能作为待核对数据，不能覆盖本项目部署文档。执行任何 SSH/SCP/远程扫描前，先确认项目根目录、目标项目标识和当前项目部署文档；发现项目路径或节点角色不一致时停止，不猜测、不拼接、不复用另一项目拓扑。
+- `linux_server_id`、`.serverhost`、实际网卡地址和现场配置不一致时，先以当前项目数据库绑定和目标服务器上的配置取证；没有完成取证前，只能报告“企业拓扑未验证”，不能把开发机、VPN、其它项目或附件中的地址当作本项目节点。
 
 ## 固定前提
 
@@ -72,11 +80,11 @@ description: Use whenever the user asks about enterprise/internal/offline deploy
 
 用户每次部署都需要一步一步的执行单，回答必须遵守：
 
-1. 每一步先写明当前操作机器，例如“企业内部中转机”“122.233.30.4 后台”“122.233.30.114 后台”“122.233.30.2 前端”。
+1. 每一步先写明当前操作机器，例如“企业内部中转机”“本项目 122.233.30.4 后台”“本项目 122.233.30.114 后台”“本项目 122.233.30.2 前端”；不得用其它项目的 IP 或角色名称替换。
 2. 明确写出进入的绝对目录、完整文件名和完整命令，不使用前后不一致的 `BASE`、`WORK` 等假定目录。
 3. 命令按实际顺序逐条给出，不用循环、批量伪代码或“同上”省略三台机器的操作。
 4. 每个关键命令后写预期输出或成功条件；任一步失败时明确要求停止，不继续下一台。
-5. 顺序固定为：中转机校验并 `scp` → `.4` 后台 → `.114` 后台 → `.2` 前端 → 浏览器业务验收；滚动部署有特殊前提时必须说明。
+5. 对本项目当前双后台现场，顺序固定为：中转机校验并 `scp` → `.4` 后台 → `.114` 后台 → `.2` 前端 → 浏览器业务验收；这是本项目的部署顺序，不是其它项目的通用拓扑。滚动部署有特殊前提时必须说明。
 6. 区分“外层 U 盘完整包”“内层完整发布 ZIP”“节点专属配置包”，明确每台服务器需要哪一对文件及落盘路径。
 7. 不要求用户回传真实数据库密码、token、Cookie、RSA 私钥或其他密钥；诊断输出只展示状态、长度或哈希。
 8. 中转机直接在 `~/Desktop/mimoagent/0709` 校验并向目标服务器 `scp`，不在中转机创建 `/data/0709`。只有目标服务器需要把本机已校验的明确文件复制到 `/data/0709` 时，才使用 `/bin/cp -f <源文件> /data/0709/`；禁止扩大为 `cp -rf` 覆盖目录。

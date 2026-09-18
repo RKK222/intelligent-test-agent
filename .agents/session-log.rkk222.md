@@ -17577,3 +17577,23 @@
 - 实现默认关闭、可通过系统参数页开启的 RTK 命令改写链路，以及 Caveman 的 MIT Skill-only 集成。
 - RTK 官方运行时即使关闭遥测/Recall/retriever 仍会在本地维护 `history.db` 命令记录；企业隐私、留存和供应链审批仍需在启用前完成，不能将当前实现表述为隐私无记录方案。
 - 本次未执行完整企业 worker 镜像发布、Jenkins 部署或真实客户端连接验收；migration 只做事务演练，尚未应用到持久测试库。
+
+## 2026-09-18 - 隔离企业部署技能的跨项目拓扑
+
+### Why
+
+- 用户指出此前把另一项目扫描结果中的 `122.233.94.105`、`122.233.94.137`、`122.233.30.15`、`122.233.30.55` 误用于当前 TestAgent 项目；两个项目的企业部署结构不同，不能共用节点或扫描结论。
+
+### What
+
+- 更新 `.agents/skills/enterprise-offline-deploy/SKILL.md`：明确只适用于当前仓库，禁止引用 TraceWeave/`testing-knowledge-graph` 的节点与附件扫描结果；固定拓扑必须回到当前仓库部署文档和现场配置核对。
+- 更新 `.agents/skills/enterprise-troubleshooting/SKILL.md`：增加同一项目边界、来源项目核验、节点冲突停止和“企业拓扑未验证”规则，避免现场排障复用其它项目结构。
+
+### How
+
+- 以当前仓库 `deploy/internal/README.md`、`SINGLE-BACKEND.md`、`MULTI-BACKEND.md`、`FULL-UPGRADE-RUNBOOK.md` 为事实源，确认本项目文档基线为 `.20` Redis、`.4/.114` Java+worker、`.2` Nginx、`.147` PostgreSQL。
+- 运行 skill-creator 的 `quick_validate.py` 分别校验两个技能，并运行 `git diff --check`；未修改产品代码、部署脚本、数据库或环境配置。
+
+### Result
+
+- 后续企业部署/现场排障技能会先确认项目根目录和拓扑来源，不再把其它项目的节点、路径或扫描文件当作当前项目事实；冲突时停止并报告未验证，而不是猜测或执行远程操作。
