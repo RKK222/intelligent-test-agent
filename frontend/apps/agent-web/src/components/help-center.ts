@@ -26,6 +26,7 @@ export type HelpTopicId =
   | "conversation"
   | "memory"
   | "agent-config"
+  | "local-client"
   | "faq";
 
 export type HelpTopic = {
