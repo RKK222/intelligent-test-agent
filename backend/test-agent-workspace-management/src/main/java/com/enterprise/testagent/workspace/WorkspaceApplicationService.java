@@ -350,7 +350,7 @@ public class WorkspaceApplicationService implements TrustedWorkspaceResolver {
                 "terminal", false,
                 "gitPublish", false,
                 "agentConfig", false,
-                "attachments", false,
+                "attachments", true,
                 "collaboration", false);
     }
 

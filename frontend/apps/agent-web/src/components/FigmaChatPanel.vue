@@ -831,7 +831,7 @@ const props =
     chatAttachments?: ComposerAttachment[]
     /** 工作区附件正在走分片上传；上传完成前禁止提交本轮消息。 */
     chatAttachmentsUploading?: boolean
-    /** 本地客户端首版关闭聊天附件入口；服务端仍会再次校验伪造请求。 */
+    /** 当前工作区 capability 关闭聊天附件入口；服务端仍按运行时目标校验并决定投递形态。 */
     attachmentsEnabled?: boolean
     /** permission.asked 投影出的待处理权限请求。 */
     permissions?: PermissionRequest[]
@@ -5976,7 +5976,7 @@ function onCompositionEnd() {
         <div class="figma-chat-card-actions">
           <!-- 左侧：附件上传 -->
           <el-tooltip
-            :content="attachmentsEnabled ? '上传附件' : '本地工作区首版不支持聊天附件'"
+            :content="attachmentsEnabled ? '上传附件' : '当前工作区不支持聊天附件'"
             placement="top"
             :show-after="0"
           >

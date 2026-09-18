@@ -527,7 +527,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 : new WorkspaceId(ticket.workspaceId());
     }
 
-    /** 本地 ticket 只开放目录选择和完整基础文件能力，不开放 Git、Agent 配置、附件或组合视图。 */
+    /** 本地 ticket 只开放目录选择和完整基础文件能力，不开放 Git、Agent 配置、平台引用附件或组合视图。 */
     private Object handleLocalClientMessage(
             WorkspaceFileSocketTicket ticket,
             String op,

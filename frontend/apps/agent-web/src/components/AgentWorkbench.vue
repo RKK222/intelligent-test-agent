@@ -9338,8 +9338,8 @@ async function handleChatAttachmentUpload(files: File[]) {
   if (!selectedAttachmentsEnabled.value) {
     feedback.value = {
       kind: "info",
-      title: "本地工作区暂不支持聊天附件",
-      description: "首版可通过文件管理上传普通文件，再在消息中用 @ 引用。"
+      title: "当前工作区不支持聊天附件",
+      description: "可通过文件管理上传普通文件，再在消息中用 @ 引用。"
     };
     return;
   }
@@ -10268,7 +10268,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   if (!selectedAttachmentsEnabled.value && attachments.length > 0) {
     feedback.value = {
       kind: "info",
-      title: "本地工作区暂不支持聊天附件",
+      title: "当前工作区不支持聊天附件",
       description: "请移除附件后发送；普通文件仍可通过文件管理和 @ 引用使用。"
     };
     return;
@@ -10532,7 +10532,7 @@ async function handleScheduleNight(payload: {
   if (!selectedAttachmentsEnabled.value && requestedAttachments.length > 0) {
     feedback.value = {
       kind: "info",
-      title: "本地工作区暂不支持聊天附件",
+      title: "当前工作区不支持聊天附件",
       description: "请移除附件后再安排夜间执行。"
     };
     return;

@@ -3163,7 +3163,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。没有内联内容或 URL 的普通工作区上下文会把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType/deliveryMode` 是平台请求与历史展示使用的可选来源元数据，当前用于工作区选区、上传附件展示和原生/工具投递分流，旧客户端和旧后端可忽略新增字段；它们不会原样写入 OpenCode `FilePartInput.source`。只有内联文本且能同时提供 `text/type/path` 时才生成完整远端 `FileSource`，路径型 `file://`/URL 附件省略该可选字段。
-- 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。文本/代码统一声明 `mimeType="text/plain"` 并设置 `source.deliveryMode="native"`；图片、PDF、音频和视频仅在当前模型 `/api/model` 的 `capabilities.input` 对应模态为 `true` 时设置 native。后端对 native 附件校验路径仍位于当前 Workspace 后转为不带 source 的 `file://` part，避免 OpenCode 把缺少 `text` 的 source 判为非法；其余 Excel、Office、压缩包、未知二进制或模型不支持媒体转换成包含文件名、MIME 和精确工作区相对路径的 text part，平台内部附件标记在转换为 OpenCode `TextPartInput` 时移除。提供 `command` 时，降级附件清单还会追加到 `arguments`，确保 OpenCode `/command` 的 file-only parts 约束不会丢失本轮附件路径。附件原始 file part 和平台来源元数据继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
+- 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。文本/代码统一声明 `mimeType="text/plain"` 并设置 `source.deliveryMode="native"`；图片、PDF、音频和视频仅在当前模型 `/api/model` 的 `capabilities.input` 对应模态为 `true` 时设置 native。后端对 native 附件校验路径仍位于当前 Workspace 后转为不带 source 的 `file://` part，避免 OpenCode 把缺少 `text` 的 source 判为非法；其余 Excel、Office、压缩包、未知二进制或模型不支持媒体转换成包含文件名、MIME 和精确工作区相对路径的 text part，平台内部附件标记在转换为 OpenCode `TextPartInput` 时移除。目标运行时为 `LOCAL_CLIENT` 时忽略 native 标记，本轮附件全部按工作区相对路径投递：本地工作区在用户机器上，服务端 JVM 不能把客户端盘符或 UNC 路径解析成客户端可用的 `file://` 地址，内联正文又会占用本地隧道有限的请求体额度，路径由客户端 OpenCode 用自己的 Read 工具读取（图片和 PDF 仍由该工具按原生附件投递给模型）。提供 `command` 时，降级附件清单还会追加到 `arguments`，确保 OpenCode `/command` 的 file-only parts 约束不会丢失本轮附件路径。附件原始 file part 和平台来源元数据继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
 - `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
@@ -4406,7 +4406,8 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
 - `capabilities`：明确指示 chat、fileManagement、nightExecution、terminal、gitPublish、agentConfig、
   attachments、collaboration、protectedAgentExecution。`protectedAgentExecution=true` 不改变
   `agentConfig=false`；前者表示可在网页选择服务器受保护 Agent，后者仍表示客户端不接收或编辑平台 Agent
-  配置。
+  配置。本地工作区的 `attachments=true` 只影响入口开放：Run 提交时服务端按冻结运行时目标把聊天附件统一
+  投递为工作区相对路径，不向本地隧道内联正文，也不构造客户端 `file://` 地址。
 
 旧调用不传 workspaceId 时仍选择服务端 OpenCode；本地实例离线或换代返回稳定冲突/不可用错误，不回退。
 本地客户端相关功能默认对所有用户隐藏，只能由超级管理员在“系统管理 → 用户管理”中按平台 `userId` 打开

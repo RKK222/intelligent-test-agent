@@ -4,8 +4,9 @@
 
 本地客户端让用户把自己机器上的绝对目录注册为平台 Workspace，同时继续由浏览器只访问后台 Java。
 一个客户端实例监管一个 OpenCode 1.18.4 进程，可承载多个已注册工作区；同一用户的服务端 OpenCode
-与一个本地客户端可以同时在线，同一用户不同本地实例不能同时保持实时连接。首版支持聊天、OpenCode Agent 自身工具、文件管理和夜间任务，不开放
-浏览器终端、Git 发布、Agent 配置管理、附件或协作分享。
+与一个本地客户端可以同时在线，同一用户不同本地实例不能同时保持实时连接。支持聊天（含聊天附件）、OpenCode Agent 自身工具、文件管理和夜间任务，不开放
+浏览器终端、Git 发布、Agent 配置管理或协作分享。聊天附件复用同一条工作区分片上传 RPC 落到本地目录，Run 只投递工作区相对路径，
+由客户端 OpenCode 自行读取，不向本地隧道内联文件正文。
 
 ```mermaid
 flowchart LR
@@ -206,7 +207,11 @@ SHA-256，便于审计复现，不记录提示词、文件正文或 grant。
 
 新增响应字段都追加为可选字段；旧 Session、Run、manifest、execution node 和夜间记录缺少 runtime 字段
 时反序列化为 `SERVER_PROCESS`。未携带 workspaceId 的既有 OpenCode API 保持服务端目标语义。本地专属
-能力通过 capability 字段显式关闭终端、Git 发布、Agent 配置、附件和分享；
+能力通过 capability 字段显式关闭终端、Git 发布、Agent 配置和分享；聊天附件按
+`attachments=true` 开放，但服务端按冻结运行时目标强制降级为工作区相对路径投递：本地工作区在用户机器上，
+服务端 JVM 无法把客户端路径（Windows 盘符、UNC 或其它平台形态）解析成客户端可用的 `file://` 地址，
+内联正文又会占用本地隧道有限请求体额度，因此客户端 OpenCode 用自带 Read 工具读取附件，
+图片和 PDF 仍由该工具按原生附件投递给模型。
 `protectedAgentExecution=true` 只表示可选择服务器受保护 Agent，不改变 `agentConfig=false`，前端不能仅凭
 在线状态推断。
 

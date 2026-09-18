@@ -377,6 +377,11 @@ online=true、connectionGeneration 为正数，并能看到当前版本和 SELF_
 active user service 一起证明 WS 已建立；若任一项失败，停止 rollout，先检查域名 `:9996` 的 Nginx 下载/API/Upgrade 路由、
 .4/.114 的明文控制开关与 TRUSTED_PROXY_ADDRESSES，以及后台健康日志。不得要求用户重新把已经输入的 Key 发给任何运维人员。
 
+同一个本地工作区页面还要验收聊天附件：附件经同一条工作区分片上传 RPC 落到该目录的 `.testagent/attachments`，
+上传成功后随下一条 Run 提交，服务端只投递受控相对路径，由客户端 OpenCode 用自带 Read 工具读取。
+Windows 客户端必须一并验证，服务端不得对客户端盘符路径构造 `file://` 地址；`attachments` capability 在
+工作区和实例响应中都应为 `true`，否则说明后端未升级到本版本。
+
 全新企业环境可以尚未设置本地客户端全局/个人目标版本；这时版本策略表为空属于合法状态，客户端必须保持在线，
 不能为了通过接入验收写入假策略或修改 `flyway_schema_history`。若日志表现为反复 `REGISTERED` 后立即断线，先确认
 服务端未把 `targetVersion=null/policyRevision=0` 下发为 `VERSION_POLICY`；新版客户端日志会以安全

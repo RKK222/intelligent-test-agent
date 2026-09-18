@@ -1943,6 +1943,109 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void localRuntimeDowngradesNativeWorkspaceAttachmentToWorkspacePath() {
+        UserId userId = new UserId("usr_1234567890abcdef");
+        Session localSession = session().withSource(ConversationSourceType.MANUAL, null, userId);
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        AgentRuntimeRegistry registry = runtimeRegistry(facade);
+        com.enterprise.testagent.agent.runtime.AgentRuntime runtime = registry.require("opencode");
+        String clientInstanceId = "lci_1234567890abcdef";
+        ExecutionNode localNode = new ExecutionNode(
+                new ExecutionNodeId("node_local_1234567890abcdef"),
+                "http://local-opencode-client.invalid",
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                NOW,
+                Set.of("opencode", "local-client"),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef",
+                com.enterprise.testagent.domain.runtime.RuntimeKind.LOCAL_CLIENT,
+                clientInstanceId,
+                7L);
+        com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver resolver =
+                org.mockito.Mockito.mock(
+                        com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver.class);
+        org.mockito.Mockito.when(resolver.localSessionTarget(
+                        "opencode", userId, localSession.sessionId().value(), "trace_1234567890abcdef"))
+                .thenReturn(Optional.of(
+                        new com.enterprise.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver.SessionRuntimeTarget(
+                                runtime,
+                                localNode,
+                                workspace().rootPath(),
+                                REMOTE_SESSION_ID,
+                                workspace().workspaceId())));
+        org.mockito.Mockito.when(resolver.ensureAgentSession(
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(new AgentSessionBinding(
+                        localSession.sessionId(),
+                        "opencode",
+                        REMOTE_SESSION_ID,
+                        localNode.executionNodeId(),
+                        NOW,
+                        NOW,
+                        "trace_1234567890abcdef"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(localSession),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                registry,
+                new FakeAgentSessionBindingRepository());
+        service.configureRuntimeTargetResolver(resolver);
+        service.configureRunRuntimeTargetRepository(org.mockito.Mockito.mock(
+                com.enterprise.testagent.domain.run.RunRuntimeTargetRepository.class));
+
+        service.startRun(
+                userId,
+                "opencode",
+                new StartRunInput(
+                        localSession.sessionId(),
+                        "检查 Java 附件",
+                        List.of(new StartRunInput.PromptPart(
+                                "file",
+                                null,
+                                ".testagent/attachments/sha256_code.java",
+                                "Demo.java",
+                                "text/plain",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                Map.of("contextType", "workspace_attachment", "deliveryMode", "native"),
+                                null)),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+
+        // 本地客户端工作区在用户机器上，native 标记必须降级为相对路径，且不能出现 file:// 地址或内联正文。
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.parts()).extracting(OpencodePromptPart::type)
+                .containsExactly("text", "text");
+        assertThat(command.parts().get(1).text())
+                .contains("\"workspacePath\":\".testagent/attachments/sha256_code.java\"")
+                .contains("使用工作区工具读取或处理")
+                .doesNotContain("file://");
+        assertThat(command.parts()).noneMatch(part -> "file".equals(part.type()));
+    }
+
+    @Test
     void slashCommandIncludesOnlyCurrentWorkspaceAttachmentPathsInArguments() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         RunApplicationService service = new RunApplicationService(

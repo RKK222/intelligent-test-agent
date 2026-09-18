@@ -73,7 +73,6 @@ import com.enterprise.testagent.event.RunEventAppender;
 import com.enterprise.testagent.event.RunEventLiveBus;
 import com.enterprise.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.enterprise.testagent.opencode.runtime.night.NightExecutionSessionLockGuard;
-import com.enterprise.testagent.opencode.runtime.localclient.LocalRuntimeCapabilityGuard;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.enterprise.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.enterprise.testagent.opencode.runtime.protectedagent.ProtectedAgentExecutionService;
@@ -194,7 +193,6 @@ public class RunApplicationService {
     private RunTerminalProjectionService runTerminalProjectionService;
     private BackendInstanceIdentity backendInstanceIdentity;
     private RunRuntimeTargetRepository runRuntimeTargetRepository;
-    private LocalRuntimeCapabilityGuard localRuntimeCapabilityGuard;
     private PublicAgentConfigMessageGate publicConfigMessageGate = ignored ->
             PublicAgentConfigMessageGate.MessageGateStatus.open();
     private RunOwnerLeaseSupervisor ownerLeaseSupervisor;
@@ -754,12 +752,6 @@ public class RunApplicationService {
         this.runRuntimeTargetRepository = Objects.requireNonNull(repository);
     }
 
-    /** capability 响应只用于界面展示；Run 入口仍需拒绝伪造的本地附件 part。 */
-    @Autowired(required = false)
-    void configureLocalRuntimeCapabilityGuard(LocalRuntimeCapabilityGuard guard) {
-        this.localRuntimeCapabilityGuard = Objects.requireNonNull(guard);
-    }
-
     /** 关系型目标缺失代表旧服务端 Run；本地 Run 从不允许用该兼容值覆盖显式记录。 */
     public RunRuntimeTarget runtimeTarget(RunId runId) {
         return runRuntimeTargetRepository == null
@@ -1107,13 +1099,6 @@ public class RunApplicationService {
         Workspace workspace = conversationContext == null
                 ? findWorkspace(session.workspaceId())
                 : conversationContext.workspaceSnapshot();
-        if (localRuntimeCapabilityGuard != null
-                && input.parts().stream().anyMatch(this::isWorkspaceAttachment)) {
-            localRuntimeCapabilityGuard.requireWorkspaceSupported(
-                    workspace.workspaceId(),
-                    "attachments",
-                    "本地 OpenCode 工作区首版不开放聊天附件");
-        }
         ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = protectedSelection ? DEFAULT_OPENCODE_AGENT : resolveOpencodeAgent(input);
         Run pending = reservedRunId == null
@@ -1335,7 +1320,7 @@ public class RunApplicationService {
                 // 查询失败或未穷尽时宁可等待下一次补偿，也不能把“不确定”当作未接收而重复发送。
                 throw new RunOwnershipLostException("legacy Scheduled Run 远端接收状态暂不可确认");
             }
-            List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace);
+            List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace, target.node().runtimeKind());
             String contributedSystemPrompt = systemPrompt(running, prompt, input.command() != null, traceId);
             String effectiveSystemPrompt = protectedContext == null
                     ? contributedSystemPrompt
@@ -1629,7 +1614,7 @@ public class RunApplicationService {
                         titleWatchToken,
                         claimedOwnership,
                         dispatchMessageId);
-                List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace);
+                List<AgentPromptPart> promptParts = toAgentPromptParts(input, workspace, target.node().runtimeKind());
                 AgentStartRunCommand command = new AgentStartRunCommand(
                         target.node(),
                         binding.remoteSessionId(),
@@ -2405,7 +2390,7 @@ public class RunApplicationService {
     /**
      * 将平台 prompt parts 转成 opencode prompt_async parts，缺少显式文本时保留 legacy prompt。
      */
-    private List<AgentPromptPart> toAgentPromptParts(StartRunInput input, Workspace workspace) {
+    private List<AgentPromptPart> toAgentPromptParts(StartRunInput input, Workspace workspace, RuntimeKind runtimeKind) {
         if (input.parts().isEmpty()) {
             return List.of(AgentPromptPart.text(input.effectivePrompt()));
         }
@@ -2416,7 +2401,7 @@ public class RunApplicationService {
             parts.add(AgentPromptPart.text(input.prompt()));
         }
         parts.addAll(input.parts().stream()
-                .map(part -> toAgentPromptPart(part, workspace))
+                .map(part -> toAgentPromptPart(part, workspace, runtimeKind))
                 .filter(Objects::nonNull)
                 .toList());
         return parts.isEmpty() ? List.of(AgentPromptPart.text(input.effectivePrompt())) : parts;
@@ -2450,13 +2435,13 @@ public class RunApplicationService {
     /**
      * 按 part 类型分发到 opencode text/file/agent 表达，未知类型静默丢弃。
      */
-    private AgentPromptPart toAgentPromptPart(StartRunInput.PromptPart part, Workspace workspace) {
+    private AgentPromptPart toAgentPromptPart(StartRunInput.PromptPart part, Workspace workspace, RuntimeKind runtimeKind) {
         if (part.type() == null) {
             return null;
         }
         return switch (part.type()) {
             case "text" -> part.text() == null ? null : AgentPromptPart.text(part.text());
-            case "file" -> toAgentFilePart(part, workspace);
+            case "file" -> toAgentFilePart(part, workspace, runtimeKind);
             case "agent" -> toAgentAgentPart(part);
             case "reference" -> toReferenceTextPart(part);
             case "subtask" -> AgentPromptPart.subtask(
@@ -2470,9 +2455,10 @@ public class RunApplicationService {
 
     /**
      * 将平台文件上下文转成 opencode part。聊天上传附件按 deliveryMode 分流，平台来源元数据只用于分流和用户消息历史。
+     * 本地客户端运行时统一按工作区相对路径投递，见 {@link #usesWorkspacePathDelivery}。
      */
-    private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace) {
-        if (isWorkspaceAttachment(part) && !usesNativeAttachmentDelivery(part)) {
+    private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace, RuntimeKind runtimeKind) {
+        if (isWorkspaceAttachment(part) && usesWorkspacePathDelivery(part, runtimeKind)) {
             return toWorkspaceAttachmentTextPart(part, workspace);
         }
         String mime = firstText(part.mimeType(), "text/plain");
@@ -2496,7 +2482,8 @@ public class RunApplicationService {
 
     /**
      * 工作区聊天附件已经通过平台文件 RPC 落盘，只向智能体暴露受控相对路径。
-     * 这样既不把大文件再次内联到 Run 请求，也不触发模型对 Excel 等媒体类型的能力校验。
+     * 这样既不把大文件再次内联到 Run 请求，也不触发模型对 Excel 等媒体类型的能力校验；
+     * 相对路径由运行 OpenCode 的机器按当前工作目录解析，服务器进程和本地客户端都适用。
      */
     private AgentPromptPart toWorkspaceAttachmentTextPart(StartRunInput.PromptPart part, Workspace workspace) {
         if (part.path() == null) {
@@ -2530,6 +2517,17 @@ public class RunApplicationService {
     /** 原生投递标记只改变 OpenCode part 形态，工作区路径仍经过同一安全根校验。 */
     private boolean usesNativeAttachmentDelivery(StartRunInput.PromptPart part) {
         return NATIVE_ATTACHMENT_DELIVERY.equals(part.source().get(WORKSPACE_ATTACHMENT_DELIVERY_MODE));
+    }
+
+    /**
+     * 判断工作区聊天附件是否按“工作区相对路径”投递。
+     * 本地客户端的工作区在用户机器上：服务端 JVM 无法把客户端路径（Windows 盘符、UNC 或其它平台形态）
+     * 当成本机路径解析成客户端可用的 file URL，内联正文又会占用本地隧道有限的请求体额度；
+     * 因此本地运行时只投递受控相对路径，由客户端 OpenCode 用自带 Read 工具读取，
+     * 图片和 PDF 仍由该工具按原生附件投递给模型。
+     */
+    private boolean usesWorkspacePathDelivery(StartRunInput.PromptPart part, RuntimeKind runtimeKind) {
+        return runtimeKind == RuntimeKind.LOCAL_CLIENT || !usesNativeAttachmentDelivery(part);
     }
 
     /**

@@ -329,8 +329,8 @@ tools/dev-phase11-real-e2e.sh --start-services
 健康、异常或离线状态。生产由 Nginx 同源下载路由提供，dev server 只读暴露
 `deploy/internal/dist/local-opencode-client/`，也可用
 `TEST_AGENT_LOCAL_CLIENT_DIST_DIR` 指向外部已签名分发目录，不会把 JRE/OpenCode 大制品打入前端 bundle。
-本地 Workspace 的 capability 明确关闭 terminal、Git 发布、Agent 配置、附件和协作分享；页面不能仅靠
-按钮隐藏代替后端约束。
+本地 Workspace 的 capability 明确关闭 terminal、Git 发布、Agent 配置和协作分享，聊天附件可用且统一按工作区相对路径
+投递；页面不能仅靠按钮隐藏代替后端约束。
 
 ## Trace 管理页面
 
