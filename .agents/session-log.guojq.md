@@ -1104,3 +1104,34 @@ dist-code/ 目录已清空，需基于相同源码（HEAD 88040f46e）重新构�
 - **现场动作超出"仅代码变更"权限**：本包三组件均为 `included`，现场必须 `docker load` worker 与两个工具箱镜像并重启对应容器，不能只走代码变更流程，须交给有 docker 权限的人执行。RTK 命令改写默认关闭（`RTK_COMMAND_REWRITE_ENABLED=false`），装载后不改变现有行为，需在系统参数页显式开启。
 - 未做：真实客户端连接验收、把 migration 应用到 `.env.test` 持久库、Jenkins 部署；本轮只做打包与包内一致性校验。
 
+## 2026-09-18 全量包瘦身：toolbox 退回 reuse，1325 MiB → 951 MiB
+
+### Why
+
+- 用户问「为什么打了 1 个多 G，之前全包都是 400 多 MB」。核实后确认体积只由"哪几个组件 `included`"决定：`package-release.sh` 第 1776-1796 行逐组件硬门禁（backend+frontend 恒带，client/worker+programs/toolbox 各由 mode 决定）。
+  用内层 ZIP 实测归类：worker 镜像 338.7 + toolbox 374.4 + 客户端 282.4 + programs 187.4 + 前端 12.1 + 后端 152.0 = 1351.5 MiB 未压缩。
+  三版对照 164 / 446 / 1346 MiB（446 MiB 正好对应 `MULTI-BACKEND.md` 里"包体因此约为 424 MiB"那句），增量 900 MiB 全在 worker+programs+toolbox。
+- 关键事实：**toolbox 指纹 `35447da0…f15040` 与现场基线逐字相同**，本轮本不必携带；它是被 `--include-all-components`（用户上一轮选择的"强制三组件"）一起带上的。用户随即要求「瘦身一下」。
+
+### What
+
+- 只做**重新封装**，不重建任何制品：`--zip-only --output-dir /tmp/ea/slim/dist`，`--component-state-file` 指向现场基线副本。预期与实测均为 worker `included` / **toolbox `reuse`** / client `included`，这正是 RTK 需要的最小集合。
+- 交付物（`deploy/internal/dist-full/`）：内层 `test-agent-internal-release.zip` 997,203,492 B，SHA256 `d01f103ade9b2210bf5173c4b7b5bd949699e266e0e4df83da978d11db2f609d`；外层 `test-agent-two-backend-complete.zip` 997,395,707 B，SHA256 `9b4ea76c3f7fed89a2e915cf685985bb0e3417eaf299d867412a91c67ed4accf`。
+- 上一版三组件全量包按仓库归档约定改名移入 `deploy/internal/dist-code-archive/worker-included-all-components-20260918-*`，`.sha256` 文件名标签同步改写（摘要值不变），归档自校验通过。
+
+### How
+
+- **状态文件必须用副本**：`package-release.sh` 第 2037 行 `mkdir -p "$(dirname "${COMPONENT_STATE_FILE}")"`、第 2147 行 `write_component_fingerprints "${COMPONENT_STATE_FILE}"` 会**回写**该文件；直接传 `deploy/internal/release-baselines/20260907-enterprise-deployed-components.env` 会把现场基线覆盖成本轮指纹。本次先 `cp` 到 `/tmp/ea/slim/state.env` 再传，事后确认仓库基线 `git status` 无改动。
+- **`--zip-only` 的输出目录里不能有旧内层 ZIP**：第 1052 行 `zip-only && INCLUDE_ALL_COMPONENTS==0 && -f "${OUTPUT_DIR}/test-agent-internal-release.zip"` 会进入"保持现有 ZIP 组件选择"分支，用旧 ZIP 的 `release-components.env` 覆盖本轮判断（三组件又都变 `included`）。因此新建 `/tmp/ea/slim/dist`，只 `cp -a` 进 `backend/`、`local-opencode-client/`、前端 tar、`test-agent-programs.tar.gz`、worker 镜像 tar、`.worker-runtime-artifact.env`。
+- 命令：内层 `package-release.sh --zip-only --env-file /tmp/ea/full/merged.env --component-state-file /tmp/ea/slim/state.env --output-dir /tmp/ea/slim/dist`（52 s）；外层 `TEST_AGENT_LOCAL_CLIENT_SIGNING_PUBLIC_KEY="$PWD/.secure/local-client-signing-public.pem" package-two-backend-complete.sh --release-archive …/test-agent-internal-release.zip --nodes-dir /Users/guo/mimoclaw/enterprise-build-inputs/nodes --output-dir /tmp/ea/slim/dist`（64 s）。两条都套 `env -u CODEBUDDY_SAFE_DELETE_BULK_STATE_DIR -u CODEBUDDY_TOOL_CALL_ID`。
+- **载荷差分核验**（不只看组件声明）：内层条目集合差异**只有** toolbox 那 9 项，无新增条目；两侧同名载荷 SHA-256 逐项一致 —— worker tar `175e6301…`、programs `8f14e032…`、前端 `a7c1ec0a…`、`test-agent-persistence-…jar` `4ec801dd…`、客户端 `test-agent-local-client.jar` `07291d14…`、`opencode.tar.gz` `4b5be9cd…`、`jdk.tar.gz` `a3db4265…`、`public-capabilities.tar.gz` `c2954bbf…`、`stable/manifest.json` `890ac6c4…`（客户端仍是同一份已签名制品，未重新签发）。
+- 交付前四项校验全过：外层 `shasum -c`、`unzip -tq`、外层内嵌内层 SHA 与内层一致、`.4`/`.114` 节点归档内嵌签名公钥 base64 与本机 `.secure` 公钥逐字一致。
+- 三台节点归档解包后 `diff -r` 内容全等；归档自身 SHA 与旧包不同仅因 `archive_create_tar_gz` 未规范化 mtime（`archive-common.sh` 内无 `mtime`/`gzip -n`），属正常。
+
+### Result
+
+- 交付体积 1325.2 MiB → **951.2 MiB**，减少 374 MiB（正好是 toolbox 三件：it-tools 26.0 + omni-tools 200.0 + toolbox-source 148.3 MiB）。
+- 现场动作相应减少：`.4`/`.114` 仍需 `docker load` worker 镜像并重启 manager/worker（worker `included`），但**不再需要加载/重启 toolbox**，`.2` 前端流程不变。
+- **纠正技能文档中的过期结论**：`.agents/skills/enterprise-offline-deploy/references/release-rebuild-signing-pitfalls.md` 6.2 节称 `DISABLE_SECURITY_REPO=true` 分支 pin 的 `libc6=2.31-13+deb11u11`「同样已不在任何公共源」「这条补丁路线不通」。本轮实建证明该结论已过期：TUNA **main** 仓（非 security 仓）有 `libc6=2.31-13+deb11u11`、`libssl1.1=1.1.1w-0+deb11u1`、`perl-base=5.32.1-4+deb11u3`，配 `-o Acquire::Check-Valid-Until=false` + `--allow-downgrades` 可成功重建 worker 镜像（`python-runtime` 阶段 313.9 s，`BUILD EXIT=0`）。文档"不要为过构建改 Dockerfile"的**政策**仍然成立（会改指纹），但在 worker 因 RTK 已真实变化、必然走 `included` 的前提下，该补丁是零额外代价的。已向用户报告，未擅自改动该受控技能文档。
+- 未做：真实客户端连接验收、migration 应用到 `.env.test` 持久库、Jenkins 部署。
+
