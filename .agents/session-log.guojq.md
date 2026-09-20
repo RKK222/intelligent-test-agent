@@ -1175,3 +1175,45 @@ dist-code/ 目录已清空，需基于相同源码（HEAD 88040f46e）重新构�
 - 现场动作：`.4`/`.114` 需 `docker load` 新 worker 镜像并受控重启 manager/worker（worker `included`）；`.2` 需安装新客户端分发 `releases/20260920103137`（客户端 `included`，新版本号用户端会提示升级）；toolbox 继续 `reuse`，不需要加载或重启。
 - 未做：真实客户端连接验收、`.env.test` 持久库 migration、Jenkins 部署、把包交付到企业中转机。
 
+
+## 2026-09-20 定位「对话改了公共 Agent 的 Skill，生效了但看不到落盘」并输出排查文档
+
+### Why
+
+- 企业现场用户（超级管理员）反馈：在企业网页对话里更新了公共级 Skill，改完直接使用技能内容确实变了，
+  但看不到这次修改落到文件上、也无法提交。需要给出可比对的根因、只读排查路径和正确的提交发布动作。
+- 查代码后确认这不是"文件没写"，而是**写入落点与平台文件树的读取落点不是同一份目录**：
+  用户进程的 `OPENCODE_CONFIG_DIR` 是 session 下的受管软链，**默认指向服务器共享运行副本**；
+  而超管的公共配置树传了 `worktreeId`、读的是本人公共个人 worktree。
+
+### What
+
+- 新增 `docs/deployment/public-agent-config-edit-visibility.md`：结论速览、四个落点（A 本人公共个人 worktree /
+  B 服务器共享运行副本 / C 会话 HOME 内技能目录 / D 远端技能 URL 缓存）的路径与可见性对照、原因分析、
+  Step1-7 只读排查（含 SQL 与 `readlink`/`git status` 判定表）、修改点与提交发布六步、红线、
+  以及可选的产品改进点。
+- `docs/README.md`「部署与数据库」段补文档索引条目。
+
+### How
+
+- 事实源逐条核实到行号，未凭印象：
+  - 进程环境 `HOME`/`XDG_*`/`OPENCODE_CONFIG_DIR`：`opencode-manager/internal/process/process.go:299-304`。
+  - 软链路径 `OpencodeProcessConfigLinkService.managedConfigPath:41`；session 与 config 路径
+    `UserOpencodeProcessAssignmentService:945/977`（注释即产品语义："默认指向共享公共目录"）。
+  - 读写根差异 `AgentConfigApplicationService:2644`（read：传 worktreeId 读 A、否则读 `gitRoot`）与 `:2656`
+    （write：一律要求本人 worktree）；参数解析 `:2861-2877`（`OPENCODE_PUBLIC_CONFIG_DIR` 默认 = gitRoot/opencode）。
+  - 前端 `AgentConfigPanel.vue:367`（`scope==='PUBLIC'` 时传 `publicWorktree?.worktreeId`）。
+  - opencode 技能扫描与同名覆盖顺序 `opencode-source/.../skill/index.ts:185-227`、`config/paths.ts:23-36`。
+  - 表结构：`opencode_server_processes` 直接存 `session_path`/`config_path`（V14 migration），
+    `agent_config_worktrees`（scope/root_path/status）、`public_agent_config_rollouts|_servers|_targets`。
+- 数据库与终端保持只读：只给 `SELECT` 与 `readlink -f` / `git status --porcelain` / `grep -rl`，不含任何写命令。
+- 本次未做真实现场验证：结论是代码与既有文档推导，Step1-7 需在企业节点实机执行后才能确证落点。
+
+### Result
+
+- 文档把"生效却看不到"归因为"前端树根 ≠ 写入落点"，并给出可执行的判定表；同时说明两个易被误读的副作用：
+  普通用户无公共个人 worktree、全部回退读 B（所以他们反而"看得见"），且 B 是每台 Java 各一份
+  （跨服务器行为不一致），其未提交改动会在下一次公共刷新/发布时被 reset 掉。
+- 未改任何代码、API、事件、数据库、配置或部署脚本；纯文档新增 + 索引同步。
+- 顺带发现：`.agents/skills/enterprise-troubleshooting` 缺"公共 Agent 配置落点与发布"一节，
+  本次未改动该技能，如需可作为后续补充。
