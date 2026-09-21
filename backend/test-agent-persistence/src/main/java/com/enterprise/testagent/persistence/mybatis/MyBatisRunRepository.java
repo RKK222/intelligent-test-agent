@@ -87,6 +87,12 @@ public class MyBatisRunRepository implements RunRepository {
                 .map(this::toDomain);
     }
 
+    /** Trace 归档发现 concise-output Skill 时幂等补记 true，不改变 Run 生命周期时间。 */
+    @Override
+    public boolean markConciseOutputSelected(RunId runId) {
+        return mapper.markConciseOutputSelected(runId.value()) == 1;
+    }
+
     /** 批量恢复历史会话的 Run 状态，避免反馈面板逐条查询。 */
     @Override
     public List<Run> findByIds(List<RunId> runIds) {
@@ -151,6 +157,8 @@ public class MyBatisRunRepository implements RunRepository {
                 userId(row.triggeredByUserId()),
                 row.agentId(),
                 row.modelId(),
+                row.rtkEnabled(),
+                row.conciseOutputSelected(),
                 userId(row.messageSenderUserId()),
                 row.messageSenderUnifiedAuthId(),
                 Boolean.TRUE.equals(row.messageSentBySharedUser()));
@@ -176,6 +184,8 @@ public class MyBatisRunRepository implements RunRepository {
                 userIdValue(run.triggeredByUserId()),
                 run.agentId(),
                 run.modelId(),
+                run.rtkEnabled(),
+                run.conciseOutputSelected(),
                 userIdValue(run.messageSenderUserId()),
                 run.messageSenderUnifiedAuthId(),
                 run.messageSentBySharedUser());

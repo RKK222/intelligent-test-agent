@@ -585,6 +585,8 @@ final class RuntimeDtos {
             String storageMode,
             String clientRequestId,
             Instant detailsAvailableUntil,
+            Boolean rtkEnabled,
+            Boolean conciseOutputSelected,
             String sourceType,
             String sourceRefId,
             String messageSenderUserId,
@@ -653,6 +655,8 @@ final class RuntimeDtos {
                     storageMode == null ? null : storageMode.name(),
                     clientRequestId,
                     detailsAvailableUntil,
+                    run.rtkEnabled(),
+                    run.conciseOutputSelected(),
                     run.sourceType().name(),
                     run.sourceRefId(),
                     effectiveSender == null ? null : effectiveSender.value(),
@@ -671,7 +675,8 @@ final class RuntimeDtos {
             }
             return new RunResponse(
                     runId, sessionId, workspaceId, status, createdAt, updatedAt, tokens, costUsd,
-                    storageMode, clientRequestId, detailsAvailableUntil, sourceType, sourceRefId,
+                    storageMode, clientRequestId, detailsAvailableUntil, rtkEnabled, conciseOutputSelected,
+                    sourceType, sourceRefId,
                     messageSenderUserId, messageSenderUsername, messageSenderUnifiedAuthId,
                     messageSentBySharedUser, resend, target.runtimeKind().name(),
                     target.localClientInstanceId() == null ? null : target.localClientInstanceId().value());

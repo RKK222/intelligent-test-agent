@@ -460,6 +460,9 @@ public class TraceArchiveService {
                 .filter(span -> !blank(span.capabilityKind()) && !blank(span.capabilityName()) && !blank(span.callId()))
                 .map(span -> toCapabilityFact(user, span))
                 .toList();
+        if (correlation.run() != null && facts.stream().anyMatch(this::isConciseOutputSkill)) {
+            runRepository.markConciseOutputSelected(correlation.run().runId());
+        }
         String sessionId = firstNonBlank(events, event -> text(event, "sessionId"));
         boolean terminal = manifest.complete() || events.stream().anyMatch(this::isTerminalEvent);
         long dropped = Math.max(manifest.droppedCount(), batchDroppedCount);
@@ -521,8 +524,14 @@ public class TraceArchiveService {
                     .orElse(null);
         }
         return run == null
-                ? new RunCorrelation(eventRunId, null)
-                : new RunCorrelation(run.runId().value(), run.agentId());
+                ? new RunCorrelation(eventRunId, null, null)
+                : new RunCorrelation(run.runId().value(), run.agentId(), run);
+    }
+
+    /** 只认 OpenCode 已归类的 SKILL 事实，避免从 prompt 或工具正文猜测用户是否选择 Skill。 */
+    private boolean isConciseOutputSkill(TraceModels.CapabilityFact fact) {
+        return "SKILL".equalsIgnoreCase(fact.capabilityType())
+                && "concise-output".equalsIgnoreCase(fact.capabilityName());
     }
 
     private Run findOwnedRun(User user, String runId) {
@@ -1090,7 +1099,7 @@ public class TraceArchiveService {
         return !blank(first) ? first : value(second);
     }
 
-    private record RunCorrelation(String runId, String agentId) {
+    private record RunCorrelation(String runId, String agentId, Run run) {
     }
 
     private String value(String value) {

@@ -48,7 +48,10 @@ class TraceControllerTest {
                 .expectBody()
                 .jsonPath("$.data.items[0].traceId").isEqualTo(TRACE_ID)
                 .jsonPath("$.data.items[0].archiveStatus").isEqualTo("ARCHIVED")
-                .jsonPath("$.data.items[0].complete").isEqualTo(true);
+                .jsonPath("$.data.items[0].complete").isEqualTo(true)
+                .jsonPath("$.data.items[0].rtkEnabled").isEqualTo(true)
+                .jsonPath("$.data.items[0].conciseOutputSelected").isEqualTo(true)
+                .jsonPath("$.data.items[0].skills[0]").isEqualTo("concise-output");
     }
 
     @Test
@@ -221,7 +224,10 @@ class TraceControllerTest {
                 0,
                 0,
                 true,
-                true);
+                true,
+                true,
+                true,
+                List.of("concise-output", "test-design"));
     }
 
     private static TraceModels.Span span() {

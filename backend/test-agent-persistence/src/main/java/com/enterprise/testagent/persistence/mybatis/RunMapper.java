@@ -19,6 +19,8 @@ public interface RunMapper {
             @Param("row") RunRow row,
             @Param("expectedStatus") String expectedStatus);
 
+    int markConciseOutputSelected(@Param("runId") String runId);
+
     RunRow findById(@Param("runId") String runId);
 
     List<RunRow> findByIds(@Param("runIds") List<String> runIds);

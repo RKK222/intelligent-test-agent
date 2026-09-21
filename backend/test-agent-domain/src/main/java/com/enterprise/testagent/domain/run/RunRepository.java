@@ -31,6 +31,13 @@ public interface RunRepository {
     Optional<Run> findById(RunId runId);
 
     /**
+     * Trace 发现 concise-output Skill 时补记能力快照；旧持久化实现可安全忽略该增强字段。
+     */
+    default boolean markConciseOutputSelected(RunId runId) {
+        return false;
+    }
+
+    /**
      * 批量读取可见 Run，反馈历史查询等低频场景覆盖此方法以避免逐条数据库访问。
      */
     default List<Run> findByIds(List<RunId> runIds) {

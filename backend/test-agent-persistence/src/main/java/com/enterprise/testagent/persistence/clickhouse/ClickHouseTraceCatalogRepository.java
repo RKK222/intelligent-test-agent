@@ -6,7 +6,9 @@ import com.enterprise.testagent.common.pagination.PageResponse;
 import com.enterprise.testagent.domain.trace.TraceCatalogRepository;
 import com.enterprise.testagent.domain.trace.TraceModels;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -72,6 +74,20 @@ public class ClickHouseTraceCatalogRepository implements TraceCatalogRepository 
                 mapper.trajectory(traceId, afterSequence, limit),
                 mapper.countTrajectory(traceId),
                 find(traceId).map(TraceModels.Catalog::completeThrough).orElse(0L)));
+    }
+
+    @Override
+    public Map<String, List<String>> findSkillsByTraceIds(List<String> traceIds) {
+        if (traceIds == null || traceIds.isEmpty()) {
+            return Map.of();
+        }
+        return available(() -> {
+            Map<String, List<String>> result = new LinkedHashMap<>();
+            for (TraceSkillRow row : mapper.findSkillsByTraceIds(traceIds)) {
+                result.computeIfAbsent(row.traceId(), ignored -> new java.util.ArrayList<>()).add(row.skillName());
+            }
+            return result;
+        });
     }
 
     private <T> T available(java.util.concurrent.Callable<T> call) {

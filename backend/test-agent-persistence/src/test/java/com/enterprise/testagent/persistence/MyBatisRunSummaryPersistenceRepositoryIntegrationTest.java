@@ -85,6 +85,8 @@ class MyBatisRunSummaryPersistenceRepositoryIntegrationTest {
                 .update();
         jdbcClient.sql("alter table runs add column target_local_client_instance_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column rtk_enabled boolean").update();
+        jdbcClient.sql("alter table runs add column concise_output_selected boolean").update();
         jdbcClient.sql("alter table session_messages add column sender_unified_auth_id varchar(255)").update();
         jdbcClient.sql("alter table session_messages add column sent_by_shared_user boolean not null default false")
                 .update();

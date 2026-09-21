@@ -17604,3 +17604,26 @@
 ### Result
 
 - 后续企业部署/现场排障技能会先确认项目根目录和拓扑来源，不再把其它项目的节点、路径或扫描文件当作当前项目事实；冲突时停止并报告未验证，而不是猜测或执行远程操作。
+
+## 2026-09-21 - 固化 Run 能力快照与 Trace Skill 摘要
+
+### Why
+
+- RTK 和 `concise-output` 集成后，Run/Trace 没有稳定记录开关与实际选用状态，无法按能力分组比较 Token；Trace 虽已有 Skill span 明细，也缺少每条 Trace 的去重技能摘要。
+
+### What
+
+- Run 创建时固化 `rtkEnabled`，并在命令选择或真实 `concise-output` Skill span 归档时单向标记 `conciseOutputSelected`；新增 nullable 数据库字段，历史记录保持未知。
+- Trace 列表和详情关联 Run 能力快照，并从既有 ClickHouse Skill span 聚合去重 `skills[]`；前端 Trace 页面展示 RTK、concise-output 与技能名称。
+- 同步领域、持久化、Runtime API、共享前端类型、数据库和模块文档，并补充兼容构造、序列化、查询聚合和前端展示测试。
+
+### How
+
+- Runtime 定向测试 90 项、API 定向测试 18 项、持久化定向测试 37 项、Trace 前端测试 3 项和 agent-web typecheck 通过；末次 JDK 25 定向复跑 `TraceQueryServiceTest` 通过。
+- `test-agent-app` 及依赖 24 模块跳过测试打包成功；在 `.env.test` 固定 PostgreSQL 上以事务应用并回滚新 migration，确认两个 nullable boolean 字段创建正确且未留下数据库变更。
+- 源 migration、persistence JAR 与 app 嵌套 JAR 的 migration SHA-256 一致，`git diff --check` 通过。
+
+### Result
+
+- 新 Run/Trace 可直接区分 RTK 开关、concise-output 是否实际选择以及调用过的 Skill，支持结合真实模型 usage 做分组对比；上游不返回 usage 时仍不以流式 chunk 推算 Token。
+- 未修改 OpenCode 源码、generated SDK、环境配置或部署拓扑；未执行 Jenkins/企业环境部署，ClickHouse SQL 未在真实 ClickHouse 环境联机验证。

@@ -959,6 +959,14 @@ function traceStateClass(trace: TraceCatalog) {
   return trace.status === "ACTIVE" ? "active" : "incomplete";
 }
 
+/** Trace 目录只展示能力元数据；Skill 参数和结果仍按单事件权限加载。 */
+function traceCapabilitySummary(trace: TraceCatalog) {
+  const rtk = trace.rtkEnabled == null ? "未知" : trace.rtkEnabled ? "开" : "关";
+  const concise = trace.conciseOutputSelected == null ? "未知" : trace.conciseOutputSelected ? "已选" : "未选";
+  const skills = trace.skills?.length ? trace.skills.join(", ") : "无";
+  return `RTK ${rtk} · concise-output ${concise} · Skills ${skills}`;
+}
+
 /** 历史版本曾出现 complete=true 但仍有待上传分片；展示完整度必须以无积压、无丢弃为准。 */
 function isEffectivelyComplete(trace: TraceCatalog) {
   return trace.complete && trace.pendingChunks === 0 && trace.droppedCount === 0;
@@ -1116,7 +1124,9 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
                 {{ traceStateLabel(trace) }}
               </em>
             </span>
-            <span class="trace-list-user">{{ trace.username }} · {{ trace.runtimeKind }}</span>
+            <span class="trace-list-user" :title="traceCapabilitySummary(trace)">
+              {{ trace.username }} · {{ trace.runtimeKind }} · {{ traceCapabilitySummary(trace) }}
+            </span>
             <code>{{ trace.traceId }}</code>
             <span class="trace-list-meta">
               <time>{{ formatTime(trace.startedAt) }}</time>
@@ -1156,6 +1166,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
                 <p>{{ selectedTrace.username }} · {{ selectedTrace.agentId && selectedTrace.agentId !== 'unknown' ? selectedTrace.agentId : '未识别 Agent' }}</p>
                 <h2>{{ selectedTrace.traceId }}</h2>
                 <span>{{ selectedTrace.runId || '无 Run ID' }} · {{ trajectoryEvents.length }} records / {{ selectedTrace.eventCount }} raw events · 完成水位 {{ selectedTrace.completeThrough }}</span>
+                <span :title="traceCapabilitySummary(selectedTrace)">{{ traceCapabilitySummary(selectedTrace) }}</span>
               </div>
             </header>
 
@@ -1369,7 +1380,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
 .trace-list-item { width:100%; padding:12px 14px; text-align:left; border:0; border-bottom:1px solid #efeff1; background:#fff; cursor:pointer; }
 .trace-list-item:hover { background:#faf9fd; }.trace-list-item.selected { background:#f2effa; box-shadow:inset 3px 0 #7b5ab4; }
 .trace-list-title,.trace-list-meta { display:flex; align-items:center; justify-content:space-between; gap:8px; }.trace-list-title b { font-size:12px; }.trace-list-title em { padding:2px 6px; border-radius:999px; font-size:9px; font-style:normal; }.trace-list-title em.complete { color:#147245; background:#e8f7ef; }.trace-list-title em.incomplete { color:#a8620f; background:#fff2de; }.trace-list-title em.active { color:#3567a8; background:#eaf2fc; }.trace-list-title em.pending { color:#8a6417; background:#fff6da; }
-.trace-list-user,.trace-list-item code,.trace-list-meta { display:block; margin-top:5px; color:#777b85; font-size:10px; }.trace-list-item code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#5c477f; }.trace-list-meta { display:flex; }
+.trace-list-user,.trace-list-item code,.trace-list-meta { display:block; margin-top:5px; color:#777b85; font-size:10px; }.trace-list-user { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.trace-list-item code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#5c477f; }.trace-list-meta { display:flex; }
 .trace-pagination { position:sticky; bottom:0; display:flex; align-items:center; justify-content:space-between; padding:9px; border-top:1px solid var(--line); background:#fff; font-size:10px; }.trace-pagination button { border:1px solid #dddde2; border-radius:6px; background:#fff; font-size:10px; }
 .trace-timeline-panel { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:#fcfcfd; }
 .timeline-header { display:flex; align-items:center; justify-content:space-between; padding:14px 17px; border-bottom:1px solid var(--line); background:#fff; }.timeline-header p,.timeline-header h2,.timeline-header span { margin:0; }.timeline-header p { color:#6b507e; font-size:11px; font-weight:700; }.timeline-header h2 { margin:3px 0; font:600 14px ui-monospace,SFMono-Regular,monospace; }.timeline-header span { color:var(--muted); font-size:10px; }

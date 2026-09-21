@@ -3971,7 +3971,7 @@ permission 列表中的 `PermissionRequest` 保留 `pattern/title/description` �
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
-`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`、`sourceType`、`sourceRefId`、`messageSenderUserId`、`messageSenderUsername`、`messageSenderUnifiedAuthId`、`messageSentBySharedUser`。`triggeredByUserId` 继续表示执行所属人；后四个字段表示本轮消息的实际发送人、当前平台姓名、统一认证号快照及代操作归因，姓名无法解析时可空。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。夜间任务启动的 Run 返回 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...`，普通/旧 Run 为 `MANUAL/null` 或缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`、`storageMode`、`clientRequestId`、`detailsAvailableUntil`、`rtkEnabled`、`conciseOutputSelected`、`sourceType`、`sourceRefId`、`messageSenderUserId`、`messageSenderUsername`、`messageSenderUnifiedAuthId`、`messageSentBySharedUser`。`triggeredByUserId` 继续表示执行所属人；后四个字段表示本轮消息的实际发送人、当前平台姓名、统一认证号快照及代操作归因，姓名无法解析时可空。`storageMode` 为创建时固定的 `LEGACY_FULL` 或 `REDIS_SUMMARY`，活动 Run 不允许中途切换；`clientRequestId` 用于同一次发送的幂等关联；`detailsAvailableUntil` 表示 Redis 完整详情最晚可用时间。`rtkEnabled` 是 Run 创建时 `RTK_COMMAND_REWRITE_ENABLED` 的生效快照；`conciseOutputSelected` 在以 `/concise-output` 启动时即为 `true`，也会在该 Run 的 OpenCode Trace 实际观测到同名 `SKILL` 调用后补标为 `true`。历史 Run 两字段可为 `null`，表示未知，不能按关闭或未使用统计。夜间任务启动的 Run 返回 `sourceType=SCHEDULED_TASK`、`sourceRefId=net_...`，普通/旧 Run 为 `MANUAL/null` 或缺失；`tokens` 字段结构同 `SessionMessageResponse.tokens`。
 
 `REDIS_SUMMARY` 的 `run.created` 事件还会携带 `assistantSummaryMessageId`，格式为稳定的 `msg_` + 32 位十六进制；终态 ASSISTANT 摘要复用同一 ID。反馈目标已经统一为 `runId`，该消息 ID 只保留摘要定位和旧消息反馈接口兼容用途。
 
@@ -4491,8 +4491,8 @@ HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入�
 
 | Method | Path | 说明 |
 |---|---|---|
-| `GET` | `/api/internal/platform/traces` | 按 ISO 时间、用户、组织、Agent、Skill、Tool、状态、Trace ID、Run ID 分页筛选已关联平台 Run 的目录；无 `runId` 或 Session 为 `unknown` 的进程级 OpenCode 生命周期广播不进入分页。`status=INCOMPLETE` 按 `complete=false` 查询，包含仍为 `ACTIVE/ARCHIVED` 但尚未闭合的 Run。 |
-| `GET` | `/api/internal/platform/traces/{traceId}` | 返回一条 Trace 的目录、覆盖起点、归档/积压/丢弃和完整度元数据。 |
+| `GET` | `/api/internal/platform/traces` | 按 ISO 时间、用户、组织、Agent、Skill、Tool、状态、Trace ID、Run ID 分页筛选已关联平台 Run 的目录；每项 additive 返回 Run 的 `rtkEnabled/conciseOutputSelected` 与该 Trace 已观测、去重排序的 `skills[]`。无 `runId` 或 Session 为 `unknown` 的进程级 OpenCode 生命周期广播不进入分页。`status=INCOMPLETE` 按 `complete=false` 查询，包含仍为 `ACTIVE/ARCHIVED` 但尚未闭合的 Run。 |
+| `GET` | `/api/internal/platform/traces/{traceId}` | 返回一条 Trace 的目录、覆盖起点、归档/积压/丢弃、完整度、Run 能力快照和已观测 `skills[]` 元数据。 |
 | `GET` | `/api/internal/platform/traces/{traceId}/spans?afterSequence=0&limit=200` | 从 ClickHouse 返回无正文的 DSH 语义 Span 首屏；过滤 `message.part.delta`、payload fragment 等传输级记录，最多 500 条。 |
 | `GET` | `/api/internal/platform/traces/{traceId}/events?afterSequence=0&limit=200` | 从冻结的归档节点读取正文事件；正文已归档后不依赖本地客户端在线。 |
 | `GET` | `/api/internal/platform/traces/{traceId}/records/{eventId}?globalSequence=...` | 选中单条 Span 后从冻结归档节点按需读取关联正文；Assistant 按 `messageId` 汇聚，Tool/Skill 按 `callId` 汇聚，并返回正文 fragment。 |
@@ -4503,6 +4503,7 @@ HTTP DTO 在 Spring Boot 4/Jackson 3 codec 边界使用开放 `Object`，进入�
 `backendProcessId`；同节点 Java 重启后由新进程继续读取和断点接收原 generation，跨存储节点读取只允许复用
 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`。归档服务器不可用统一返回 `TRACE_CONTENT_UNAVAILABLE`，
 禁止扫描其它节点或本机降级。
+`skills[]` 只来自 `analytics_trace_spans.capability_kind='SKILL'` 的实际调用索引，不从 prompt 猜测；只返回名称，不返回 Skill 参数、结果或正文。同一 Trace 的同名 Skill 只出现一次。Run 能力快照来自 PostgreSQL `runs`，ClickHouse 不复制这两个关系型字段。
 不完整 Run 只要 manifest 已落盘就可读取现有分片：前端把尚未产生 Step/Tool 终态的 `message.part.*` 聚合为进行中记录，
 只有生命周期事件时按事件类型保留最后一条；这只改变展示投影，不伪造完整状态，也不删除或改写服务器原始事件。
 正常 Trace 打开时只读取 `/spans` 和目录详情，不等待正文分页；事件正文只在选择记录后读取。尚无语义 Span 的历史或未闭合

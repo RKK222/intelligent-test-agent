@@ -51,7 +51,67 @@ public final class TraceModels {
             long droppedCount,
             long pendingChunks,
             boolean complete,
-            boolean redacted) {
+            boolean redacted,
+            Boolean rtkEnabled,
+            Boolean conciseOutputSelected,
+            List<String> skills) {
+
+        public Catalog {
+            skills = skills == null ? List.of() : List.copyOf(skills);
+        }
+
+        /** 兼容 ClickHouse 既有目录结构；能力快照由查询层按 runId 从 PostgreSQL 补齐。 */
+        public Catalog(
+                String traceId,
+                String userId,
+                String username,
+                String organization,
+                String rdDepartment,
+                String department,
+                String runtimeKind,
+                String source,
+                String processId,
+                String clientInstanceId,
+                String backendProcessId,
+                String linuxServerId,
+                String sessionId,
+                String runId,
+                String agentId,
+                String status,
+                String archiveStatus,
+                Instant startedAt,
+                Instant updatedAt,
+                Instant coverageStartAt,
+                long completeThrough,
+                long eventCount,
+                long archivedBytes,
+                long droppedCount,
+                long pendingChunks,
+                boolean complete,
+                boolean redacted) {
+            this(traceId, userId, username, organization, rdDepartment, department, runtimeKind, source,
+                    processId, clientInstanceId, backendProcessId, linuxServerId, sessionId, runId, agentId,
+                    status, archiveStatus, startedAt, updatedAt, coverageStartAt, completeThrough, eventCount,
+                    archivedBytes, droppedCount, pendingChunks, complete, redacted, null, null, List.of());
+        }
+
+        /** 返回附带 Run 创建时能力快照的目录视图，不改变 ClickHouse 目录事实。 */
+        public Catalog withRuntimeFeatureSnapshot(Boolean rtkEnabled, Boolean conciseOutputSelected) {
+            return new Catalog(traceId, userId, username, organization, rdDepartment, department, runtimeKind,
+                    source, processId, clientInstanceId, backendProcessId, linuxServerId, sessionId, runId,
+                    agentId, status, archiveStatus, startedAt, updatedAt, coverageStartAt, completeThrough,
+                    eventCount, archivedBytes, droppedCount, pendingChunks, complete, redacted,
+                    rtkEnabled, conciseOutputSelected, skills);
+        }
+
+        /** 返回附带本 Trace 已观测 Skill 名称的目录视图；名称已去重且不包含参数或结果正文。 */
+        public Catalog withSkills(List<String> skills) {
+            return new Catalog(traceId, userId, username, organization, rdDepartment, department, runtimeKind,
+                    source, processId, clientInstanceId, backendProcessId, linuxServerId, sessionId, runId,
+                    agentId, status, archiveStatus, startedAt, updatedAt, coverageStartAt, completeThrough,
+                    eventCount, archivedBytes, droppedCount, pendingChunks, complete, redacted,
+                    rtkEnabled, conciseOutputSelected, skills);
+        }
     }
 
     public record Span(

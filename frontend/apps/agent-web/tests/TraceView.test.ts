@@ -50,6 +50,9 @@ const trace: TraceCatalog = {
   pendingChunks: 0,
   complete: false,
   redacted: true,
+  rtkEnabled: true,
+  conciseOutputSelected: true,
+  skills: ["test-design", "concise-output"],
 };
 
 const fragmentPayload = {
@@ -166,11 +169,14 @@ describe("TraceView", () => {
     expect(view.queryByLabelText("主导航")).toBeNull();
     expect(view.queryByLabelText("返回工作台")).toBeNull();
     expect(view.getAllByText("不完整").length).toBeGreaterThan(0);
+    expect(view.getByTitle("RTK 开 · concise-output 已选 · Skills test-design, concise-output")).toBeTruthy();
 
     let releaseInitialRecord!: (value: { items: TraceRawEvent[]; completeThrough: number; complete: boolean }) => void;
     api.getTraceRecord.mockImplementationOnce(() => new Promise((resolve) => { releaseInitialRecord = resolve; }));
     await fireEvent.click(view.getByText("test-design-agent").closest("button")!);
     await waitFor(() => expect(view.getAllByText("test-design").length).toBeGreaterThan(0));
+    expect(view.getAllByText("RTK 开 · concise-output 已选 · Skills test-design, concise-output").length)
+      .toBeGreaterThan(0);
     expect(api.getTraceSpans).toHaveBeenCalledWith(trace.traceId, 0, 500);
     expect(api.getTraceEvents).not.toHaveBeenCalled();
     expect(view.getByText("正在读取所选事件正文…")).toBeTruthy();

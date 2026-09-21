@@ -1634,6 +1634,9 @@ export type TraceCatalog = {
   pendingChunks: number;
   complete: boolean;
   redacted: boolean;
+  rtkEnabled?: boolean | null;
+  conciseOutputSelected?: boolean | null;
+  skills?: string[];
 };
 
 export type TraceQueryParams = {
@@ -1935,6 +1938,8 @@ export type Run = {
   storageMode?: "LEGACY_FULL" | "REDIS_SUMMARY" | string | null;
   clientRequestId?: string | null;
   detailsAvailableUntil?: string | null;
+  rtkEnabled?: boolean | null;
+  conciseOutputSelected?: boolean | null;
   status: "PENDING" | "RUNNING" | "CANCELLING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | string;
   createdAt: string;
   updatedAt: string;

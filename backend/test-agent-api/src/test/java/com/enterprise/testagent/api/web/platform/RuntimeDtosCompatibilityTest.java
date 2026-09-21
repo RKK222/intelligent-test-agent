@@ -42,6 +42,17 @@ class RuntimeDtosCompatibilityTest {
         assertThat(response.storageMode()).isNull();
         assertThat(response.clientRequestId()).isNull();
         assertThat(response.detailsAvailableUntil()).isNull();
+        assertThat(response.rtkEnabled()).isNull();
+        assertThat(response.conciseOutputSelected()).isNull();
+    }
+
+    @Test
+    void runMappingExposesRuntimeFeatureSnapshot() {
+        RuntimeDtos.RunResponse response = RuntimeDtos.RunResponse.from(
+                run().withRuntimeFeatureSnapshot(true, true));
+
+        assertThat(response.rtkEnabled()).isTrue();
+        assertThat(response.conciseOutputSelected()).isTrue();
     }
 
     @Test

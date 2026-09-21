@@ -122,6 +122,46 @@ class RunApplicationServiceTest {
     private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
 
     @Test
+    void runCreationSnapshotsRtkAndConciseOutputSelection() {
+        FakeRunRepository runs = new FakeRunRepository();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository());
+        com.enterprise.testagent.domain.configuration.CommonParameterValues values =
+                org.mockito.Mockito.mock(com.enterprise.testagent.domain.configuration.CommonParameterValues.class);
+        org.mockito.Mockito.when(values.resolvedValue("RTK_COMMAND_REWRITE_ENABLED"))
+                .thenReturn(Optional.of("true"));
+        service.configureCommonParameterValues(values);
+
+        Run run = service.startRun(new StartRunInput(
+                        session().sessionId(),
+                        "/concise-output compare token usage",
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        "concise-output",
+                        "compare token usage"),
+                "trace_1234567890abcdef");
+
+        assertThat(run.rtkEnabled()).isTrue();
+        assertThat(run.conciseOutputSelected()).isTrue();
+        assertThat(runs.findById(run.runId())).get().satisfies(saved -> {
+            assertThat(saved.rtkEnabled()).isTrue();
+            assertThat(saved.conciseOutputSelected()).isTrue();
+        });
+    }
+
+    @Test
     void authenticatedLegacyLocalRunUsesManagedResolverAndPersistsLocalTarget() {
         UserId userId = new UserId("usr_1234567890abcdef");
         Session localSession = session().withSource(ConversationSourceType.MANUAL, null, userId);

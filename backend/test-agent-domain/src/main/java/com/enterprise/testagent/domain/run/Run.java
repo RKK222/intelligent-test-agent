@@ -29,9 +29,35 @@ public record Run(
         UserId triggeredByUserId,
         String agentId,
         String modelId,
+        Boolean rtkEnabled,
+        Boolean conciseOutputSelected,
         UserId messageSenderUserId,
         String messageSenderUnifiedAuthId,
         boolean messageSentBySharedUser) {
+
+    /** 兼容运行能力快照加入前、已经携带实际消息发送人归因的完整构造器。 */
+    public Run(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId triggeredByUserId,
+            String agentId,
+            String modelId,
+            UserId messageSenderUserId,
+            String messageSenderUnifiedAuthId,
+            boolean messageSentBySharedUser) {
+        this(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId, tokenUsage, costUsd,
+                sourceType, sourceRefId, triggeredByUserId, agentId, modelId, null, null,
+                messageSenderUserId, messageSenderUnifiedAuthId, messageSentBySharedUser);
+    }
 
     /** 兼容新增实际消息发送人归因前的完整构造器。 */
     public Run(
@@ -51,7 +77,7 @@ public record Run(
             String modelId) {
         this(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId,
                 tokenUsage, costUsd, sourceType, sourceRefId, triggeredByUserId, agentId,
-                modelId, triggeredByUserId, null, false);
+                modelId, null, null, triggeredByUserId, null, false);
     }
 
     /**
@@ -168,6 +194,8 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 messageSenderUserId,
                 messageSenderUnifiedAuthId,
                 messageSentBySharedUser);
@@ -230,6 +258,8 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 messageSenderUserId,
                 messageSenderUnifiedAuthId,
                 messageSentBySharedUser);
@@ -261,6 +291,8 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 messageSenderUserId,
                 messageSenderUnifiedAuthId,
                 messageSentBySharedUser);
@@ -285,6 +317,8 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 messageSenderUserId,
                 messageSenderUnifiedAuthId,
                 messageSentBySharedUser);
@@ -309,6 +343,8 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 messageSenderUserId,
                 messageSenderUnifiedAuthId,
                 messageSentBySharedUser);
@@ -334,8 +370,39 @@ public record Run(
                 triggeredByUserId,
                 agentId,
                 modelId,
+                rtkEnabled,
+                conciseOutputSelected,
                 actualSenderUserId,
                 actualSenderUnifiedAuthId,
                 sharedUser);
+    }
+
+    /** 固化本次 Run 创建时的运行能力快照；旧 Run 或兼容装配允许字段为空。 */
+    public Run withRuntimeFeatureSnapshot(Boolean rtkEnabled, Boolean conciseOutputSelected) {
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId,
+                agentId,
+                modelId,
+                rtkEnabled,
+                conciseOutputSelected,
+                messageSenderUserId,
+                messageSenderUnifiedAuthId,
+                messageSentBySharedUser);
+    }
+
+    /** Trace 发现 Skill 调用时只补记 concise-output=true，不覆盖已记录的 RTK 快照。 */
+    public Run withConciseOutputSelected(Boolean conciseOutputSelected) {
+        return withRuntimeFeatureSnapshot(rtkEnabled, conciseOutputSelected);
     }
 }

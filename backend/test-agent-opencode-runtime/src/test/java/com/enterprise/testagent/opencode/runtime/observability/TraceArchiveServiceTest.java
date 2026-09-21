@@ -396,6 +396,53 @@ class TraceArchiveServiceTest {
                 .isEqualTo(runId.value());
     }
 
+    @Test
+    void shouldMarkOwnedRunWhenConciseOutputSkillIsObserved() throws Exception {
+        InMemoryCatalogRepository repository = new InMemoryCatalogRepository();
+        RunRepository runRepository = mock(RunRepository.class);
+        User user = User.createNew(
+                "usr_00000000000000000000000005", "u-5", "钱七", "hash", null, null, null);
+        RunId runId = new RunId("run_concise00000000000000000001");
+        Run run = new Run(
+                runId,
+                new SessionId("ses_concise00000000000000000001"),
+                new WorkspaceId("wrk_concise00000000000000000001"),
+                RunStatus.RUNNING,
+                Instant.parse("2026-08-22T00:00:00Z"),
+                Instant.parse("2026-08-22T00:00:00Z"),
+                "trace-concise",
+                null,
+                null,
+                null,
+                null,
+                user.userId(),
+                "opencode",
+                "deepseek/test");
+        when(runRepository.findById(runId)).thenReturn(Optional.of(run));
+        TraceArchiveService service = service(
+                repository, mock(RunSessionScopeRepository.class), runRepository);
+        JsonNode skillEvent = event(
+                "trc_00000000000000000000000000000005",
+                1,
+                "TOOL_EXECUTE_AFTER",
+                "{\"tool\":\"skill\",\"skillName\":\"concise-output\","
+                        + "\"capabilityKind\":\"SKILL\",\"status\":\"SUCCEEDED\"}");
+        ((com.fasterxml.jackson.databind.node.ObjectNode) skillEvent).put("runId", runId.value());
+
+        service.ingestPluginBatch(
+                new OpencodeObservabilityModels.IngestionIdentity(user, "proc-5", null, "generation-5"),
+                new OpencodeObservabilityModels.PluginBatch(
+                        "1.0",
+                        new OpencodeObservabilityModels.RuntimeIdentity(
+                                "SERVER_PROCESS", "generation-5", "proc-5", "server-1", null),
+                        Instant.parse("2026-08-22T00:00:00Z"),
+                        0,
+                        true,
+                        List.of(skillEvent)));
+
+        org.mockito.Mockito.verify(runRepository).markConciseOutputSelected(runId);
+    }
+
     private TraceArchiveService service(InMemoryCatalogRepository repository) {
         return service(repository, mock(RunSessionScopeRepository.class), mock(RunRepository.class));
     }

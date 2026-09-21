@@ -29,6 +29,8 @@ public record RunPersistenceAnchorRow(
         String triggeredByUserId,
         String agentId,
         String modelId,
+        Boolean rtkEnabled,
+        Boolean conciseOutputSelected,
         String messageSenderUserId,
         String messageSenderUnifiedAuthId,
         Boolean messageSentBySharedUser,

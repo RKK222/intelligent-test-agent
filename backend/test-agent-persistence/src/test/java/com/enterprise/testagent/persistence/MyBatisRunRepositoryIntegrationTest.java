@@ -64,6 +64,8 @@ class MyBatisRunRepositoryIntegrationTest {
         jdbcClient.sql("alter table runs add column message_sender_unified_auth_id varchar(128)").update();
         jdbcClient.sql("alter table runs add column message_sent_by_shared_user boolean not null default false").update();
         jdbcClient.sql("alter table runs add column active_session_id varchar(128)").update();
+        jdbcClient.sql("alter table runs add column rtk_enabled boolean").update();
+        jdbcClient.sql("alter table runs add column concise_output_selected boolean").update();
         seedWorkspaceSessionAndUser();
 
         SqlSessionFactory sqlSessionFactory = sqlSessionFactory();
@@ -82,6 +84,7 @@ class MyBatisRunRepositoryIntegrationTest {
                 .withSource(ConversationSourceType.MANUAL, null, USER_ID)
                 .withMessageSender(USER_ID, "u_run1234567890abcdef", true)
                 .withRuntimeSelection("OpenCode", "enterprise-openai/deepseek")
+                .withRuntimeFeatureSnapshot(true, false)
                 .withUsage(new TokenUsage(10L, 20L, 3L, 4L, 5L), new BigDecimal("0.25000000"));
 
         repository.save(run);
@@ -97,7 +100,14 @@ class MyBatisRunRepositoryIntegrationTest {
             assertThat(saved.messageSenderUserId()).isEqualTo(USER_ID);
             assertThat(saved.messageSenderUnifiedAuthId()).isEqualTo("u_run1234567890abcdef");
             assertThat(saved.messageSentBySharedUser()).isTrue();
+            assertThat(saved.rtkEnabled()).isTrue();
+            assertThat(saved.conciseOutputSelected()).isFalse();
         });
+
+        assertThat(repository.markConciseOutputSelected(run.runId())).isTrue();
+        assertThat(repository.findById(run.runId())).get()
+                .extracting(Run::conciseOutputSelected)
+                .isEqualTo(true);
     }
 
     @Test

@@ -30,6 +30,8 @@
             <arg column="triggered_by_user_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="rtk_enabled" javaType="java.lang.Boolean"/>
+            <arg column="concise_output_selected" javaType="java.lang.Boolean"/>
             <arg column="message_sender_user_id" javaType="java.lang.String"/>
             <arg column="message_sender_unified_auth_id" javaType="java.lang.String"/>
             <arg column="message_sent_by_shared_user" javaType="java.lang.Boolean"/>
@@ -82,6 +84,7 @@
         scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
         assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
         source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+        rtk_enabled, concise_output_selected,
         message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
         target_runtime_kind, target_local_client_instance_id
     </sql>
@@ -94,6 +97,7 @@
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            rtk_enabled, concise_output_selected,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
             target_runtime_kind, target_local_client_instance_id, active_session_id
         ) values (
@@ -103,6 +107,7 @@
             #{row.scheduledDispatchAttemptId}, #{row.scheduledDispatchLeaseUntil}, #{row.scheduledDispatchAcceptedAt},
             #{row.assistantSummaryMessageId}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt}, #{row.detailsExpiresAt},
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.rtkEnabled}, #{row.conciseOutputSelected},
             #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
             #{row.targetRuntimeKind}, #{row.targetLocalClientInstanceId},
             #{row.sessionId}
@@ -122,6 +127,7 @@
             #{row.assistantSummaryMessageId}, #{row.traceId}, cast(#{row.createdAt} as timestamp),
             cast(#{row.updatedAt} as timestamp), cast(#{row.detailsExpiresAt} as timestamp),
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.rtkEnabled}, #{row.conciseOutputSelected},
             #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
             #{row.targetRuntimeKind}, #{row.targetLocalClientInstanceId},
             #{row.sessionId}
@@ -132,6 +138,7 @@
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            rtk_enabled, concise_output_selected,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
             target_runtime_kind, target_local_client_instance_id, active_session_id
         )
@@ -143,6 +150,7 @@
             scheduled_dispatch_attempt_id, scheduled_dispatch_lease_until, scheduled_dispatch_accepted_at,
             assistant_summary_message_id, trace_id, created_at, updated_at, details_expires_at,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            rtk_enabled, concise_output_selected,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
             target_runtime_kind, target_local_client_instance_id, active_session_id
         ) values (
@@ -154,6 +162,7 @@
             source.assistant_summary_message_id,
             source.trace_id, source.created_at, source.updated_at, source.details_expires_at,
             source.source_type, source.source_ref_id, source.triggered_by_user_id, source.agent_id, source.model_id,
+            source.rtk_enabled, source.concise_output_selected,
             source.message_sender_user_id, source.message_sender_unified_auth_id,
             source.message_sent_by_shared_user, source.target_runtime_kind,
             source.target_local_client_instance_id, source.active_session_id

@@ -44,11 +44,54 @@ public record RunPersistenceAnchor(
         UserId triggeredByUserId,
         String agentId,
         String modelId,
+        Boolean rtkEnabled,
+        Boolean conciseOutputSelected,
         UserId messageSenderUserId,
         String messageSenderUnifiedAuthId,
         boolean messageSentBySharedUser,
         RuntimeKind targetRuntimeKind,
         String targetLocalClientInstanceId) {
+
+    /** 兼容运行能力快照加入前、已经携带运行目标与发送人归因的完整锚点构造器。 */
+    public RunPersistenceAnchor(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            RunStorageMode storageMode,
+            long statusVersion,
+            String clientRequestId,
+            String producerLinuxServerId,
+            String executionNodeIdSnapshot,
+            String opencodeProcessIdSnapshot,
+            String rootRemoteSessionId,
+            String dispatchMessageId,
+            String scheduledDispatchAttemptId,
+            Instant scheduledDispatchLeaseUntil,
+            Instant scheduledDispatchAcceptedAt,
+            SessionMessageId assistantSummaryMessageId,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt,
+            Instant detailsExpiresAt,
+            ConversationSourceType sourceType,
+            String sourceRefId,
+            UserId triggeredByUserId,
+            String agentId,
+            String modelId,
+            UserId messageSenderUserId,
+            String messageSenderUnifiedAuthId,
+            boolean messageSentBySharedUser,
+            RuntimeKind targetRuntimeKind,
+            String targetLocalClientInstanceId) {
+        this(runId, sessionId, workspaceId, status, storageMode, statusVersion, clientRequestId,
+                producerLinuxServerId, executionNodeIdSnapshot, opencodeProcessIdSnapshot, rootRemoteSessionId,
+                dispatchMessageId, scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
+                scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt, updatedAt,
+                detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId, agentId, modelId, null, null,
+                messageSenderUserId, messageSenderUnifiedAuthId, messageSentBySharedUser,
+                targetRuntimeKind, targetLocalClientInstanceId);
+    }
 
     /** 兼容本地运行目标加入前的完整锚点构造器。 */
     public RunPersistenceAnchor(
@@ -86,7 +129,7 @@ public record RunPersistenceAnchor(
                 scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
                 scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt,
                 updatedAt, detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId,
-                agentId, modelId, messageSenderUserId, messageSenderUnifiedAuthId,
+                agentId, modelId, null, null, messageSenderUserId, messageSenderUnifiedAuthId,
                 messageSentBySharedUser, RuntimeKind.SERVER_PROCESS, null);
     }
 
@@ -123,7 +166,7 @@ public record RunPersistenceAnchor(
                 scheduledDispatchAttemptId, scheduledDispatchLeaseUntil,
                 scheduledDispatchAcceptedAt, assistantSummaryMessageId, traceId, createdAt,
                 updatedAt, detailsExpiresAt, sourceType, sourceRefId, triggeredByUserId,
-                agentId, modelId, triggeredByUserId, null, false,
+                agentId, modelId, null, null, triggeredByUserId, null, false,
                 RuntimeKind.SERVER_PROCESS, null);
     }
 

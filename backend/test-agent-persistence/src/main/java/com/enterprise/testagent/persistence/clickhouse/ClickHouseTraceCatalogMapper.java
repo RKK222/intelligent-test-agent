@@ -38,4 +38,6 @@ public interface ClickHouseTraceCatalogMapper {
             @Param("limit") int limit);
 
     long countTrajectory(@Param("traceId") String traceId);
+
+    List<TraceSkillRow> findSkillsByTraceIds(@Param("traceIds") List<String> traceIds);
 }

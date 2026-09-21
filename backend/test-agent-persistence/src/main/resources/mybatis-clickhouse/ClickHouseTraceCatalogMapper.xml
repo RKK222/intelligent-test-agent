@@ -153,4 +153,17 @@
     <select id="countTrajectory" resultType="long">
         select count() from analytics_trace_spans final where <include refid="trajectoryFilter"/>
     </select>
+
+    <select id="findSkillsByTraceIds" resultType="com.enterprise.testagent.persistence.clickhouse.TraceSkillRow">
+        select trace_id, capability_name as skill_name
+        from analytics_trace_spans final
+        where capability_kind = 'SKILL'
+          and capability_name != ''
+          and trace_id in
+          <foreach collection="traceIds" item="traceId" open="(" separator="," close=")">
+              #{traceId}
+          </foreach>
+        group by trace_id, capability_name
+        order by trace_id, capability_name
+    </select>
 </mapper>

@@ -22,6 +22,8 @@ import com.enterprise.testagent.domain.agent.AgentSessionBindingRepository;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunLeaseLifecycle;
 import com.enterprise.testagent.domain.automationreference.AutomationReferenceRunPreparation;
 import com.enterprise.testagent.domain.configuration.PublicAgentConfigMessageGate;
+import com.enterprise.testagent.domain.configuration.CommonParameterValues;
+import com.enterprise.testagent.domain.configuration.RtkRuntimePolicy;
 import com.enterprise.testagent.domain.hub.ProtectedAgentSelection;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.event.RunEventDraft;
@@ -209,6 +211,7 @@ public class RunApplicationService {
     private List<AgentRootRunTerminalObserver> rootRunTerminalObservers = List.of();
     private AutomationReferenceRunLeaseLifecycle automationReferenceRunLeaseLifecycle;
     private ProtectedAgentExecutionService protectedAgentExecutionService;
+    private CommonParameterValues commonParameterValues;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -725,6 +728,12 @@ public class RunApplicationService {
         this.publicConfigMessageGate = Objects.requireNonNull(messageGate, "messageGate must not be null");
     }
 
+    /** 读取创建时的通用参数快照；兼容测试装配未注入时按 RTK 关闭处理。 */
+    @Autowired(required = false)
+    void configureCommonParameterValues(CommonParameterValues commonParameterValues) {
+        this.commonParameterValues = commonParameterValues;
+    }
+
     /** Run 启动前读取与 dispose 共用的用户级闸门，避免释放全部 workspace 实例时产生新任务竞态。 */
     @Autowired(required = false)
     void configureUserRuntimeDisposeCoordinator(UserRuntimeDisposeCoordinator coordinator) {
@@ -1134,6 +1143,10 @@ public class RunApplicationService {
         pending = pending.withRuntimeSelection(
                 protectedSelection ? resolvedAgentId : opencodeAgent,
                 firstText(modelSelection.modelId(), input.model()));
+        // Run 创建时固化两项能力状态，后续 Token 统计可按快照分组；旧装配缺少参数读取时 RTK 按关闭处理。
+        pending = pending.withRuntimeFeatureSnapshot(
+                RtkRuntimePolicy.enabled(commonParameterValues),
+                isConciseOutputCommand(input));
         ProtectedAgentExecutionService.ExecutionContext protectedContext = null;
         if (protectedSelection) {
             if (userId == null || protectedAgentExecutionService == null) {
@@ -1502,6 +1515,8 @@ public class RunApplicationService {
                     running.triggeredByUserId(),
                     resolvedAgentId,
                     firstText(modelSelection.modelId(), input.model()),
+                    running.rtkEnabled(),
+                    running.conciseOutputSelected(),
                     running.messageSenderUserId(),
                     running.messageSenderUnifiedAuthId(),
                     running.messageSentBySharedUser(),
@@ -1858,9 +1873,13 @@ public class RunApplicationService {
                     userId,
                     pending.agentId(),
                     pending.modelId(),
+                    pending.rtkEnabled(),
+                    pending.conciseOutputSelected(),
                     pending.messageSenderUserId(),
                     pending.messageSenderUnifiedAuthId(),
-                    pending.messageSentBySharedUser()));
+                    pending.messageSentBySharedUser(),
+                    RuntimeKind.SERVER_PROCESS,
+                    null));
             if (inserted) {
                 return new LegacyScheduledAnchorClaim(pending, dispatchMessageId, true, false, false);
             }
@@ -1998,7 +2017,12 @@ public class RunApplicationService {
                 anchor.sourceRefId(),
                 anchor.triggeredByUserId(),
                 anchor.agentId(),
-                anchor.modelId());
+                anchor.modelId(),
+                anchor.rtkEnabled(),
+                anchor.conciseOutputSelected(),
+                anchor.messageSenderUserId(),
+                anchor.messageSenderUnifiedAuthId(),
+                anchor.messageSentBySharedUser());
     }
 
     private List<Map<String, Object>> runtimeInputParts(StartRunInput input) {
@@ -2009,6 +2033,19 @@ public class RunApplicationService {
                     return Map.copyOf(mapped);
                 })
                 .toList();
+    }
+
+    /** 兼容新前端 command 字段与只发送斜杠文本的旧调用方，严格匹配 Skill 名称避免误判正文。 */
+    private boolean isConciseOutputCommand(StartRunInput input) {
+        if (input == null) {
+            return false;
+        }
+        if (input.command() != null && "concise-output".equalsIgnoreCase(input.command().trim())) {
+            return true;
+        }
+        String prompt = input.effectivePrompt().trim();
+        return prompt.equalsIgnoreCase("/concise-output")
+                || prompt.regionMatches(true, 0, "/concise-output ", 0, "/concise-output ".length());
     }
 
     private AgentSessionBinding createInitialAgentSession(

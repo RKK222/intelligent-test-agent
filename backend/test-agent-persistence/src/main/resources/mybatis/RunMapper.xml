@@ -23,6 +23,8 @@
             <arg column="triggered_by_user_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="rtk_enabled" javaType="java.lang.Boolean"/>
+            <arg column="concise_output_selected" javaType="java.lang.Boolean"/>
             <arg column="message_sender_user_id" javaType="java.lang.String"/>
             <arg column="message_sender_unified_auth_id" javaType="java.lang.String"/>
             <arg column="message_sent_by_shared_user" javaType="java.lang.Boolean"/>
@@ -33,6 +35,7 @@
         run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
         tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost_usd,
         source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+        rtk_enabled, concise_output_selected,
         message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user
     </sql>
 
@@ -54,6 +57,8 @@
         triggered_by_user_id = #{row.triggeredByUserId},
         agent_id = #{row.agentId},
         model_id = #{row.modelId},
+        rtk_enabled = #{row.rtkEnabled},
+        concise_output_selected = #{row.conciseOutputSelected},
         message_sender_user_id = #{row.messageSenderUserId},
         message_sender_unified_auth_id = #{row.messageSenderUnifiedAuthId},
         message_sent_by_shared_user = #{row.messageSentBySharedUser},
@@ -69,6 +74,7 @@
             tokens_input, tokens_output, tokens_reasoning,
             tokens_cache_read, tokens_cache_write, cost_usd,
             source_type, source_ref_id, triggered_by_user_id, agent_id, model_id,
+            rtk_enabled, concise_output_selected,
             message_sender_user_id, message_sender_unified_auth_id, message_sent_by_shared_user,
             active_session_id
         ) values (
@@ -76,6 +82,7 @@
             #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning},
             #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.costUsd},
             #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId},
+            #{row.rtkEnabled}, #{row.conciseOutputSelected},
             #{row.messageSenderUserId}, #{row.messageSenderUnifiedAuthId}, #{row.messageSentBySharedUser},
             case when #{row.status} in ('PENDING', 'RUNNING', 'CANCELLING') then #{row.sessionId} else null end
         )
@@ -94,6 +101,13 @@
         <include refid="RunAssignments"/>
         where run_id = #{row.runId}
           and status = #{expectedStatus}
+    </update>
+
+    <!-- Trace 归档发现 Skill 后只补记 true，不刷新 Run 生命周期时间或状态。 -->
+    <update id="markConciseOutputSelected">
+        update runs
+        set concise_output_selected = true
+        where run_id = #{runId}
     </update>
 
     <select id="findById" resultMap="RunRowMap">
