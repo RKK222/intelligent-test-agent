@@ -8,7 +8,7 @@
 - manifest 包含工作区、输出、对象目录、对象规约索引、实际对象规约、方法选择、A/B、案例组装、追溯和质量门禁；
 - 每个实际对象类型都以 `bindingType=PRIMARY` 绑定 `spec-index.md` 指向的主对象规约；有领域加载信号的对象还以 `bindingType=DOMAIN_EXTENSION` 绑定命中的领域附加规约，准确记录 `domainScopes`、逐领域 `loadEvidence` 和去重后的 `expectedRuleIds`，没有信号时未误加载；
 - 异步任务、UI 界面、批量任务、接口、业务改造-其它，以及命中大数据领域附加规约的对象，按“对象 + 规约文件”逐条记录启用规则的编号、材料证据、最低覆盖、Phase A 中间物项、案例引用和排除理由；
-- 暂缓的混沌、性能、安全和生产安全旧规则卡未被生成或 Review 加载；用户明确请求混沌或安全专项案例时，仅加载对应公共 Skill，并在 `methodSkillsRead` 记录技术 ID；未明确请求时不得自动加载；
+- 暂缓的混沌、性能、安全和生产安全旧规则卡未被生成或 Review 加载；`specialtySkillDecisions` 同时包含 `chaos-case-generate` 和 `secure-case-recommend` 的选择/排除结果；用户明确请求时强制选中，有具体内容的专项章节或已冻结对象事实中具有独立覆盖价值的安全/容错风险自动选中，空标题、占位文本和孤立泛化词不选中；自动选中项有 `sourceEvidence`、`coverageTargets` 和 Phase A `artifactItemRefs`，`FULL` / `CASES` 在 Phase B 还将实际加载的技术 ID 记入 `methodSkillsRead` 并写回 `caseRefs`；
 - 每个选中方法都登记实际方法 skill，未选方法未加载；
 - Review 的 `reviewPolicyManifest` 包含质量门禁、方法选择、对象规约索引、实际对象规约、Review 模板和按需 Mermaid 规约；
 - 规约缺失、不可读或 manifest 与实际对象/方法不匹配时不得完成。

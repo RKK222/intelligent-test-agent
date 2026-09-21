@@ -21,6 +21,10 @@ mermaidValidation:
   failureLocation:
 gaps: []
 questions: []
+specialtyCoverageBindings:
+  - skillId: chaos-case-generate | secure-case-recommend
+    coverageTarget:
+    artifactItemRefs: []
 ```
 
 以上 YAML 只写入内部 `<task_result>.phaseAArtifactManifest`，不写入正式测试设计文档。
@@ -33,4 +37,4 @@ questions: []
 
 Phase A 不输出测试案例。
 
-命中启用公共规则时，`policyManifest.objectRuleBindings` 必须把每个 `ruleId` 绑定到正式中间物中的实际行、节点、路径或矩阵项。
+命中启用公共规则时，`policyManifest.objectRuleBindings` 必须把每个 `ruleId` 绑定到正式中间物中的实际行、节点、路径或矩阵项。选中安全/混沌专项时，`specialtyCoverageBindings` 必须把每个 `coverageTarget` 绑定到同类可定位中间物项；未选中时不生成虚假绑定。

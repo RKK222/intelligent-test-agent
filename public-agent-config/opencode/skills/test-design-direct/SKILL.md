@@ -5,14 +5,15 @@ compatibility: opencode
 metadata:
   display-name: Text Understanding Generation
   display-name-zh: 文本理解生成
+  source: test-agent
   agent-id: test-design-generation
-  version: '3.3.1'
+  version: '3.3.2'
   emoji: ✍️
 ---
 
 # 文本理解生成
 
-仅在阶段 2 使用。先加载公共 `test-design` skill。
+仅由 `test-design-generation` 在事实基线冻结并选中本方法后使用。先加载公共 `test-design` skill。
 
 仅用于简单单点规则或技术差异，且不存在更合适的输入域、组合、路径或场景方法。
 

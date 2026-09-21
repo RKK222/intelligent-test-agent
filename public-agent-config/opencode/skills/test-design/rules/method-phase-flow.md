@@ -1,6 +1,6 @@
-# 阶段 2 的 Phase A / Phase B 流程
+# 生成 Agent 的 Phase A / Phase B 流程
 
-阶段 2 不是“边分析边写案例”。每个已选中的结构化测试方法都必须先产出中间物，再从已冻结的中间物组装案例；未选方法不生成中间物或案例。
+生成 Agent 不是“边分析边写案例”。每个已选中的结构化测试方法都必须先产出中间物，再从已冻结的中间物组装案例；未选方法不生成中间物或案例。
 
 ```text
 方法选择
@@ -11,7 +11,7 @@
 
 ## Phase A：中间物生成
 
-Phase A 的输入是阶段 1 对象事实、`designSignals` 和材料证据。输出只包含当前方法的中间物本体，不输出测试案例。
+Phase A 的输入是已冻结 `analysisBaseline` 中的对象事实、`designSignals` 和材料证据。输出只包含当前方法的中间物本体，不输出测试案例。
 
 | 方法 skill | Phase A 产物 |
 | --- | --- |
@@ -25,7 +25,7 @@ Phase A 的输入是阶段 1 对象事实、`designSignals` 和材料证据。�
 
 Phase A 必须直接保留图、表或矩阵本体；不得先生成案例，再反推中间物。
 
-命中启用公共规则卡时，Phase A 必须把规则覆盖点落到一个或多个实际中间物项，并在内部对应单条 `ruleId` 的 `objectRuleBindings.evaluatedRules[].artifactItemRefs` 中记录引用。`MATCHED` 不得使用批量 `ruleIds`，缺少引用不得冻结。
+命中启用公共规则卡时，Phase A 必须把规则覆盖点落到一个或多个实际中间物项，并在内部对应单条 `ruleId` 的 `objectRuleBindings.evaluatedRules[].artifactItemRefs` 中记录引用。`MATCHED` 不得使用批量 `ruleIds`，缺少引用不得冻结。已选中安全/混沌专项的 `coverageTargets` 也必须在 Phase A 绑定 `artifactItemRefs`，不得直接跳到 Phase B 生成专项案例。
 
 路径图和场景图必须额外读取 `rules/mermaid.md`，以 Mermaid `11.16.0` 为最低兼容基线。静态检查失败或官方 parser 校验失败的 Mermaid 中间物不得进入确认/冻结；parser 不可用时必须如实记录 `UNAVAILABLE`。
 
@@ -40,7 +40,7 @@ Phase A 必须直接保留图、表或矩阵本体；不得先生成案例，再
 
 ## Phase B：案例组装
 
-Phase B 的主要输入必须是现有的 Phase A 中间物。可读取阶段 1 对象事实和证据来补充步骤、具体数据和可验证预期，但不得：
+Phase B 的主要输入必须是现有的 Phase A 中间物。可读取已冻结对象事实和证据来补充步骤、具体数据和可验证预期，但不得：
 
 - 新增 Phase A 中没有的等价类、因子、路径、场景、接口覆盖项或规则点；
 - 修改、重画或替换已冻结中间物；

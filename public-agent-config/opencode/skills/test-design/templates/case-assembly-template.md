@@ -10,6 +10,11 @@ artifactFreezeEvidence: []
 caseFile:
 caseCount:
 artifactToCaseMapping: []
+specialtyCaseMapping:
+  - skillId: chaos-case-generate | secure-case-recommend
+    coverageTarget:
+    artifactItemRefs: []
+    caseRefs: []
 artifactMismatch: []
 gaps: []
 questions: []
@@ -26,6 +31,7 @@ questions: []
 - Phase B 不重建或修改中间物；
 - 案例覆盖由中间物项驱动。
 - 命中公共规则的案例只能来自该规则已绑定的 Phase A 中间物项。
+- 安全/混沌专项案例只能来自已冻结决策中的 `coverageTargets` 及其 Phase A `artifactItemRefs`；不得在 Phase B 新增专项覆盖点。
 
 ## 非接口案例
 

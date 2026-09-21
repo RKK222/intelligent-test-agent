@@ -5,14 +5,15 @@ compatibility: opencode
 metadata:
   display-name: Scenario Testing
   display-name-zh: 场景法
+  source: test-agent
   agent-id: test-design-generation
-  version: '3.2.1'
+  version: '3.2.2'
   emoji: 🎬
 ---
 
 # 场景法
 
-仅在阶段 2 使用。先加载公共 `test-design` skill。
+仅由 `test-design-generation` 在事实基线冻结并选中本方法后使用。先加载公共 `test-design` skill。
 
 ## phase=artifact：生成场景图
 

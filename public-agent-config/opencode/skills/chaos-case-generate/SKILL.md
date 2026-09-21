@@ -1,12 +1,12 @@
 ---
 name: chaos-case-generate
-description: Chaos Case Generate（混沌案例生成）。由测试设计生成 Agent 在用户明确要求混沌案例、故障注入案例或混沌测试设计时加载；根据需求提取关键词、匹配案例库并输出实例化注入步骤。不处理格式转换，不做真实混沌工程执行。
+description: Chaos Case Generate（混沌案例生成）。由测试设计生成 Agent 在用户明确要求，或需求/详细设计中的具体故障、容错与恢复信号被自动识别时加载；根据需求提取关键词、匹配案例库并输出实例化注入步骤。不处理格式转换，不做真实混沌工程执行。
 compatibility: opencode
 metadata:
   display-name: Chaos Case Generate
   display-name-zh: 混沌案例生成
   source: test-agent
-  version: '1.0.1'
+  version: '1.1.0'
   agent-id: test-design-generation
 ---
 
@@ -16,14 +16,14 @@ metadata:
 
 ## Agent 集成
 
-- owner 为 `test-design-generation`；只有用户明确要求混沌测试设计、混沌案例或故障注入案例时加载。
-- 不因普通需求材料中出现“异常、失败、重试”等通用词自动加载，也不替代测试设计主方法。
+- owner 为 `test-design-generation`；用户明确要求时强制加载；详细设计中有具体混沌/可靠性章节，或事实分析识别出关键依赖故障、网络延迟/中断、资源压力、主备切换、超时熔断降级或故障恢复等具体且有独立覆盖价值的信号时自动加载。
+- 自动加载必须由 `specialtySkillDecisions` 提供可定位的 `sourceEvidence` 和 `coverageTargets`；不因孤立的“异常、失败、重试”等通用词触发，也不替代测试设计主方法。
 - 本 Skill 只生成设计案例，不调用真实故障注入或测试执行能力。
 
 ## 输入检查
 
 1. 必须提供 `require_sub_item`（需求子条目名称）和 `require_sub_item_describe`（需求子条目描述）。
-2. 可选字段：`task_describe`（任务描述）、`content`（功能设计原始数据）、`systemType`（系统类型，默认 `distributed`）。
+2. 可选字段：`task_describe`（任务描述）、`content`（功能设计原始数据）、`systemType`（系统类型，默认 `distributed`）、`selectionEvidence`（生成 Agent 已决策的证据和覆盖目标）。
 3. 不询问用户确认每个关键词；缺失时自动使用兜底策略。
 
 ## 执行流程

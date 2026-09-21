@@ -5,18 +5,19 @@ compatibility: opencode
 metadata:
   display-name: Equivalence Partitioning
   display-name-zh: 等价类法
+  source: test-agent
   agent-id: test-design-generation
-  version: '3.2.1'
+  version: '3.2.2'
   emoji: 📊
 ---
 
 # 等价类法
 
-仅在阶段 2 使用。先加载公共 `test-design` skill。
+仅由 `test-design-generation` 在事实基线冻结并选中本方法后使用。先加载公共 `test-design` skill。
 
 ## phase=artifact：生成等价类表
 
-输入：阶段 1 对象事实、输入约束和证据。
+输入：已冻结事实基线中的对象事实、输入约束和证据。
 
 使用 `templates/equivalence-table.md`，只输出等价类表本体：
 

@@ -4,7 +4,7 @@
 
 ```text
 sourceEvidence
-  -> ruleId（命中公共规则卡时）
+  -> ruleId（命中公共规则卡时）/ specialtySkill + coverageTarget（选中安全或混沌专项时）
   -> objectId
   -> methodSkill
   -> phaseAArtifactFile
@@ -49,6 +49,7 @@ sourceEvidence
 - 每个 Phase A 中间物项至少映射一条案例，或写明未转换原因；
 - 每条案例至少映射一个中间物项；
 - 每条 `MATCHED` 公共规则在 Phase A 冻结前至少绑定一个 `artifactItemRef`，Phase B 的 `caseRefs` 只能来自这些中间物项；
+- 每个已选安全/混沌专项 `coverageTarget` 在 Phase A 冻结前至少绑定一个 `artifactItemRef`，Phase B 实际加载对应 Skill 后才能写入 `caseRefs`；
 - 关键预期有材料证据或标记 `需确认`；
 - Phase B 不得出现 Phase A 中不存在的覆盖项；
 - Review 发现孤立方法、孤立中间物项、孤立案例或反向补造时，至少判为 `major`。

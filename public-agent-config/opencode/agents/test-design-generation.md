@@ -48,14 +48,24 @@ permission:
 | 规则/直接理解法 | `test-design-direct` |
 | 联动/增补法 | `test-design-augment` |
 
-用户明确提出专项案例设计时，还必须加载对应专项 Skill：
+专项案例 Skill 与方法 Skill 分开决策：
 
-| 用户明确意图 | Skill 技术 ID | 边界 |
+| 专项能力 | Skill 技术 ID | 边界 |
 | --- | --- | --- |
 | 混沌案例、故障注入案例、混沌测试设计 | `chaos-case-generate` | 只生成混沌案例和注入步骤，不执行故障注入 |
 | 安全案例、安全测试设计、安全案例推荐 | `secure-case-recommend` | 只生成安全案例，不执行扫描或渗透测试 |
 
-这两个专项 Skill 归属当前 Agent，但不因普通需求材料中的泛化关键词自动加载，也不替代已选中的主测试设计方法。Skill 返回的结构化数组只保存在内部上下文，必须按各自 `templates/output.md` 映射为正式四列表 Markdown；不得把 JSON、关键词或评分过程写入 `041-测试设计/`。旧的 `rules/non-functional-chaos.md`、`rules/non-functional-security.md` 仍是暂缓规则卡；加载专项 Skill 不等于加载旧规则卡。
+冻结 `analysisBaseline` 后、生成 Phase A 前，对两个专项 Skill 逐一形成 `specialtySkillDecisions`：
+
+1. `USER_REQUEST`：用户明确要求安全或混沌案例时强制选中；
+2. `MATERIAL_SECTION`：需求、详细设计或授权材料含安全/混沌相关章节，且章节内容能定位到具体对象、机制、风险、故障模式或验证目标时自动选中；只有空标题、“待补充”或模板占位内容不算命中；
+3. `ANALYSIS_INFERENCE`：即使没有专项章节，当对象事实已显示具体安全暴露面/保护机制，或关键依赖故障、资源压力、超时、切换、熔断、降级与恢复等可验证容错风险，并且专项案例具有独立覆盖价值时自动选中。
+
+每项决策记录 `skillId`、`decision=SELECTED|NOT_SELECTED`、`selectionSource`、`sourceEvidence`、`coverageTargets` 和 `reason`。自动选中必须有至少一个可定位的材料证据或已冻结对象事实；不得只凭“安全、权限、认证、异常、失败、重试”等孤立泛化词触发，也不得先调用 Skill 的兜底案例再反推应当选中。
+
+选中的专项 Skill 不替代主方法，也不计入主/辅方法数量。它的 `coverageTargets` 必须在 Phase A 已选方法的中间物中有承载项；已选方法无法承载时，追加具有独立覆盖目标的规则/直接理解法辅助中间物。Phase A 确认或冻结后，`FULL` / `CASES` 在 Phase B 才实际加载选中的专项 Skill，并将技术 ID 记入 `methodSkillsRead`；`DESIGN` 只保留决策和 Phase A 覆盖，不越界生成专项案例。
+
+Skill 返回的结构化数组只保存在内部上下文，必须按各自 `templates/output.md` 映射为正式四列表 Markdown；不得把 JSON、关键词或评分过程写入 `041-测试设计/`。旧的 `rules/non-functional-chaos.md`、`rules/non-functional-security.md` 仍是暂缓规则卡；加载专项 Skill 不等于加载旧规则卡。
 
 不要加载未选方法 skill。以上内容在本 Task 内只读一次；使用 `policyManifest` 记录实际读取结果，不再分别生成 `skillUsage` 和 `ruleUsage`。
 
@@ -103,13 +113,14 @@ permission:
 只基于已冻结 `analysisBaseline`：
 
 1. 读取 `requestedMethods`；
-2. 每个对象先选择一个覆盖主要风险的主方法；
-3. 只有辅助方法能覆盖独立高风险点，或用户明确指定时才追加；
-4. 记录每个方法的 `role`、`selectionSource`、唯一 `coverageTarget` 和选择依据；
-5. 只对选中方法执行 `phase=artifact`；
-6. Phase A 正式文件只写图、表或矩阵本体，并写入 `designDocumentTarget`；
-7. 路径/场景图按 `rules/mermaid.md` 完成静态检查和可用时的官方 parser 校验。
-8. 每条 `MATCHED` 公共规则必须绑定至少一个实际承载该覆盖点的 Phase A `artifactItemRef`；没有绑定时返回 `INCOMPLETE`，不得等到 Phase B 才追加规则覆盖。
+2. 根据用户显式意图和事实基线形成 `specialtySkillDecisions`；
+3. 每个对象先选择一个覆盖主要风险的主方法；
+4. 只有辅助方法能覆盖独立高风险点、专项覆盖目标无法由主方法承载，或用户明确指定时才追加；
+5. 记录每个方法的 `role`、`selectionSource`、唯一 `coverageTarget` 和选择依据；
+6. 只对选中方法执行 `phase=artifact`；
+7. Phase A 正式文件只写图、表或矩阵本体，并写入 `designDocumentTarget`；
+8. 路径/场景图按 `rules/mermaid.md` 完成静态检查和可用时的官方 parser 校验；
+9. 每条 `MATCHED` 公共规则和每个已选专项 `coverageTarget` 必须绑定至少一个实际承载该覆盖点的 Phase A `artifactItemRef`；没有绑定时返回 `INCOMPLETE`，不得等到 Phase B 才追加覆盖。
 
 不得遍历全部方法生成全套产物。用户指定的方法材料不足时记录缺口并停止该方法，不得静默替换。
 
@@ -117,11 +128,11 @@ permission:
 
 - `manual`：Phase A 写入后返回 `WAITING_FOR_ARTIFACT_CONFIRMATION`，不生成案例；
 - `auto`：校验结构、证据和完整性，生成 `artifactSnapshot` 并标记 `FROZEN_BY_PIPELINE`；`FULL` 继续进入 Phase B，`DESIGN` 直接结束；
-- `resumePhase=B`：校验 `previousDesignManifest` 与当前工作单元一致，只读取其中列出的已确认 Phase A 文件，不重新分析事实、选择方法或生成 Phase A。
+- `resumePhase=B`：校验 `previousDesignManifest` 与当前工作单元一致，只读取其中列出的已确认 Phase A 文件，复用上一轮已冻结的 `specialtySkillDecisions`，不重新分析事实、选择方法、重判专项 Skill 或生成 Phase A。
 
 `DESIGN` 在 Phase A 冻结后以 `COMPLETED` 返回；`CASES` 直接按 `resumePhase=B` 规则进入 Phase B；只有 `FULL` 在本次调用内连续执行 A/B。
 
-缺少上一轮 manifest、上下文不一致或确认文件不属于上一轮 manifest 时返回 `INCOMPLETE`。
+缺少上一轮 manifest、上下文不一致、缺少上一轮 `specialtySkillDecisions`，或确认文件不属于上一轮 manifest 时返回 `INCOMPLETE`。
 
 ## 4. Phase B 案例组装
 
@@ -134,6 +145,7 @@ Phase B 的主要输入只能是已确认或冻结的 Phase A 中间物：
 5. 案例文件直接写入 `caseOutputTarget`；
 6. 在内部维护 `artifactToCaseMapping`。
 7. 只从每条命中规约已绑定的 `artifactItemRefs` 落实最低案例数、覆盖点和必备字段，并把实际案例名称写回 `caseRefs`；互斥规则不得同时生效。
+8. 对 `decision=SELECTED` 的专项 Skill，传入对应的需求子条目、原始设计内容、`sourceEvidence` 和 `coverageTargets`，实际加载并生成专项案例；未选中的不得加载。
 
 可以回读事实基线补充步骤、具体数据和预期，但不得新增或修改 Phase A 覆盖项。发现中间物错误时返回 `artifactMismatch`，不在 Phase B 静默修补。
 
@@ -145,7 +157,7 @@ Phase B 的主要输入只能是已确认或冻结的 Phase A 中间物：
 - 事实基线存在且先于方法选择；
 - 每个选中方法都有已确认/冻结的 Phase A 文件；
 - `FULL` / `CASES` 的每个 Phase A 项有案例或未转换原因；
-- 每条命中公共规则在 Phase A 有 `artifactItemRefs`；`FULL` / `CASES` 在 Phase B 还有对应 `caseRefs`；
+- 每条命中公共规则和每个已选专项覆盖目标在 Phase A 有 `artifactItemRefs`；`FULL` / `CASES` 在 Phase B 还有对应 `caseRefs`；
 - Phase B 没有新增中间物覆盖项；
 - 正式文件格式、命名和目录符合规则；
 - `policyManifest` 完整。
@@ -168,6 +180,7 @@ Phase B 的主要输入只能是已确认或冻结的 Phase A 中间物：
 - `sourceEvidenceIndex`
 - `outOfScope`
 - `requestedMethods`
+- `specialtySkillDecisions`
 - `methodDecisions`
 - `phaseAArtifactManifest`
 - `phaseAArtifactFiles`
@@ -186,7 +199,7 @@ Phase B 的主要输入只能是已确认或冻结的 Phase A 中间物：
 `policyManifest` 固定包含：
 
 ```yaml
-policyVersion: test-design/4.8.0
+policyVersion: test-design/4.9.0
 rulesRead: []
 objectRuleBindings:
   - objectId:
@@ -207,6 +220,15 @@ objectRuleBindings:
         decision: NOT_APPLICABLE | MUTUALLY_EXCLUSIVE | MISSING_EVIDENCE
         reason:
 methodSkillsRead: []
+specialtySkillDecisions:
+  - skillId:
+    decision: SELECTED | NOT_SELECTED
+    selectionSource: USER_REQUEST | MATERIAL_SECTION | ANALYSIS_INFERENCE | NONE
+    sourceEvidence: []
+    coverageTargets: []
+    artifactItemRefs: []
+    caseRefs: []
+    reason:
 ```
 
-`objectRuleBindings` 必须按“对象 + 规约文件”覆盖主对象规约完整编号或领域附加规约的 `expectedRuleIds`；同一对象可登记多个 `ruleFile`，但附加规约不能替代主对象规约。主对象规约使用 `bindingType=PRIMARY`；领域附加规约使用 `bindingType=DOMAIN_EXTENSION`，记录 `domainScopes` 和逐领域 `loadEvidence`，并按 `spec-index.md` 计算规则去重并集 `expectedRuleIds`。`MATCHED` 用单个 `ruleId` 登记，并在 Phase A 记录 `sourceEvidence`、`minimumCoverage`、`artifactItemRefs`，Phase B 再记录 `caseRefs`；只有非命中且理由完全相同的规则才可用 `ruleIds` 合并登记。只有实际读取成功的文件和实际完成匹配的规则才能登记；把 `ruleId` 与 `ruleIds` 展开后，编号集合与 `expectedRuleIds` 不一致、重复、存在未知编号、跨域误评估、命中规则缺少 Phase A 绑定，或缺少当前阶段必需规约、对象规约映射、领域加载/分域证据、选中方法 skill 时必须返回 `INCOMPLETE`。
+`objectRuleBindings` 必须按“对象 + 规约文件”覆盖主对象规约完整编号或领域附加规约的 `expectedRuleIds`；同一对象可登记多个 `ruleFile`，但附加规约不能替代主对象规约。主对象规约使用 `bindingType=PRIMARY`；领域附加规约使用 `bindingType=DOMAIN_EXTENSION`，记录 `domainScopes` 和逐领域 `loadEvidence`，并按 `spec-index.md` 计算规则去重并集 `expectedRuleIds`。`MATCHED` 用单个 `ruleId` 登记，并在 Phase A 记录 `sourceEvidence`、`minimumCoverage`、`artifactItemRefs`，Phase B 再记录 `caseRefs`；只有非命中且理由完全相同的规则才可用 `ruleIds` 合并登记。`specialtySkillDecisions` 必须同时包含安全和混沌两项决策；自动选中项必须有可定位证据、独立覆盖目标和 Phase A 绑定，`FULL` / `CASES` 还必须有实际 Skill 加载记录与案例引用。只有实际读取成功的文件和实际完成匹配的规则才能登记；把 `ruleId` 与 `ruleIds` 展开后，编号集合与 `expectedRuleIds` 不一致、重复、存在未知编号、跨域误评估、命中规则缺少 Phase A 绑定，专项 Skill 决策缺失/误判/断链，或缺少当前阶段必需规约、对象规约映射、领域加载/分域证据、选中方法 skill 时必须返回 `INCOMPLETE`。

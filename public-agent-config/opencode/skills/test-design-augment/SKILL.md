@@ -5,14 +5,15 @@ compatibility: opencode
 metadata:
   display-name: Case Augmentation
   display-name-zh: 增补法
+  source: test-agent
   agent-id: test-design-generation
-  version: '3.3.1'
+  version: '3.3.2'
   emoji: 🧩
 ---
 
 # 增补法
 
-仅在阶段 2 使用。先加载公共 `test-design` skill。
+仅由 `test-design-generation` 在事实基线冻结并选中本方法后使用。先加载公共 `test-design` skill。
 
 ## mode=ui-api
 

@@ -1,12 +1,12 @@
 ---
 name: secure-case-recommend
-description: Secure Case Recommend（安全案例推荐）。由测试设计生成 Agent 在用户明确要求安全案例、安全测试设计或安全案例推荐时加载；根据需求提取关键词、匹配案例库、打分并输出实例化步骤。不处理格式转换，不做安全渗透测试执行。
+description: Secure Case Recommend（安全案例推荐）。由测试设计生成 Agent 在用户明确要求，或需求/详细设计中的具体安全风险与保护机制被自动识别时加载；根据需求提取关键词、匹配案例库、打分并输出实例化步骤。不处理格式转换，不做安全渗透测试执行。
 compatibility: opencode
 metadata:
   display-name: Secure Case Recommend
   display-name-zh: 安全案例推荐
   source: test-agent
-  version: '1.0.2'
+  version: '1.1.0'
   agent-id: test-design-generation
 ---
 
@@ -16,14 +16,14 @@ metadata:
 
 ## Agent 集成
 
-- owner 为 `test-design-generation`；只有用户明确要求安全案例、安全测试设计或安全案例推荐时加载。
-- 不因普通需求材料中出现“权限、认证、敏感”等通用词自动加载，也不替代测试设计主方法。
+- owner 为 `test-design-generation`；用户明确要求时强制加载；详细设计中有具体安全章节，或事实分析识别出身份鉴别、访问控制、敏感数据保护、交易完整性/防重放、文件上传、开放接口、输入攻击面或审计等具体且有独立覆盖价值的安全信号时自动加载。
+- 自动加载必须由 `specialtySkillDecisions` 提供可定位的 `sourceEvidence` 和 `coverageTargets`；不因孤立的“安全、权限、认证、敏感”等通用词触发，也不替代测试设计主方法。
 - 本 Skill 只做案例设计和推荐，不执行漏洞扫描、渗透测试或真实攻击。
 
 ## 输入检查
 
 1. 必须提供 `require_sub_item`（需求子条目名称）和 `require_sub_item_describe`（需求子条目描述）。
-2. 可选字段：`task_describe`（任务描述）、`content`（功能设计原始数据）、`baseName`（基地名称，默认 `hzbase`）。
+2. 可选字段：`task_describe`（任务描述）、`content`（功能设计原始数据）、`baseName`（基地名称，默认 `hzbase`）、`selectionEvidence`（生成 Agent 已决策的证据和覆盖目标）。
 3. 不询问用户确认每个关键词；缺失时自动使用兜底策略。
 
 ## 执行流程

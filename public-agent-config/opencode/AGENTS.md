@@ -33,13 +33,15 @@
 
 ```text
 test-design-orchestrator
-  -> test-design-analysis
   -> test-design-generation
+       -> 事实分析基线
        -> Phase A 中间物
        -> 确认/冻结
        -> Phase B 案例组装
   -> test-design-review
 ```
+
+`test-design-analysis` 作为历史兼容的隐藏内部 Agent 保留，当前 `test-design-orchestrator` 默认链路不单独调用；事实分析已合并到 `test-design-generation` Task，但分析基线冻结、方法选择和 A/B 阶段语义仍分开。
 
 ## Agent 可见性
 
@@ -92,7 +94,7 @@ test-design-orchestrator
 
 - 技能物理目录名必须与 `SKILL.md` frontmatter 的 `name` 完全一致；不得使用中文目录名承载英文技术 ID。
 - 需要 Agent 编排的技能在 `metadata.agent-id` 写明唯一 owner；当前设计链路归属 `test-design-orchestrator`/`test-design-generation`，执行链路归属 `test-execution-agent`/`test-execution-api`。
-- `chaos-case-generate`、`secure-case-recommend` 归属 `test-design-generation`，仅在用户明确提出混沌或安全专项案例时加载；普通测试设计不自动触发。
+- `chaos-case-generate`、`secure-case-recommend` 归属 `test-design-generation`；用户明确提出专项案例时强制选中，详细设计等授权材料含有具体内容的专项章节，或对象事实显示具有独立覆盖价值的安全/容错风险时自动选中；空标题、占位文本和孤立泛化词不触发。
 - `bdsp-job-result-query`、`bdsp-job-scheduler`、`concise-output`、`secure-scan`、`skill-creator`、`skill-optimizer` 是可直接调用的独立技能，不强行伪造 Agent 归属。
 - BDSP 案例设计已经包含在 `test-design` 的 `big-data-common-cases.md` 领域附加规约中，由 `test-design-generation` 按 `COMMON + BDSP` 加载；`bdsp-job-scheduler`、`bdsp-job-result-query` 是真实调度/查询能力，不绑定案例设计链。
 - 发现或导入技能时使用目录清单和 frontmatter 校验；公共包不携带 `opencode.jsonc`、服务器地址、密钥、缓存或 `.git`。
@@ -107,12 +109,12 @@ test-design-orchestrator
 - 各阶段必须实际读取 `test-design/SKILL.md` 为本阶段列出的 `rules/*.md`，不能只依据 Agent 正文或文件名猜测规则内容；
 - `rules/` 相对路径以已加载的 `test-design/SKILL.md` 所在目录解析，不得拼接到业务工作区；
 - 对象规约只读取 `rules/spec-index.md` 中与当前对象类型对应的文件，避免无关规约污染上下文；
-- 各子 Agent 在内部 `<task_result>.ruleUsage` 记录已读取规约及用途；规约缺失、不可读或应读未读时阶段状态必须为 `INCOMPLETE`；
-- `ruleUsage` 仅用于内部编排和审核，不写入正式文件或最终回复。
+- 兼容 `test-design-analysis` 在 `<task_result>.ruleUsage` 记录已读取规约；当前主链路的 `test-design-generation` 和 `test-design-review` 分别使用 `policyManifest`、`reviewPolicyManifest`。规约缺失、不可读或应读未读时阶段状态必须为 `INCOMPLETE`；
+- 上述内部使用记录只用于编排和审核，不写入正式文件或最终回复。
 
 ### test-design-analysis
 
-只识别对象、事实、关系、风险、证据、缺口和 `designSignals`。不得选择方法、生成中间物或案例。
+历史兼容的隐藏内部 Agent，当前默认主链路不单独调用。若存量调用方显式使用，仍只识别对象、事实、关系、风险、证据、缺口和 `designSignals`，不得选择方法、生成中间物或案例。
 
 ### test-design-generation
 
@@ -128,7 +130,7 @@ test-design-orchestrator
 - 接口：先输出接口覆盖矩阵；
 - 直接理解：先输出规则与验证点表；
 - 联动/增补：先输出映射表。
-- 用户明确要求混沌专项案例时加载 `chaos-case-generate`；明确要求安全专项案例时加载 `secure-case-recommend`。两者的内部 JSON 不落盘，正式案例均映射为四列表 Markdown；普通需求中的异常、权限、认证等词不自动触发。
+- 用户明确要求混沌/安全专项案例时分别强制选中 `chaos-case-generate`、`secure-case-recommend`；材料章节或事实基线具备可定位的具体信号时自动选中。两者的内部 JSON 不落盘，正式案例均映射为四列表 Markdown；普通需求中孤立的异常、权限、认证等词不自动触发。
 
 Phase A 中间物确认或冻结后，Phase B 才能组装案例。Phase B 不得从需求重建中间物，不得先写案例再补表/图。
 

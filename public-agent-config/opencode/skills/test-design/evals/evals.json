@@ -64,7 +64,7 @@
     {
       "id": 11,
       "prompt": "只审核现有批量测试设计和案例，不要重新生成或修改。已提供 sourceManifest、材料读取清单、事实基线、Phase A/B 文件、映射和生成 policyManifest。",
-      "expected_output": "入口设置 requestedDeliverable=REVIEW，直接且只调用一次 test-design-review；designReviewInput 包含 sourceManifest、materialsRead、analysisBaseline、outOfScope、requestedMethods、mermaidValidation、analysisMismatch、artifactMismatch 和 structuralGateCheck，不调用 test-design-generation，不修改 Phase A/B。",
+      "expected_output": "入口设置 requestedDeliverable=REVIEW，直接且只调用一次 test-design-review；designReviewInput 包含 sourceManifest、materialsRead、analysisBaseline、outOfScope、requestedMethods、methodDecisions、specialtySkillDecisions、mermaidValidation、analysisMismatch、artifactMismatch 和 structuralGateCheck，不调用 test-design-generation，不修改 Phase A/B。",
       "files": []
     },
     {
@@ -76,7 +76,7 @@
     {
       "id": 13,
       "prompt": "订单接口同时有 userId 必输、1000 TPS 性能目标、网络故障注入、安全渗透、灰度和 AMC 告警要求。当前只做测试案例设计。",
-      "expected_output": "当前案例设计只按启用的 api.md 命中 API-13 等功能规则；不得读取或登记 non-functional-chaos.md、non-functional-performance.md、non-functional-security.md、production-safety.md，不生成性能、混沌、安全、灰度、应急或监控案例，也不把这些暂缓项当作设计缺口。",
+      "expected_output": "当前案例设计按启用的 api.md 命中 API-13 等功能规则；不得读取或登记 non-functional-chaos.md、non-functional-performance.md、non-functional-security.md、production-safety.md。材料中的网络故障注入和安全渗透是具体专项信号；specialtySkillDecisions 以 MATERIAL_SECTION 或 ANALYSIS_INFERENCE 选中 chaos-case-generate 和 secure-case-recommend，先把覆盖目标绑定 Phase A，再在 Phase B 加载两个 Skill 并生成四列专项案例；性能、灰度、应急和监控仍不因暂缓规则卡生成案例。",
       "files": []
     },
     {
@@ -118,19 +118,37 @@
     {
       "id": 20,
       "prompt": "请为这个 Kafka 交易状态同步需求补充混沌案例，重点验证消息积压、Broker 不可用和网络延迟。",
-      "expected_output": "入口把专项意图规范化为 chaos-case-generate，test-design-generation 加载该 Skill 并记录到 methodSkillsRead；不加载暂缓的 non-functional-chaos.md，不执行真实故障注入。内部结构按模板生成但不落盘，正式案例以四列表 Markdown 输出。",
+      "expected_output": "入口把专项意图规范化为 chaos-case-generate；specialtySkillDecisions 以 USER_REQUEST 强制选中，先把消息积压、Broker 不可用和网络延迟绑定到 Phase A，再在 Phase B 加载该 Skill 并记录到 methodSkillsRead；不加载暂缓的 non-functional-chaos.md，不执行真实故障注入。内部结构按模板生成但不落盘，正式案例以四列表 Markdown 输出。",
       "files": []
     },
     {
       "id": 21,
       "prompt": "请为文件上传功能设计安全案例，覆盖越权、恶意文件和敏感信息泄露，但不要执行扫描。",
-      "expected_output": "入口把专项意图规范化为 secure-case-recommend，test-design-generation 加载该 Skill并记录到 methodSkillsRead；不加载暂缓的 non-functional-security.md，不调用 secure-scan 或渗透测试。内部匹配与评分不落盘，正式案例以四列表 Markdown 输出。",
+      "expected_output": "入口把专项意图规范化为 secure-case-recommend；specialtySkillDecisions 以 USER_REQUEST 强制选中，先把越权、恶意文件和敏感信息泄露绑定到 Phase A，再在 Phase B 加载该 Skill 并记录到 methodSkillsRead；不加载暂缓的 non-functional-security.md，不调用 secure-scan 或渗透测试。内部匹配与评分不落盘，正式案例以四列表 Markdown 输出。",
       "files": []
     },
     {
       "id": 22,
       "prompt": "为登录功能做普通测试设计，需求提到认证失败后允许重试，没有要求混沌或安全专项案例。",
-      "expected_output": "按普通测试设计方法处理；不能仅因认证、失败、重试等泛化词加载 chaos-case-generate 或 secure-case-recommend，methodSkillsRead 中不应出现这两个专项 Skill。",
+      "expected_output": "按普通测试设计方法处理；specialtySkillDecisions 同时记录两个专项为 NOT_SELECTED、selectionSource=NONE 及排除理由；不能仅因认证、失败、重试等泛化词加载 chaos-case-generate 或 secure-case-recommend，methodSkillsRead 中不应出现这两个专项 Skill。",
+      "files": []
+    },
+    {
+      "id": 23,
+      "prompt": "请根据详细设计生成完整测试设计。文档的『安全设计』章节说明：文件上传必须白名单校验、扫描恶意文件，下载必须校验文件所有者并对身份证号脱敏。『混沌与容灾设计』章节说明：对象存储不可用时熔断并转本地待补传队列，恢复后补传且不得重复入库。用户没有额外点名安全或混沌案例。",
+      "expected_output": "两个章节都有具体对象、机制和验证目标；specialtySkillDecisions 以 MATERIAL_SECTION 自动选中 secure-case-recommend 和 chaos-case-generate，保存章节锚点、coverageTargets 和 Phase A artifactItemRefs。Phase A 冻结后，Phase B 实际加载两个 Skill，methodSkillsRead 同时记录两个技术 ID，生成四列安全和混沌案例；不加载暂缓旧规则卡，不执行扫描或故障注入。",
+      "files": []
+    },
+    {
+      "id": 24,
+      "prompt": "某付款接口设计没有安全或混沌专项章节，但说明请求包含卡号和身份信息，关键交易要验签并防重放；同时依赖风控服务和主备数据库，风控连续超时后熔断降级，数据库需支持主备切换。请生成完整测试设计。",
+      "expected_output": "虽无专项章节，但敏感数据、验签防重放、风控超时熔断降级和数据库主备切换都是具体风险；specialtySkillDecisions 以 ANALYSIS_INFERENCE 自动选中 secure-case-recommend 和 chaos-case-generate，证据指向已冻结对象事实，不得因用户没有说出专项名称而跳过。两类覆盖先进入 Phase A，再在 Phase B 加载对应 Skill 生成案例。",
+      "files": []
+    },
+    {
+      "id": 25,
+      "prompt": "详细设计有『安全设计』和『混沌测试』标题，两节正文都只写『待补充』。功能正文仅说登录认证失败可以重试一次。请生成普通测试设计。",
+      "expected_output": "空章节/占位文本不构成 MATERIAL_SECTION 证据，认证、失败和重试也只是孤立泛化词；specialtySkillDecisions 将两项记为 NOT_SELECTED 并说明理由，不加载两个专项 Skill，不先运行 Skill 兜底案例再反推选中。",
       "files": []
     }
   ]

@@ -22,7 +22,7 @@ permission:
 - `workspaceContext`；
 - `requestedDeliverable`、`sourceManifest`、`materialsRead`、`analysisBaseline` 和 `outOfScope`；
 - `recognizedObjects`、`objectRelations` 和 `sourceEvidenceIndex`；
-- `requestedMethods` 和 `methodDecisions`；
+- `requestedMethods`、`methodDecisions` 和 `specialtySkillDecisions`；
 - `phaseAArtifactManifest` 和 `artifactFreezeEvidence`；
 - `caseAssemblyManifest` 和 `artifactToCaseMapping`；
 - Phase A、Phase B 正式文件路径；
@@ -48,7 +48,7 @@ permission:
 
 针对启用的公共规则卡，先用 `spec-index.md` 核对当前对象的主对象规约和所有应加载领域附加规约；大数据对象还要独立判断属于 BDP、BDSP、出湖中的哪些 `domainScopes`，任一领域成立时包含 `COMMON`。再按“对象 + 规约文件”核对主规约完整编号或分域计算的 `expectedRuleIds`，展开生成阶段 `evaluatedRules` 中的 `ruleId` / `ruleIds` 并独立复核。逐个验证 `MATCHED` 的证据、卡内全部适用子检查、最低覆盖、`artifactItemRefs` 和 `caseRefs`，以及领域加载/分域信号、互斥、不适用和缺证据理由；不得把 BDP 与 BDSP 专属规则混用，不能只因合并卡标题有案例就判为覆盖，批量登记也不能掩盖不同触发条件或不同排除理由。暂缓的非功能规约不读取、不审核，也不因此报缺失。
 
-先检查测试设计生成 `policyManifest` 是否包含其应读的工作区、输出、对象、方法、A/B、案例和追溯规约，以及实际选中的方法 skill。缺失时返回 `INCOMPLETE`；不为证明已读而再次读取全部生成规约。
+先检查测试设计生成 `policyManifest` 是否包含其应读的工作区、输出、对象、方法、A/B、案例和追溯规约，以及实际选中的方法 skill。同时独立复核 `specialtySkillDecisions`：明确且有具体内容的安全/混沌章节或对象事实中具有独立覆盖价值的相关风险已选中，空标题、占位文本和孤立泛化词未被误选；自动选中项有材料证据、Phase A 承载项，`FULL` / `CASES` 还有实际 Skill 加载和案例引用。缺失时返回 `INCOMPLETE`；不为证明已读而再次读取全部生成规约。
 
 ## 审核维度
 
@@ -57,10 +57,11 @@ permission:
 1. 工作单元、材料范围、目录和文件命名；
 2. 事实基线是否先于方法选择，关键对象、异常和风险是否遗漏；
 3. 主方法是否匹配主要风险，辅助方法是否有独立覆盖价值；
-4. 实际命中的公共规约是否有材料证据，最低覆盖是否落实，互斥分支是否正确排除；
-5. Phase A → 确认/冻结 → Phase B 顺序，以及规则卡 → 中间物项 → 案例映射；
-6. 案例步骤、数据、预期及正常/异常/边界/权限/状态等覆盖质量；
-7. Mermaid、接口专用结构和最终可见交付格式。
+4. 安全/混沌专项 Skill 是否根据用户意图、材料章节或事实基线正确选中/排除，以及决策到 Phase A 和案例的追溯是否完整；
+5. 实际命中的公共规约是否有材料证据，最低覆盖是否落实，互斥分支是否正确排除；
+6. Phase A → 确认/冻结 → Phase B 顺序，以及规则卡/专项决策 → 中间物项 → 案例映射；
+7. 案例步骤、数据、预期及正常/异常/边界/权限/状态等覆盖质量；
+8. Mermaid、接口专用结构和最终可见交付格式。
 
 测试设计生成的 `structuralGateCheck` 只能作为输入证据，不能替代独立审核结论。
 
@@ -87,6 +88,7 @@ permission:
 - `scopeVerdict`
 - `factBaselineVerdict`
 - `methodSelectionVerdict`
+- `specialtySkillSelectionVerdict`
 - `publicRuleCoverageVerdict`
 - `phaseOrderVerdict`
 - `artifactToCaseVerdict`

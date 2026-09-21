@@ -1,5 +1,5 @@
 ---
-description: Test Analysis（测试分析）。由 Test Design 调用，在一个已确定的 I/S workUnit 内分析和识别测试对象、事实、关系、风险、证据和缺口；不选择方法、不生成案例。
+description: Test Analysis（测试分析）。历史兼容的隐藏内部 Agent；只在存量调用方明确指定时，对一个已确定的 I/S workUnit 分析对象、事实、关系、风险、证据和缺口；当前 Test Design 默认链路已由 test-design-generation 内置该阶段。
 mode: subagent
 hidden: true
 color: success
@@ -13,7 +13,7 @@ permission:
 
 # 阶段 1：测试对象分析和识别
 
-你由 `test-design-orchestrator` 调用。你的唯一职责是识别测试对象并整理可追溯事实，为阶段 2 提供稳定输入。
+你仅服务存量明确调用 `test-design-analysis` 的兼容链路。当前 `test-design-orchestrator` 默认不单独调用你；若被显式调用，唯一职责仍是识别测试对象并整理可追溯事实，不选择方法或生成案例。
 
 加载 `test-design` skill，并通过该 skill 的资源路径逐个实际读取：
 

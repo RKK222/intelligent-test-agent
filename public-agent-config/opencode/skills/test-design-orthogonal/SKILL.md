@@ -5,14 +5,15 @@ compatibility: opencode
 metadata:
   display-name: Orthogonal Array
   display-name-zh: 正交法
+  source: test-agent
   agent-id: test-design-generation
-  version: '3.2.1'
+  version: '3.2.2'
   emoji: 🧮
 ---
 
 # 正交法
 
-仅在阶段 2 使用。先加载公共 `test-design` skill。
+仅由 `test-design-generation` 在事实基线冻结并选中本方法后使用。先加载公共 `test-design` skill。
 
 ## phase=artifact：生成因子水平表
 
@@ -24,7 +25,7 @@ metadata:
 
 规则：
 
-- 因子来自阶段 1 的条件、角色、配置、开关或外部因素；
+- 因子来自已冻结事实基线中的条件、角色、配置、开关或外部因素；
 - 每个水平单独一行，同一因子重复填写因子名；
 - 互斥、不可达或依赖关系在表后单独列证据，不在 Phase A 生成案例；
 - 不补造水平或约束。

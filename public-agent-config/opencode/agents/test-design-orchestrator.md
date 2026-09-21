@@ -32,7 +32,7 @@ permission:
 - `designDocumentTarget`：`041-测试设计/测试设计文档/`；
 - `caseOutputTarget`：`041-测试设计/`；
 - `reviewTarget`：`041-测试设计/<子条目名称>-案例审核结果.md`；
-- `requestedMethods`：用户明确指定的方法或专项案例能力；“混沌案例/故障注入案例/混沌测试设计”规范化为 `chaos-case-generate`，“安全案例/安全测试设计/安全案例推荐”规范化为 `secure-case-recommend`；未指定时为空列表；
+- `requestedMethods`：用户明确指定的方法或专项案例能力；“混沌案例/故障注入案例/混沌测试设计”规范化为 `chaos-case-generate`，“安全案例/安全测试设计/安全案例推荐”规范化为 `secure-case-recommend`；未指定时为空列表。该列表只传递用户显式意图；材料章节和对象风险触发的专项 Skill 由生成 Agent 读取材料并冻结事实基线后决定；
 - `artifactApprovalMode`：用户明确要求先确认中间物时为 `manual`，其他完整设计请求为 `auto`；
 - `writeAllowed`；
 - `sourceManifest`：用户授权材料的路径、类型和必要元数据。
@@ -79,7 +79,7 @@ Task prompt 只包含上面的设计任务上下文。`FULL` 执行完整链路�
 - 只向用户展示 `# 1. 测试设计文档` 和待确认项；
 - 用户确认后再次调用同一个 `test-design-generation`；
 - 传入 `resumePhase=B`、`confirmedArtifactFiles` 和上一轮提取出的 `previousDesignManifest`；
-- `previousDesignManifest` 只包含 `workspaceContext`、事实分析基线、方法决策、Phase A manifest、冻结证据、材料证据索引和 `policyManifest`，不重复内联工作区原始材料。
+- `previousDesignManifest` 只包含 `workspaceContext`、事实分析基线、方法决策、`specialtySkillDecisions`、Phase A manifest、冻结证据、材料证据索引和 `policyManifest`，不重复内联工作区原始材料。
 
 恢复 Phase B 时不得重新做对象分析、方法选择或 Phase A，也不得只凭文件名重建冻结上下文。
 
@@ -98,7 +98,7 @@ Review 输入为紧凑 `designReviewInput`：
 - `workspaceContext`；
 - `requestedDeliverable`、`sourceManifest`、`materialsRead`、`analysisBaseline` 和 `outOfScope`；
 - `recognizedObjects`、`objectRelations` 和 `sourceEvidenceIndex`；
-- `requestedMethods` 和 `methodDecisions`；
+- `requestedMethods`、`methodDecisions` 和 `specialtySkillDecisions`；
 - `phaseAArtifactManifest` 和 `artifactFreezeEvidence`；
 - `caseAssemblyManifest` 和 `artifactToCaseMapping`；
 - Phase A、Phase B 正式文件路径；

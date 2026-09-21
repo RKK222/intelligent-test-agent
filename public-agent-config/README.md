@@ -32,7 +32,7 @@ deploy/internal/package-public-agent-config.sh
 2. `skill-creator` 升级到 1.2.1、`skill-optimizer` 升级到 1.1.1，明确 `Working directory` 与 Git/UI Workspace root 的差异，并为校验器增加互斥的 `--workspace-root`、`--public-config-root`。
 3. 将中文目录 `安全测试` 改为 `secure-scan`，使目录名与 frontmatter `name` 一致；去除其中的固定扫描地址、Cookie 和真实报文，改为受控环境注入。
 4. 为 `legacy-interface-function-asset-to-md` 补上 `metadata.agent-id: test-execution-api`；修复 AGENTS 清单中不存在的 `api-execute-case`，补齐遗漏 Agent/Skill。
-5. 将 `chaos-case-generate`、`secure-case-recommend` 绑定到 `test-design-generation`，增加显式意图路由和正反评测；内部匹配结果不落盘，正式案例统一映射为四列表 Markdown。
+5. 将 `chaos-case-generate`、`secure-case-recommend` 绑定到 `test-design-generation`；用户明确要求时强制选中，详细设计等输入含有具体内容的专项章节，或 Agent 从已冻结对象事实判断存在具有独立覆盖价值的安全/容错风险时自动选中；空标题、占位文本和孤立泛化词不触发。内部匹配结果不落盘，正式案例统一映射为四列表 Markdown。
 6. `test-execution-ui` 增加 `hidden: true`，与“只允许内部编排”的约定一致。
 7. 保留输入包已经验证可执行的 BDSP 调度/查询逻辑、原有地址、请求模板和授权捕获程序；数据库连接配置与加密密钥仍不复制进项目基线。
 
@@ -50,6 +50,8 @@ deploy/internal/package-public-agent-config.sh
 BDSP 案例设计通过 `test-design` 的 `big-data-common-cases.md` 接入设计链：识别到 BDSP 平台化作业、作业组、单作业调度或全流程调度信号后，由 `test-design-generation` 加载 `COMMON + BDSP` 规则集合。`bdsp-job-scheduler` 和 `bdsp-job-result-query` 只负责真实调度/结果查询，不应绑定案例设计 Agent。
 
 `stock-case-recommendation`、`test-execution-ui` 和 `whitebox-code-analyst` 通过专用 Tool 或自身流程工作，没有遗漏一个必须绑定的 Skill。
+
+其余测试设计方法 Skill 已重新核对：接口、等价类、正交、路径、场景、规则法和 UI/API 联动均按对象信号和独立风险自动选择，不要求用户先点名；只有 `test-design-augment` 的 `augment-flow` 模式保留“用户明确要求”门槛，因为它会按原编号、顺序和结构修改既有案例。当前默认主链路由 `test-design-generation` 内置事实分析；`test-design-analysis` 仅作为历史兼容的隐藏 Agent 保留。
 
 ## 部署者需要注入的环境变量
 

@@ -1,22 +1,24 @@
 # Agent 与 skill 映射
 
-## 三阶段主链路
+## 当前主链路
 
 | 阶段 | Agent | 核心产物 |
 | --- | --- | --- |
-| 1. 对象分析和识别 | `test-design-analysis` | 对象事实、关系、风险、证据和缺口；不含方法 |
-| 2. 方法设计与案例组装 | `test-design-generation` | Phase A 中间物 + Phase B 案例 |
-| 3. 案例 Review | `test-design-review` | 评审结论、问题和评审报告 |
+| 1. 事实分析、方法设计与案例组装 | `test-design-generation` | 先冻结对象事实基线，再生成 Phase A 中间物和 Phase B 案例 |
+| 2. 案例 Review | `test-design-review` | 评审结论、问题和评审报告 |
 
-## 阶段 2 内部流程
+`test-design-analysis` 仅作为历史兼容的隐藏内部 Agent 保留，当前 `test-design-orchestrator` 不单独调用。合并的是 Agent 调用边界；事实基线冻结、方法选择、Phase A 和 Phase B 的语义仍严格分开。
+
+## 生成 Agent 内部流程
 
 ```text
-2A 方法选择与中间物生成
-  -> 2A 中间物确认/冻结
-  -> 2B 基于中间物组装案例
+事实分析基线冻结
+  -> Phase A 方法选择与中间物生成
+  -> Phase A 中间物确认/冻结
+  -> Phase B 基于中间物组装案例
 ```
 
-阶段 2A 和 2B 属于同一个顶层阶段，但必须使用不同输入/输出契约。不能合成一个“边做表边写案例”的模板。
+生成 Agent 内的 Phase A 和 Phase B 必须使用不同输入/输出契约。不能合成一个“边做表边写案例”的模板。
 
 ## 方法 skill 的双模式
 
@@ -35,9 +37,9 @@
 
 ## 专项案例 Skill
 
-| 用户明确意图 | owner Agent | Skill | 执行边界 |
+| 专项能力 | owner Agent | Skill | 执行边界 |
 | --- | --- | --- | --- |
 | 混沌案例、故障注入案例、混沌测试设计 | `test-design-generation` | `chaos-case-generate` | 只生成专项案例与注入步骤，不执行故障注入 |
 | 安全案例、安全测试设计、安全案例推荐 | `test-design-generation` | `secure-case-recommend` | 只生成专项案例，不执行扫描或渗透测试 |
 
-专项 Skill 只有在用户明确提出对应意图时才加载，并记录到 `policyManifest.methodSkillsRead`。它们不替代主方法，也不读取暂缓的 `non-functional-chaos.md`、`non-functional-security.md`。
+专项 Skill 在用户明确提出对应意图时强制选中；在需求/详细设计含有具体内容的专项章节，或生成 Agent 根据已冻结对象事实判断存在具有独立覆盖价值的安全或容错风险时自动选中。决策记入 `policyManifest.specialtySkillDecisions`，Phase B 实际加载后把技术 ID 记入 `methodSkillsRead`。它们不替代主方法，也不读取暂缓的 `non-functional-chaos.md`、`non-functional-security.md`。

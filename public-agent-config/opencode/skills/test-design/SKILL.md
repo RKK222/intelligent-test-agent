@@ -5,8 +5,9 @@ compatibility: opencode
 metadata:
   display-name: Test Design
   display-name-zh: 测试设计
+  source: test-agent
   agent-id: test-design-orchestrator
-  version: '4.8.0'
+  version: '4.9.0'
   emoji: 🧪
 ---
 
@@ -59,11 +60,12 @@ test-design-orchestrator
 - `templates/case-assembly-template.md`
 - `templates/case-template.md`
 - 实际选中的方法 skill 和模板
+- Phase B 实际选中的 `chaos-case-generate` / `secure-case-recommend` 专项 Skill
 - 选中路径法或场景法时读取 `rules/mermaid.md`
 
 不要加载未选方法 skill，也不要在事实分析、Phase A 和 Phase B 之间重复读取同一规约。
 
-`rules/non-functional-chaos.md`、`rules/non-functional-performance.md`、`rules/non-functional-security.md` 和 `rules/production-safety.md` 是暂缓的旧规则卡，当前测试案例设计和 Review 均不得直接加载或匹配。用户明确要求混沌案例或安全案例时，生成 Agent 分别加载公共 `chaos-case-generate`、`secure-case-recommend` Skill；这两个专项能力不读取上述暂缓规则卡，也不在普通测试设计中自动触发。
+`rules/non-functional-chaos.md`、`rules/non-functional-performance.md`、`rules/non-functional-security.md` 和 `rules/production-safety.md` 是暂缓的旧规则卡，当前测试案例设计和 Review 均不得直接加载或匹配。但这不阻断公共 `chaos-case-generate`、`secure-case-recommend` Skill：用户明确要求时强制选中；需求/详细设计存在有具体内容的安全或混沌章节，或生成 Agent 从已冻结对象事实识别到具有独立覆盖价值的安全暴露面或容错故障模式时自动选中。自动选中必须有可定位证据和具体覆盖目标；空标题、占位文本和孤立泛化词不触发。这两个专项能力不读取上述暂缓规则卡。
 
 异步任务、UI 界面、批量任务、接口和业务改造-其它主对象规约，以及按领域信号加载的大数据公共案例附加规约，均位于本 Skill 的 `rules/` 目录。大数据附加规约必须先区分 `COMMON`、`BDP`、`BDSP`、`OUTBOUND`，只评估命中领域的规则集合；不得把 BDP 与 BDSP 专属规则混用。生成 Agent 必须按“适用域 → 触发条件 → 材料证据 → 必须分析 → 最低覆盖 → 排除条件”匹配实际适用的规则卡；不得只按标题套用，也不得为当前大类或领域机械生成全量案例。合并卡命中后必须逐项落实卡内检查点和互斥分支，不能把一张卡误当成一个宽泛案例。
 
@@ -90,7 +92,7 @@ Review 通过生成结果的 `policyManifest` 检查生成阶段是否加载完�
 测试设计生成结果使用一次 `policyManifest`：
 
 ```yaml
-policyVersion: test-design/4.8.0
+policyVersion: test-design/4.9.0
 rulesRead: []
 objectRuleBindings:
   - objectId:
@@ -111,14 +113,24 @@ objectRuleBindings:
         decision: NOT_APPLICABLE | MUTUALLY_EXCLUSIVE | MISSING_EVIDENCE
         reason:
 methodSkillsRead: []
+specialtySkillDecisions:
+  - skillId:
+    decision: SELECTED | NOT_SELECTED
+    selectionSource: USER_REQUEST | MATERIAL_SECTION | ANALYSIS_INFERENCE | NONE
+    sourceEvidence: []
+    coverageTargets: []
+    artifactItemRefs: []
+    caseRefs: []
+    reason:
 ```
 
 Review 使用独立 manifest：
 
 ```yaml
 reviewPolicyManifest:
-  policyVersion: test-design/4.8.0
+  policyVersion: test-design/4.9.0
   rulesRead: []
+  specialtySkillSelectionVerdict:
   reviewedObjectRuleSets:
     - objectId:
       ruleFile:
@@ -133,7 +145,7 @@ reviewPolicyManifest:
       minimumCoverageGaps: []
 ```
 
-`objectRuleBindings` 按“对象 + 规约文件”记录规则编号的评估结果；同一对象命中主对象规约和领域附加规约时可出现多项，但每项 `ruleFile` 唯一。主对象规约登记 `bindingType=PRIMARY`，`domainScopes` 为空，`expectedRuleIds` 是主规约完整编号；领域附加规约登记 `bindingType=DOMAIN_EXTENSION`，在 `domainScopes` 中区分 `COMMON`、`BDP`、`BDSP`、`OUTBOUND`，在 `loadEvidence` 中保存逐领域材料锚点，并以 `spec-index.md` 的分域集合计算去重后的 `expectedRuleIds`。每个预期编号的 `decision` 只能是 `MATCHED`、`NOT_APPLICABLE`、`MUTUALLY_EXCLUSIVE` 或 `MISSING_EVIDENCE`；`MATCHED` 必须用单个 `ruleId` 记录材料证据、最低覆盖、Phase A `artifactItemRefs` 和 Phase B `caseRefs`。多个非命中规则仅在判断理由完全相同时可用 `ruleIds` 合并一项，Review 展开后仍须与 `expectedRuleIds` 完全一致。缺少必要规约、附加规约加载或分域证据不足、编号未评估完整、跨域误评估或命中规则未绑定 Phase A 时对应 Agent 返回 `INCOMPLETE`。两种 manifest 都只用于内部编排，不进入正式文件或最终回复。
+`objectRuleBindings` 按“对象 + 规约文件”记录规则编号的评估结果；同一对象命中主对象规约和领域附加规约时可出现多项，但每项 `ruleFile` 唯一。主对象规约登记 `bindingType=PRIMARY`，`domainScopes` 为空，`expectedRuleIds` 是主规约完整编号；领域附加规约登记 `bindingType=DOMAIN_EXTENSION`，在 `domainScopes` 中区分 `COMMON`、`BDP`、`BDSP`、`OUTBOUND`，在 `loadEvidence` 中保存逐领域材料锚点，并以 `spec-index.md` 的分域集合计算去重后的 `expectedRuleIds`。每个预期编号的 `decision` 只能是 `MATCHED`、`NOT_APPLICABLE`、`MUTUALLY_EXCLUSIVE` 或 `MISSING_EVIDENCE`；`MATCHED` 必须用单个 `ruleId` 记录材料证据、最低覆盖、Phase A `artifactItemRefs` 和 Phase B `caseRefs`。多个非命中规则仅在判断理由完全相同时可用 `ruleIds` 合并一项，Review 展开后仍须与 `expectedRuleIds` 完全一致。`specialtySkillDecisions` 同时记录安全和混沌的选择/排除、来源、证据、覆盖目标与 A/B 追溯；自动选中不得只凭泛化词，已选中也不得绕过 Phase A 直接生成案例。缺少必要规约、附加规约加载或分域证据不足、编号未评估完整、跨域误评估、命中规则未绑定 Phase A，或专项 Skill 决策缺失/误判/断链时对应 Agent 返回 `INCOMPLETE`。两种 manifest 都只用于内部编排，不进入正式文件或最终回复。
 
 ## 核心不变量
 
@@ -144,6 +156,7 @@ reviewPolicyManifest:
 - 事实分析基线只记录对象、事实、关系、风险、证据和缺口，不选择方法；
 - 用户未指定方法时，每个对象先选一个主方法，仅在有独立覆盖价值时追加辅助方法；
 - 用户指定的方法必须纳入，材料不足时明确返回缺口，不静默替换；
+- 安全/混沌专项 Skill 按“用户显式指定强制选中，具体材料章节或事实风险自动选中，泛化词不触发”决策；
 - Phase A 不生成案例，Phase B 不新增或修改中间物；
 - `DESIGN`、`CASES`、`REVIEW` 只创建用户请求的产物；`REVIEW` 不先补跑生成；
 - 等价类、正交、路径、场景和接口方法必须先生成对应表、图或矩阵；
