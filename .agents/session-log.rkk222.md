@@ -17758,3 +17758,24 @@
 - 当前团队代码视图已按最新 `release` 提交发布到测试环境，访问地址为 `http://192.168.8.100:3000/`，Jenkins 地址为 `http://192.168.8.100:18081/job/intelligent-test-agent-release/29/`。
 - `20443` 仍保持原服务器管理台，不应直接替换为 TestAgent。若要在该管理台服务清单中新增 TestAgent 入口，需要提供其独立源码/配置仓库或授权的远端编辑路径；本项目没有该配置源。
 - 本次未修改产品代码、API、事件、数据库、Flyway、环境文件、OpenCode 源码或 generated SDK；只同步内部发布远端并完成 Jenkins 部署记录。
+
+## 2026-09-22 - 将 TestAgent 加入 20443 管理台服务清单
+
+### Why
+
+- 用户确认需要在 `https://192.168.8.100:20443/` 的服务器管理台服务清单中新增 TestAgent 入口，避免部署完成后仍需从其它位置寻找平台地址。
+
+### What
+
+- 通过 100 测试机现有受控 SSH 入口定位独立 `management-dashboard` 的站点文件 `/home/abc/management-dashboard/site/index.html`。
+- 先保留备份 `/home/abc/management-dashboard/site/index.html.bak-20260922-testagent`，再新增一行 `TestAgent 智能测试代理平台`，入口指向 `http://192.168.8.100:3000/`。
+
+### How
+
+- 复用 `management-dashboard` Nginx 容器现有只读站点挂载，仅编辑管理台站点 HTML，不覆盖根路径、不修改 `nginx.conf`，也未读取或输出任何凭据。
+- 通过本地 HTTPS 页面抓取确认新行已对外展示；通过远端 `docker exec management-dashboard nginx -t` 确认 Nginx 配置语法有效，并确认容器仍在运行。
+
+### Result
+
+- `https://192.168.8.100:20443/` 现在显示 TestAgent 服务行，复制/打开入口均为 `http://192.168.8.100:3000/`；原站点备份仍保留。
+- 20443 管理台属于当前仓库之外的独立配置，本次远端站点修改不进入产品代码提交；仅将本次操作记录写入本仓库会话日志并提交同步。
