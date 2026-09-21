@@ -246,6 +246,21 @@ public final class RuntimeIdGenerator {
         return prefixed("sae_");
     }
 
+    /** 生成团队特权访问审计事件 ID。 */
+    public static String teamOversightAuditEventId() {
+        return prefixed("toe_");
+    }
+
+    /** 生成团队工作区整组导出任务 ID。 */
+    public static String teamWorkspaceExportId() {
+        return prefixed("twe_");
+    }
+
+    /** 生成团队工作区整组导出明细 ID。 */
+    public static String teamWorkspaceExportItemId() {
+        return prefixed("twi_");
+    }
+
     /** 生成会话分享审计事件 ID。 */
     public static String sessionShareAuditEventId() {
         return prefixed("ssa_");

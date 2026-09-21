@@ -1,5 +1,13 @@
 # test-agent-workspace-management
 
+## 系统管理员团队代码视图
+
+`TeamWorkspaceApplicationService` 按授权范围列出应用、工作空间模板、版本、当前/历史人员及同版本多个个人 worktree；Git 状态区分 staged、unstaged、untracked，个人提交限定 `baseCommit..HEAD`，merge 标为 `SYNC_MERGE`，已发布提交还必须位于个人基线可达的版本目标范围，并同时匹配既有 SCM 校准姓名和统一认证号邮箱。祖先关系无法确认时失败关闭并返回“无法归属”。
+
+`TeamWorkspaceExportService` 在现有 Java 节点内异步导出全部个人 worktree，全局最多四个、同源节点最多两个并发，明细通过数据库租约防重复领取。预检上限为 2 GiB/5 万个普通文件；`.git`、符号链接、特殊文件和敏感凭据不进入 shard，排除路径/原因只写 ZIP `manifest.json`，审计只保存路径摘要。源节点生成稳定 shard，控制面复用公共 Java 路由，文件内容只通过文件 WebSocket 到协调节点；成功子集生成 `PARTIAL_READY`，产物保留两小时。成员移除会主动取消相关任务并通知协调节点清理，离线协调节点由仅处理本节点任务的每分钟轮询兜底；取消、过期或其它实时撤权同样阻断下载并清理。
+
+对应回归包括真实临时 Git 仓库、敏感文件规则、文件 WebSocket `TEAM_READ_ONLY` 权限与审计，以及 H2/固定 `.env.test` PostgreSQL 的团队关系、租约和迁移测试。
+
 创建应用版本使用既有注入 Clock 取时；副本写入后同仓库状态回写的时间校验遵循数据库微秒舍入精度，避免纳秒时间与数据库读回值差异导致创建失败。`ManagedWorkspaceApplicationServiceTest` 使用固定纳秒时间和模拟数据库舍入覆盖完整创建及最近工作区登记。顶部与左下角创建入口均复用 `createVersion`。
 
 Agent 配置权限补充：公共 Git 的 worktree 管理、暂存、提交和发布仍仅允许 `SUPER_ADMIN`；已登录用户可在服务层所有权校验通过后回退本人公共个人 worktree 的本地改动。应用 Agent 的暂存、提交和发布仍由 `APP_ADMIN`（含 `SUPER_ADMIN`）执行，普通成员仅可回退本人个人 worktree 中的应用 Agent 本地改动，不能指定共享 worktree。

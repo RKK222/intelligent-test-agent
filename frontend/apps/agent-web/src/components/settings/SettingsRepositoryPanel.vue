@@ -8,6 +8,7 @@ import type {
   RepositoryTypeOption
 } from "@test-agent/shared-types";
 import { InfoFilled } from "@element-plus/icons-vue";
+import { hasAppAdminCapability } from "../../auth/roleCapabilities";
 
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
 const AUTOMATION_CODE_REPOSITORY_TYPE = "AUTOMATION_CODE_REPOSITORY";
@@ -45,7 +46,7 @@ const createDialogVisible = ref(false);
 // 权限
 const currentRoles = computed(() => props.currentUser?.roles ?? []);
 const currentRoleLabel = computed(() => (currentRoles.value.length ? currentRoles.value.join(",") : "无角色"));
-const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP_ADMIN") || currentRoles.value.includes("SUPER_ADMIN"));
+const hasAppSettingsPermission = computed(() => hasAppAdminCapability(currentRoles.value));
 
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);

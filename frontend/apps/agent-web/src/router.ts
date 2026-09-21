@@ -9,6 +9,7 @@ import { handleAamCallback } from "./auth/aamAuth";
 import { jumpAam, resolveAamLoginBaseUrl } from "./utils/aamLogin";
 import { useAuthStore } from "./stores/authStore";
 import { useMemoryAccessStore } from "./stores/memoryAccessStore";
+import { hasSuperAdminCapability } from "./auth/roleCapabilities";
 
 const TOKEN_KEY = "test-agent.auth.token";
 const DEFAULT_WORKBENCH_PATH = "/workbench";
@@ -251,7 +252,7 @@ router.beforeEach(async (to, _from) => {
   if (to.name === "traces") {
     // 菜单隐藏不是权限边界；直达路由先刷新当前角色，后台接口还会再次执行 SUPER_ADMIN 强校验。
     const currentUser = authStore.currentUser ?? await authStore.fetchCurrentUser(backendApi);
-    if (!currentUser?.roles?.includes("SUPER_ADMIN")) {
+    if (!hasSuperAdminCapability(currentUser?.roles)) {
       return { name: "workbench", replace: true };
     }
   }

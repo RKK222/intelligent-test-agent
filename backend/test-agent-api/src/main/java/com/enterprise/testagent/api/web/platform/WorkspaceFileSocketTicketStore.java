@@ -172,6 +172,25 @@ class WorkspaceFileSocketTicketStore {
         return ticket;
     }
 
+    /** 签发团队只读 ticket；字段只保存团队范围快照，逐条 RPC 仍访问数据库实时复核。 */
+    WorkspaceFileSocketTicket issueTeamReadOnly(
+            String workspaceId,
+            String linuxServerId,
+            String actorUserId,
+            String targetUserId,
+            String scopeMode,
+            String ownerUserId,
+            String personalWorkspaceId,
+            String traceId) {
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                ticketFactory.get(), workspaceId, linuxServerId, null, false, false, false,
+                actorUserId, "workspace", null, null, true, "TEAM:" + scopeMode,
+                ownerUserId, personalWorkspaceId, targetUserId, traceId,
+                clock.instant().plus(DEFAULT_TTL), null, null, null, null, false, null, null);
+        tickets.put(ticket.ticket(), ticket);
+        return ticket;
+    }
+
     /** 分享文件 ticket 同时绑定 actor、执行所属人、分享版本和权限快照。 */
     WorkspaceFileSocketTicket issueShared(
             String workspaceId,

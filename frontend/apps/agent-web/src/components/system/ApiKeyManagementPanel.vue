@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Copy, Eye, KeyRound, Pencil, Plus, RefreshCw, RotateCw, Search, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 import type {
   CurrentUser,
   ExternalApiCredential,
@@ -15,7 +16,7 @@ import type {
 const props = defineProps<{ currentUser: CurrentUser | null; pageActive: boolean }>();
 const api = inject<BackendApiClient>("api")!;
 const queryClient = useQueryClient();
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 
 const keywordDraft = ref("");
 const keyword = ref("");

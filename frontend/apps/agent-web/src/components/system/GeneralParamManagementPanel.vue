@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Clock, Monitor } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag, ElSwitch } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 import type {
   CurrentUser,
   GeneralParameter,
@@ -59,7 +60,7 @@ const changeLogsParam = ref<GeneralParameter | null>(null);
 const memoryValuesDrawerOpen = ref(false);
 const refreshingMemoryProcessId = ref<string | null>(null);
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 
 const params = computed(() => ({
   platform: activePlatform.value || undefined,

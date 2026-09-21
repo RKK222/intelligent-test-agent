@@ -24,6 +24,7 @@ import com.enterprise.testagent.workspace.WorkspaceViewLocatorKind;
 import com.enterprise.testagent.opencode.runtime.localclient.LocalClientWorkspaceFileGateway;
 import com.enterprise.testagent.workspace.RequirementImportApplicationService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
+import com.enterprise.testagent.system.management.team.SystemAdminTeamApplicationService.AuthorizedTarget;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -260,6 +261,8 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         WorkspaceId auditedWorkspaceId = null;
         String auditedPath = null;
         SupportAccessAuthorization supportAuthorization = null;
+        AuthorizedTarget teamAuthorization = null;
+        boolean teamReadOnly = ticket.teamReadOnly();
         try {
             JsonNode root = objectMapper.readTree(payload);
             id = text(root, "id");
@@ -271,9 +274,13 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                     requireSupportReadOperation(op);
                 }
                 auditedWorkspaceId = workspaceId(ticket, params);
-                supportAuthorization = authorizeWorkspaceRpc(ticket, auditedWorkspaceId);
+                if (teamReadOnly) {
+                    teamAuthorization = ticketService.authorizeTeamWorkspaceRpc(ticket, auditedWorkspaceId);
+                } else {
+                    supportAuthorization = authorizeWorkspaceRpc(ticket, auditedWorkspaceId);
+                }
                 // 实时授权必须先于路径级拒绝，确保体验资格、当前绑定和服务器事实每条 RPC 都重新核对。
-                auditedPath = supportAuditPath(op, params);
+                auditedPath = supportAuditPath(ticket, op, params);
                 experienceWorkspaceRpc = ExperienceWorkspaceAccessAuthorizer
                         .isExperienceWorkspaceId(auditedWorkspaceId);
                 if (experienceWorkspaceRpc) {
@@ -450,6 +457,11 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 ticketService.recordSupportRpc(
                         supportAuthorization, op, auditedWorkspaceId, auditedPath, "SUCCESS", null, traceId);
             }
+            if (teamReadOnly) {
+                // 团队审计先于正文响应落库；角色降级或移出团队会在此再次失败关闭。
+                ticketService.recordTeamRpc(
+                        ticket, teamAuthorization, op, auditedWorkspaceId, auditedPath, "SUCCESS", null, traceId);
+            }
             if (ticket.sharedSession()) {
                 ticketService.recordSharedRpc(
                         ticket, op, sharedAuditWorkspace(ticket, auditedWorkspaceId), auditedPath,
@@ -469,6 +481,16 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                             traceId);
                 } catch (RuntimeException auditFailure) {
                     return error(id, ErrorCode.INTERNAL_ERROR.name(), "排查访问审计失败", traceId, Map.of());
+                }
+            }
+            if (teamAuthorization != null && auditedWorkspaceId != null) {
+                try {
+                    ticketService.recordTeamRpc(
+                            ticket, teamAuthorization, op == null ? "workspace.unknown" : op,
+                            auditedWorkspaceId, auditedPath, "FAILED",
+                            exception.errorCode().name(), traceId);
+                } catch (RuntimeException auditFailure) {
+                    return error(id, ErrorCode.INTERNAL_ERROR.name(), "团队访问审计失败", traceId, Map.of());
                 }
             }
             if (ticket.sharedSession()) {
@@ -499,6 +521,16 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                             traceId);
                 } catch (RuntimeException ignored) {
                     // 两次失败均只返回稳定错误，不暴露审计存储或文件系统异常细节。
+                }
+            }
+            if (teamAuthorization != null && auditedWorkspaceId != null) {
+                try {
+                    ticketService.recordTeamRpc(
+                            ticket, teamAuthorization, op == null ? "workspace.unknown" : op,
+                            auditedWorkspaceId, auditedPath, "FAILED",
+                            ErrorCode.INTERNAL_ERROR.name(), traceId);
+                } catch (RuntimeException ignored) {
+                    // 文件与审计同时失败时只返回稳定错误。
                 }
             }
             if (ticket.sharedSession()) {
@@ -710,12 +742,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         }
     }
 
-    private String supportAuditPath(String op, JsonNode params) {
+    private String supportAuditPath(WorkspaceFileSocketTicket ticket, String op, JsonNode params) {
         if ("workspace.search".equals(op)) {
             return null;
         }
         String path = text(params, "path");
-        if (protectedConfigPath(path)) {
+        if (!ticket.teamReadOnly() && protectedConfigPath(path)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "排查入口不允许读取 Agent 配置文件");
         }
         return path;

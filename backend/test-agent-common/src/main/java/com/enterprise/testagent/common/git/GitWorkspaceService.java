@@ -33,6 +33,8 @@ public class GitWorkspaceService {
     private static final int READ_ONLY_UNTRACKED_PATCH_MAX_LINES = 2_000;
     private static final int READ_ONLY_PATCH_MAX_FILE_CHARS = 256 * 1024;
     private static final int READ_ONLY_PATCH_MAX_TOTAL_CHARS = 1024 * 1024;
+    private static final int READ_ONLY_COMMIT_DIFF_MAX_CHARS = 1024 * 1024;
+    private static final Pattern COMMIT_OBJECT_ID = Pattern.compile("^[0-9a-fA-F]{7,64}$");
     private static final Pattern RELOCATION_REF = Pattern.compile(
             "^refs/test-agent/relocations/[A-Za-z0-9_-]{8,128}/(head|stash)$");
 
@@ -389,6 +391,123 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 分页读取两个固定提交之间的只读提交历史；不会 fetch、刷新 index 或修改工作树。
+     * baseExclusive 为空时从 endInclusive 可达的全部历史读取，调用方不得用该模式猜测业务归属。
+     */
+    public List<GitCommitSummary> listCommitHistory(
+            Path repoRoot,
+            String baseExclusive,
+            String endInclusive,
+            int offset,
+            int limit,
+            boolean includeMerges) {
+        return listCommitHistory(repoRoot, baseExclusive, endInclusive, offset, limit, includeMerges, null);
+    }
+
+    /** 与无 pathspec 版本相同，但只保留触及指定仓库相对目录的提交。 */
+    public List<GitCommitSummary> listCommitHistory(
+            Path repoRoot,
+            String baseExclusive,
+            String endInclusive,
+            int offset,
+            int limit,
+            boolean includeMerges,
+            String pathPrefix) {
+        if (offset < 0 || limit < 1 || limit > 200) {
+            throw new IllegalArgumentException("commit page must use offset >= 0 and limit between 1 and 200");
+        }
+        String end = requireCommitObjectId(endInclusive == null || endInclusive.isBlank() ? headCommit(repoRoot) : endInclusive);
+        String revision = end;
+        if (baseExclusive != null && !baseExclusive.isBlank()) {
+            revision = requireCommitObjectId(baseExclusive) + ".." + end;
+        }
+        ArrayList<String> command = new ArrayList<>(List.of(
+                "git", "--no-optional-locks", "-c", "log.showSignature=false",
+                "-C", repoRoot.toString(), "log", "--date-order", "--skip=" + offset,
+                "--max-count=" + limit,
+                "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%ct%x1f%s%x1e"));
+        if (!includeMerges) {
+            command.add("--no-merges");
+        }
+        command.add(revision);
+        if (pathPrefix != null && !pathPrefix.isBlank()) {
+            command.add("--");
+            command.add(requireReadOnlyRelativePath(pathPrefix));
+        }
+        String output = executor.execute(List.copyOf(command), null, DEFAULT_TIMEOUT).stdoutText();
+        return parseCommitSummaries(output);
+    }
+
+    /** 读取一个固定提交修改的路径和状态，不返回文件正文。 */
+    public List<GitNameStatusEntry> commitChangedFiles(Path repoRoot, String commit) {
+        String output = executor.execute(
+                List.of("git", "--no-optional-locks", "-c", "core.quotepath=false",
+                        "-C", repoRoot.toString(), "show", "--format=", "--name-status",
+                        "--no-renames", requireCommitObjectId(commit)),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+        return parseNameStatus(output);
+    }
+
+    /** 返回指定提交中单个安全相对路径的受限 patch；超限时明确标记截断。 */
+    public String commitFileDiff(Path repoRoot, String commit, String file) {
+        String normalizedFile = requireReadOnlyRelativePath(file);
+        String output = executor.execute(
+                List.of("git", "--no-optional-locks", "-c", "core.quotepath=false",
+                        "-C", repoRoot.toString(), "show", "--format=", "--no-ext-diff",
+                        "--no-renames", "--unified=3", requireCommitObjectId(commit), "--", normalizedFile),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+        if (output.length() <= READ_ONLY_COMMIT_DIFF_MAX_CHARS) {
+            return output;
+        }
+        return output.substring(0, READ_ONLY_COMMIT_DIFF_MAX_CHARS)
+                + "\n\n[diff truncated at " + READ_ONLY_COMMIT_DIFF_MAX_CHARS + " characters]\n";
+    }
+
+    private List<GitCommitSummary> parseCommitSummaries(String output) {
+        if (output == null || output.isBlank()) {
+            return List.of();
+        }
+        ArrayList<GitCommitSummary> commits = new ArrayList<>();
+        for (String record : output.split("\\u001e")) {
+            String normalized = record.strip();
+            if (normalized.isEmpty()) {
+                continue;
+            }
+            String[] fields = normalized.split("\\u001f", -1);
+            if (fields.length != 8) {
+                continue;
+            }
+            List<String> parents = fields[1].isBlank()
+                    ? List.of()
+                    : List.of(fields[1].trim().split("\\s+"));
+            commits.add(new GitCommitSummary(
+                    fields[0], parents, fields[2], fields[3], fields[4], fields[5],
+                    Instant.ofEpochSecond(Long.parseLong(fields[6])), fields[7], parents.size() > 1));
+        }
+        return List.copyOf(commits);
+    }
+
+    private String requireCommitObjectId(String value) {
+        String normalized = Objects.requireNonNull(value, "commit must not be null").trim();
+        if (!COMMIT_OBJECT_ID.matcher(normalized).matches()) {
+            throw new IllegalArgumentException("commit object id is invalid");
+        }
+        return normalized;
+    }
+
+    private String requireReadOnlyRelativePath(String value) {
+        String normalized = Objects.requireNonNull(value, "file must not be null").trim().replace('\\', '/');
+        Path path = Path.of(normalized).normalize();
+        if (normalized.isBlank() || path.isAbsolute() || path.startsWith("..")
+                || normalized.equals(".git") || normalized.startsWith(".git/")) {
+            throw new IllegalArgumentException("file path is invalid");
+        }
+        return path.toString().replace('\\', '/');
+    }
+
+    /**
      * 读取指定应用分支在本地仓库中的 origin 跟踪提交；不执行 fetch，也不访问网络。
      *
      * <p>该引用是本地 Git 对远程状态的事实快照，适合只读 Diff 判断本地 HEAD 是否包含
@@ -561,6 +680,11 @@ public class GitWorkspaceService {
             // merge-base 只有退出码 1 表示“不是祖先”；超时、仓库损坏或引用错误必须继续失败关闭。
             throw exception;
         }
+    }
+
+    /** 团队只读视图仅接受固定对象 ID，避免把数据库文本解释为 Git option 或可移动 ref。 */
+    public boolean isCommitAncestor(Path repoRoot, String ancestor, String descendant) {
+        return isAncestor(repoRoot, requireCommitObjectId(ancestor), requireCommitObjectId(descendant));
     }
 
     /**
@@ -1135,6 +1259,20 @@ public class GitWorkspaceService {
                         "status",
                         "--porcelain",
                         "--untracked-files=all"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText();
+    }
+
+    /** 返回指定安全 pathspec 下不会修改 index 的 porcelain 状态。 */
+    public String statusPorcelainReadOnly(Path repoRoot, String pathspec) {
+        String normalized = requireReadOnlyRelativePath(pathspec);
+        GitCommandResult result = executor.execute(
+                List.of(
+                        "git", "--no-optional-locks", "-c", "core.quotepath=false",
+                        "-c", "core.untrackedCache=false", "-c", "core.fsmonitor=false",
+                        "-C", repoRoot.toString(), "status", "--porcelain",
+                        "--untracked-files=all", "--", normalized),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText();
@@ -2166,6 +2304,19 @@ public class GitWorkspaceService {
         private boolean needsUnstagedDiff() {
             return !untrackedFile() && worktreeStatus != ' ' && worktreeStatus != '?';
         }
+    }
+
+    /** 团队只读代码视图使用的固定提交摘要。 */
+    public record GitCommitSummary(
+            String commit,
+            List<String> parents,
+            String authorName,
+            String authorEmail,
+            String committerName,
+            String committerEmail,
+            Instant committedAt,
+            String subject,
+            boolean merge) {
     }
 
     public record GitDiffFile(

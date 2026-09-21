@@ -4,6 +4,7 @@ import { FolderGit2, GitPullRequest, RefreshCcw } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import OpencodePublicConfigManagementPanel from "./OpencodePublicConfigManagementPanel.vue";
 import ApplicationGitRefreshManagementPanel from "./ApplicationGitRefreshManagementPanel.vue";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -12,7 +13,7 @@ const props = defineProps<{
 
 type ConfigMenuKey = "opencode-public" | "application-runtime" | "application-git";
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 const activeKey = ref<ConfigMenuKey>(hasSuperAdmin.value ? "opencode-public" : "application-git");
 
 watch(hasSuperAdmin, (allowed) => {

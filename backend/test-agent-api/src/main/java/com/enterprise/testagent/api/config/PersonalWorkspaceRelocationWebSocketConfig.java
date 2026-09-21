@@ -2,6 +2,8 @@ package com.enterprise.testagent.api.config;
 
 import com.enterprise.testagent.api.web.platform.PersonalWorkspaceRelocationTransferController;
 import com.enterprise.testagent.api.web.platform.PersonalWorkspaceRelocationTransferWebSocketHandler;
+import com.enterprise.testagent.api.web.platform.TeamWorkspaceExportShardController;
+import com.enterprise.testagent.api.web.platform.TeamWorkspaceExportShardWebSocketHandler;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -14,9 +16,12 @@ public class PersonalWorkspaceRelocationWebSocketConfig {
 
     @Bean
     HandlerMapping personalWorkspaceRelocationWebSocketHandlerMapping(
-            PersonalWorkspaceRelocationTransferWebSocketHandler handler) {
+            PersonalWorkspaceRelocationTransferWebSocketHandler handler,
+            TeamWorkspaceExportShardWebSocketHandler teamExportHandler) {
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
-        mapping.setUrlMap(Map.of(PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH, handler));
+        mapping.setUrlMap(Map.of(
+                PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH, handler,
+                TeamWorkspaceExportShardController.WEB_SOCKET_PATH, teamExportHandler));
         mapping.setOrder(-1);
         return mapping;
     }

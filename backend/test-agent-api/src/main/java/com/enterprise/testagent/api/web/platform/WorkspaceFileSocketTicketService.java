@@ -12,6 +12,7 @@ import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
 import com.enterprise.testagent.domain.runtime.RuntimeKind;
+import com.enterprise.testagent.domain.team.TeamScopeMode;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer;
 import com.enterprise.testagent.domain.workspace.ConversationWorkspaceAccessAuthorizer.FileWorkspaceKind;
@@ -29,6 +30,10 @@ import com.enterprise.testagent.workspace.UserWorkspaceQueryService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessApplicationService;
 import com.enterprise.testagent.system.supportaccess.SupportAccessAuthorization;
 import com.enterprise.testagent.system.supportaccess.SupportAccessRequestContext;
+import com.enterprise.testagent.system.management.team.SystemAdminTeamApplicationService;
+import com.enterprise.testagent.system.management.team.SystemAdminTeamApplicationService.AuthorizedTarget;
+import com.enterprise.testagent.system.management.team.TeamOversightRequestContext;
+import com.enterprise.testagent.workspace.TeamWorkspaceApplicationService;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -57,6 +62,8 @@ class WorkspaceFileSocketTicketService {
     private LocalClientWorkspaceRepository localWorkspaceRepository;
     private LocalClientConnectionStore localConnectionStore;
     private BackendJavaRouteResolver backendRouteResolver;
+    private SystemAdminTeamApplicationService systemAdminTeams;
+    private TeamWorkspaceApplicationService teamWorkspaces;
 
     WorkspaceFileSocketTicketService(
             WorkspaceApplicationService workspaceService,
@@ -268,6 +275,43 @@ class WorkspaceFileSocketTicketService {
         return response(ticket);
     }
 
+    /** 在个人 worktree 权威节点签发团队只读 ticket。 */
+    WorkspaceFileSocketDtos.TicketResponse createTeamReadOnlyTicket(
+            AuthPrincipal principal,
+            TeamScopeMode mode,
+            String ownerUserId,
+            String personalWorkspaceId,
+            String requestedLinuxServerId,
+            TeamOversightRequestContext requestContext) {
+        requireTeamServices();
+        var scope = systemAdminTeams.authorizeScope(principal, mode, ownerUserId);
+        UserId owner = scope.scope().global() ? null : new UserId(scope.scope().ownerUserId());
+        var personal = teamWorkspaces.personalWorkspace(
+                scope.scope().global(), owner, personalWorkspaceId);
+        AuthorizedTarget target = systemAdminTeams.authorizeTarget(
+                scope.actor().user().userId(), scope.scope().mode(), scope.scope().ownerUserId(),
+                personal.workspace().userId());
+        String currentLinuxServerId = workspaceService.currentLinuxServerId();
+        if (requestedLinuxServerId == null
+                || !currentLinuxServerId.equals(requestedLinuxServerId.trim())
+                || !currentLinuxServerId.equals(personal.linuxServerId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "团队文件 ticket 必须在个人工作区权威后端签发",
+                    Map.of("currentLinuxServerId", currentLinuxServerId));
+        }
+        WorkspaceId workspaceId = personal.workspace().runtimeWorkspaceId();
+        workspaceService.requireWorkspaceOnCurrentServer(workspaceId, requestContext.traceId());
+        WorkspaceFileSocketTicket ticket = ticketStore.issueTeamReadOnly(
+                workspaceId.value(), currentLinuxServerId, scope.actor().user().userId().value(),
+                target.target().userId().value(), scope.scope().mode().name(), scope.scope().ownerUserId(),
+                personalWorkspaceId, requestContext.traceId());
+        systemAdminTeams.recordOutcome(
+                scope.actor(), target.target(), "FILE_TICKET_ISSUED", "PERSONAL_WORKSPACE",
+                personalWorkspaceId, null, "SUCCESS", null, requestContext);
+        return response(ticket);
+    }
+
     /**
      * 每条 workspace RPC 重新校验 ticket、当前 JVM、用户 agent、Workspace 与托管副本事实。
      *
@@ -287,6 +331,10 @@ class WorkspaceFileSocketTicketService {
             return authorizeLocalWorkspaceRpc(ticket, workspaceId);
         }
         if (ticket.supportReadOnly()) {
+            if (ticket.teamReadOnly()) {
+                authorizeTeamWorkspaceRpc(ticket, workspaceId);
+                return null;
+            }
             requireSupportServices();
             if (ticket.supportTargetUserId() == null
                     || ticket.supportGrantId() == null
@@ -344,6 +392,55 @@ class WorkspaceFileSocketTicketService {
         }
         workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
         return null;
+    }
+
+    /** 团队文件 RPC 每次重新校验实时角色、团队关系、人员和 worktree 映射。 */
+    AuthorizedTarget authorizeTeamWorkspaceRpc(WorkspaceFileSocketTicket ticket, WorkspaceId workspaceId) {
+        requireTeamServices();
+        if (ticket == null || !ticket.teamReadOnly() || ticket.userId() == null
+                || ticket.supportTargetUserId() == null || ticket.supportActorSessionDigest() == null
+                || ticket.workspaceId() == null || !ticket.workspaceId().equals(workspaceId.value())
+                || !Objects.equals(workspaceService.currentLinuxServerId(), ticket.linuxServerId())) {
+            throw workspaceRpcDenied();
+        }
+        TeamScopeMode mode;
+        try {
+            mode = TeamScopeMode.valueOf(ticket.supportGrantId().substring("TEAM:".length()));
+        } catch (RuntimeException exception) {
+            throw workspaceRpcDenied();
+        }
+        String ownerUserId = ticket.supportGrantTokenDigest();
+        AuthorizedTarget target = systemAdminTeams.authorizeTarget(
+                new UserId(ticket.userId()), mode, ownerUserId,
+                new UserId(ticket.supportTargetUserId()));
+        UserId owner = mode == TeamScopeMode.GLOBAL ? null
+                : (mode == TeamScopeMode.MY_TEAM ? new UserId(ticket.userId()) : new UserId(ownerUserId));
+        var personal = teamWorkspaces.personalWorkspace(
+                mode == TeamScopeMode.GLOBAL, owner, ticket.supportActorSessionDigest());
+        if (!personal.workspace().runtimeWorkspaceId().equals(workspaceId)
+                || !personal.workspace().userId().equals(target.target().userId())
+                || !Objects.equals(personal.linuxServerId(), ticket.linuxServerId())) {
+            throw workspaceRpcDenied();
+        }
+        workspaceService.requireWorkspaceOnCurrentServer(workspaceId, ticket.traceId());
+        return target;
+    }
+
+    /** 团队文件访问审计只记录路径摘要，由领域审计仓储统一落库。 */
+    void recordTeamRpc(
+            WorkspaceFileSocketTicket ticket,
+            AuthorizedTarget target,
+            String operation,
+            WorkspaceId workspaceId,
+            String path,
+            String outcome,
+            String errorCode,
+            String traceId) {
+        systemAdminTeams.recordOutcome(
+                target.actor(), target.target(),
+                operation.toUpperCase(java.util.Locale.ROOT).replace('.', '_'),
+                "WORKSPACE_FILE", ticket.supportActorSessionDigest(), path,
+                outcome, errorCode, new TeamOversightRequestContext(traceId, null, null));
     }
 
     /** 记录文件 RPC 审计结果。 */
@@ -404,6 +501,12 @@ class WorkspaceFileSocketTicketService {
         }
     }
 
+    private void requireTeamServices() {
+        if (systemAdminTeams == null || teamWorkspaces == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "团队只读文件服务未装配");
+        }
+    }
+
     private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(UserId userId, String traceId) {
         // 文件路由只需要用户进程的服务器归属，不触发强健康检查
         // 直接使用 fileRoutingAffinity，避免因瞬时健康检查失败导致文件树不可用
@@ -414,6 +517,15 @@ class WorkspaceFileSocketTicketService {
     @Autowired(required = false)
     void configureSessionShareService(SessionCollaborationShareService shareService) {
         this.shareService = shareService;
+    }
+
+    /** 可选 setter 保持现有轻量测试构造器兼容；生产环境由 Spring 完整装配。 */
+    @Autowired(required = false)
+    void configureTeamWorkspaceServices(
+            SystemAdminTeamApplicationService systemAdminTeams,
+            TeamWorkspaceApplicationService teamWorkspaces) {
+        this.systemAdminTeams = Objects.requireNonNull(systemAdminTeams);
+        this.teamWorkspaces = Objects.requireNonNull(teamWorkspaces);
     }
 
     /** 生产环境装配本地客户端精确连接路由；保留既有轻量单元测试构造路径。 */

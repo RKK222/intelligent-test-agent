@@ -9,6 +9,7 @@ import type {
   ApplicationGitRefreshResult,
   CurrentUser
 } from "@test-agent/shared-types";
+import { hasAppAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -21,9 +22,7 @@ const loading = ref(false);
 const refreshingOperation = ref<string | null>(null);
 const errorMessage = ref("");
 const results = ref<Record<string, ApplicationGitRefreshResult>>({});
-const canRefreshApplicationGit = computed(() => props.currentUser?.roles?.some(
-  (role) => role === "SUPER_ADMIN" || role === "APP_ADMIN"
-) === true);
+const canRefreshApplicationGit = computed(() => hasAppAdminCapability(props.currentUser?.roles));
 
 onMounted(() => {
   if (canRefreshApplicationGit.value) void loadApplications();

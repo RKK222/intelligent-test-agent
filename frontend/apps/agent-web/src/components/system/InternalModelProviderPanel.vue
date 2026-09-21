@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { CirclePlus, KeyRound, Pencil, RefreshCw, TestTube2, Trash2 } from "lucide-vue-next";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 import type {
   CurrentUser,
   InternalModelCapability,
@@ -67,7 +68,7 @@ const modelCatalogError = ref("");
 let modelCatalogRequest = 0;
 let pendingTokenCommand: TokenSaveCommand | null = null;
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 
 const query = useQuery({
   queryKey: ["internal-model-providers"],

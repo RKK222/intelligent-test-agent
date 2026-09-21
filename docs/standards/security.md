@@ -520,3 +520,13 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 错误只返回稳定 code、reason、预算和上游 HTTP 状态，不返回 Token、服务 URL、物理路径、上游正文、源码正文
   或堆栈。成功源码正文只进入本次 Tool 响应并附 commit/generation/path/line/SHA-256；源码和图谱不写入 Mem0。
   所有操作为只读，不得借查询触发源码准备、TraceWeave 扫描/同步、业务源码写入或测试执行。
+
+## 系统管理员团队监督
+
+1. 角色能力只允许经后端 `RoleCapabilities` 和前端 `roleCapabilities.ts` 解释：`SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER`。团队 HTTP、下载和文件 WebSocket 每次操作都必须从数据库实时复核账号与角色；不得只相信 Token、菜单可见性或已签发 ticket。
+2. 系统管理员只能维护和读取自己的当前团队；超级管理员可用 `GLOBAL` 或指定实际系统管理员。团队关系与应用成员独立，成员移除后当前及历史范围立即失效；退出应用但仍在团队且保留个人 worktree 时只保留历史只读能力。
+3. `TEAM_READ_ONLY` 文件范围必须等同目标成员普通工作区可见根，可读 `.opencode`，但拒绝 `.git`、越界、符号链接、特殊设备、写/删/移动/上传、Git 变更、终端、配置修改和会话附加。每条 RPC 重新核对目标用户、版本、worktree 和权威服务器；跨 Java 文件正文只走平台文件 WebSocket。
+4. 已发布提交必须同时满足个人基线与版本目标的祖先边界，并匹配现有 SCM 校准姓名和统一认证号邮箱；关系不确定时显示无法归属。merge 只标为 `SYNC_MERGE`，不得算作个人提交或用模糊姓名扩大匹配。
+5. 整组导出排除 `.env/.env.*`（示例后缀除外）、凭据文件、私钥和 keystore；清单只记相对路径与原因，数据库审计只记路径 SHA-256。`.git`、符号链接和特殊文件不进入 shard。2 GiB/5 万普通文件上限在创建前预检，并在合并前再次校验。
+6. 导出控制信息只能通过公共 Java 路由转发，过滤 shard 使用源/目标绑定、摘要校验和单次 ticket 的内部 WebSocket；内部 `inspect/build/delete-revoked-artifact/receive/ws` 仅精确路径交给 XXL Token 或一次性 ticket 专用鉴权，子路径不得继承豁免。最终下载 ticket 短期、单次、绑定 actor/范围/目标人员，浏览器直接连接协调节点。团队成员移除时必须先把关联任务置为不可下载，再通知协调节点删除产物；协调节点离线时由只处理本节点任务的每分钟清理兜底。角色或负责人失效在每次进度、取消、路由、文件 RPC 和下载时实时撤权；取消、失败和两小时过期同样清理临时文件。
+7. 团队名单、代码、文件、导出与下载使用既有特权审计表的 `TEAM_OVERSIGHT` 类型，正文返回前必须先成功落审计。审计不保存文件内容、路径明文、Token、Git stderr 或 ZIP；继续执行 365 天清理规则。

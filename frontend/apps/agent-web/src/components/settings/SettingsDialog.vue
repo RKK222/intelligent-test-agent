@@ -4,6 +4,7 @@ import { createBackendApiClient } from "@test-agent/backend-api";
 import type { ApplicationDefinition, CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
+import { hasAppAdminCapability, hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 type MenuKey = "appWorkspace" | "repository" | "personal";
 
@@ -34,8 +35,8 @@ provide("api", api);
 const activeKey = ref<MenuKey>("appWorkspace");
 const autoOpenCreate = ref(false);
 const refreshKey = ref(0);
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
-const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
+const hasAppAdmin = computed(() => hasAppAdminCapability(props.currentUser?.roles));
 const defaultMenuKey = computed<MenuKey>(() => "appWorkspace");
 
 watch(

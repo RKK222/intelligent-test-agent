@@ -224,6 +224,10 @@ function renderWithApi(
         LocalClientVersionManagementPanel: {
           props: ["currentUser", "pageActive"],
           template: `<div data-testid="local-client-version-panel" :data-page-active="pageActive">客户端版本管理面板</div>`
+        },
+        TeamManagementPanel: {
+          props: ["currentUser", "pageActive"],
+          template: `<div data-testid="team-management-panel" :data-page-active="pageActive">团队管理面板</div>`
         }
       },
       provide: { api: backendApi }
@@ -562,6 +566,19 @@ describe("scheduler management panel", () => {
     expect(view.queryByText("用户管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("TestAgent公共配置管理")).toBeNull();
     expect(backendApi.listApplicationGitRefreshScopes).toHaveBeenCalledTimes(1);
+    view.queryClient.clear();
+  });
+
+  it("gives system administrators the team page and inherited application configuration only", async () => {
+    const backendApi = api();
+    const systemAdmin: CurrentUser = { ...currentUser, roles: ["SYSTEM_ADMIN"] };
+    const view = renderWithApi(SystemManagementPanel, backendApi, systemAdmin, { activeKey: "team" });
+
+    expect(await view.findByText("团队管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.getByText("配置管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.queryByText("运行管理", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.queryByText("用户管理", { selector: ".ta-system-menu-text" })).toBeNull();
+    expect(view.getByTestId("team-management-panel").getAttribute("data-page-active")).toBe("true");
     view.queryClient.clear();
   });
 

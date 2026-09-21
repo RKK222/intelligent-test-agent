@@ -15,6 +15,7 @@ import type {
   InternalModelThroughputDistribution
 } from "@test-agent/shared-types";
 import MetricHelpLabel from "./MetricHelpLabel.vue";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -214,7 +215,7 @@ const chartHelp = {
   providerVolume: "按供应商汇总当前筛选范围内的调用次数，用来比较各供应商实际承载的调用量。"
 } as const;
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 
 const probeStatusQuery = useQuery({
   queryKey: ["internal-model-observability-probe-status"],

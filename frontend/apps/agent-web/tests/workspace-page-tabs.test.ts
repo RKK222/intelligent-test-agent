@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   closeWorkspacePageTabs,
+  canOpenSystemMenu,
   defaultSystemMenuKey,
   moveWorkspacePageTab,
   openWorkspacePageTab,
@@ -166,6 +167,13 @@ describe("workspace page tabs", () => {
       canonicalize: false
     });
     expect(defaultSystemMenuKey(["APP_ADMIN"])).toBe("config");
+    expect(defaultSystemMenuKey(["SYSTEM_ADMIN"])).toBe("team");
+    expect(canOpenSystemMenu("team", ["SYSTEM_ADMIN"])).toBe(true);
+    expect(canOpenSystemMenu("runtime", ["SYSTEM_ADMIN"])).toBe(false);
+    expect(parseWorkspacePageRoute("system", "team", ["SYSTEM_ADMIN"])).toEqual({
+      id: "system:team",
+      canonicalize: false
+    });
   });
 
   it("keeps the default system route clean and encodes non-default sections", () => {

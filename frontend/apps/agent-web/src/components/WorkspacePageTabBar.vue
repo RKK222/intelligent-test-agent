@@ -15,6 +15,7 @@ import {
   Settings2,
   SlidersHorizontal,
   Trash2,
+  UserRoundCheck,
   Waypoints,
   Wrench,
   X
@@ -48,6 +49,7 @@ const PAGE_ICONS: Partial<Record<WorkspacePageId, Component>> = {
   toolbox: Wrench,
   memories: BrainCircuit,
   hub: Boxes,
+  "system:team": UserRoundCheck,
   "system:scheduler": CalendarClock,
   "system:runtime": Activity,
   "system:localClientVersions": RefreshCw,

@@ -8,6 +8,8 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
 
 后端 HTTP/SSE/WebSocket API 定义模块，只做协议入口、请求响应 DTO、统一响应、错误、traceId、鉴权、限流和受控 WebSocket 适配。
 
+系统管理员团队入口由 `SystemAdminTeamController` 与 `TeamWorkspaceController` 提供；HTTP 每次读取实时角色与团队关系，个人 worktree 请求使用 `BackendJavaRouteResolver` / `BackendHttpForwarder` 定位权威 Java。`TEAM_READ_ONLY` 文件 ticket 复用平台文件 WebSocket 且逐 RPC 复核授权，只开放目录、搜索、预览、分块读取和 diff。整组导出控制面跨 Java 走公共 HTTP 转发，过滤 shard 通过专用一次性 WebSocket 传输，浏览器使用协调节点的一次性路由原生下载；内部 shard 与撤权清理入口仅按精确路径放行给 XXL Token/单次 ticket 专用鉴权。
+
 ## 主要职责
 
 - `LocalClientVersionManagementController` 的基址为 `/api/internal/platform/local-opencode-client/version-management`，

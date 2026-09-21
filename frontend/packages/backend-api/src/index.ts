@@ -61,6 +61,18 @@ import type {
   TraceQueryParams,
   TraceRawEventPage,
   TraceSpanPage,
+  TeamApplication,
+  TeamCommitDetail,
+  TeamCommitDiff,
+  TeamCommitPage,
+  TeamContribution,
+  TeamExport,
+  TeamExportDownloadRoute,
+  TeamGitStatus,
+  TeamScopeParams,
+  TeamUser,
+  TeamWorkspaceTemplate,
+  TeamWorkspaceVersion,
   ApplicationWorkspaceTemplate,
   BatchContext,
   ApplicationWorkspaceVersion,
@@ -754,6 +766,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const workspaceFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const supportFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const supportFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  const teamFileSockets = new Map<string, WorkspaceFileSocketClient>();
+  const teamFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
@@ -904,6 +918,74 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         return await client.request<T>(op, { workspaceId, ...params });
       } catch (error) {
         if (!retryTransportOnce || attempt > 0 || !(error instanceof WorkspaceFileTransportError)) throw error;
+      }
+    }
+  }
+
+  function teamScopeQuery(scope: TeamScopeParams): string {
+    return query({ scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId });
+  }
+
+  function teamSocketKey(scope: TeamScopeParams, personalWorkspaceId: string): string {
+    return [scope.scopeMode ?? "MY_TEAM", scope.ownerUserId ?? "", personalWorkspaceId]
+      .map(encodeURIComponent).join(":");
+  }
+
+  async function ensureTeamWorkspaceFileClient(
+    scope: TeamScopeParams,
+    personalWorkspaceId: string,
+    workspaceId: string
+  ): Promise<WorkspaceFileSocketClient> {
+    const key = teamSocketKey(scope, personalWorkspaceId);
+    const existing = teamFileSockets.get(key);
+    if (existing?.open) return existing;
+    const connecting = teamFileConnections.get(key);
+    if (connecting) return connecting;
+    existing?.close();
+    const basePath = `${workspaceManagementBase}/team/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}`;
+    const scopeQuery = teamScopeQuery(scope);
+    const connection = (async () => {
+      const route = await requestFrom<WorkspaceFileRoute>(baseUrl, `${basePath}/file-ws-route${scopeQuery}`, {
+        method: "POST"
+      });
+      const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+        route.baseUrl.replace(/\/$/, ""),
+        `${basePath}/file-ws-tickets${scopeQuery}`,
+        { method: "POST", body: JSON.stringify({ linuxServerId: route.linuxServerId }) }
+      );
+      let client!: WorkspaceFileSocketClient;
+      client = new WorkspaceFileSocketClient(
+        toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+        webSocketFactory,
+        () => {
+          if (teamFileSockets.get(key) === client) teamFileSockets.delete(key);
+        }
+      );
+      teamFileSockets.set(key, client);
+      await client.ready();
+      return client;
+    })();
+    teamFileConnections.set(key, connection);
+    try {
+      return await connection;
+    } finally {
+      if (teamFileConnections.get(key) === connection) teamFileConnections.delete(key);
+    }
+  }
+
+  async function teamWorkspaceFileRpc<T>(
+    scope: TeamScopeParams,
+    personalWorkspaceId: string,
+    workspaceId: string,
+    op: "workspace.list" | "workspace.search" | "workspace.read" | "workspace.read.chunk" | "workspace.read.binary.chunk",
+    params: Record<string, unknown>
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const client = await ensureTeamWorkspaceFileClient(scope, personalWorkspaceId, workspaceId);
+        return await client.request<T>(op, { workspaceId, ...params });
+      } catch (error) {
+        if (attempt > 0 || !(error instanceof WorkspaceFileTransportError)) throw error;
       }
     }
   }
@@ -3303,6 +3385,132 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       }),
     /** 查询可选角色列表，供新增用户下拉选择。 */
     listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
+
+    // ---- 系统管理员团队代码视图 API ----
+
+    listSystemAdmins: (keyword = "", page = 1, size = 50) =>
+      request<PageResponse<TeamUser>>(`${systemManagementBase}/system-admins${query({ keyword, page, size })}`),
+    listSystemAdminTeamMembers: (scope: TeamScopeParams, keyword = "", page = 1, size = 50) =>
+      request<PageResponse<TeamUser>>(`${systemManagementBase}/team-members${query({
+        scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, keyword, page, size
+      })}`),
+    listSystemAdminTeamCandidates: (scope: TeamScopeParams, keyword = "", page = 1, size = 50) =>
+      request<PageResponse<TeamUser>>(`${systemManagementBase}/team-member-candidates${query({
+        scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, keyword, page, size
+      })}`),
+    addSystemAdminTeamMember: (scope: TeamScopeParams, memberUserId: string) =>
+      request<{ ownerUserId: string; memberUserId: string; active: boolean }>(
+        `${systemManagementBase}/team-members${query({
+          scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId
+        })}`,
+        { method: "POST", body: JSON.stringify({ memberUserId }) }
+      ),
+    removeSystemAdminTeamMember: (scope: TeamScopeParams, memberUserId: string) =>
+      request<{ ownerUserId: string; memberUserId: string; active: boolean }>(
+        `${systemManagementBase}/team-members/${encodeURIComponent(memberUserId)}${query({
+          scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId
+        })}`,
+        { method: "DELETE" }
+      ),
+    listTeamApplications: (scope: TeamScopeParams) =>
+      request<TeamApplication[]>(`${workspaceManagementBase}/team/applications${teamScopeQuery(scope)}`),
+    listTeamWorkspaceTemplates: (scope: TeamScopeParams, appId: string) =>
+      request<TeamWorkspaceTemplate[]>(
+        `${workspaceManagementBase}/team/applications/${encodeURIComponent(appId)}/workspaces${teamScopeQuery(scope)}`
+      ),
+    listTeamWorkspaceVersions: (scope: TeamScopeParams, workspaceId: string) =>
+      request<TeamWorkspaceVersion[]>(
+        `${workspaceManagementBase}/team/workspaces/${encodeURIComponent(workspaceId)}/versions${teamScopeQuery(scope)}`
+      ),
+    listTeamContributions: (scope: TeamScopeParams, versionId: string) =>
+      request<TeamContribution[]>(
+        `${workspaceManagementBase}/team/versions/${encodeURIComponent(versionId)}/contributions${teamScopeQuery(scope)}`
+      ),
+    getTeamWorkspaceGitStatus: (scope: TeamScopeParams, personalWorkspaceId: string) =>
+      request<TeamGitStatus>(
+        `${workspaceManagementBase}/team/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/status${teamScopeQuery(scope)}`
+      ),
+    listTeamWorkspaceCommits: (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      kind: "PERSONAL" | "PUBLISHED",
+      offset = 0,
+      limit = 50
+    ) => request<TeamCommitPage>(
+      `${workspaceManagementBase}/team/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/commits${query({
+        scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, kind, offset, limit
+      })}`
+    ),
+    getTeamWorkspaceCommitDetail: (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      commit: string,
+      kind: "PERSONAL" | "PUBLISHED"
+    ) => request<TeamCommitDetail>(
+      `${workspaceManagementBase}/team/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}`
+      + `/commits/${encodeURIComponent(commit)}${query({
+        scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, kind
+      })}`
+    ),
+    getTeamWorkspaceCommitDiff: (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      commit: string,
+      path: string,
+      kind: "PERSONAL" | "PUBLISHED"
+    ) => request<TeamCommitDiff>(
+      `${workspaceManagementBase}/team/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}`
+      + `/commits/${encodeURIComponent(commit)}/diff${query({
+        scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, kind, path
+      })}`
+    ),
+    listTeamWorkspaceFiles: async (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      workspaceId: string,
+      path = ""
+    ) => (await teamWorkspaceFileRpc<BackendFileTreeEntry[]>(
+      scope, personalWorkspaceId, workspaceId, "workspace.list", { path }
+    )).map((entry) => ({
+      path: entry.path, name: entry.name, type: entry.directory ? "directory" : "file",
+      size: entry.size, modifiedAt: entry.lastModifiedAt
+    })) satisfies FileTreeEntry[],
+    searchTeamWorkspaceFiles: async (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      workspaceId: string,
+      searchQuery: string
+    ) => (await teamWorkspaceFileRpc<BackendFileSearchResult[]>(
+      scope, personalWorkspaceId, workspaceId, "workspace.search", { query: searchQuery }
+    )).map((result) => ({
+      path: result.path, name: result.name, directory: result.directory,
+      size: result.size, modifiedAt: result.lastModifiedAt
+    })) satisfies FileSearchResult[],
+    readTeamWorkspaceFile: async (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      workspaceId: string,
+      path: string
+    ) => {
+      const data = await teamWorkspaceFileRpc<BackendFileContent>(
+        scope, personalWorkspaceId, workspaceId, "workspace.read", { path }
+      );
+      return { path: data.path || path, content: data.content ?? "", encoding: "utf-8",
+        size: data.size, readonly: true } satisfies FileContent;
+    },
+    createTeamExport: (scope: TeamScopeParams, versionId: string) => request<TeamExport>(
+      `${workspaceManagementBase}/team/versions/${encodeURIComponent(versionId)}/exports${teamScopeQuery(scope)}`,
+      { method: "POST" }
+    ),
+    getTeamExport: (exportId: string) => request<TeamExport>(
+      `${workspaceManagementBase}/team/exports/${encodeURIComponent(exportId)}`
+    ),
+    cancelTeamExport: (exportId: string) => request<boolean>(
+      `${workspaceManagementBase}/team/exports/${encodeURIComponent(exportId)}/cancel`, { method: "POST" }
+    ),
+    createTeamExportDownloadRoute: (exportId: string) => request<TeamExportDownloadRoute>(
+      `${workspaceManagementBase}/team/exports/${encodeURIComponent(exportId)}/download-route`, { method: "POST" }
+    ),
 
     // ---- 超级管理员问题排查只读 API ----
 

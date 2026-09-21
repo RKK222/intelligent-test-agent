@@ -256,6 +256,7 @@ import {
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import { reconcileAutomationReferenceWorkspace } from "./automation-reference-config-reconciliation";
+import { hasAppAdminCapability, hasSuperAdminCapability } from "../auth/roleCapabilities";
 import CustomMenuSettingsPanel from "./settings/CustomMenuSettingsPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import CustomMenuPage from "./CustomMenuPage.vue";
@@ -470,7 +471,7 @@ type RawOutputEntry = {
 // 模型切换是超级管理员的隐藏运维入口，默认不展示，避免普通操作误触。
 const modelSelectionUnlocked = ref(false);
 const modelSelectionShortcut = createTripleKeyShortcut("Control");
-const isSuperAdmin = computed(() => !shareMode.value && authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const isSuperAdmin = computed(() => !shareMode.value && hasSuperAdminCapability(authStore.currentUser?.roles));
 const canSelectModel = computed(() => isSuperAdmin.value && modelSelectionUnlocked.value);
 watch(isSuperAdmin, () => {
   // 退出超级管理员上下文后立即收回入口；再次进入仍需重新完成三次 Ctrl。
@@ -480,7 +481,7 @@ watch(isSuperAdmin, () => {
 const memoryAvailable = computed(() => !shareMode.value && memoryAccessStore.resolved && memoryAccessStore.allowed);
 const canUseLobehub = computed(() => releaseFeatures.lobehub && isSuperAdmin.value);
 const isAppAdmin = computed(() =>
-  !shareMode.value && (isSuperAdmin.value || authStore.currentUser?.roles?.includes("APP_ADMIN") === true)
+  !shareMode.value && hasAppAdminCapability(authStore.currentUser?.roles)
 );
 
 const FIRST_LOGIN_GUIDE_STORAGE_VERSION = "v7";

@@ -4,6 +4,7 @@ import { ArrowDownToLine, RefreshCw, RotateCcw, ShieldCheck } from "lucide-vue-n
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Badge, Button, Input, Spinner } from "@test-agent/ui-kit";
 import type { BackendApiClient } from "@test-agent/backend-api";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 import type {
   CurrentUser,
   LocalClientGlobalPolicy,
@@ -20,7 +21,7 @@ const props = defineProps<{
 }>();
 
 const api = inject<BackendApiClient>("api")!;
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 const releases = ref<LocalClientRelease[]>([]);
 const globalPolicy = ref<LocalClientGlobalPolicy | null>(null);
 const userPolicies = ref<LocalClientUserPolicy[]>([]);

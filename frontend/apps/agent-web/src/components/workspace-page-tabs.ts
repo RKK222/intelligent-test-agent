@@ -3,8 +3,10 @@ import {
   type CustomMenuIconKey,
   type CustomMenuItem
 } from "./custom-menus";
+import { hasAppAdminCapability, hasSuperAdminCapability, hasSystemAdminCapability } from "../auth/roleCapabilities";
 
 export type SystemMenuKey =
+  | "team"
   | "scheduler"
   | "runtime"
   | "users"
@@ -39,6 +41,7 @@ export type WorkspacePageTab = {
 };
 
 const SYSTEM_MENU_KEYS: readonly SystemMenuKey[] = [
+  "team",
   "scheduler",
   "runtime",
   "users",
@@ -55,6 +58,7 @@ const SYSTEM_MENU_KEYS: readonly SystemMenuKey[] = [
 ];
 
 const SYSTEM_SECTION_BY_KEY: Record<SystemMenuKey, string> = {
+  team: "team",
   scheduler: "scheduler",
   runtime: "runtime",
   users: "users",
@@ -78,6 +82,7 @@ const PAGE_TITLES: Record<Exclude<WorkspacePageId, CustomWorkspacePageId>, strin
   toolbox: "工具箱",
   memories: "记忆",
   hub: "能力库",
+  "system:team": "团队管理",
   "system:scheduler": "定时任务管理",
   "system:runtime": "运行管理",
   "system:users": "用户管理",
@@ -143,8 +148,9 @@ export function systemMenuKeyFromPageId(id: WorkspacePageId): SystemMenuKey | nu
 }
 
 export function canOpenSystemMenu(key: SystemMenuKey, roles: string[], supportRevealed = false): boolean {
-  if (roles.includes("SUPER_ADMIN")) return key !== "support" || supportRevealed;
-  return roles.includes("APP_ADMIN") && key === "config";
+  if (hasSuperAdminCapability(roles)) return key !== "support" || supportRevealed;
+  if (hasSystemAdminCapability(roles)) return key === "team" || key === "config";
+  return hasAppAdminCapability(roles) && key === "config";
 }
 
 export function canOpenWorkspacePage(
@@ -287,7 +293,9 @@ export function restoreWorkspacePageTabs(
 }
 
 export function defaultSystemMenuKey(roles: string[]): SystemMenuKey {
-  return roles.includes("SUPER_ADMIN") ? "scheduler" : "config";
+  return hasSuperAdminCapability(roles) ? "scheduler"
+    : hasSystemAdminCapability(roles) ? "team"
+      : "config";
 }
 
 export function parseWorkspacePageRoute(
@@ -306,7 +314,7 @@ export function parseWorkspacePageRoute(
     return { id: customMenuPageId(rawCustomMenuId), canonicalize: false };
   }
   if (routeName !== "system") return null;
-  if (!roles.includes("SUPER_ADMIN") && !roles.includes("APP_ADMIN")) return null;
+  if (!hasAppAdminCapability(roles)) return null;
   const fallbackKey = defaultSystemMenuKey(roles);
   if (typeof rawSection !== "string" || rawSection.trim() === "") {
     return { id: `system:${fallbackKey}`, canonicalize: false };

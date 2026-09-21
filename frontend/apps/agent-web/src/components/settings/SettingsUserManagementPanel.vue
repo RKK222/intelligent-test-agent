@@ -10,6 +10,7 @@ import type {
   UserManagementFilter,
   UserManagementUser
 } from "@test-agent/shared-types";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 // SettingsPanel 统一向所有面板传入 currentUser，用于权限判断。
 const props = defineProps<{
@@ -20,7 +21,7 @@ const api = inject<BackendApiClient>("api")!;
 
 // 权限：仅 SUPER_ADMIN 可用，菜单层也会隐藏入口，此处双保险。
 const hasPermission = computed(
-  () => props.currentUser?.roles?.includes("SUPER_ADMIN") === true
+  () => hasSuperAdminCapability(props.currentUser?.roles)
 );
 
 const users = ref<UserManagementUser[]>([]);

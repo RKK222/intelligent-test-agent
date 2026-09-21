@@ -1,5 +1,7 @@
 # @test-agent/backend-api
 
+系统管理员团队 API 统一由本包封装：人员名单与范围参数走 HTTP，个人 worktree Git 请求由服务端跨 Java 路由，目录/搜索/预览走 `TEAM_READ_ONLY` 文件 WebSocket，整组导出只接收任务状态和一次性协调节点下载路由。客户端不得持有物理路径、复用普通可写 ticket，或在浏览器内拼接跨节点 shard。
+
 新增外部 API 凭据管理 client：scope、分页、新建、编辑、reveal、rotate、delete 全部调用 `/api/internal/platform/system-management/api-keys`。原始交换观察器把 `apiKey/ciphertext/encryptedApiKey` 视为敏感字段递归脱敏；一次性明文响应由组件直接消费，不应写入共享缓存。
 
 认证客户端提供 `loginByUnifiedAuth()`，请求固定调用 `/api/auth/login-by-unified-auth`，显式忽略 options 或 `sessionStorage` 中残留的平台 Token，也抑制全局 401 处理器，由 router 区分 AAM 拒绝与外部服务不可用。请求/响应原始观察器继续按 `token` 键递归脱敏。

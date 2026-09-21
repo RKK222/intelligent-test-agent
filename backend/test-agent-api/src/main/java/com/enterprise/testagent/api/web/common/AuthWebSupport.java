@@ -4,6 +4,7 @@ import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.auth.AuthPrincipal;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.dictionary.RoleCapabilities;
 import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.server.ServerWebExchange;
@@ -49,15 +50,9 @@ public final class AuthWebSupport {
         throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
     }
 
-    /**
-     * 判断全局角色权限，超级管理员继承应用管理员能力，但不改写认证主体中的实际角色。
-     */
+    /** 判断全局角色权限，按平台统一层级展开能力，但不改写认证主体中的实际角色。 */
     public static boolean hasRole(AuthPrincipal principal, String role) {
-        if (principal.roles().contains(role)) {
-            return true;
-        }
-        return Dictionary.ROLE_APP_ADMIN.equals(role)
-                && principal.roles().contains(Dictionary.ROLE_SUPER_ADMIN);
+        return RoleCapabilities.hasCapability(principal.roles(), role);
     }
 
     /**

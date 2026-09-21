@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceExportMapper">
+    <resultMap id="JobMap" type="com.enterprise.testagent.domain.team.TeamWorkspaceExportJob">
+        <constructor>
+            <arg column="export_id" javaType="java.lang.String"/>
+            <arg column="actor_user_id" javaType="java.lang.String"/>
+            <arg column="owner_user_id" javaType="java.lang.String"/>
+            <arg column="scope_mode" javaType="com.enterprise.testagent.domain.team.TeamScopeMode"/>
+            <arg column="version_id" javaType="java.lang.String"/>
+            <arg column="coordinator_linux_server_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="com.enterprise.testagent.domain.team.TeamWorkspaceExportStatus"/>
+            <arg column="total_items" javaType="_int"/>
+            <arg column="completed_items" javaType="_int"/>
+            <arg column="succeeded_items" javaType="_int"/>
+            <arg column="failed_items" javaType="_int"/>
+            <arg column="file_count" javaType="_int"/>
+            <arg column="uncompressed_bytes" javaType="_long"/>
+            <arg column="archive_bytes" javaType="java.lang.Long"/>
+            <arg column="archive_sha256" javaType="java.lang.String"/>
+            <arg column="artifact_file_name" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/>
+            <arg column="error_message" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="started_at" javaType="java.time.Instant"/>
+            <arg column="completed_at" javaType="java.time.Instant"/>
+            <arg column="expires_at" javaType="java.time.Instant"/>
+            <arg column="cancelled_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ItemMap" type="com.enterprise.testagent.domain.team.TeamWorkspaceExportItem">
+        <constructor>
+            <arg column="export_item_id" javaType="java.lang.String"/>
+            <arg column="export_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="personal_workspace_id" javaType="java.lang.String"/>
+            <arg column="source_linux_server_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="file_count" javaType="_int"/>
+            <arg column="uncompressed_bytes" javaType="_long"/>
+            <arg column="shard_bytes" javaType="java.lang.Long"/>
+            <arg column="shard_sha256" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/>
+            <arg column="error_message" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="JobColumns">export_id, actor_user_id, owner_user_id, scope_mode, version_id,
+        coordinator_linux_server_id, status, total_items, completed_items, succeeded_items,
+        failed_items, file_count, uncompressed_bytes, archive_bytes, archive_sha256,
+        artifact_file_name, error_code, error_message, created_at, started_at, completed_at,
+        expires_at, cancelled_at</sql>
+
+    <sql id="ItemColumns">export_item_id, export_id, user_id, personal_workspace_id,
+        source_linux_server_id, status, file_count, uncompressed_bytes, shard_bytes,
+        shard_sha256, error_code, error_message, created_at, updated_at</sql>
+
+    <insert id="insertJob">
+        insert into team_workspace_export_jobs(
+            <include refid="JobColumns"/>)
+        values (#{exportId}, #{actorUserId}, #{ownerUserId}, #{scopeMode}, #{versionId},
+            #{coordinatorLinuxServerId}, #{status}, #{totalItems}, #{completedItems},
+            #{succeededItems}, #{failedItems}, #{fileCount}, #{uncompressedBytes},
+            #{archiveBytes}, #{archiveSha256}, #{artifactFileName}, #{errorCode},
+            #{errorMessage}, #{createdAt}, #{startedAt}, #{completedAt}, #{expiresAt}, #{cancelledAt})
+    </insert>
+
+    <insert id="insertItem">
+        insert into team_workspace_export_items(<include refid="ItemColumns"/>)
+        values (#{exportItemId}, #{exportId}, #{userId}, #{personalWorkspaceId},
+            #{sourceLinuxServerId}, #{status}, #{fileCount}, #{uncompressedBytes},
+            #{shardBytes}, #{shardSha256}, #{errorCode}, #{errorMessage}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findJob" resultMap="JobMap">
+        select <include refid="JobColumns"/> from team_workspace_export_jobs where export_id = #{exportId}
+    </select>
+
+    <select id="findItems" resultMap="ItemMap">
+        select <include refid="ItemColumns"/> from team_workspace_export_items
+        where export_id = #{exportId} order by id
+    </select>
+
+    <update id="updateJob">
+        update team_workspace_export_jobs set
+            status=#{status}, total_items=#{totalItems}, completed_items=#{completedItems},
+            succeeded_items=#{succeededItems}, failed_items=#{failedItems}, file_count=#{fileCount},
+            uncompressed_bytes=#{uncompressedBytes}, archive_bytes=#{archiveBytes},
+            archive_sha256=#{archiveSha256}, artifact_file_name=#{artifactFileName},
+            error_code=#{errorCode}, error_message=#{errorMessage}, started_at=#{startedAt},
+            completed_at=#{completedAt}, expires_at=#{expiresAt}, cancelled_at=#{cancelledAt}
+        where export_id=#{exportId}
+    </update>
+
+    <update id="updateItem">
+        update team_workspace_export_items set status=#{status}, file_count=#{fileCount},
+            uncompressed_bytes=#{uncompressedBytes}, shard_bytes=#{shardBytes},
+            shard_sha256=#{shardSha256}, error_code=#{errorCode}, error_message=#{errorMessage},
+            lease_owner=null, lease_token=null, lease_expires_at=null, updated_at=#{updatedAt}
+        where export_item_id=#{exportItemId}
+    </update>
+
+    <update id="claimItem">
+        update team_workspace_export_items set status='RUNNING', lease_owner=#{leaseOwner},
+            lease_token=#{leaseToken}, lease_expires_at=#{leaseExpiresAt}, updated_at=#{now}
+        where export_item_id=#{exportItemId}
+          and status='QUEUED'
+          and (lease_expires_at is null or lease_expires_at &lt;= #{now})
+    </update>
+
+    <update id="cancel">
+        update team_workspace_export_jobs set status='CANCELLED', cancelled_at=#{now}, completed_at=#{now}
+        where export_id=#{exportId} and actor_user_id=#{actorUserId} and status in ('QUEUED','RUNNING')
+    </update>
+
+    <select id="findActiveByTeamMember" resultMap="JobMap">
+        select distinct <include refid="JobColumns"/>
+        from team_workspace_export_jobs
+        where owner_user_id = #{ownerUserId}
+          and scope_mode in ('MY_TEAM', 'SYSTEM_ADMIN_TEAM')
+          and status in ('QUEUED', 'RUNNING', 'READY', 'PARTIAL_READY')
+          and exists (
+              select 1 from team_workspace_export_items item
+              where item.export_id = team_workspace_export_jobs.export_id
+                and item.user_id = #{memberUserId}
+          )
+        order by created_at
+    </select>
+
+    <select id="findExpiredReady" resultMap="JobMap">
+        select <include refid="JobColumns"/> from team_workspace_export_jobs
+        where coordinator_linux_server_id = #{coordinatorLinuxServerId}
+          and (
+              status = 'CANCELLED'
+              or (expires_at &lt;= #{now} and status in ('READY','PARTIAL_READY','FAILED'))
+          )
+        order by expires_at limit #{limit}
+    </select>
+</mapper>

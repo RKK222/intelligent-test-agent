@@ -3550,6 +3550,143 @@ export type SupportAccessAuditQuery = {
   size?: number;
 };
 
+// ---- 系统管理员团队代码视图 ----
+
+export type TeamScopeMode = "MY_TEAM" | "SYSTEM_ADMIN_TEAM" | "GLOBAL";
+export type TeamMembershipState = "CURRENT" | "HISTORICAL";
+export type TeamContributionType = "PUBLISHED_COMMIT" | "PERSONAL_COMMIT" | "UNCOMMITTED" | "SYNC_MERGE";
+export type TeamExportStatus = "QUEUED" | "RUNNING" | "READY" | "PARTIAL_READY" | "FAILED" | "CANCELLED" | "EXPIRED";
+
+export type TeamScopeParams = {
+  scopeMode?: TeamScopeMode;
+  ownerUserId?: string;
+};
+
+export type TeamUser = PlatformUserSummary & {
+  status: string;
+  roles: string[];
+  addedAt?: string | null;
+};
+
+export type TeamApplication = {
+  appId: string;
+  appName: string;
+  enabled: boolean;
+  currentMemberCount: number;
+  historicalMemberCount: number;
+};
+
+export type TeamWorkspaceTemplate = {
+  workspaceId: string;
+  appId: string;
+  workspaceName: string;
+  branch: string;
+  directoryPath: string;
+  enabled: boolean;
+};
+
+export type TeamWorkspaceVersion = {
+  versionId: string;
+  applicationWorkspaceId: string;
+  appId: string;
+  version: string;
+  branch: string;
+  status: string;
+  targetCommitHash?: string | null;
+  updatedAt: string;
+};
+
+export type TeamPersonalWorkspace = {
+  personalWorkspaceId: string;
+  workspaceId: string;
+  workspaceName: string;
+  branch: string;
+  linuxServerId: string;
+  baseCommit?: string | null;
+  status: string;
+  updatedAt: string;
+};
+
+export type TeamContribution = PlatformUserSummary & {
+  membershipState: TeamMembershipState;
+  personalWorkspaces: TeamPersonalWorkspace[];
+};
+
+export type TeamGitDiffFile = {
+  path: string;
+  rawStatus: string;
+  status: string;
+  staged: boolean;
+  patch: string;
+  additions: number;
+  deletions: number;
+};
+
+export type TeamGitStatus = {
+  files: TeamGitDiffFile[];
+  stagedCount: number;
+  unstagedCount: number;
+  untrackedCount: number;
+};
+
+export type TeamCommit = {
+  commit: string;
+  parents: string[];
+  authorName: string;
+  authorEmail: string;
+  committerName: string;
+  committerEmail: string;
+  committedAt: string;
+  subject: string;
+  contributionType: TeamContributionType;
+};
+
+export type TeamCommitPage = {
+  items: TeamCommit[];
+  offset: number;
+  limit: number;
+  hasMore: boolean;
+  attributionConfirmed: boolean;
+  attributionMessage?: string | null;
+};
+
+export type TeamCommitDetail = { commit: TeamCommit; files: { status: string; oldPath?: string | null; path: string }[] };
+export type TeamCommitDiff = { commit: string; path: string; patch: string };
+
+export type TeamExportItem = {
+  exportItemId: string;
+  userId: string;
+  personalWorkspaceId?: string | null;
+  sourceLinuxServerId?: string | null;
+  status: string;
+  fileCount: number;
+  uncompressedBytes: number;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+};
+
+export type TeamExport = {
+  exportId: string;
+  status: TeamExportStatus;
+  totalItems: number;
+  completedItems: number;
+  succeededItems: number;
+  failedItems: number;
+  fileCount: number;
+  uncompressedBytes: number;
+  archiveBytes?: number | null;
+  archiveSha256?: string | null;
+  artifactFileName?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  createdAt: string;
+  completedAt?: string | null;
+  expiresAt: string;
+  items: TeamExportItem[];
+};
+
+export type TeamExportDownloadRoute = { baseUrl: string; downloadPath: string; expiresAt: string };
+
 /** 用户管理列表组合筛选；role=UNASSIGNED 表示仅查询未分配全局角色的用户。 */
 export type UserManagementQuery = {
   keyword?: string;

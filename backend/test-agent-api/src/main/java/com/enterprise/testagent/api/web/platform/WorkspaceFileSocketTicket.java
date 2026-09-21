@@ -257,4 +257,9 @@ record WorkspaceFileSocketTicket(
     boolean localClient() {
         return runtimeKind == RuntimeKind.LOCAL_CLIENT;
     }
+
+    /** 团队只读票据复用既有只读字段存储范围快照，但与支持排查授权严格分流。 */
+    boolean teamReadOnly() {
+        return supportReadOnly && supportGrantId != null && supportGrantId.startsWith("TEAM:");
+    }
 }

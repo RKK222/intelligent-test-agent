@@ -6,6 +6,8 @@
 
 用户全局角色替换先通过领域 `ConversationContextStore.beginUserMutation` 建立临时 gate；事务真正提交后原子再次失效并释放 gate，事务回滚只撤回自己的 gate token。gate 覆盖数据库写入窗口，避免撤权期间签发新 token；模块不依赖 Redis 实现或 persistence。
 
+`LiveRoleCapabilityService` 每次从数据库复核有效账号和角色，统一按 `SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER` 继承能力。`SystemAdminTeamApplicationService` 维护系统管理员自己的团队名单；超级管理员可切换到全平台范围，或指定实际持有 `SYSTEM_ADMIN` 角色的负责人维护其名单。加人、移人不改变应用成员关系，移除后团队读取和长连接文件 RPC 立即失效；所有团队特权读取使用 `TEAM_OVERSIGHT` 审计并沿用 365 天清理规则。
+
 ## 当前状态
 
 已完成用户认证相关的基础能力：

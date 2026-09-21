@@ -1,6 +1,7 @@
 package com.enterprise.testagent.api.config;
 
 import com.enterprise.testagent.api.web.platform.PersonalWorkspaceRelocationTransferController;
+import com.enterprise.testagent.api.web.platform.TeamWorkspaceExportShardController;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -93,6 +94,9 @@ public class RuntimeSecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration(
                 PersonalWorkspaceRelocationTransferController.WEB_SOCKET_PATH,
+                relocationWebSocketConfiguration);
+        source.registerCorsConfiguration(
+                TeamWorkspaceExportShardController.WEB_SOCKET_PATH,
                 relocationWebSocketConfiguration);
         source.registerCorsConfiguration("/**", configuration);
         return source;

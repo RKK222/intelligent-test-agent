@@ -2181,6 +2181,18 @@ SHA-256 一致。
 `flyway_schema_history`，从已部署基线升级到 HEAD，并核对源码、persistence JAR 与最终应用 JAR 中该 migration 字节一致；
 未知 checksum、未知更高版本或历史分叉必须停止，禁止使用 `outOfOrder`、`repair` 或手工修改历史表。
 
+## 系统管理员团队代码视图
+
+`V20260921152423__system_admin_team_members_create.sql` 新增三张表：
+
+- `system_admin_team_members` 以 `(owner_user_id, member_user_id)` 唯一，保存添加人、创建/更新时间和软删除时间；恢复关系保留最初创建时间，不改变 `application_members`。
+- `team_workspace_export_jobs` 保存范围、版本、协调 Java、进度、文件/字节统计、ZIP 摘要、两小时过期时间及安全错误摘要。
+- `team_workspace_export_items` 保存每个成员/worktree 的源 Java、处理状态、文件/字节/摘要、失败原因及 worker 租约；`NO_WORKTREE` 是正常明细状态。
+
+既有 `support_access_audit_events` 增加非空默认 `access_kind=SUPPORT` 和 `SUPPORT|TEAM_OVERSIGHT` 检查约束，旧审计语义保持不变；团队审计沿用既有 365 天清理，不新增第二套清理器。所有名单、范围、导出和审计 SQL 分别位于 `SystemAdminTeamMapper.xml`、`TeamWorkspaceQueryMapper.xml`、`TeamWorkspaceExportMapper.xml`，没有新增 JDBC SQL。
+
+升级前必须先部署数据库结构，再切换包含团队入口的同版本 Java/前端；旧版本不会访问新表，代码回滚后新表和新增审计列可保留。导出明细中的 `personal_workspace_id` 是必须保留的历史快照标识，不建立指向可清理 worktree 的物理外键；`support_access_audit_events` 扩展使用 `ALTER TABLE IF EXISTS`，兼容旧的裁剪迁移历史。物理回收必须在备份后的停机窗口显式执行，禁止回改已执行 migration。固定 `.env.test` PostgreSQL 的 `public.flyway_schema_history` 验证时最高已执行版本为 `20260912123831`，低于本版本；`SystemAdminTeamPostgresqlIntegrationTest` 在随机隔离 schema 同时覆盖空库到 HEAD、该已部署基线到 HEAD、PostgreSQL upsert、部门检索和租约列，另由 `ApplicationAutomationReferenceMigrationPostgresqlIntegrationTest` 覆盖既有兼容历史。源码 SHA-256 为 `ada37e9cb2ddd3b5d5fa51049bc271688af2b0dca303eb19368bd035b9f3d0a6`；进入任何需保留数据库后文件名和字节必须冻结。企业发布前仍须收集每套目标库完整 `flyway_schema_history`，并核对源码、persistence JAR 和最终应用 JAR 字节；未知 checksum、未知更高版本或分叉必须停止，禁止 `outOfOrder`、`repair` 或手工改历史表。
+
 ## V20260918120000 通用参数种子 RTK_COMMAND_REWRITE_ENABLED
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260918120000__common_parameters_add_rtk_command_rewrite.sql` 初始化 RTK 命令改写的生产开关：

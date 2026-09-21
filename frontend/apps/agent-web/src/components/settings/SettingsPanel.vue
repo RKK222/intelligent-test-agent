@@ -4,6 +4,7 @@ import type { ApplicationDefinition, CurrentUser } from "@test-agent/shared-type
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
 import SettingsRepositoryPanel from "./SettingsRepositoryPanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
+import { hasAppAdminCapability, hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 type PanelDef = { title: string; component: Component };
 
@@ -30,8 +31,8 @@ const panels: Record<string, PanelDef> = {
   personal: { title: "个人设置", component: SettingsPersonalPanel }
 };
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
-const hasAppAdmin = computed(() => hasSuperAdmin.value || props.currentUser?.roles?.includes("APP_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
+const hasAppAdmin = computed(() => hasAppAdminCapability(props.currentUser?.roles));
 
 const effectiveKey = computed(() => {
   if (props.activeKey === "repository" && !hasAppAdmin.value) {

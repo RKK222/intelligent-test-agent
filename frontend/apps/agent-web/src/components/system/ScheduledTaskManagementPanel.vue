@@ -4,6 +4,7 @@ import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-vue-next";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser } from "@test-agent/shared-types";
 import { applyXxlJobEmbeddedShell } from "./xxl-job-embedded-shell";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -20,7 +21,7 @@ type ConsoleState =
   | "unavailable";
 
 const api = inject<BackendApiClient>("api")!;
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 const formRef = ref<HTMLFormElement | null>(null);
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const frameName = `test-agent-xxl-job-${Math.random().toString(36).slice(2)}`;

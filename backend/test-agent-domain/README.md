@@ -19,6 +19,7 @@
 - `supportaccess` 定义限时排查授权、内存态授权摘要、审计事件/查询与 Repository/Redis store 端口；领域对象禁止包含平台 Token、授权 Token、消息/文件正文和文件路径明文。`UserWorkspaceQueryRepository` 与 `SessionHistoryRepository` 提供按目标用户归因的工作区/会话只读端口，供普通归属校验和受审排查入口共同复用；工作区端口支持在分页前按名称或 Workspace ID 过滤并保留无查询条件的兼容方法，会话端口保留默认 ACTIVE 方法，并提供排查显式包含 ARCHIVED 的兼容重载。
 - `externalapi` 定义外部工具凭据聚合、`USER_SSH_KEY_READ` scope、Repository 端口、认证主体与刷新事件；聚合只保存 RSA 密文、SHA-256 指纹和 Key 提示，不保存明文。
 - `notification` 定义用户通知、受控类型/动作/状态、列表有效性投影和值对象/Repository 端口；领域对象只保存安全展示快照和内部动作目标 ID，不表达任意 URL、SSE 或 MyBatis 行模型。
+- `RoleCapabilities` 是后端角色继承的唯一判断入口；`team` 包定义团队范围、当前/历史成员状态、贡献类型、导出状态，以及名单、查询、导出和 `TEAM_OVERSIGHT` 审计端口。团队关系独立于应用成员，软删除后可恢复，撤权不得依赖登录 Token 中的旧角色快照。
 
 ## 已有模型
 

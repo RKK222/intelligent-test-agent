@@ -17662,3 +17662,27 @@
 
 - 新 Run/Trace 可直接区分 RTK 开关、concise-output 是否实际选择以及调用过的 Skill，支持结合真实模型 usage 做分组对比；上游不返回 usage 时仍不以流式 chunk 推算 Token。
 - 未修改 OpenCode 源码、generated SDK、环境配置或部署拓扑；未执行 Jenkins/企业环境部署，ClickHouse SQL 未在真实 ClickHouse 环境联机验证。
+
+## 2026-09-21 - 实现系统管理员团队代码视图
+
+### Why
+
+- 系统管理员角色此前没有业务入口，需要位于超级管理员和应用管理员之间，能够维护自己的组员，并按应用、工作空间、版本和人员只读查看团队提交、个人 worktree 与未提交修改；超级管理员还需要全平台和指定系统管理员两种范围。
+
+### What
+
+- 建立前后端唯一角色能力入口，落实 `SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER`，保留单一生效角色机制；增加团队名单软删除/恢复、候选用户、超级管理员范围切换与团队管理页面。
+- 复用应用成员关系、个人工作空间、SCM 身份和 Git 能力，提供当前/历史成员贡献、已发布提交归属、个人基线提交、`SYNC_MERGE`、状态、详情和受限 diff；无法确认祖先关系时不扩大归属范围。
+- 在既有文件 WebSocket、`BackendJavaRouteResolver`、`BackendHttpForwarder` 和 Java 节点上增加 `TEAM_READ_ONLY` 文件访问及异步整组导出；每次文件 RPC 都实时复核角色、团队和 worktree 映射，导出排除敏感文件、限制 2 GiB/5 万文件，并支持分片摘要、部分成功、取消、过期、单次下载和撤权清理。
+- 增加 `system_admin_team_members`、`team_workspace_export_jobs/items` 及 `TEAM_OVERSIGHT` 审计 migration，所有业务 SQL 使用 MyBatis XML；同步后端/前端/模块 README、HTTP API、事件、数据库、安全和用户手册文档，不新增 RunEvent/SSE 类型或部署节点。
+
+### How
+
+- 后端本功能定向回归 90 项通过，覆盖角色继承、团队软删除/恢复、Git 真实仓库、导出上限/撤权、内部路由鉴权、文件 WebSocket 只读与中途撤权、MyBatis 租约及 Spring 构造器装配；固定 `.env.test` PostgreSQL 上的新 migration 空库和既有基线升级 2 项通过，既有自动化引用 migration 回归通过。
+- 前端 162 个测试文件共 2300 项通过、1 项跳过，lint、typecheck 和生产构建通过，构建目标保持 Chromium 108；后端 24 模块跳过测试打包成功。
+- migration 在源码、persistence JAR 和应用嵌套 JAR 中的 SHA-256 均为 `ada37e9cb2ddd3b5d5fa51049bc271688af2b0dca303eb19368bd035b9f3d0a6`，并完成 `git diff --check`。
+
+### Result
+
+- 系统管理员现在可以在“团队管理”中维护组员并查看版本下每人的共享分支提交、多个个人 worktree、未提交文件和只读内容；超级管理员可使用全平台或指定系统管理员范围。角色降级或成员移除会立即阻止后续读取和下载，并撤销相关导出。
+- 未修改 OpenCode 源码、generated SDK、`.env.local` 或部署拓扑，也未执行 Jenkins/企业环境部署。实际企业多节点在线链路，以及接近 2 GiB/5 万文件时 10 分钟内完成的性能基线尚未在企业环境实测；本地已验证超过 2 GiB 的预检拒绝、并发/失败/清理逻辑和产物结构。

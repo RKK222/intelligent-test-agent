@@ -23,6 +23,7 @@ import type {
   Workspace
 } from "@test-agent/shared-types";
 import { chatStateFromSessionTreeSnapshot } from "../workbench-utils";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -92,9 +93,10 @@ const auditOutcome = ref("");
 const actorLabel = computed(() => props.currentUser
   ? `${props.currentUser.username}（${props.currentUser.userId}）`
   : "-");
-const supportActorKey = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN")
-  ? props.currentUser.userId
-  : "");
+const supportActorKey = computed(() => {
+  const currentUser = props.currentUser;
+  return currentUser && hasSuperAdminCapability(currentUser.roles) ? currentUser.userId : "";
+});
 const remainingSeconds = computed(() => {
   if (!grant.value) return 0;
   return Math.max(0, Math.ceil((Date.parse(grant.value.expiresAt) - now.value) / 1000));
@@ -170,7 +172,7 @@ watch(() => props.activationSequence, (activationSequence, previousActivationSeq
 });
 
 watch(() => props.currentUser?.roles, (roles) => {
-  if (!roles?.includes("SUPER_ADMIN") && grant.value) {
+  if (!hasSuperAdminCapability(roles) && grant.value) {
     const active = grant.value;
     api.closeSupportAccessConnections(active.grantId);
     void api.revokeSupportAccessGrant(active.grantId, active.grantToken).catch(() => undefined);
@@ -194,8 +196,9 @@ function errorText(error: unknown): string {
 
 /** 获取权威工单建议；当前后端没有工单数据源时会返回新的唯一排查单号。 */
 async function loadIncidentSuggestion() {
-  if (!props.currentUser?.roles?.includes("SUPER_ADMIN")) return;
-  const actorUserId = props.currentUser.userId;
+  const currentUser = props.currentUser;
+  if (!currentUser || !hasSuperAdminCapability(currentUser.roles)) return;
+  const actorUserId = currentUser.userId;
   const requestId = ++incidentSuggestionRequest;
   incidentSuggestionLoading.value = true;
   try {

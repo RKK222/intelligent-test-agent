@@ -43,6 +43,14 @@ public class ApiTokenWebFilter implements WebFilter {
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer-tickets";
     private static final String PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH =
             "/api/internal/platform/workspace-management/personal-workspace-relocations/transfer/ws";
+    private static final String TEAM_WORKSPACE_EXPORT_SHARD_BUILD_PATH =
+            "/api/internal/platform/workspace-management/team/export-shards/build";
+    private static final String TEAM_WORKSPACE_EXPORT_SHARD_INSPECT_PATH =
+            "/api/internal/platform/workspace-management/team/export-shards/inspect";
+    private static final String TEAM_WORKSPACE_EXPORT_DELETE_REVOKED_ARTIFACT_PATH =
+            "/api/internal/platform/workspace-management/team/export-shards/delete-revoked-artifact";
+    private static final String TEAM_WORKSPACE_EXPORT_SHARD_WEB_SOCKET_PATH =
+            "/api/internal/platform/workspace-management/team/export-shards/receive/ws";
     private static final String WORKSPACE_GIT_TOOL_PATH =
             "/api/internal/agent/opencode/workspace-git-tool";
     private static final String CODE_KNOWLEDGE_TOOL_PATH =
@@ -106,6 +114,10 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(RUN_RESEND_INTERNAL_DISPATCH_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_TICKET_PATH)
                 || path.equals(PERSONAL_WORKSPACE_RELOCATION_WEB_SOCKET_PATH)
+                || path.equals(TEAM_WORKSPACE_EXPORT_SHARD_BUILD_PATH)
+                || path.equals(TEAM_WORKSPACE_EXPORT_SHARD_INSPECT_PATH)
+                || path.equals(TEAM_WORKSPACE_EXPORT_DELETE_REVOKED_ARTIFACT_PATH)
+                || path.equals(TEAM_WORKSPACE_EXPORT_SHARD_WEB_SOCKET_PATH)
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
                 || path.equals(CODE_KNOWLEDGE_TOOL_PATH)
                 || path.equals(CODE_SOURCE_TOOL_PATH)

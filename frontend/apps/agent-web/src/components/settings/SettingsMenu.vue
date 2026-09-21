@@ -2,6 +2,7 @@
 import { computed, type Component } from "vue";
 import { Setting, User, Folder } from "@element-plus/icons-vue";
 import type { CurrentUser } from "@test-agent/shared-types";
+import { hasAppAdminCapability } from "../../auth/roleCapabilities";
 
 type MenuKey = "appWorkspace" | "repository" | "personal";
 
@@ -29,8 +30,7 @@ const items = computed<MenuItem[]>(() => {
   const menuItems: MenuItem[] = [
     { key: "appWorkspace", label: "应用管理", icon: Setting }
   ];
-  const roles = props.currentUser?.roles ?? [];
-  if (roles.includes("SUPER_ADMIN") || roles.includes("APP_ADMIN")) {
+  if (hasAppAdminCapability(props.currentUser?.roles)) {
     menuItems.push({ key: "repository", label: "版本库管理", icon: Folder });
   }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });

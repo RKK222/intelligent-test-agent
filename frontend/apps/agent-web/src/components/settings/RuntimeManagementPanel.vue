@@ -20,6 +20,7 @@ import type {
 } from "@test-agent/shared-types";
 import RuntimeMetricChart from "./RuntimeMetricChart.vue";
 import RuntimeTopologyGraph from "./RuntimeTopologyGraph.vue";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -129,7 +130,7 @@ const batchManagedProcessResult = ref<BatchManagedProcessResult | null>(null);
 const batchManagedProcessProgress = ref<BatchManagedProcessProgress | null>(null);
 const batchRunnerActive = ref(false);
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
   status: activeFilters.value.status || undefined,
   linuxServerId: activeFilters.value.linuxServerId.trim() || undefined,

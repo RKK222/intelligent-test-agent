@@ -11,6 +11,7 @@ import type {
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 import AgentConfigRolloutTargetDisclosure from "./AgentConfigRolloutTargetDisclosure.vue";
+import { hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 type ManagementView = "public" | "application-runtime";
 
@@ -51,7 +52,7 @@ const closingTargetId = ref<string | null>(null);
 const restartingTargetId = ref<string | null>(null);
 let rolloutTimer: number | null = null;
 
-const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
 const isPublicView = computed(() => props.view === "public");
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
 const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");

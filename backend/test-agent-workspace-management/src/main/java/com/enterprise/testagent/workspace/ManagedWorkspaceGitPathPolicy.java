@@ -3,6 +3,7 @@ package com.enterprise.testagent.workspace;
 import com.enterprise.testagent.common.error.ErrorCode;
 import com.enterprise.testagent.common.error.PlatformException;
 import com.enterprise.testagent.domain.dictionary.Dictionary;
+import com.enterprise.testagent.domain.dictionary.RoleCapabilities;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
@@ -32,10 +33,9 @@ public final class ManagedWorkspaceGitPathPolicy {
         }
     }
 
-    /** 超级管理员继承应用管理员能力，与平台 HTTP 鉴权规则保持一致。 */
+    /** 系统管理员和超级管理员继承应用管理员能力，与平台 HTTP 鉴权规则保持一致。 */
     public static boolean hasApplicationAdminRole(Collection<String> roles) {
-        return roles != null && (roles.contains(Dictionary.ROLE_APP_ADMIN)
-                || roles.contains(Dictionary.ROLE_SUPER_ADMIN));
+        return RoleCapabilities.hasCapability(roles, Dictionary.ROLE_APP_ADMIN);
     }
 
     /** 归一化路径后判断是否落入完整的应用 OpenCode 配置命名空间。 */

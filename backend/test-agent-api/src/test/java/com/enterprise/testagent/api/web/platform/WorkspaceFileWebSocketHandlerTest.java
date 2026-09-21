@@ -1449,6 +1449,48 @@ class WorkspaceFileWebSocketHandlerTest {
     }
 
     @Test
+    void teamReadOnlyTicketAllowsAgentConfigReadRejectsWriteAndAuditsBeforeResponse() {
+        WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceFileSocketTicket ticket = teamWorkspaceTicket();
+        WorkspaceId workspaceId = new WorkspaceId("wrk_1234567890abcdef");
+        var authorization = Mockito.mock(
+                com.enterprise.testagent.system.management.team.SystemAdminTeamApplicationService.AuthorizedTarget.class);
+        when(ticketService.consume("wft_team", "http://localhost:3000")).thenReturn(ticket);
+        when(ticketService.authorizeTeamWorkspaceRpc(ticket, workspaceId)).thenReturn(authorization);
+        when(workspaceService.readFile(workspaceId, ".opencode/opencode.jsonc"))
+                .thenReturn(new com.enterprise.testagent.workspace.FileContentResponse(
+                        ".opencode/opencode.jsonc", "{}", 2));
+        WebSocketHandler handler = new WorkspaceFileWebSocketHandler(
+                ticketService,
+                workspaceService,
+                Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class),
+                new ObjectMapper().findAndRegisterModules(),
+                "http://localhost:3000");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/internal/platform/workspace-management/file/ws?ticket=wft_team",
+                List.of(
+                        """
+                        {"id":"req_team_read","op":"workspace.read","params":{"workspaceId":"wrk_1234567890abcdef","path":".opencode/opencode.jsonc"}}
+                        """,
+                        """
+                        {"id":"req_team_write","op":"workspace.write","params":{"workspaceId":"wrk_1234567890abcdef","path":"README.md","content":"changed"}}
+                        """));
+
+        handler.handle(session).block();
+
+        assertThat(session.sentText()).filteredOn(value -> value.contains("req_team_read"))
+                .singleElement().satisfies(value -> assertThat(value).contains("\"type\":\"result\"", "{}"));
+        assertThat(session.sentText()).filteredOn(value -> value.contains("req_team_write"))
+                .singleElement().satisfies(value -> assertThat(value).contains("\"type\":\"error\"", "FORBIDDEN"));
+        verify(ticketService).recordTeamRpc(
+                ticket, authorization, "workspace.read", workspaceId, ".opencode/opencode.jsonc",
+                "SUCCESS", null, TRACE_ID);
+        verify(workspaceService, never()).writeFile(Mockito.any(), Mockito.any(), Mockito.any());
+    }
+
+    @Test
     void sharedWorkspaceReadIsReauthorizedAndAuditedWithoutBody() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
@@ -1672,6 +1714,28 @@ class WorkspaceFileWebSocketHandlerTest {
                 "1".repeat(64),
                 "2".repeat(64),
                 "usr_support_target",
+                TRACE_ID,
+                NOW.plusSeconds(60));
+    }
+
+    private static WorkspaceFileSocketTicket teamWorkspaceTicket() {
+        return new WorkspaceFileSocketTicket(
+                "wft_team",
+                "wrk_1234567890abcdef",
+                "linux-1",
+                null,
+                false,
+                false,
+                false,
+                "usr_system_admin",
+                "workspace",
+                null,
+                null,
+                true,
+                "TEAM:MY_TEAM",
+                "usr_system_admin",
+                "pw_member_1",
+                "usr_member",
                 TRACE_ID,
                 NOW.plusSeconds(60));
     }

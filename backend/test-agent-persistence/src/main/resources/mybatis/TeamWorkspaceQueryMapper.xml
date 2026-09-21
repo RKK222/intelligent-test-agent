@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceQueryMapper">
+    <resultMap id="ApplicationRowMap" type="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceApplicationRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="app_name" javaType="java.lang.String"/>
+            <arg column="enabled" javaType="_boolean"/>
+            <arg column="current_member_count" javaType="_long"/>
+            <arg column="historical_member_count" javaType="_long"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="TemplateRowMap" type="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceTemplateRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="workspace_name" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="directory_path" javaType="java.lang.String"/>
+            <arg column="enabled" javaType="_boolean"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="VersionRowMap" type="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceVersionRow">
+        <constructor>
+            <arg column="version_id" javaType="java.lang.String"/>
+            <arg column="application_workspace_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="version" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="repo_root_path" javaType="java.lang.String"/>
+            <arg column="workspace_root_path" javaType="java.lang.String"/>
+            <arg column="runtime_workspace_id" javaType="java.lang.String"/>
+            <arg column="created_by_user_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="target_commit_hash" javaType="java.lang.String"/>
+            <arg column="target_commit_updated_at" javaType="java.time.Instant"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ContributionRowMap" type="com.enterprise.testagent.persistence.mybatis.TeamWorkspaceContributionRow">
+        <constructor>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="unified_auth_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="password_hash" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="user_status" javaType="java.lang.String"/>
+            <arg column="user_created_at" javaType="java.time.Instant"/>
+            <arg column="user_updated_at" javaType="java.time.Instant"/>
+            <arg column="membership_state" javaType="java.lang.String"/>
+            <arg column="personal_workspace_id" javaType="java.lang.String"/>
+            <arg column="version_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="application_workspace_id" javaType="java.lang.String"/>
+            <arg column="workspace_name" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="repo_root_path" javaType="java.lang.String"/>
+            <arg column="workspace_root_path" javaType="java.lang.String"/>
+            <arg column="runtime_workspace_id" javaType="java.lang.String"/>
+            <arg column="base_commit" javaType="java.lang.String"/>
+            <arg column="workspace_status" javaType="java.lang.String"/>
+            <arg column="workspace_created_at" javaType="java.time.Instant"/>
+            <arg column="workspace_updated_at" javaType="java.time.Instant"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findApplications" resultMap="ApplicationRowMap">
+        select a.app_id, a.app_name, a.enabled,
+               (select count(distinct am.user_id)
+                from application_members am
+                where am.app_id = a.app_id and am.deleted_at is null
+                  and (#{globalScope} = true or exists (
+                      select 1 from system_admin_team_members team
+                      where team.owner_user_id = #{ownerUserId}
+                        and team.member_user_id = am.user_id and team.deleted_at is null
+                  ))) as current_member_count,
+               (select count(distinct pw.user_id)
+                from personal_workspaces pw
+                where pw.app_id = a.app_id
+                  and (#{globalScope} = true or exists (
+                      select 1 from system_admin_team_members team
+                      where team.owner_user_id = #{ownerUserId}
+                        and team.member_user_id = pw.user_id and team.deleted_at is null
+                  ))
+                  and not exists (
+                      select 1 from application_members current_member
+                      where current_member.app_id = a.app_id
+                        and current_member.user_id = pw.user_id
+                        and current_member.deleted_at is null
+                  )) as historical_member_count
+        from applications a
+        where exists (
+            select 1 from application_members am
+            where am.app_id = a.app_id and am.deleted_at is null
+              and (#{globalScope} = true or exists (
+                  select 1 from system_admin_team_members team
+                  where team.owner_user_id = #{ownerUserId}
+                    and team.member_user_id = am.user_id and team.deleted_at is null
+              ))
+        ) or exists (
+            select 1 from personal_workspaces pw
+            where pw.app_id = a.app_id
+              and (#{globalScope} = true or exists (
+                  select 1 from system_admin_team_members team
+                  where team.owner_user_id = #{ownerUserId}
+                    and team.member_user_id = pw.user_id and team.deleted_at is null
+              ))
+        )
+        order by a.app_name, a.app_id
+    </select>
+
+    <select id="findWorkspaceTemplates" resultMap="TemplateRowMap">
+        select aw.workspace_id, aw.app_id, aw.workspace_name, aw.branch, aw.directory_path, aw.enabled
+        from application_workspaces aw
+        where aw.app_id = #{appId}
+          and (
+              exists (
+                  select 1 from application_members am
+                  where am.app_id = aw.app_id and am.deleted_at is null
+                    and (#{globalScope} = true or exists (
+                        select 1 from system_admin_team_members team
+                        where team.owner_user_id = #{ownerUserId}
+                          and team.member_user_id = am.user_id and team.deleted_at is null
+                    ))
+              )
+              or exists (
+                  select 1 from personal_workspaces pw
+                  where pw.application_workspace_id = aw.workspace_id
+                    and (#{globalScope} = true or exists (
+                        select 1 from system_admin_team_members team
+                        where team.owner_user_id = #{ownerUserId}
+                          and team.member_user_id = pw.user_id and team.deleted_at is null
+                    ))
+              )
+          )
+        order by aw.workspace_name, aw.workspace_id
+    </select>
+
+    <select id="findWorkspaceVersions" resultMap="VersionRowMap">
+        select v.version_id, v.application_workspace_id, v.app_id, v.repository_id,
+               v.version, v.branch, v.repo_root_path, v.workspace_root_path,
+               v.runtime_workspace_id, v.created_by_user_id, v.status,
+               v.target_commit_hash, v.target_commit_updated_at, v.created_at, v.updated_at
+        from application_workspace_versions v
+        where v.application_workspace_id = #{applicationWorkspaceId}
+          and (
+              exists (
+                  select 1 from application_members am
+                  where am.app_id = v.app_id and am.deleted_at is null
+                    and (#{globalScope} = true or exists (
+                        select 1 from system_admin_team_members team
+                        where team.owner_user_id = #{ownerUserId}
+                          and team.member_user_id = am.user_id and team.deleted_at is null
+                    ))
+              )
+              or exists (
+                  select 1 from personal_workspaces pw
+                  where pw.app_workspace_version_id = v.version_id
+                    and (#{globalScope} = true or exists (
+                        select 1 from system_admin_team_members team
+                        where team.owner_user_id = #{ownerUserId}
+                          and team.member_user_id = pw.user_id and team.deleted_at is null
+                    ))
+              )
+          )
+        order by v.created_at desc, v.version_id
+    </select>
+
+    <select id="findContributions" resultMap="ContributionRowMap">
+        with scoped_contributors as (
+            select distinct am.user_id
+            from application_workspace_versions v
+            join application_members am on am.app_id = v.app_id and am.deleted_at is null
+            where v.version_id = #{versionId}
+              and (#{globalScope} = true or exists (
+                  select 1 from system_admin_team_members team
+                  where team.owner_user_id = #{ownerUserId}
+                    and team.member_user_id = am.user_id and team.deleted_at is null
+              ))
+            union
+            select distinct pw.user_id
+            from personal_workspaces pw
+            where pw.app_workspace_version_id = #{versionId}
+              and (#{globalScope} = true or exists (
+                  select 1 from system_admin_team_members team
+                  where team.owner_user_id = #{ownerUserId}
+                    and team.member_user_id = pw.user_id and team.deleted_at is null
+              ))
+        )
+        select u.user_id, u.unified_auth_id, u.username, u.password_hash,
+               u.organization, u.rd_department, u.department, u.status as user_status,
+               u.created_at as user_created_at, u.updated_at as user_updated_at,
+               case when exists (
+                   select 1 from application_members am
+                   join application_workspace_versions v2 on v2.app_id = am.app_id
+                   where v2.version_id = #{versionId} and am.user_id = u.user_id and am.deleted_at is null
+               ) then 'CURRENT' else 'HISTORICAL' end as membership_state,
+               pw.personal_workspace_id, pw.app_workspace_version_id as version_id,
+               pw.app_id, pw.application_workspace_id, pw.workspace_name, pw.branch,
+               pw.repo_root_path, pw.workspace_root_path, pw.runtime_workspace_id,
+               pw.base_commit, pw.status as workspace_status,
+               pw.created_at as workspace_created_at, pw.updated_at as workspace_updated_at,
+               w.linux_server_id
+        from scoped_contributors contributors
+        join users u on u.user_id = contributors.user_id
+        left join personal_workspaces pw
+          on pw.user_id = u.user_id and pw.app_workspace_version_id = #{versionId}
+        left join workspaces w on w.workspace_id = pw.runtime_workspace_id
+        order by u.username, u.user_id, pw.created_at, pw.personal_workspace_id
+    </select>
+
+    <select id="findPersonalWorkspace" resultMap="ContributionRowMap">
+        select u.user_id, u.unified_auth_id, u.username, u.password_hash,
+               u.organization, u.rd_department, u.department, u.status as user_status,
+               u.created_at as user_created_at, u.updated_at as user_updated_at,
+               case when exists (
+                   select 1 from application_members am
+                   where am.app_id = pw.app_id and am.user_id = u.user_id and am.deleted_at is null
+               ) then 'CURRENT' else 'HISTORICAL' end as membership_state,
+               pw.personal_workspace_id, pw.app_workspace_version_id as version_id,
+               pw.app_id, pw.application_workspace_id, pw.workspace_name, pw.branch,
+               pw.repo_root_path, pw.workspace_root_path, pw.runtime_workspace_id,
+               pw.base_commit, pw.status as workspace_status,
+               pw.created_at as workspace_created_at, pw.updated_at as workspace_updated_at,
+               w.linux_server_id
+        from personal_workspaces pw
+        join users u on u.user_id = pw.user_id
+        left join workspaces w on w.workspace_id = pw.runtime_workspace_id
+        where pw.personal_workspace_id = #{personalWorkspaceId}
+          and (#{globalScope} = true or exists (
+              select 1 from system_admin_team_members team
+              where team.owner_user_id = #{ownerUserId}
+                and team.member_user_id = pw.user_id and team.deleted_at is null
+          ))
+    </select>
+</mapper>

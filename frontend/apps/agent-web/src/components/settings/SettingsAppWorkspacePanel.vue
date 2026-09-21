@@ -17,6 +17,7 @@ import type {
 import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
 import RepositoryDirectoryTree from "../RepositoryDirectoryTree.vue";
 import { isValidStandardWorkspaceBranch } from "../standard-workspace-branch";
+import { hasAppAdminCapability, hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const TEST_WORK_REPOSITORY_TYPE = "TEST_WORK_REPOSITORY";
@@ -72,8 +73,8 @@ const applicationOptionsLoading = ref(false);
 // 权限
 const currentRoles = computed(() => props.currentUser?.roles ?? []);
 const currentRoleLabel = computed(() => (currentRoles.value.length ? currentRoles.value.join(",") : "无角色"));
-const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP_ADMIN") || currentRoles.value.includes("SUPER_ADMIN"));
-const hasSuperAdmin = computed(() => currentRoles.value.includes("SUPER_ADMIN"));
+const hasAppSettingsPermission = computed(() => hasAppAdminCapability(currentRoles.value));
+const hasSuperAdmin = computed(() => hasSuperAdminCapability(currentRoles.value));
 const createApplicationOpen = ref(false);
 const newApplicationId = ref("");
 const newApplicationName = ref("");

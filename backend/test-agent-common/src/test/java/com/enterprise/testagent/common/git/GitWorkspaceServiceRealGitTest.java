@@ -88,6 +88,73 @@ class GitWorkspaceServiceRealGitTest {
     }
 
     @Test
+    void readsBoundedCommitHistoryDetailsAndDiffFromRealRepository() throws Exception {
+        Path repo = initializeRepository();
+        Files.createDirectories(repo.resolve("workspace"));
+        write(repo, "workspace/member.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        write(repo, "workspace/member.txt", "member change\n");
+        git(repo, "add", "--all");
+        new GitWorkspaceService().commitStaged(
+                repo, "member commit", null,
+                GitCommitIdentity.forPlatformUser("member", "MEMBER001"));
+        String head = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        List<GitWorkspaceService.GitCommitSummary> history = service.listCommitHistory(
+                repo, base, head, 0, 10, true, "workspace");
+
+        assertThat(history).singleElement().satisfies(commit -> {
+            assertThat(commit.commit()).isEqualTo(head);
+            assertThat(commit.committerEmail()).isEqualTo("MEMBER001@mails.icbc");
+            assertThat(commit.merge()).isFalse();
+        });
+        assertThat(service.commitChangedFiles(repo, head))
+                .extracting(GitWorkspaceService.GitNameStatusEntry::path)
+                .containsExactly("workspace/member.txt");
+        assertThat(service.commitFileDiff(repo, head, "workspace/member.txt"))
+                .contains("-base", "+member change");
+        assertThat(service.isCommitAncestor(repo, base, head)).isTrue();
+        assertThatThrownBy(() -> service.commitFileDiff(repo, head, "../outside"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void marksMergeCommitsAndKeepsPaginationStable() throws Exception {
+        Path repo = initializeRepository();
+        write(repo, "base.txt", "base\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "base");
+        String base = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+        git(repo, "checkout", "-b", "feature");
+        write(repo, "feature.txt", "feature\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "feature");
+        git(repo, "checkout", "main");
+        write(repo, "main.txt", "main\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "main");
+        git(repo, "merge", "--no-ff", "feature", "-m", "sync merge");
+        String head = git(repo, "rev-parse", "HEAD").stdoutText().trim();
+
+        GitWorkspaceService service = new GitWorkspaceService();
+        List<GitWorkspaceService.GitCommitSummary> first = service.listCommitHistory(
+                repo, base, head, 0, 2, true);
+        List<GitWorkspaceService.GitCommitSummary> second = service.listCommitHistory(
+                repo, base, head, 2, 2, true);
+
+        assertThat(first).hasSize(2);
+        assertThat(first.getFirst().merge()).isTrue();
+        assertThat(second).hasSize(1);
+        assertThat(first).extracting(GitWorkspaceService.GitCommitSummary::commit)
+                .doesNotContainAnyElementsOf(second.stream()
+                        .map(GitWorkspaceService.GitCommitSummary::commit).toList());
+    }
+
+    @Test
     void commitFilesOnlyDoesNotIncludeOtherUsersStagedPaths() throws Exception {
         Path repo = initializeRepository();
         write(repo, "selected.txt", "base selected\n");

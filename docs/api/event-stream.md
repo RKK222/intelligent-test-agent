@@ -1149,3 +1149,7 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
 ## 个人工作区搬迁诊断边界
 
 搬迁失败诊断仅增强源 Java 日志及既有数据库安全错误说明，不新增 RunEvent/SSE 或广播字段；`personal-workspace.relocation-requested` 仍为空业务 payload 的唤醒事件。
+
+## 系统管理员团队代码视图事件边界
+
+团队名单、版本贡献、Git、只读文件和整组导出不新增 RunEvent/SSE 类型。导出进度由前端轮询团队 HTTP API；跨 Java shard 使用内部一次性二进制 WebSocket，它不是 RunEvent、用户通知或公开事件流。角色降级和成员移除通过每次 HTTP/文件 RPC 实时复核生效，不依赖广播事件最终一致性。

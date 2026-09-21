@@ -4615,3 +4615,55 @@ Agent/Skill/Tool 数量、`requiresRestart` 和 `changeSummaryJson`。公共配�
 TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `versionKey`，若查询期间视图推进则返回
 `knowledgeUpdating=true` 及 `latestGraphEvidence`；链路结果另返回实际 `queryRequest`，详情 URL 携带同一资产、
 固定版本、不确定关系开关和预算。查询不会准备源码、扫描/同步图谱、写源码、生成测试或执行测试。
+
+## 系统管理员团队代码视图
+
+所有入口使用平台用户 JWT、统一响应和 `X-Trace-Id`。角色能力按 `SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER` 继承；下列团队入口要求实时 `SYSTEM_ADMIN` 能力，超级管理员专属操作另行标明。范围参数固定为 `scopeMode=MY_TEAM|SYSTEM_ADMIN_TEAM|GLOBAL`：系统管理员省略时使用 `MY_TEAM`；`SYSTEM_ADMIN_TEAM` 必须由超级管理员同时传实际系统管理员 `ownerUserId`；`GLOBAL` 仅超级管理员可用。
+
+### 团队名单
+
+| 方法与路径 | 用途与输入 | 响应 |
+|---|---|---|
+| `GET /api/internal/platform/system-management/system-admins` | 仅超级管理员；`keyword/page/size` 分页查实际系统管理员 | `PageResponse<TeamUser>` |
+| `GET /api/internal/platform/system-management/team-members` | 团队成员；范围、`keyword/page/size` | `PageResponse<TeamUser>`，含角色与 `addedAt` |
+| `GET /api/internal/platform/system-management/team-member-candidates` | 全平台有效候选，排除负责人及当前成员；同上分页 | `PageResponse<TeamUser>` |
+| `POST /api/internal/platform/system-management/team-members` | body `{memberUserId}`；添加或恢复软删除关系 | `{ownerUserId,memberUserId,active:true}` |
+| `DELETE /api/internal/platform/system-management/team-members/{memberUserId}` | 立即移除团队关系 | `{ownerUserId,memberUserId,active:false}` |
+
+### 版本与贡献
+
+基址为 `/api/internal/platform/workspace-management/team`。应用范围是当前团队成员所属应用与仍保留个人 worktree 的历史应用并集；移出团队后不再返回当前或历史数据。
+
+| 方法与相对路径 | 用途 |
+|---|---|
+| `GET /applications` | 可见应用及当前/历史成员数 |
+| `GET /applications/{appId}/workspaces` | 应用工作空间模板 |
+| `GET /workspaces/{workspaceId}/versions` | 工作空间版本 |
+| `GET /versions/{versionId}/contributions` | 人员、`CURRENT/HISTORICAL` 与同版本多个个人 worktree |
+| `GET /personal-workspaces/{id}/status` | staged、unstaged、untracked 和受限 diff |
+| `GET /personal-workspaces/{id}/commits?kind=PERSONAL|PUBLISHED&offset=&limit=` | 最多 200 条；个人范围为 `baseCommit..HEAD`，发布范围还要求 SCM 身份和版本目标可达 |
+| `GET /personal-workspaces/{id}/commits/{commit}?kind=...` | 提交详情与可见文件 |
+| `GET /personal-workspaces/{id}/commits/{commit}/diff?kind=...&path=...` | 单文件受限 diff |
+
+提交类型固定为 `PUBLISHED_COMMIT|PERSONAL_COMMIT|UNCOMMITTED|SYNC_MERGE`。merge 单独标记为 `SYNC_MERGE`；版本目标或祖先关系无法确认时 `attributionConfirmed=false`，不得扩大查询范围猜测。个人 worktree 在远端 Java 时，Controller 复用 `BackendJavaRouteResolver` 与 `BackendHttpForwarder`，不在错误节点本机降级。
+
+### 团队只读文件 WebSocket
+
+- `POST /personal-workspaces/{id}/file-ws-route` 返回权威 Java 的 `WorkspaceFileRouteResponse`。
+- `POST /personal-workspaces/{id}/file-ws-tickets` 接收 `{linuxServerId}`，签发一次性 `TEAM_READ_ONLY` ticket；浏览器随后连接既有平台文件 WebSocket。
+- 每条 `workspace.list/search/read/read.chunk` RPC 都重新复核账号、实时角色、团队关系、目标用户、版本/worktree 映射和服务器归属；只读 diff 仍走上述 Git HTTP API。
+- `.opencode` 可读取；`.git`、路径穿越、符号链接和特殊设备文件拒绝。写入、上传、删除、移动、Git 变更、终端、配置修改、会话附加和普通工作区下载均返回 `FORBIDDEN`。
+
+### 整组导出
+
+| 方法与相对路径 | 用途 |
+|---|---|
+| `POST /versions/{versionId}/exports` | 预检后创建异步任务；超 2 GiB 或 5 万普通文件返回 `VALIDATION_ERROR` |
+| `GET /exports/{exportId}` | 查询 `QUEUED|RUNNING|READY|PARTIAL_READY|FAILED|CANCELLED|EXPIRED` 及每 worktree 结果 |
+| `POST /exports/{exportId}/cancel` | 取消并清理临时 shard/产物 |
+| `POST /exports/{exportId}/download-route` | 返回产物协调节点 `baseUrl`、短期单次 `downloadPath` 和过期时间 |
+| `GET /exports/{exportId}/download?ticket=...` | 浏览器在协调节点原生流式下载；ticket 单次消费 |
+
+内部精确路径 `/team/export-shards/inspect`、`/build`、`/delete-revoked-artifact` 和 `/receive/ws` 只对通用 Bearer 过滤器豁免，随后分别使用现有 XXL 内部控制 Token或一次性 WebSocket ticket 完成专用鉴权；相邻及子路径不继承豁免，也不接受用户 JWT 直接调用。它们用于权威源节点预检、过滤 shard 传输及团队撤权后的协调节点产物清理。源节点每 worktree 最多两个、全局最多四个并发；明细先原子领取数据库租约。至少一个 worktree 成功即生成 ZIP；失败 worktree、`NO_WORKTREE` 和敏感排除项记录在 `manifest.json`。角色降级、负责人失效或任一团队成员移除后，后续团队请求会实时复核并作废任务；成员移除还会主动取消关联任务并通知协调节点删除产物，协调节点离线时由每分钟清理轮询兜底。
+
+通用错误为 `UNAUTHENTICATED/FORBIDDEN/NOT_FOUND/VALIDATION_ERROR/CONFLICT/GIT_UNAVAILABLE/INTERNAL_ERROR`，均使用统一 `ApiErrorResponse` 且不返回物理路径、凭据、内部 Token 或 Git stderr。团队名单、代码、文件、导出和下载操作统一先写 `TEAM_OVERSIGHT` 审计；文件路径和 User-Agent 在数据库仅保存 SHA-256。兼容性：只新增 internal API 和可选角色能力，不修改旧 URL、RunEvent 或现有响应字段。对应测试为 `RoleCapabilitiesTest`、`SystemAdminTeamRepositoryIntegrationTest`、`SystemAdminTeamPostgresqlIntegrationTest`、`GitWorkspaceServiceRealGitTest`、`WorkspaceFileWebSocketHandlerTest` 和前端角色能力/构建测试。
