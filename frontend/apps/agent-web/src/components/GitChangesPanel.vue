@@ -1142,7 +1142,11 @@ function applyPublicAgentDiffRefresh(files: AgentConfigDiffFile[], publishPendin
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
   const token = ++refreshChangesToken;
   loading.value = true;
-  if (!options.preserveError) {
+  // 提交进度弹框打开时，errorMessage 是弹窗里的红色“错误说明”。
+  // watch（公共 worktree / agentConfigRevision 变化）触发的后台自动刷新不传 preserveError，
+  // 若照常清空 errorMessage，用户还没看清失败原因就被刷没；因此弹框打开期间一律保留。
+  const keepError = options.preserveError || showCommitProgressDialog.value;
+  if (!keepError) {
     errorMessage.value = "";
   }
   try {
@@ -1247,7 +1251,10 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
     selectInitialDiffScope();
   } catch (error) {
     if (token !== refreshChangesToken) return;
-    errorMessage.value = errorMessageFor(error, "刷新变更列表失败");
+    // 弹框打开期间后台刷新自身失败也不能覆盖提交失败说明，避免错误原因被无关刷新文本顶掉。
+    if (!keepError) {
+      errorMessage.value = errorMessageFor(error, "刷新变更列表失败");
+    }
   } finally {
     if (token === refreshChangesToken) {
       loading.value = false;
