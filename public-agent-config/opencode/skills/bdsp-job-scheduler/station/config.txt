@@ -1,0 +1,8 @@
+# ===========================================
+# UserInfo Capture - Configuration
+# ===========================================
+# Configure the authorized target URL below before use. The public package
+# intentionally does not embed an enterprise server address.
+# Lines starting with # are comments and are ignored.
+# The first non-comment, non-empty line is used as the URL.
+https://example.invalid/replace-with-authorized-target

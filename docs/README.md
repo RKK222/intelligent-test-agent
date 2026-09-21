@@ -59,6 +59,7 @@
 - `docs/deployment/codex-whitebox-mcp.md`：官方 Codex 0.145.0 MCP、企业 DeepSeek 路由、无审批夜间分析、原生参数风险、Linux 4.19 / Docker 18.09.7 预检与回滚。
 - `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
 - `docs/deployment/public-agent-config-edit-visibility.md`：公共 Agent Skill 改动“已生效但看不到落盘”的原因、只读排查步骤与提交发布边界。
+- `public-agent-config/README.md`：随当前项目版本管理的公共 Agent/Skill/Tool 审计基线、打包方法，以及与企业公共配置独立 Git 的发布边界。
 - `deploy/internal/CLICKHOUSE-ANALYTICS.md`：运营分析 ClickHouse 专机的离线打包、部署、回填、验收、清理和回滚。
 - `docs/deployment/toolbox.md`：IT-Tools + OmniTools 的 193 项离线目录、派生源码、双后台共置容器、Nginx、增量发布与回滚。
 - `docs/deployment/lobehub-offline.md`：LobeHub/ParadeDB/RustFS 独立离线制品、安装、Redis ACL、启动、验收和回滚。

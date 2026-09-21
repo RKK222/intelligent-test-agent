@@ -1,0 +1,22 @@
+{
+  "url": "{BDSP_BASE_URL}/api/bdsp/BdspJobRun/runBdspJob",
+  "headers": {
+    "Content-Type": "application/json;charset=UTF-8",
+    "Authorization": "{AUTH_TOKEN}",
+    "Encrypted": "false",
+    "Userinfo": "{USERINFO}"
+  },
+  "params": {
+    "envName": "{ENV}",
+    "concurrency": "1",
+    "batchDate": "{BATCH_DATE}",
+    "batchNum": "1",
+    "jobNames": "{JOB_NAME}",
+    "isDebug": 0,
+    "triggerOption": "0",
+    "sftgxlzyOption": "0",
+    "etlSystemName": "{ETL_SYSTEM}",
+    "runTimeOut": 7200,
+    "userId": "{USER_ID}"
+  }
+}

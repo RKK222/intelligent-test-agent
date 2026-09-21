@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-21 - 将公共 Agent 能力基线纳入当前项目仓库
+
+- Why: 用户明确要求后续公共 Agent 不再只交付不可审查来源的 ZIP，而要同时提交到当前 TestAgent 项目仓库；现有企业运行链路又要求公共配置独立 Git 的已发布固定提交继续作为运行权威，不能用本地仓库文件直接覆盖共享目录。
+- What: 新增 `public-agent-config/`，保存本次已审计的 9 Agent、22 Skill、12 Tool 及 BDSP 运行资产；增加 `artifacts.sha256` 锁定 12 个预编译程序、驱动、Java class 和 Excel 模板。新增 `deploy/internal/package-public-agent-config.sh`，只允许从当前 Git HEAD 中已提交且无脏改动的基线生成固定名 ZIP，自动写入 `SOURCE-COMMIT`，拒绝 `opencode.jsonc`、真实数据库配置、密钥、依赖缓存和符号链接。部署文档明确项目内基线用于评审、追溯和封包，正式发布仍走公共配置个人 worktree、Diff、提交与发布流程。
+- How: 源目录与已复核候选包的 `opencode/**` 逐文件一致；4 个关键 Skill 的公共根路径校验通过，结构核对为 9/22/12，测试设计 22 个 eval 及混沌、安全、BDSP 路由均存在；三组 Python 回归 8+1+37 项通过，全部 TypeScript Tool、JSON、shell 和 BDSP Go 程序校验通过；12 个不透明资产摘要一致，敏感路径、符号链接、私网地址和字面认证头扫描通过。打包脚本 Bash 语法通过，并在源文件尚未提交时按设计拒绝封包；提交后的 clean-HEAD 封包和 ZIP 复验在本条后续结果中补齐。
+- Result: 当前改动不新增部署节点，目标分支为 `release`；不涉及产品 API、事件、数据库/Flyway、性能链路、环境配置或 OpenCode 只读源码。项目仓库现已具备公共能力源文件、打包入口和发布边界文档；企业公共 Git 尚未因本次提交自动发布或安装。
+
 ### 2026-09-21 - 审计并生成最新公共 Agent 候选包
 
 - Why: 用户提供企业内现用 `config.7z`，要求合入近期 token/输出精简改造、修复 Skill 路径问题，并核对所有 Skill 是否串到对应 Agent。附件 `feature_config` 的 `6bb05a0f585ebe12cf06c72fe58224676a5ec02` 仍存在一个中文 Skill 目录与英文 `name` 不一致、执行链 owner 缺失、AGENTS 引用不存在 Skill，以及固定企业地址和认证材料混入公共配置的问题。

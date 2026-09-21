@@ -1,0 +1,143 @@
+{
+  "evals": [
+    {
+      "name": "接口编号触发完整参考链路",
+      "prompt": "生成 101011111 接口的自动化脚本，案例文件位于当前子条目 041-测试设计。",
+      "expectations": [
+        "首先调用 TCDS 且请求体使用 seasId",
+        "只保留 NIT 并分别处理 TC 与一体化平台脚本",
+        "全部案例各生成一份脚本且只写 042-测试执行"
+      ]
+    },
+    {
+      "name": "TCDS 失败需要确认",
+      "prompt": "生成 Moegglobalpaysubmit 接口的自动化脚本，没有上传存量 TC 文件。",
+      "expectations": [
+        "首先调用 TCDS 且请求体使用 seasName",
+        "TCDS 失败时不生成文件",
+        "返回 TCDS_FAILED_CONFIRMATION_REQUIRED 并由主 Agent 询问用户"
+      ]
+    },
+    {
+      "name": "上传 TC 优先与长度复核",
+      "prompt": "生成 aaaaaaa 接口全部案例的自动化脚本，已上传同一 TC 的 Java/XLS，其中一个案例要求字段 userName 长度为 65。",
+      "expectations": [
+        "仍先调用 TCDS",
+        "先完整提取上传 XLS 的全部工作表，逐案例还原报文、数据准备/恢复和断言，再结合 Java 映射与覆盖",
+        "报文值、SQL/table 和断言优先使用实际被框架消费的上传 TC Excel 事实",
+        "按 reqParamStruct 保留空字段并对 userName 最终值执行长度 65 二次校验"
+      ]
+    },
+    {
+      "name": "TC 与一体化平台双来源不可跳过",
+      "prompt": "生成 101011111 接口的自动化脚本，TCDS 同时返回 TC 和一体化平台 NIT 脚本。",
+      "expectations": [
+        "完整查找并解析一个 TC Java/Excel 文件组",
+        "同时对排序后的前 10 个一体化平台脚本发起一次查询并解析返回",
+        "平台请求中的每个脚本都与返回项一一关联并解析，缺少任一项即不算完成",
+        "任一来源未完成时返回 PARTIAL 和 INCOMPLETE，不生成正式脚本",
+        "两类参考均完成后才返回 RESOLVED 并进入全案例生成"
+      ]
+    },
+    {
+      "name": "长 SQL 数据准备不得简化",
+      "prompt": "生成 aaaaaaa 接口自动化脚本，TC Excel 包含多条数百行准备和恢复 SQL，以及包含空单元格的大型 table 数据。",
+      "expectations": [
+        "提取所有适用准备与恢复动作并保持执行顺序",
+        "完整输出每条 SQL，不使用省略号、摘要、同上或重新格式化内容",
+        "完整输出 table 的全部行列、顺序和空值",
+        "运行数据准备完整性校验，缺失、顺序变化或内容变化时禁止标记 GENERATED"
+      ]
+    },
+    {
+      "name": "报文数据准备断言双来源合并",
+      "prompt": "生成 101011111 接口脚本，TC 和一体化平台都提供报文、准备 SQL 和断言，其中部分相同、部分互补、部分冲突。",
+      "expectations": [
+        "报文字段逐项同时参考 TC 与平台，按 reqParamStruct 合并并记录冲突处理",
+        "合并两边非冲突数据准备，重复动作去重但记录双来源，长 SQL 完整保留",
+        "合并两边非冲突断言，冲突预期按案例目标和优先级处理",
+        "来源贡献校验通过，任一有内容来源在任一维度未参考时禁止生成"
+      ]
+    },
+    {
+      "name": "全部权限直通且禁止二级子 Agent",
+      "prompt": "生成 101011111 接口自动化脚本，TC Java/XLS 是工作区外附件，需要访问外部只读引用、执行解析脚本、调用平台接口并写入 042-测试执行。",
+      "expectations": [
+        "test-execution-agent 只派发固定的一层 test-execution-api",
+        "test-execution-api 不再调用 Task、General、Explore 或其它 Agent",
+        "test-execution-agent 与 test-execution-api 的 question 权限均为 deny，不调用 Question 询问文件、目录、命令、网络或 Tool 权限",
+        "文件、外部目录、命令、网络、Skill、平台 Tool 和规定目录写入均直接执行，不申请权限或等待批准",
+        "test-execution-api 的 task/question 保持 deny，以禁止二级 Agent 和权限询问，不触发解锁申请",
+        "只读文件不被修改，正式产物仍只写 042-测试执行"
+      ]
+    },
+    {
+      "name": "TC 文件递归搜索全部子目录",
+      "prompt": "生成 101011111 接口自动化脚本，TCDS 返回的 TC 文件不在只读自动化引用根目录和直接映射路径，而是在多层子目录中。",
+      "expectations": [
+        "先尝试第一段映射出的直接逻辑路径",
+        "直接路径不完整时通过逻辑引用递归搜索全部后代目录且不限深度",
+        "进入递归兜底后即使中途找到完整文件对也继续盘点，并穷尽所有自动化引用",
+        "按 TC 主名和逻辑父目录配对 Java/XLS，找到完整组后解析 Excel 和 Java",
+        "只记录引用别名和匹配逻辑路径，不读取、构造或展示服务器物理根路径"
+      ]
+    },
+    {
+      "name": "reqParamStruct 第一层根节点不进入报文",
+      "prompt": "生成 101011111 接口自动化脚本，一体化平台返回的 reqParamStruct 第一层节点名为 ApiRequest，其 children 包含 ACCOUNT 和 EMPTY。",
+      "expectations": [
+        "保留原始 reqParamStruct 作为结构依据，但把 ApiRequest 仅视为结构根节点",
+        "最终报文第一层直接输出 ACCOUNT 和 EMPTY，不输出 ApiRequest 外层",
+        "EMPTY 即使为空也输出为空字符串",
+        "二次校验拒绝包含 ApiRequest 根字段、缺少 children 字段或增加其它字段的报文"
+      ]
+    },
+    {
+      "name": "案例明确缺字段时只允许缺少目标字段",
+      "prompt": "生成 101011111 接口自动化脚本，reqParamStruct 包含 ACCOUNT、MOBILE 和 EMPTY；当前已评审案例明确要求不传 MOBILE 字段，其他案例没有缺字段要求。",
+      "expectations": [
+        "仅当前缺字段案例的 expectedMissingPaths 包含 MOBILE，不能从参考或生成结果反向增加允许路径",
+        "当前案例最终报文必须不包含 MOBILE，但仍完整包含 ACCOUNT 和 EMPTY，EMPTY 为空时保留空字符串",
+        "其他普通案例的 expectedMissingPaths 为空，ACCOUNT、MOBILE 和 EMPTY 全部存在",
+        "二次校验拒绝目标字段仍存在、缺少其它字段、未知允许路径、null 或任何额外字段"
+      ]
+    },
+    {
+      "name": "案例明确新增字段时只允许增加目标字段",
+      "prompt": "生成 101011111 接口自动化脚本，reqParamStruct 包含 ACCOUNT、MOBILE 和 EMPTY；当前已评审案例明确要求多传字段 EXT_FIELD，并要求不传 MOBILE。",
+      "expectations": [
+        "生成前只从案例原文提取 expectedAdditionalPaths=EXT_FIELD 和 expectedMissingPaths=MOBILE，不从 TC、平台参考或生成结果反向补录",
+        "最终报文以完整 reqParamStruct 为基准，按案例要求加入 EXT_FIELD 并省略 MOBILE，其它结构字段保持不变",
+        "EXT_FIELD 即使案例要求空值也显式输出为空字符串，不能因为为空省略",
+        "二次校验拒绝 EXT_FIELD 未出现、MOBILE 仍存在、加入未声明字段、缺少其它字段或把已有结构字段声明为新增字段",
+        "数组元素内新增字段必须出现在每个实际元素中，缺字段和新增字段可在同一案例同时生效"
+      ]
+    },
+    {
+      "name": "内存优先且所有出口无临时残留",
+      "prompt": "生成 101011111 接口自动化脚本，过程中会产生 TCDS 响应、Excel 提取物和三类二次校验 JSON；即使平台部分失败也不能遗留临时文件。",
+      "expectations": [
+        "TCDS/平台响应、参考计划、values、manifest 和全部校验材料默认保存在上下文并通过 stdin/stdout 传递，不创建中间文件",
+        "禁止生成 clean-up.json、cleanup.json，禁止在 042-测试执行内创建 .reference-work、.tmp 或其它临时目录",
+        "第三方程序确实强制落盘时才延迟创建 042-测试执行同级 .tmp/api-automation-<runId>/，子进程的 TMP、TEMP、TMPDIR 仅在进程级指向该 run 的 system-temp",
+        "test-execution-api 使用覆盖完整流程的 finally，在成功、失败、阻断和异常出口执行清理",
+        "结束时关闭文件和本次子进程，只删除本次 run；本次创建的 .tmp 根清空后删除，但不删除其它并发 run",
+        "运行 validate_temp_cleanup.py，042 内 legacy .reference-work、清理 JSON、本次 run 或其它新增路径都会导致校验失败",
+        "子 Agent 在校验通过前不得结束，入口 Agent 收到结果后还会独立复验并直接兜底清理",
+        "用执行前基线和 generatedFiles 复核 042，generatedFiles 不包含临时文件，最终回复前不存在任何额外路径"
+      ]
+    },
+    {
+      "name": "整份产物严格跟随当前模板组",
+      "prompt": "生成 101011111 接口全部案例的自动化脚本，公共模板刚刚调整了案例信息、接口信息、请求报文、数据准备和断言章节中的标题与表头。",
+      "expectations": [
+        "每个案例先在 Agent 上下文形成结构化 values 对象，并通过 stdin 传给 renderer",
+        "调用 generate-api-automation-markdown 的 renderer 从当前主模板及全部 partial 一次性生成整份 Markdown",
+        "文档开头、1-5 章、固定说明、所有表头、分隔线、代码块和重复区块均来自当前模板，不能只修正 5.1/5.2",
+        "renderer 从 stdout 返回 manifest 到上下文，manifest verifier 从 stdin 接收 values/manifest 后重新渲染并逐字节核对全部哈希",
+        "内容或格式修正只更新上下文 values 后重渲染，不直接编辑正式 Markdown",
+        "values、manifest 和校验结果不落盘，generatedFiles 只含正式 Markdown"
+      ]
+    }
+  ]
+}

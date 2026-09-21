@@ -1,0 +1,13 @@
+interface:
+  display_name: Legacy 接口自动化资产转换
+  short_description: 将旧接口脚本与测试数据整理成可执行 Markdown 资产
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+  default_prompt: 使用 $legacy-interface-function-asset-to-md 将测试脚本和配套测试数据整理为接口功能自动化资产。
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

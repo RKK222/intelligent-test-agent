@@ -1,0 +1,81 @@
+# TCDS 与一体化平台接口契约
+
+## TCDS 关联脚本查询
+
+- URL：`${TCDS_BASE_URL}/caseInterface/getyScriptIdByInterface`（`TCDS_BASE_URL` 由受控运行环境注入）
+- Method：`POST`
+- Content-Type：`application/json`
+- Header：`toolId: 66f36bfa5c1c6105572b0118880261d6`
+
+请求体固定包含两个字段；未识别的字段传空字符串，不能用日期、路径或案例编号补造：
+
+```json
+{
+  "seasId": "103849873",
+  "seasName": "Moegglobalpaysubmit"
+}
+```
+
+使用公共 `http_call` Tool 时参数为：
+
+```text
+uri=${TCDS_BASE_URL}/caseInterface/getyScriptIdByInterface
+method=POST
+headers={"toolId":"66f36bfa5c1c6105572b0118880261d6","Content-Type":"application/json","Accept":"application/json"}
+body=<上面请求体的 JSON 字符串>
+```
+
+成功响应要求 `code == 0` 且 `data` 为数组。只保留 `scriptType` 去空白后不区分大小写等于 `NIT` 的元素。`scriptId` 若以 `Nit,`、`NIT,` 等大小写变体开头，先移除该前缀和逗号，再参与分类和后续接口入参。
+
+## 一体化平台接口脚本查询
+
+- URL：`${TEST_AGENT_HTTP_PROXY_BASE_URL}/opencode/interface/getInterfaceInfosByScriptIds`（基础地址由受控运行环境注入）
+- Method：`POST`
+- Content-Type：`application/json`
+
+```json
+{
+  "appName": "F-BASE",
+  "version": "2026年3月",
+  "scriptIds": ["脚本名1", "脚本名2"]
+}
+```
+
+`scriptIds` 必须是排序后的非 TC 一体化平台脚本，去重后最多 10 个，一次请求传入，不能逐个调用。
+
+### appName 解析
+
+按以下顺序选择第一个非空精确值：
+
+1. 用户明确给出的应用 ID；
+2. Task prompt 的 `workspaceContext.appId`；
+3. 当前应用工作空间元数据中的应用 ID；
+4. 已评审接口案例中明确标注的应用 ID。
+
+不得从 Java 包名、脚本第一段、中文模块名或常识猜测。存在一体化平台脚本但没有 appName 时返回 `INCOMPLETE`，由主 Agent 要求用户补充应用 ID 或恢复工作空间应用上下文；不得跳过必需调用。
+
+### version 解析
+
+按以下顺序选择：
+
+1. 工作空间元数据中的明确版本；
+2. 当前工作空间路径中有效的 8 位日期段 `yyyyMMdd`；
+3. 已评审材料中明确的版本日期。
+
+`yyyyMMdd` 必须先按真实日期校验，再转换为 `yyyy年M月`，例如 `20260101 -> 2026年1月`。如果上下文已经是 `yyyy年M月`，保持该值。多个日期候选时优先使用应用工作空间元数据；仅有路径时使用最接近当前应用工作空间根的有效日期段。不得使用当前系统日期代替。存在一体化平台脚本但无法得到版本时返回 `INCOMPLETE`，由主 Agent 要求用户补充版本或恢复工作空间版本上下文。
+
+调用 `rank_reference_scripts.py` 时，`--workspace-value` 按上述优先级从高到低重复传入；脚本选取第一个含有效版本的上下文值。
+
+### 返回使用
+
+读取 `interfaceInfos` 中的：
+
+- `caseList`：案例名和 `caseData`；
+- `dataPrepareList`：SQL 或表格准备/恢复；
+- `assertGroupList`：返回值和数据库断言；
+- `dataMockList`：Mock；
+- `reqParamStruct`：默认规范请求结构。数组中唯一的第一层节点作为结构根节点保留在内部上下文，但生成实际报文时不输出该节点名称，直接使用其 `children` 作为报文第一层字段。普通案例必须完整保留全部结构字段且不能增加字段；已评审案例明确测试缺少字段时，只允许省略该案例指定的精确路径；明确测试新增字段时，在完整结构基础上只允许加入该案例指定的精确路径；两种例外可同时生效。
+
+若多个返回项的 `reqParamStruct` 不一致，使用输入排序中第一个非空结构作为当前生成批次的规范结构；后续参考值默认只能映射到该结构已有字段。只有已评审案例明确要求新增字段时，才能按案例预先提取的 `expectedAdditionalPaths` 追加，不能因后续参考本身多出字段而扩大允许列表。响应若携带脚本标识则按标识关联；未携带时按请求 `scriptIds` 与返回顺序关联。
+
+请求的每个 `scriptId` 都必须关联到一个返回case并完成解析。若响应case少于请求项、脚本标识无法关联、返回顺序不足以完成一一对应，或某个响应项整体不可解析，则该次一体化平台参考链路不完整；同时存在 TC 参考时必须返回 `PARTIAL/INCOMPLETE`，不能只使用已成功解析的 TC 或部分平台结果生成脚本。

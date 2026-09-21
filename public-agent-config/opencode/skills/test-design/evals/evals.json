@@ -1,0 +1,137 @@
+{
+  "skill_name": "test-design",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "为登录页面做完整测试设计：用户名必输且长度 6-20 位，密码连续输错 5 次锁定 30 分钟。明确使用等价类法和路径法。",
+      "expected_output": "用户指定的等价类法和路径法都被选中；等价类表和路径图写入 041-测试设计/测试设计文档，文件按登录页-用户名输入-等价类表、登录页-账号锁定-路径图等业务语义命名；分别生成登录页-用户名输入-等价类法-案例.md 和登录页-账号锁定-路径法-案例.md，不生成未选方法案例。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "为 POST /api/users/query 设计接口案例。userId 必输且为 10 位数字，成功返回 code=0000 和用户状态；未提供数据库、CMC 参数和下游材料。",
+      "expected_output": "智能体自主选择能覆盖主要接口风险的少量方法，不因 userId 输入约束机械追加全部设计方法；接口覆盖矩阵按用户查询接口-接口覆盖矩阵命名并写入测试设计文档目录，七区块案例按用户查询接口-接口法-案例.md 命名并写入 041 根目录；未知材料标记需确认。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "为审批子条目设计测试案例。材料包含提交、通过、驳回和撤回流程，没有指定测试设计方法。",
+      "expected_output": "智能体按主要流程风险自主选择路径法作为主方法，只在存在独立高风险覆盖时增加辅助方法，不生成接口、等价类、正交、路径、场景、规则和增补的全套产物；路径中间物命名为审批流程-路径图.md，最终案例按审批流程-路径法-案例.md 命名。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "为助商组合贷的信鸽取证设计场景法测试。页面按钮原始文案为用户点击\"发起取证\"，流程包含发起、处理中、成功、失败、超时补偿和未知状态。",
+      "expected_output": "场景法 Phase A 生成 Mermaid 场景图，并以 Mermaid 11.16.0 为最低兼容基线；按钮文案中的 ASCII 双引号改用中文引号或 &quot;，不得生成 A[用户点击\"发起取证\"] 这类无效语法；内部记录 staticCheck 和 parserCheck，语法检查失败时不得冻结或进入 Phase B。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "先为登录页面生成等价类表给我确认，确认后再生成案例并审核。用户名必输且长度 6-20 位。",
+      "expected_output": "入口只调用 test-design-generation；生成 Agent 在同一 Task 内先冻结事实分析基线，再生成等价类 Phase A，并以 WAITING_FOR_ARTIFACT_CONFIRMATION 暂停。用户确认后再次调用同一个 generation，使用 previousDesignManifest 从 Phase B 继续，不重新分析材料或重做 Phase A；案例完成后只再调用一次 test-design-review。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "某批量文件允许重跑，重跑时先清理同日期旧数据再重新加载；目录中可能同时存在多个日期文件，但只加载当日文件。请生成测试设计。",
+      "expected_output": "读取 batch-job.md，分别命中 BATCH-12‘重复加载策略’和 BATCH-13‘多日期文件加载策略’；BATCH-12 选择‘清理同日期旧数据后重新加载’，排除‘不重新加载’，BATCH-13 选择‘只加载当日数据’，排除‘全部加载’，并把两个所选分支的最低覆盖绑定到 Phase A，不机械套用其余批量规则。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "异步任务写入业务主键和技术主键，按优先级调度，处理完成后更新终态，并要求同一业务并发请求只处理一次。请生成测试设计。",
+      "expected_output": "读取 async-task.md，按材料命中 ASYNC-01、ASYNC-02、ASYNC-03、ASYNC-05、ASYNC-18 和 ASYNC-20，逐条落实最低覆盖并记录材料证据及 Phase A 中间物项；并发防重复和终态属于功能正确性，继续参与本轮设计，混沌、性能、安全、灰度、应急和监控规约仍不读取。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "审核一份批量任务设计：材料说明允许重跑且只加载当日文件；生成 manifest 只登记 BATCH-12 为命中，没有评估 BATCH-01 至 BATCH-29 的其余编号；案例只有‘发现当日数据后直接结束’，没有清理旧数据后重新加载的案例。",
+      "expected_output": "Review 读取 spec-index.md、batch-job.md 和 quality-gate.md；展开 ruleId/ruleIds 后因编号集合不完整返回 INCOMPLETE，不能给出‘通过’。同时独立指出 BATCH-12 选择了支持重跑却生成相反案例，缺少清理同日期旧数据后重新加载的 Phase A 绑定和最低覆盖，且 BATCH-13‘只加载当日数据’漏判；内部 reviewedObjectRuleSets 记录编号、artifactBindingGaps 与覆盖缺口。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "只生成登录页面的测试设计文档，不要测试案例，也不要审核。用户名必输且长度 6-20 位。",
+      "expected_output": "入口设置 requestedDeliverable=DESIGN，只调用一次 test-design-generation；完成事实分析、方法选择和 Phase A 冻结后结束，只创建并输出测试设计文档，不生成案例文件，不调用 test-design-review。",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "只根据已有的登录页-等价类表.md 生成测试案例，不重新分析需求。当前没有提供该中间物的确认状态和 previousDesignManifest。",
+      "expected_output": "入口设置 requestedDeliverable=CASES；因缺少已确认/冻结状态和 previousDesignManifest 返回 INCOMPLETE，只说明一个必要缺口，不重做事实分析或 Phase A，不生成案例，不调用 Review。",
+      "files": []
+    },
+    {
+      "id": 11,
+      "prompt": "只审核现有批量测试设计和案例，不要重新生成或修改。已提供 sourceManifest、材料读取清单、事实基线、Phase A/B 文件、映射和生成 policyManifest。",
+      "expected_output": "入口设置 requestedDeliverable=REVIEW，直接且只调用一次 test-design-review；designReviewInput 包含 sourceManifest、materialsRead、analysisBaseline、outOfScope、requestedMethods、mermaidValidation、analysisMismatch、artifactMismatch 和 structuralGateCheck，不调用 test-design-generation，不修改 Phase A/B。",
+      "files": []
+    },
+    {
+      "id": 12,
+      "prompt": "接口规则 API-13 命中且材料要求 userId 必输，但接口覆盖矩阵中没有对应条目；案例中后来补了一条 userId 为空。请审核。",
+      "expected_output": "Review 判定规则到 Phase A 的追溯失败：MATCHED 规则必须先有 artifactItemRefs，caseRefs 只能来自这些中间物项；Phase B 后补案例违反禁止新增覆盖，至少记为 major，不能通过。",
+      "files": []
+    },
+    {
+      "id": 13,
+      "prompt": "订单接口同时有 userId 必输、1000 TPS 性能目标、网络故障注入、安全渗透、灰度和 AMC 告警要求。当前只做测试案例设计。",
+      "expected_output": "当前案例设计只按启用的 api.md 命中 API-13 等功能规则；不得读取或登记 non-functional-chaos.md、non-functional-performance.md、non-functional-security.md、production-safety.md，不生成性能、混沌、安全、灰度、应急或监控案例，也不把这些暂缓项当作设计缺口。",
+      "files": []
+    },
+    {
+      "id": 14,
+      "prompt": "批量设计同时包含：文件等待次数和间隔可配置、CHK 文件名错误时中断、码制异常时中断、多个上游依赖、核对文件第一行校验。请生成测试设计。",
+      "expected_output": "读取 batch-job.md 后命中 BATCH-07、BATCH-11、BATCH-14、BATCH-19 和 BATCH-28；BATCH-07 内等待次数与间隔都必须各覆盖至少两个值，BATCH-11 覆盖文件名错误，BATCH-14 选择中断分支，BATCH-19 选择多依赖并覆盖全完成、全未完成、部分完成，BATCH-28 覆盖第一行。每张卡保留证据、最低覆盖和 Phase A 绑定；其余非命中规则展开后必须完整覆盖 BATCH-01 至 BATCH-29。",
+      "files": []
+    },
+    {
+      "id": 15,
+      "prompt": "审核一份批量空文件案例：需求只说‘可能收到空文件’，没有说明空文件是否允许、是否影响核心业务；生成结果同时设计了允许空文件正常结束、不允许但正常结束、不允许且中断报警三组案例，并将 BATCH-05 标为命中。",
+      "expected_output": "Review 读取 BATCH-05 后判定材料不足以选择互斥分支，应记录 MISSING_EVIDENCE 或提出一个必要确认点；同时生成三种冲突预期属于 major，不能通过。Review 必须检查卡内分支和最低覆盖，不能因 BATCH-05 已登记且有案例就判为覆盖。",
+      "files": []
+    },
+    {
+      "id": 16,
+      "prompt": "某数据湖改造使用 A 与 F2 文件入湖，F2 依赖 A；需要覆盖连续两日、新增修改删除、有交易和无交易，并验证文件接口变更后的上下游。请生成测试设计。",
+      "expected_output": "在主对象规约之外读取 big-data-common-cases.md，以 DOMAIN_EXTENSION 登记 domainScopes=[COMMON,BDP]、逐领域 loadEvidence 和 expectedRuleIds=[BIGDATA-01..BIGDATA-11,BIGDATA-21]；不得评估 BDSP 专属的 BIGDATA-12..BIGDATA-19 或 OUTBOUND 的 BIGDATA-20。按证据命中 BIGDATA-01、BIGDATA-05、BIGDATA-08 和 BIGDATA-11，同时继续以 PRIMARY 评估 batch-job.md 等主对象规约。F2 预期使用 T-1 全量与 T 日增量合并，不误套 F1 或 Hudi 语义；数据矩阵、接口影响和上下游真实联测先绑定到 Phase A，再组装案例。BIGDATA-01 必须生成覆盖工作日、节假日、年末、月末、季末、跨年、跨月且连续至少 2 日，新增、修改、删除，当天有交易、当天无交易，以及正常数据、生僻字（如𠮷、㐭、𪚥等 Unicode 扩展字符）、换行符（`\\n` / `0x0A`）、回车符（`\\r` / `0x0D`）、特殊字符（如 `<>\"/\\|*?#&%$!@`、Emoji、零宽字符等）、字段首尾隐藏占位符的案例；允许合并相容维度，但每个维度至少有一条独立案例证明其被覆盖。不能因提示或需求未列出全部要点而省略，未确认的字段、码值和业务预期仍写需确认。",
+      "files": []
+    },
+    {
+      "id": 17,
+      "prompt": "为一个普通 CSV 日批导入任务设计案例：支持空文件和失败重跑，材料未出现 BDP、BDSP、SEAS、入湖、出湖、Hudi 或大数据平台。",
+      "expected_output": "读取 batch-job.md 并按材料命中空文件、重复加载或失败重做等主对象规则；不得仅因出现‘批量、CSV、文件、数据’而加载 big-data-common-cases.md，不登记 BIGDATA 编号，也不生成 A/F、Hudi、BDSP 或出湖案例。",
+      "files": []
+    },
+    {
+      "id": 18,
+      "prompt": "某 BDSP 平台化作业新增作业组，涉及生命周期配置、单作业调度、外部系统触发全流程和数据清理；材料没有 BDP、入湖、Hudi 或出湖。请生成测试设计。",
+      "expected_output": "读取 big-data-common-cases.md 并登记 domainScopes=[COMMON,BDSP]；expectedRuleIds 只能包含 BIGDATA-01、BIGDATA-08、BIGDATA-10、BIGDATA-12..BIGDATA-19、BIGDATA-21。不得评估 BDP 专属 BIGDATA-02..BIGDATA-07、BIGDATA-09、BIGDATA-11 或 OUTBOUND 的 BIGDATA-20；继续按 PRIMARY 评估批量任务等主对象规约。命中 BDSP 静态、作业变更、单作业、全流程和清理规则，并先绑定 Phase A。运行型对象按 BIGDATA-01 必须生成四组数据维度的案例，不能因需求未提及日期、交易类型、当天交易量或数据质量而省略，也不能沿用按算法或调度频率将这些要点记为 NOT_APPLICABLE 的旧豁免；纯静态对象仍保留该卡原有边界。数据质量案例沿用该卡中的生僻字（𠮷、㐭、𪚥）、换行/回车和特殊字符示例，每个维度至少有一条独立案例证明其被覆盖；不得只写笼统的‘特殊字符’就当作覆盖全部数据质量要点。",
+      "files": []
+    },
+    {
+      "id": 19,
+      "prompt": "某 BDP Hudi 表结构和视图发生变更并需要移行，材料给出 RA/RF 算法、A/D/F latest 以及日终 pt_dt 合并规则。请生成测试设计。",
+      "expected_output": "登记 domainScopes=[COMMON,BDP]，命中 BIGDATA-07、BIGDATA-08 和 BIGDATA-09；Hudi 最低覆盖必须包含注册/启动、实际数据消费和日终作业完整链路，核对 A/D/F latest 与 RA/RF 日终结果。不能因描述为注册、表结构或移行变更而只做静态及启动验证；环境或证据不足时标记 MISSING_EVIDENCE，不能把消费和日终记为 NOT_APPLICABLE。不得评估 BDSP 或 OUTBOUND 专属规则。",
+      "files": []
+    },
+    {
+      "id": 20,
+      "prompt": "请为这个 Kafka 交易状态同步需求补充混沌案例，重点验证消息积压、Broker 不可用和网络延迟。",
+      "expected_output": "入口把专项意图规范化为 chaos-case-generate，test-design-generation 加载该 Skill 并记录到 methodSkillsRead；不加载暂缓的 non-functional-chaos.md，不执行真实故障注入。内部结构按模板生成但不落盘，正式案例以四列表 Markdown 输出。",
+      "files": []
+    },
+    {
+      "id": 21,
+      "prompt": "请为文件上传功能设计安全案例，覆盖越权、恶意文件和敏感信息泄露，但不要执行扫描。",
+      "expected_output": "入口把专项意图规范化为 secure-case-recommend，test-design-generation 加载该 Skill并记录到 methodSkillsRead；不加载暂缓的 non-functional-security.md，不调用 secure-scan 或渗透测试。内部匹配与评分不落盘，正式案例以四列表 Markdown 输出。",
+      "files": []
+    },
+    {
+      "id": 22,
+      "prompt": "为登录功能做普通测试设计，需求提到认证失败后允许重试，没有要求混沌或安全专项案例。",
+      "expected_output": "按普通测试设计方法处理；不能仅因认证、失败、重试等泛化词加载 chaos-case-generate 或 secure-case-recommend，methodSkillsRead 中不应出现这两个专项 Skill。",
+      "files": []
+    }
+  ]
+}

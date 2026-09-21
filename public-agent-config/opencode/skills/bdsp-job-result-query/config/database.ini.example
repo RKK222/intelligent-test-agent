@@ -1,0 +1,20 @@
+[jc2]
+host = <JC2_HOST>
+port = 5432
+database = <JC2_DATABASE>
+username = <JC2_USERNAME>
+password = env:GAUSSDB_JC2_PASSWORD
+
+[jc4]
+host = <JC4_HOST>
+port = 5432
+database = <JC4_DATABASE>
+username = <JC4_USERNAME>
+password = env:GAUSSDB_JC4_PASSWORD
+
+[jc6]
+host = <JC6_HOST>
+port = 5432
+database = <JC6_DATABASE>
+username = <JC6_USERNAME>
+password = env:GAUSSDB_JC6_PASSWORD

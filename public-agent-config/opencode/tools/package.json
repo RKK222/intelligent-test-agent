@@ -1,0 +1,11 @@
+{
+  "name": "opencode-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenCode custom tools for calling third-party APIs",
+  "type": "module",
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.4",
+    "playwright-core": "1.61.0"
+  }
+}

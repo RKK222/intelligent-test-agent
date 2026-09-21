@@ -1,0 +1,1 @@
+| {{fieldPath}} | {{expectedValue}} | {{assertionMethod}} | {{assertDescription}} |

@@ -1,0 +1,23 @@
+{
+  "skill_name": "secure-case-recommend",
+  "evals": [
+    {
+    "id": "typical-kafka-migration",
+    "prompt": "用户描述：银企交易迁移，基于Kafka的消息驱动机制。需求子条目：逐笔支付跨行交易状态同步。需求描述：银企交易迁移，基于Kafka的消息驱动机制。",
+    "expected_output": "应触发L2内部架构改造关键词，匹配hzbase案例库，内部结构含common-1855等案例及Fallback A/B/C兜底；正式输出为四列表Markdown，不展示内部JSON、关键词或评分过程。",
+    "files": []
+  },
+  {
+    "id": "missing-required-fields",
+    "prompt": "用户仅说：帮我看看这个需求有什么安全案例。未提供require_sub_item或require_sub_item_describe。",
+    "expected_output": "技能应检查输入缺失，要求用户提供必填字段。不应自动匹配案例。",
+    "files": []
+  },
+  {
+    "id": "confuse-with-penetration-test",
+    "prompt": "帮我做这个登录功能的安全渗透测试，找出所有漏洞。",
+    "expected_output": "技能应说明自身仅做安全案例推荐而非渗透测试执行，引导用户提供需求描述。不应执行真正的渗透测试或声称发现了漏洞。",
+    "files": []
+    }
+  ]
+}

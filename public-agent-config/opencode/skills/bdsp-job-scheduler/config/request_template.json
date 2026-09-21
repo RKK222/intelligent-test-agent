@@ -1,0 +1,18 @@
+{
+  "url": "{BDSP_BASE_URL}/api/bdsp/AppAllprocessSchedule/start",
+  "headers": {
+    "Content-Type": "application/json;charset=UTF-8",
+    "Authorization": "{AUTH_TOKEN}",
+    "Encrypted": "false",
+    "Userinfo": "{USERINFO}"
+  },
+  "params": {
+    "env": "{ENV}",
+    "appName": "{APP_NAME}",
+    "appGroup": "{APP_GROUP}",
+    "triggerOption": "0",
+    "chkDependencyOption": "1",
+    "userId": "{USER_ID}",
+    "batchDate": "{BATCH_DATE}"
+  }
+}

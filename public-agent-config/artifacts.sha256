@@ -1,0 +1,12 @@
+9390b2f8dce6378f7b9f19dbda3dbf8955111ec15ae4acb91c9e618189d12905  opencode/skills/bdsp-job-result-query/lib/GaussDBV5-503.1.0.SPC1700_23.09.22.jar
+a8b60767ba307ee88297319e81bf0207c78673646af213f611864a99396d2885  opencode/skills/bdsp-job-result-query/scripts/GaussDBQuery.class
+32b52903ab470ba929a013c5c9cb7dfc85053382b768ccf2a2c08e0ace6c8f2e  opencode/skills/bdsp-job-result-query/templates/作业执行结果查询输入模板.xls
+e7558cc475e3370c6f68b03cf44587e14ef9f1c78abc6d381cd541dd050cc86c  opencode/skills/bdsp-job-result-query/templates/作业组执行结果查询输入模板.xls
+95645192d73073aa95cbcde2de6d08ee61c0aa29221889c820f8d679647c090c  opencode/skills/bdsp-job-scheduler/station/capture-proxy-linux-amd64
+85e407e90cad38c0ba28a9e1483b2dd7ca400fba28cabdc6dcc7067e5969bcea  opencode/skills/bdsp-job-scheduler/station/capture-proxy-linux-arm64
+275249a83c7e17856bc77b4a6ddd2fe1f32f6c5a37296d1636a3fa512ffebabe  opencode/skills/bdsp-job-scheduler/station/capture-proxy-mac
+d15c673e36756f6214a422d85cbb4445ec49dc9cccc6f4cdd696678bdc707dcb  opencode/skills/bdsp-job-scheduler/station/capture-proxy-macos-arm64
+69cf2ed3f0fd4a4e0e84636e7082381fd5a371394b2edc8c4a0c0af871837b47  opencode/skills/bdsp-job-scheduler/station/capture-proxy-windows-386.exe
+658171f390143650a7904aa8924c49e8d360c69cc13be2c63e61cc9bc0375681  opencode/skills/bdsp-job-scheduler/station/capture-proxy-windows-amd64.exe
+e7558cc475e3370c6f68b03cf44587e14ef9f1c78abc6d381cd541dd050cc86c  opencode/skills/bdsp-job-scheduler/templates/作业组调度输入模板.xls
+1dce2eebebfcdef870f9ba7ffb566d5ef35d2facea37e6158d8a65cc87313afd  opencode/skills/bdsp-job-scheduler/templates/作业调度输入模板.xls
