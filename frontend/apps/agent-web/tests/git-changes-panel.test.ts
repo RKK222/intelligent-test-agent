@@ -2344,6 +2344,59 @@ describe("GitChangesPanel", () => {
     expect(view.getByText("FAILED")).toBeTruthy();
   });
 
+  it("keeps the failed publish error visible when a background revision refresh runs", async () => {
+    const { BackendApiError } = await import("@test-agent/backend-api");
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(502, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远程读取失败",
+      traceId: "trace_publish",
+      details: {
+        failedStep: "PREPARE_REMOTE",
+        executedCommands: ["git -C /repo fetch origin"]
+      }
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        agentConfigRevision: 0
+      },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("selected.ts")).toBeTruthy();
+    await fireEvent.click(view.getByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+    expect(await view.findByText(/提交失败：Git 远程读取失败/)).toBeTruthy();
+
+    // 进度弹框还开着时，agentConfigRevision 等后台 watch 触发的 refreshChanges()
+    // 不得清空或覆盖弹窗里的红色错误说明，否则失败原因刚显示就被刷没。
+    const diffCallsBefore = apiClientMock.getWorkspaceGitDiff.mock.calls.length;
+    await view.rerender({
+      workspaceId: "wrk_1234567890abcdef",
+      personalWorkspaceId: "psw_default",
+      apiBaseUrl: "http://api",
+      canWrite: true,
+      agentConfigRevision: 1
+    });
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitDiff.mock.calls.length).toBeGreaterThan(diffCallsBefore));
+    expect(view.queryByText(/提交失败：Git 远程读取失败/)).toBeTruthy();
+    expect(view.getByText("FAILED")).toBeTruthy();
+  });
+
   it("keeps publishable workspace files available after local-only commit", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
