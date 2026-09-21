@@ -520,7 +520,6 @@ ticket 创建与 WebSocket 协议细节见 `docs/api/http-api.md`。
 - 错误只返回稳定 code、reason、预算和上游 HTTP 状态，不返回 Token、服务 URL、物理路径、上游正文、源码正文
   或堆栈。成功源码正文只进入本次 Tool 响应并附 commit/generation/path/line/SHA-256；源码和图谱不写入 Mem0。
   所有操作为只读，不得借查询触发源码准备、TraceWeave 扫描/同步、业务源码写入或测试执行。
-
 ## 系统管理员团队监督
 
 1. 角色能力只允许经后端 `RoleCapabilities` 和前端 `roleCapabilities.ts` 解释：`SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER`。团队 HTTP、下载和文件 WebSocket 每次操作都必须从数据库实时复核账号与角色；不得只相信 Token、菜单可见性或已签发 ticket。

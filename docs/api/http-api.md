@@ -4615,7 +4615,6 @@ Agent/Skill/Tool 数量、`requiresRestart` 和 `changeSummaryJson`。公共配�
 TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `versionKey`，若查询期间视图推进则返回
 `knowledgeUpdating=true` 及 `latestGraphEvidence`；链路结果另返回实际 `queryRequest`，详情 URL 携带同一资产、
 固定版本、不确定关系开关和预算。查询不会准备源码、扫描/同步图谱、写源码、生成测试或执行测试。
-
 ## 系统管理员团队代码视图
 
 所有入口使用平台用户 JWT、统一响应和 `X-Trace-Id`。角色能力按 `SUPER_ADMIN > SYSTEM_ADMIN > APP_ADMIN > USER` 继承；下列团队入口要求实时 `SYSTEM_ADMIN` 能力，超级管理员专属操作另行标明。范围参数固定为 `scopeMode=MY_TEAM|SYSTEM_ADMIN_TEAM|GLOBAL`：系统管理员省略时使用 `MY_TEAM`；`SYSTEM_ADMIN_TEAM` 必须由超级管理员同时传实际系统管理员 `ownerUserId`；`GLOBAL` 仅超级管理员可用。
