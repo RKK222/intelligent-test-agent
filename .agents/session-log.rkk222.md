@@ -17733,3 +17733,28 @@
 
 - 真实测试环境端到端验收完成，当前用户入口为 `http://192.168.8.100:3000/`；Jenkins 记录为 [#28](http://192.168.8.100:18081/job/intelligent-test-agent-release/28/)。复用应用成员、Git、文件 WebSocket、公共路由和快照机制，没有新增部署节点、RunEvent/SSE 或文件 HTTP 代理。
 - 已验证功能、权限、实时撤权、审计先于内容返回、导出结构/摘要/撤权失效和浏览器界面；未在企业环境实际生成接近 2 GiB/5 万文件并验证 10 分钟性能上限，仍保留该性能风险。整组导出测试数据已在撤权后按规则失效并清理。
+
+## 2026-09-22 - 重新发布团队代码视图并核对 20443 管理台入口
+
+### Why
+
+- 用户要求继续完成上一轮部署，并给出 `https://192.168.8.100:20443/` 作为“部署完之后配到这里”的入口。
+- 当前 Jenkins 使用内部 GitLab `release`，其基线仍停在 `0efdc602`；本地 `release` 已前进到 `8bee153a`，需要先同步后再走标准发布。
+
+### What
+
+- 将已提交的 `release` 快进推送到内部 GitLab，触发 Jenkins `intelligent-test-agent-release` 的 `ACTION=DEPLOY`。
+- Jenkins #29 成功发布不可变标签 `release-29-8bee153a`；发布日志确认 `test-agent-jenkins-backend` 与 `test-agent-jenkins-frontend` 均由流水线重建并启动。
+- 只读核对 `https://192.168.8.100:20443/`：它是独立的“服务器管理台”服务清单，不是 TestAgent 前端；当前清单没有 TestAgent 行。未覆盖其根路径，也未修改外部管理台文件。
+
+### How
+
+- 复核 `deploy/local/README.md`、根 `Jenkinsfile` 和 Jenkins 部署技能，确认测试应用事实入口仍是 `http://192.168.8.100:3000`，后端为 `18082`，不是 `20443`。
+- Jenkins #29 的 Checkout、Release contract、Build、Prepare、数据库升级、Publish and verify、Post Actions 全部成功；构建耗时约 25 分钟。
+- 发布后实测后端 readiness、XXL Admin readiness、前端同源 XXL readiness 均返回 `{"status":"UP"}`，`http://192.168.8.100:3000/` 返回 200/login 页面，`9999` executor TCP 可连接；浏览器页面可见“智能测试代理平台”登录页。
+
+### Result
+
+- 当前团队代码视图已按最新 `release` 提交发布到测试环境，访问地址为 `http://192.168.8.100:3000/`，Jenkins 地址为 `http://192.168.8.100:18081/job/intelligent-test-agent-release/29/`。
+- `20443` 仍保持原服务器管理台，不应直接替换为 TestAgent。若要在该管理台服务清单中新增 TestAgent 入口，需要提供其独立源码/配置仓库或授权的远端编辑路径；本项目没有该配置源。
+- 本次未修改产品代码、API、事件、数据库、Flyway、环境文件、OpenCode 源码或 generated SDK；只同步内部发布远端并完成 Jenkins 部署记录。
