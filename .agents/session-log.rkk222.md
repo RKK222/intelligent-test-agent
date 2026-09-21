@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-21 - 恢复 BDSP 原始可执行配置
+
+- Why: 用户指出候选包把已能完成任务的 BDSP 地址替换成 `example.invalid`，并明确要求不要改动原有逻辑和配置；同时确认 `test-design-generation` 并非新造 Agent。
+- What: 从原始 `config.7z` 的 `feature_config@6bb05a0f585ebe12cf06c72fe58224676a5ec02` 恢复 BDSP 调度 Skill、请求模板、调度脚本、授权捕获 Go 源码和六个平台捕获程序，以及结果查询 Skill；移除项目基线中新加的 `database.ini.example`，不复制原始数据库配置和加密密钥。
+- How: 逐目录 `diff -qr` 确认 `bdsp-job-scheduler` 与原始输入一致；验证原始 `http://dataops.sdc.icbc`、Userinfo 模板和捕获默认页均存在，未再出现 `example.invalid` 或 `BDSP_BASE_URL` 占位逻辑。`test-design-generation` 在原始输入和既有公共配置 Git 中均已存在，职责是由 `test-design-orchestrator` 调用的隐藏生成子 Agent，不是此次新增用户入口。
+- Result: 后续公共 Agent 源基线不再用示例 URL 覆盖可执行 BDSP 配置；企业公共 Git 的正式发布边界不变。本次只修正公共配置源和文档，不新增部署节点、API、事件、数据库迁移或 OpenCode 源码改动。
+
 ### 2026-09-21 - 将公共 Agent 能力基线纳入当前项目仓库
 
 - Why: 用户明确要求后续公共 Agent 不再只交付不可审查来源的 ZIP，而要同时提交到当前 TestAgent 项目仓库；现有企业运行链路又要求公共配置独立 Git 的已发布固定提交继续作为运行权威，不能用本地仓库文件直接覆盖共享目录。

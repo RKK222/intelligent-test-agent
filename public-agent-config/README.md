@@ -20,7 +20,7 @@ deploy/internal/package-public-agent-config.sh
 
 ## 导入边界
 
-此 ZIP 是公共能力候选包，只包含 `opencode/agents/**`、`opencode/skills/**`、`opencode/tools/**`、校验清单和说明文档。没有携带 `opencode.jsonc`、`.git`、缓存、真实数据库配置、加密密钥、Cookie、Token 或固定企业服务器地址。
+此 ZIP 是公共能力候选包，只包含 `opencode/agents/**`、`opencode/skills/**`、`opencode/tools/**`、校验清单和说明文档。没有携带 `opencode.jsonc`、`.git`、缓存、真实数据库配置或加密密钥；BDSP 原有调度地址、请求模板和捕获程序按输入公共配置保留，不用占位地址替换。
 
 请在平台“公共 Agent”个人 worktree 中导入，查看 Diff，完成评审、提交和发布；不要直接覆盖企业共享运行目录。正式客户端公共能力仍以企业平台已发布的固定 Git commit 为唯一权威源。
 
@@ -34,7 +34,7 @@ deploy/internal/package-public-agent-config.sh
 4. 为 `legacy-interface-function-asset-to-md` 补上 `metadata.agent-id: test-execution-api`；修复 AGENTS 清单中不存在的 `api-execute-case`，补齐遗漏 Agent/Skill。
 5. 将 `chaos-case-generate`、`secure-case-recommend` 绑定到 `test-design-generation`，增加显式意图路由和正反评测；内部匹配结果不落盘，正式案例统一映射为四列表 Markdown。
 6. `test-execution-ui` 增加 `hidden: true`，与“只允许内部编排”的约定一致。
-7. 数据库、TCDS、HTTP/RPC 代理、BDSP 地址改为环境注入；BDSP 真实数据库配置和加密密钥不进入公共包，只保留示例模板。
+7. 保留输入包已经验证可执行的 BDSP 调度/查询逻辑、原有地址、请求模板和授权捕获程序；数据库连接配置与加密密钥仍不复制进项目基线。
 
 ## Agent 与 Skill 归属
 
@@ -58,7 +58,7 @@ BDSP 案例设计通过 `test-design` 的 `big-data-common-cases.md` 接入设�
 - `TEST_AGENT_DB_SERVICE_BASE_URL`
 - `TEST_AGENT_HTTP_PROXY_BASE_URL`
 - `TEST_AGENT_RPC_PROXY_BASE_URL`
-- `BDSP_BASE_URL`、可选 `BDSP_USERINFO`
+- `BDSP_AUTH_TOKEN`（仅在不使用授权捕获程序时提供）
 - `SECURE_SCAN_ENDPOINT`、可选 `SECURE_SCAN_AUTH`
 - `GAUSSDB_JC2_PASSWORD`、`GAUSSDB_JC4_PASSWORD`、`GAUSSDB_JC6_PASSWORD`（采用示例配置的 `env:` 方式时）
 

@@ -24,7 +24,7 @@ const (
 	configName     = "config.txt"
 	resultName     = "result.txt"
 
-	defaultPageURL = "https://example.invalid/replace-with-authorized-target"
+	defaultPageURL = "http://dataops.sdc.icbc"
 
 	// 静默超时: queryUserInfo 请求间隔超过此时长则认为页面已稳定, 触发结束。
 	silenceTimeout = 5 * time.Second

@@ -195,14 +195,9 @@ def render_request(kind, row, auth_token):
         raise ValueError("统一认证号、调度应用、作业组名不能为空")
     if kind == "job" and not job:
         raise ValueError("单作业调度时作业名不能为空")
-    base_url = os.environ.get("BDSP_BASE_URL", "").strip().rstrip("/")
-    if not base_url:
-        raise ValueError("未设置 BDSP_BASE_URL，不能发送调度请求")
 
     mapping = {
-        "BDSP_BASE_URL": base_url,
         "AUTH_TOKEN": auth_token or "<AUTH_TOKEN>",
-        "USERINFO": os.environ.get("BDSP_USERINFO", "").strip(),
         "ENV": env,
         "APP_NAME": app,
         "APP_GROUP": group,
@@ -217,8 +212,6 @@ def render_request(kind, row, auth_token):
             if key.lower() == "authorization" and rendered and not rendered.startswith("Bearer "):
                 rendered = "Bearer " + rendered
             template["headers"][key] = rendered
-    if isinstance(template.get("url"), str):
-        template["url"] = template["url"].format(**mapping)
     for key, value in list(template.get("params", {}).items()):
         if isinstance(value, str):
             template["params"][key] = value.format(**mapping)

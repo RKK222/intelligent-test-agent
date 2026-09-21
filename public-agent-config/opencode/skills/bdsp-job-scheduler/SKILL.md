@@ -19,8 +19,7 @@ metadata:
 - `JC2/JC4/JC6` 自动转换为 `BDSP_JC2/BDSP_JC4/BDSP_JC6`。
 - 默认通过 `station/` 中的授权捕获程序获取 Authorization；也可由 `BDSP_AUTH_TOKEN` 环境变量或 `--auth-file` 提供。
 - 授权捕获组件支持 macOS、Linux amd64/arm64、Windows 32/64 位，并包含新版浏览器兼容逻辑。
-- 授权目标页必须由部署者在 `station/config.txt` 配置；公共包不内置企业服务器地址。
-- 调度 API 基础地址通过 `BDSP_BASE_URL` 注入；如接口要求额外 Userinfo 头，通过 `BDSP_USERINFO` 安全注入。
+- 授权目标页默认使用 `http://dataops.sdc.icbc`；仍可通过 `station/config.txt` 覆盖。
 - 授权捕获会持续更新 `queryUserInfo` 请求中的 Authorization，以 5 秒静默后的最后一次有效值继续调度。
 - Linux 奇安信浏览器场景使用 PAC，仅将目标 API 请求送入本地捕获代理，其余页面资源直连；抓取完成后关闭代理浏览器，不再自动重开页面。
 
@@ -30,7 +29,7 @@ metadata:
 2. 缺少必要参数时先向用户补齐；不要猜统一认证号、应用、作业组、作业名或日期。
 3. 不要把 Authorization、Userinfo 或其他认证信息打印到回复里；OpenCode CLI 包装层会静默授权捕获程序的终端输出，并在读取后清理 `result.txt` / `capture-proxy.log`。
 4. 批量文件优先直接使用用户给出的文件路径，不要复制或改写原文件。
-5. `station/config.txt` 控制授权时打开的目标页面。首次部署必须由管理员按授权范围填写；除非用户明确要求切换环境/页面，否则不要修改。
+5. `station/config.txt` 控制授权时打开的目标页面。除非用户明确要求切换环境/页面，否则不要修改。
 6. 不要把 `.browser-profile`、浏览器缓存、Cookie、历史记录等运行态目录加入技能包。
 
 ## 首次准备
@@ -120,7 +119,7 @@ python3 scripts/schedule.py job \
 station/config.txt
 ```
 
-公共包只提供示例占位地址；部署者必须先在 `station/config.txt` 写入已授权目标。捕获程序匹配 `queryUserInfo` 请求并获取 Authorization；多次请求时持续覆盖，静默 5 秒后以最后一次捕获值结束。Linux 奇安信浏览器会使用 PAC 仅代理目标 API，避免全局代理影响页面资源加载。抓取完成后关闭代理浏览器；CLI 读取令牌后会清理临时敏感文件。
+默认配置为 `http://dataops.sdc.icbc`。捕获程序匹配 `queryUserInfo` 请求并获取 Authorization；多次请求时持续覆盖，静默 5 秒后以最后一次捕获值结束。Linux 奇安信浏览器会使用 PAC 仅代理目标 API，避免全局代理影响页面资源加载。抓取完成后关闭代理浏览器；CLI 读取令牌后会清理临时敏感文件。
 
 如授权捕获需要人工排障，可根据系统使用：
 

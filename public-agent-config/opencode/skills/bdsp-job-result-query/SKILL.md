@@ -15,7 +15,7 @@ metadata:
 - 查询作业组执行结果：调度环境 + 调度应用 + 作业组名 + 可选调度日期。
 - 查询单作业执行结果：增加作业名。
 - 支持 `.xls/.xlsx` 批量输入。
-- 从部署者安全提供的 `config/database.ini` 读取连接信息，可配合 `config/.encryption.key` 解密密码；公共包不携带真实配置或密钥。
+- 自动读取 `config/database.ini`，使用 `config/.encryption.key` 解密原工程中的数据库密码。
 - 使用 `lib/` 中的 GaussDB JDBC 驱动；查询结果按环境写入 `.xls`。
 
 ## 使用原则
@@ -33,8 +33,6 @@ metadata:
 ```bash
 python3 -m pip install -r requirements.txt
 ```
-
-首次部署请复制 `config/database.ini.example` 为 `config/database.ini`，并通过受控交付方式放置 `.encryption.key`。也可以把密码写成 `env:变量名`，让运行时从环境变量读取；不要把数据库主机、密码或密钥提交到公共包。
 
 ## 作业组查询
 

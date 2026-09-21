@@ -158,6 +158,8 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展�
 
 公共配置初始化排障优先按前端提示的 `traceId` 搜索 Java 日志：`event=agent_config_public_branches_start|agent_config_public_branches_failed` 表示初始化弹窗加载远端分支已进入后端或失败，`event=agent_config_public_repository_initialize_failed` 表示已选分支后的 clone/fetch/pull/目录校验失败；底层 Git 命令会输出 `event=git_command_start|git_command_success|git_command_slow|git_command_failed|git_command_timeout|git_command_unavailable`，开始/成功日志包含脱敏后的 Git URL/命令和耗时，失败类日志额外包含 `failureType` 和安全排查建议。日志不会输出 SSH 私钥、Authorization 或 URL 中的用户名/token。
 
+项目内公共能力基线中的 BDSP 调度地址、请求模板和授权捕获程序按输入配置保持原样；项目仓库不复制 BDSP 数据库配置和加密密钥。
+
 ### 引用资产库多服务器副本
 
 引用资产根目录来自只读通用参数 `OPENCODE_REFERENCES_DIR=${SYS_DATA_ROOT_DIR}/agent-opencode/references`，每台在线 Java 所在服务器都必须拥有独立本地目录并让 Java 运行用户可读写。单个仓库固定落在 `{OPENCODE_REFERENCES_DIR}/{repository.englishName}`；首次初始化成功后 `englishName` 和代码库类型冻结，避免多服务器目录身份漂移。`REFERENCES_SDD_FOLDER_NAMES` 默认 `docs,spec`，保存小写逗号分隔的精确相对路径清单，也可配置 `ai-agent/spec`；后端只把路径精确命中的真实目录标记为前端蓝色可选目录，父目录仅供浏览。

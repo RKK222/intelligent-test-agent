@@ -1,10 +1,10 @@
 {
-  "url": "{BDSP_BASE_URL}/api/bdsp/AppAllprocessSchedule/start",
+  "url": "http://dataops.sdc.icbc/api/bdsp/AppAllprocessSchedule/start",
   "headers": {
     "Content-Type": "application/json;charset=UTF-8",
     "Authorization": "{AUTH_TOKEN}",
     "Encrypted": "false",
-    "Userinfo": "{USERINFO}"
+    "Userinfo": "x1Hyh86LaudIqP+d7rJwiUJkfOnyk/Gt8hsfSNTDPXBMlterMIYtYNu+3cR16hqkfdXSqqP2ZoQ+rzhkFn97N8KPh0popQ5UCviwBYAc0c2O9PdkfS2A+SSoS2QRZJhshX4HZNkzUmGZZFscfubZVbdLgVLvz1LObJEBZx1RHjb1M/mwlo4wY7RHTw6oxAKP/TrsbutkpSZElZrdrMGwpg=="
   },
   "params": {
     "env": "{ENV}",

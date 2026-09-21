@@ -1,8 +1,8 @@
 # ===========================================
 # UserInfo Capture - Configuration
 # ===========================================
-# Configure the authorized target URL below before use. The public package
-# intentionally does not embed an enterprise server address.
+# Modify the URL below to change the target page.
 # Lines starting with # are comments and are ignored.
 # The first non-comment, non-empty line is used as the URL.
-https://example.invalid/replace-with-authorized-target
+http://dataops.sdc.icbc
+# http://192.168.43.5:9080/userInfo.html

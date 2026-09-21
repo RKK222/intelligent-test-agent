@@ -389,7 +389,7 @@ deploy/internal/dist/test-agent-public-agents-skills.zip.sha256
 
 该包由 [public-agent-config](../../public-agent-config/README.md) 中已提交、无脏改动的公共能力基线通过
 `deploy/internal/package-public-agent-config.sh` 生成，包含全部 Agent、Skill、Tool、说明、源提交标识和
-预编译资产摘要，不包含 `opencode.jsonc`、`.git`、`node_modules`、缓存、密钥或真实环境连接配置。
+预编译资产摘要，不包含 `opencode.jsonc`、`.git`、`node_modules`、缓存、BDSP 数据库配置或加密密钥；输入公共配置中已经验证可执行的 BDSP 地址、请求模板和捕获程序保持原样。
 `opencode.jsonc` 中的模型、供应商和内部代理配置继续由公共配置独立 Git 按环境维护。能力包须通过
 “系统管理 → 配置管理 → opencode 公共配置管理”的个人 worktree 导入、查看 Diff、提交并发布；
 不要直接覆盖共享运行目录。平台正式运行内容仍以公共配置独立 Git 的已发布固定提交为权威，
