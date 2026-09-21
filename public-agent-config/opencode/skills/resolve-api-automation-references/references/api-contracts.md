@@ -2,7 +2,7 @@
 
 ## TCDS 关联脚本查询
 
-- URL：`${TCDS_BASE_URL}/caseInterface/getyScriptIdByInterface`（`TCDS_BASE_URL` 由受控运行环境注入）
+- URL：`http://tcds-prod.sdc.icbc/caseInterface/getyScriptIdByInterface`
 - Method：`POST`
 - Content-Type：`application/json`
 - Header：`toolId: 66f36bfa5c1c6105572b0118880261d6`
@@ -19,7 +19,7 @@
 使用公共 `http_call` Tool 时参数为：
 
 ```text
-uri=${TCDS_BASE_URL}/caseInterface/getyScriptIdByInterface
+uri=http://tcds-prod.sdc.icbc/caseInterface/getyScriptIdByInterface
 method=POST
 headers={"toolId":"66f36bfa5c1c6105572b0118880261d6","Content-Type":"application/json","Accept":"application/json"}
 body=<上面请求体的 JSON 字符串>
@@ -29,7 +29,7 @@ body=<上面请求体的 JSON 字符串>
 
 ## 一体化平台接口脚本查询
 
-- URL：`${TEST_AGENT_HTTP_PROXY_BASE_URL}/opencode/interface/getInterfaceInfosByScriptIds`（基础地址由受控运行环境注入）
+- URL：`http://interface.sdc.cs.icbc/contract-api/opencode/interface/getInterfaceInfosByScriptIds`
 - Method：`POST`
 - Content-Type：`application/json`
 

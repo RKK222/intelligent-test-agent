@@ -1,6 +1,6 @@
 import { tool } from "@opencode-ai/plugin"
 
-const TCDS_BASE_URL_ENV = "TCDS_BASE_URL"
+const TCDS_BASE_URL = "http://tcds-prod.sdc.icbc"
 const AUTO_CASE_AI_INVOKE = "/auto/case/ai/invoke"
 
 const argSchema = {
@@ -64,7 +64,7 @@ async function executeAutoCaseMenu(appName: string, itemNo: string, testCaseDire
     "itemNo":itemNo,
     "testCaseDirectory":testCaseDirectory
   }
-  const response = await fetch(`${serviceBaseUrl()}${AUTO_CASE_AI_INVOKE}`, {
+  const response = await fetch(`${TCDS_BASE_URL}${AUTO_CASE_AI_INVOKE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json"},
     body: JSON.stringify(requestBody),
@@ -83,16 +83,6 @@ async function executeAutoCaseMenu(appName: string, itemNo: string, testCaseDire
   }
 
   return formatSuccessResponse(data.msg, appName, itemNo, testCaseDirectory)
-}
-
-function serviceBaseUrl(): string {
-  const value = (process.env[TCDS_BASE_URL_ENV] ?? "").trim()
-  if (!value) throw new Error(`${TCDS_BASE_URL_ENV} 未配置`)
-  const parsed = new URL(value)
-  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error(`${TCDS_BASE_URL_ENV} 配置无效`)
-  }
-  return value.replace(/\/+$/, "")
 }
 
 function formatSuccessResponse(resultData: any, appName: string, itemNo: string, testCaseDirectory: string): string {

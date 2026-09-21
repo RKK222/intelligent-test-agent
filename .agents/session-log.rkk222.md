@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-21 - 恢复公共 Agent 原包的运行服务地址
+
+- Why: 用户追问 TCDS 和一体化地址是否已经真正注入 OpenCode 进程；源码审计未找到 `TCDS_BASE_URL`、`TEST_AGENT_HTTP_PROXY_BASE_URL` 等新变量的启动注入证据，用户要求先保留原样，并检查恢复其他 URL/域名。
+- What: 以原始 `config.7z` 为准，恢复案例资产与 TCDS 准入查询 `http://122.210.62.32:9080`、TCDS 自动案例及脚本查询 `http://tcds-prod.sdc.icbc`、一体化 HTTP/RPC/数据库代理 `http://interface.sdc.cs.icbc/contract-api`以及安全扫描引擎 `http://122.244.74.57:8888/api/v1/jungle_happy_scan`；移除未落地的 URL 环境变量必填逻辑和对应部署说明。
+- How: 解包附件后对 `opencode/**` 做 URL、域名和 IP 值级清单对比；7 个 Tool 和接口契约的运行地址/调用逻辑已与原包对齐。安全扫描只恢复引擎地址，不恢复原样例中的 Cookie、CSRF Token、具体业务域名和用户数据；`database.ini`/密钥与被排除的 `opencode.jsonc` 仍遵守既有封包边界。全部 10 个 TypeScript Tool 通过 Bun 转译，`git diff --check` 通过，地址清单没有新增原包不存在的值。
+- Result: 公共 Agent 源基线现在不再依赖尚未验证的 URL 环境变量，保留已确认的安全/混沌自动路由、BDSP 设计与调度逻辑。本次不新增部署节点，不涉及产品 API、事件、数据库/Flyway、性能实现、`.env*` 或 OpenCode 源码；企业公共 Git 尚未因本次修正自动发布。
+
 ### 2026-09-21 - 安全/混沌专项改为材料与风险自动路由
 
 - Why: 用户指出 `chaos-case-generate`、`secure-case-recommend` 不应只在显式点名时生成；详细设计已有具体专项章节，或事实分析能识别独立安全/容错风险时也应调用。同时需重新审计其他设计 Skill 的路由和 owner 是否完整。

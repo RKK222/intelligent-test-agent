@@ -11,7 +11,7 @@
 import { tool } from "@opencode-ai/plugin"
 
 /** 后端代理服务地址，按需修改 */
-const PROXY_BASE_URL_ENV = "TEST_AGENT_HTTP_PROXY_BASE_URL"
+const PROXY_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"
 
 // ============================================================
 // 参数 Schema 定义
@@ -21,7 +21,7 @@ const argSchema = {
   /** 目标 URL（必填），支持 http/https */
   uri: tool.schema
     .string()
-    .describe("目标 URL，如 https://api.example.com/users 或 https://api.example.com/health"),
+    .describe("目标 URL，如 https://api.example.com/users 或 http://192.168.1.100:8080/health"),
 
   /** HTTP 方法（选填） */
   method: tool.schema
@@ -80,9 +80,8 @@ export default tool({
     const startTime = Date.now()
 
     try {
-      const proxyBaseUrl = serviceBaseUrl()
       // 调用后端代理
-      const response = await fetch(`${proxyBaseUrl}/opencode/interface/http/call`, {
+      const response = await fetch(`${PROXY_BASE_URL}/opencode/interface/http/call`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -137,13 +136,3 @@ export default tool({
     }
   },
 })
-
-function serviceBaseUrl(): string {
-  const value = (process.env[PROXY_BASE_URL_ENV] ?? "").trim()
-  if (!value) throw new Error(`${PROXY_BASE_URL_ENV} 未配置`)
-  const parsed = new URL(value)
-  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
-    throw new Error(`${PROXY_BASE_URL_ENV} 配置无效`)
-  }
-  return value.replace(/\/+$/, "")
-}
