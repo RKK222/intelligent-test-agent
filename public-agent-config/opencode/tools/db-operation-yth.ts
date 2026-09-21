@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin"
 
-const DB_SERVICE_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"
+const DB_SERVICE_BASE_URL_ENV = "TEST_AGENT_DB_SERVICE_BASE_URL"
+const DEFAULT_DB_SERVICE_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"
 const QUERY_DATA_SOURCES_ENDPOINT = "/dbOperation/queryDataSources"
 const DB_EXECUTE_BY_KEY_ENDPOINT = "/aiTool/dbExecuteByKey"
 
@@ -71,7 +72,7 @@ export default tool({
 })
 
 async function queryDataSources(appId: string, version: string, startTime: number): Promise<string> {
-  const response = await fetch(`${DB_SERVICE_BASE_URL}${QUERY_DATA_SOURCES_ENDPOINT}`, {
+  const response = await fetch(`${serviceBaseUrl()}${QUERY_DATA_SOURCES_ENDPOINT}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ appId, appVersion:version }),
@@ -124,7 +125,7 @@ function formatDataSourceList(dataSources: any[], appId: string, version: string
 }
 
 async function executeSqlByKey(dataSourceKey: string, sql: string, startTime: number): Promise<string> {
-  const response = await fetch(`${DB_SERVICE_BASE_URL}${DB_EXECUTE_BY_KEY_ENDPOINT}`, {
+  const response = await fetch(`${serviceBaseUrl()}${DB_EXECUTE_BY_KEY_ENDPOINT}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key: dataSourceKey, sql }),
@@ -207,4 +208,14 @@ function truncateSql(sql: string, maxLen: number): string {
 
 function escapeMarkdown(str: string): string {
   return String(str).replace(/\|/g, "\\|").replace(/\n/g, " ")
+}
+
+function serviceBaseUrl(): string {
+  const value = (process.env[DB_SERVICE_BASE_URL_ENV] ?? DEFAULT_DB_SERVICE_BASE_URL).trim()
+  if (!value) throw new Error(`${DB_SERVICE_BASE_URL_ENV} 未配置`)
+  const parsed = new URL(value)
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${DB_SERVICE_BASE_URL_ENV} 配置无效`)
+  }
+  return value.replace(/\/+$/, "")
 }

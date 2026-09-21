@@ -11,6 +11,7 @@ import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 
+const BASE_URL_ENV = "ASSET_CASE_BASE_URL"
 const DEFAULT_BASE_URL = "http://122.210.62.32:9080"
 const LIST_ENDPOINT = "/tcds/cases/by-menu"
 const HTTP_CALL_SCRIPT = "http_call.py"
@@ -145,7 +146,8 @@ export default tool({
 })
 
 function resolveBaseUrl(): string {
-  const raw = (process.env.ASSET_CASE_BASE_URL ?? DEFAULT_BASE_URL).trim()
+  const raw = (process.env[BASE_URL_ENV] ?? DEFAULT_BASE_URL).trim()
+  if (!raw) throw new Error(`${BASE_URL_ENV} is required`)
   const parsed = new URL(raw)
   if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error("invalid asset case base URL")

@@ -11,7 +11,8 @@
 import { tool } from "@opencode-ai/plugin"
 
 /** 第三方数据库服务基础地址，按需修改 */
-const DB_SERVICE_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"
+const DB_SERVICE_BASE_URL_ENV = "TEST_AGENT_DB_SERVICE_BASE_URL"
+const DEFAULT_DB_SERVICE_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"
 
 /** 数据库 SQL 执行接口路径 */
 const DB_EXECUTE_ENDPOINT = "/aiTool/dbExecute"
@@ -24,7 +25,7 @@ const argSchema = {
   /** 数据库 IP 地址（必填） */
   host: tool.schema
     .string()
-    .describe("数据库主机地址，如 192.168.1.100 或 localhost"),
+    .describe("数据库主机地址，如 db.example 或 localhost"),
 
   /** 数据库端口（必填） */
   port: tool.schema
@@ -114,8 +115,9 @@ export default tool({
     const startTime = Date.now()
 
     try {
+      const dbServiceBaseUrl = serviceBaseUrl()
       // 直连第三方数据库服务接口
-      const response = await fetch(`${DB_SERVICE_BASE_URL}${DB_EXECUTE_ENDPOINT}`, {
+      const response = await fetch(`${dbServiceBaseUrl}${DB_EXECUTE_ENDPOINT}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -280,4 +282,14 @@ function truncateSql(sql: string, maxLen: number): string {
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str
   return str.substring(0, maxLen - 3) + "..."
+}
+
+function serviceBaseUrl(): string {
+  const value = (process.env[DB_SERVICE_BASE_URL_ENV] ?? DEFAULT_DB_SERVICE_BASE_URL).trim()
+  if (!value) throw new Error(`${DB_SERVICE_BASE_URL_ENV} 未配置`)
+  const parsed = new URL(value)
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error(`${DB_SERVICE_BASE_URL_ENV} 配置无效`)
+  }
+  return value.replace(/\/+$/, "")
 }

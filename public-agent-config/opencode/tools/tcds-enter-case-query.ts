@@ -16,8 +16,9 @@ import { existsSync } from "node:fs"
 import path from "node:path"
 
 // ==================== 可修改配置 ====================
-/** TCDS 服务基础地址（含端口），按需修改 */
-const TCDS_BASE_URL = "http://122.210.62.32:9080"
+/** TCDS 服务基础地址（含端口），可由受控运行环境覆盖。 */
+const TCDS_BASE_URL_ENV = "TCDS_BASE_URL"
+const DEFAULT_TCDS_BASE_URL = "http://122.210.62.32:9080"
 /** 未导入准入案例接口路径 */
 const NO_ENTER_ENDPOINT = "/tcds/tasks/no-enter-case"
 /** 未执行准入案例接口路径 */
@@ -94,6 +95,11 @@ export default tool({
   async execute(args, context) {
     const startTime = Date.now()
 
+    const baseUrl = resolveBaseUrl()
+    if (!baseUrl) {
+      return "配置错误：未设置 TCDS_BASE_URL，无法执行准入案例查询。"
+    }
+
     // 参数校验
     const missing: string[] = []
     if (!args.deptName) missing.push("deptName(开发部门)")
@@ -104,7 +110,7 @@ export default tool({
     }
 
     const endpoint = args.queryType === "未导入" ? NO_ENTER_ENDPOINT : NO_EXCUTE_ENDPOINT
-    const url = `${TCDS_BASE_URL}${endpoint}`
+    const url = `${baseUrl}${endpoint}`
 
     const bodyObj = {
       deptName: args.deptName,
@@ -198,6 +204,20 @@ export default tool({
     return lines.join("\n")
   },
 })
+
+function resolveBaseUrl(): string {
+  const raw = (process.env[TCDS_BASE_URL_ENV] ?? DEFAULT_TCDS_BASE_URL).trim()
+  if (!raw) return ""
+  try {
+    const parsed = new URL(raw)
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      return ""
+    }
+    return raw.replace(/\/+$/, "")
+  } catch {
+    return ""
+  }
+}
 
 // ============================================================
 // 辅助函数
