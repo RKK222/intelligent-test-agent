@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-21 - 安全/混沌专项改为材料与风险自动路由
+
+- Why: 用户指出 `chaos-case-generate`、`secure-case-recommend` 不应只在显式点名时生成；详细设计已有具体专项章节，或事实分析能识别独立安全/容错风险时也应调用。同时需重新审计其他设计 Skill 的路由和 owner 是否完整。
+- What: `test-design/4.9.0` 新增 `USER_REQUEST / MATERIAL_SECTION / ANALYSIS_INFERENCE` 三源专项决策，空标题、占位文本和孤立泛化词不触发；已选安全/混沌覆盖先绑定 Phase A，再在 Phase B 调用专项 Skill，Review 独立检查漏选、误选和追溯断链。校正默认主链文档：事实分析已内置到 `test-design-generation`，`test-design-analysis` 仅保留存量兼容。其他方法仍按对象信号自动选择；仅 `test-design-augment mode=augment-flow` 因会修改既有案例而保留用户明确要求门槛。
+- How: 使用仓库 Skill 校验器验证本轮 10 个 Skill；JSON 解析和静态契约校验确认 25 个连续唯一评测场景覆盖显式触发、具体章节、风险推断与误触发反例。全量归属校验为 16 个 owner 绑定和 6 个直接调用 Skill，9 Agent / 22 Skill / 12 Tool 清单一致；BDSP 目录无 diff，12 个不透明资产摘要全部一致。
+- Result: 配置源提交为 `023cadebc3097a540da0a0fa7b4a9ae07c9ebf5f`。候选包经 `unzip -tq`、SHA-256、`SOURCE-COMMIT`、禁带路径和关键路由内容校验，已复制到 Downloads；包 SHA-256 为 `b3bd91d55e03a0250d03be2a5ff61a1c585ff2813b9907be767e51b98333dd65`。本次不新增部署节点，不涉及产品 API、事件、数据库/Flyway、性能实现、环境配置或 OpenCode 源码；企业公共 Git 尚未因本次提交自动发布。
+
 ### 2026-09-21 - 恢复 BDSP 原始可执行配置
 
 - Why: 用户指出候选包把已能完成任务的 BDSP 地址替换成 `example.invalid`，并明确要求不要改动原有逻辑和配置；同时确认 `test-design-generation` 并非新造 Agent。
