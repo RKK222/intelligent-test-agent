@@ -17686,3 +17686,25 @@
 
 - 系统管理员现在可以在“团队管理”中维护组员并查看版本下每人的共享分支提交、多个个人 worktree、未提交文件和只读内容；超级管理员可使用全平台或指定系统管理员范围。角色降级或成员移除会立即阻止后续读取和下载，并撤销相关导出。
 - 未修改 OpenCode 源码、generated SDK、`.env.local` 或部署拓扑，也未执行 Jenkins/企业环境部署。实际企业多节点在线链路，以及接近 2 GiB/5 万文件时 10 分钟内完成的性能基线尚未在企业环境实测；本地已验证超过 2 GiB 的预检拒绝、并发/失败/清理逻辑和产物结构。
+
+## 2026-09-21 - 系统管理员团队视图端到端验收受共享测试环境阻断
+
+### Why
+
+- 用户要求在功能提交后完成真实端到端验收，需要启动当前 `release` 的实际前后端并验证团队维护、代码视图、只读文件与整组导出闭环。
+
+### What
+
+- 按本地启动规范固定使用 JDK 25、`test` profile 和根目录 `.env.test` 执行完整重启；没有切换 `.env.local`、本机 PostgreSQL/Redis 或临时 dotenv。
+- 对启动失败后的本机进程、共享依赖端口、测试环境 readiness、前端代理和本地/远端 `release` 提交差异做了只读核验，并清理失败启动残留的本机 backend screen/Java 进程。
+
+### How
+
+- 后端 26 模块跳过测试打包、前端生产构建和本机 ClickHouse 启动通过；主 Spring 上下文在注册 Backend Java heartbeat 时因 `.env.test` Redis `192.168.8.100:16379` 拒绝连接而退出，`8080` 未监听。
+- 测试机 `15432` PostgreSQL、`22` SSH、`18083` XXL Admin 和 `3000` 前端端口可达，`18083` readiness 为 UP；`16379` Redis 与 `9999` executor 关闭，`18082` 返回 Python BaseHTTP 404，前端 `/api/auth/*` 代理也返回 404，当前不具备业务验收条件。
+- 当前本地 `release` 为 `447b5fd1f`，比 `origin/release` 的 `edbb35b2e` 多 9 个提交；Jenkins 匿名访问为 403，本机也没有可用的测试机 SSH 公钥会话。按测试环境发布规范，未直接覆盖远端制品、启动远端容器、推送分支或绕过 Jenkins。
+
+### Result
+
+- 本轮未完成浏览器业务端到端验收，阻塞条件是共享 Redis/后端运行态不可用，以及缺少将当前 9 个提交推送并通过 Jenkins 发布的明确授权与 Jenkins 认证入口。代码构建链通过，但不能用构建结果替代运行验收。
+- 后续需要先恢复共享依赖，或由有权限的发布者确认推送当前 `release` 并触发 `intelligent-test-agent-release` 的 `ACTION=DEPLOY`；成功后再执行角色、撤权、Git/文件 WebSocket、跨节点导出和下载的真实浏览器闭环。
