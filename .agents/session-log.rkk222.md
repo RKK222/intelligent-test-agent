@@ -5,6 +5,13 @@
 
 ## Entries
 
+### 2026-09-21 - 审计并生成最新公共 Agent 候选包
+
+- Why: 用户提供企业内现用 `config.7z`，要求合入近期 token/输出精简改造、修复 Skill 路径问题，并核对所有 Skill 是否串到对应 Agent。附件 `feature_config` 的 `6bb05a0f585ebe12cf06c72fe58224676a5ec02` 仍存在一个中文 Skill 目录与英文 `name` 不一致、执行链 owner 缺失、AGENTS 引用不存在 Skill，以及固定企业地址和认证材料混入公共配置的问题。
+- What: 基于附件生成 9 Agent / 22 Skill / 12 Tool 的脱敏候选包；新增独立 `concise-output`，明确它只控制最终回复、原生 `/compact` 仍负责运行时上下文压缩；将 `skill-creator`/`skill-optimizer` 升到 1.2.1/1.1.1，区分平台 `Working directory`、Git/UI Workspace root 和公共配置根，并为校验器加入互斥的 `--workspace-root`/`--public-config-root`；把 `安全测试/` 改为 `secure-scan/`，补 `legacy-interface-function-asset-to-md -> test-execution-api`，修复 `api-execute-case` 失效清单、`test-execution-ui hidden` 和方法 Skill 显式映射。公共包删除真实数据库配置、密钥、Cookie/Token 和固定企业服务器地址，Tool/BDSP/扫描地址改为受控环境注入；BDSP 六个平台授权捕获二进制用 Go 1.20.14 重建。
+- How: 对候选包执行目录/frontmatter/`agent-id`/owner Agent 显式引用审计，14 个绑定 Skill 均通过；creator/optimizer 正向落点校验通过、错误 root 负例被拒绝；3 组 Python 回归共 45 项通过，Excel 提取测试通过；12 个 TypeScript Tool 经 Node 22 type-strip 语法检查，JSON、shell、Go test 和两个 BDSP CLI 脱敏配置校验通过。ZIP 用 7-Zip 解包复验，181 个文件与暂存目录一致，敏感路径、私有地址、缓存、`.git`、`opencode.jsonc`、原始 `node_modules` 均未进入包；仓库固定名和 Downloads 日期名逐字节一致，SHA-256 均为 `c21b9773c1a8c156a2f0f96e1042ea2ce22f33a37ab0e6bb4494f68f155ad2ac`。
+- Result: 产物为 `deploy/internal/dist/test-agent-public-agents-skills.zip`（被仓库忽略）及 `/Users/kaka/Downloads/光学文件接收/test-agent-public-agents-skills-20260921.zip`，各自带 `.sha256`。这是待导入平台公共 Agent 个人 worktree、查看 Diff、提交并发布的候选包，未直接覆盖企业共享运行目录，也未替用户完成企业发布。正式公共能力仍以企业已发布 commit 为权威；客户端受控运行时尚未核对是否含精确依赖 `@opencode-ai/plugin 1.18.4` 和 `playwright-core 1.61.0`，确认前应标记 `SERVER_ONLY`。本次不新增部署节点，目标分支仍为 `release`；不改产品 API、事件、数据库、Flyway、性能链路、`.env*` 或 OpenCode 只读源码，安全边界收紧。工作树中既有 Run/MyBatis 未提交改动属于其他工作，已保留且不纳入本次提交。
+
 ### 2026-09-18 - 同步 RTK 与 concise-output 用户手册
 
 - Why: `release` 在最近一次手册同步提交 `ff30ed2f3` 后交付 RTK 命令改写和 Caveman `concise-output` Skill，需要按真实入口、权限、数据边界和截图事实更新内置帮助中心。
