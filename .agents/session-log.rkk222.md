@@ -17707,3 +17707,29 @@
 
 - 本轮未完成浏览器业务端到端验收，阻塞条件是共享 Redis/后端运行态不可用，以及缺少将当前 9 个提交推送并通过 Jenkins 发布的明确授权与 Jenkins 认证入口。代码构建链通过，但不能用构建结果替代运行验收。
 - 后续需要先恢复共享依赖，或由有权限的发布者确认推送当前 `release` 并触发 `intelligent-test-agent-release` 的 `ACTION=DEPLOY`；成功后再执行角色、撤权、Git/文件 WebSocket、跨节点导出和下载的真实浏览器闭环。
+
+## 2026-09-21 - 完成系统管理员团队代码视图真实端到端验收
+
+### Why
+
+- 用户确认通过 SSH 恢复共享测试机并要求完成端到端验收；上一条记录的 Redis、后端 readiness 和 Jenkins 发布阻断需要闭环验证，不能以本地测试替代真实环境结果。
+
+### What
+
+- 保留 `release` 分支和当前实现，使用 Jenkins build `#28` 部署提交 `0efdc602b4b9c6202311243c2b25b0d6d59643be`，发布标签 `release-28-0efdc602`。
+- 在测试机上恢复 MockCenter Redis 原始 `127.0.0.1:16379` 配置和原认证，另以 `192.168.8.100:16379` 启动项目专用单节点 Redis；没有把 Redis Cluster 地址暴露给单节点 Spring 客户端。冲突的 `sim-paas-router` 保持停止，避免占用 TestAgent `18082`。
+- 通过真实超级管理员和临时系统管理员账号验证角色继承、名单维护、超级管理员 `GLOBAL/SYSTEM_ADMIN_TEAM` 范围、应用/工作空间/版本/人员贡献、多个个人 worktree、`CURRENT` 标记、Git 状态/提交接口、实时撤权和角色降级。
+- 通过真实 WebSocket route/ticket 验证目录列表、`.opencode` 可见、写入拒绝和路径穿越拒绝；创建并下载整组 ZIP，校验成员目录、`manifest.json`、符号链接排除、文件数/字节数/摘要和一次性下载路由。
+- 通过 Chromium 浏览器登录最终发布版本，确认“系统管理 → 团队管理 → 我的组员/代码视图”，应用、工作空间、版本切换、人员卡片、未提交修改和只读文件面板可见。
+
+### How
+
+- 先完成 JDK 25 后端定向测试、前端测试/typecheck/build、Jenkins release contract 和 cloned PostgreSQL migration 校验；Jenkins #26/#27 因远端端口/运行态问题失败后未覆盖制品，恢复依赖后只重跑一次 #28，并确认 Checkout、Build、Prepare、Verify、Publish、Post Actions 全部成功。
+- SSH 现场校验：项目 Redis `healthy` 且凭据摘要与后端一致，MockCenter Redis `healthy`，后端、XXL-JOB、前端 readiness 均返回 `{"status":"UP"}`；远端 `deployed-release-tag` 为 `release-28-0efdc602`。
+- 业务验收结果：团队成员加入后返回 5 个应用；`awv_hub_demo` 返回同一人员 2 个 worktree；`psw_36c1158362e1496dbe1fe9ccf6c44c52` 状态为 `0/0/0`，只读 WebSocket root 返回 3 项，写入和 `../etc/passwd` 均返回 `FORBIDDEN`；导出 READY，1 个 worktree、3654 个文件、约 54.9 MB 未压缩、约 12.8 MB ZIP，摘要与下载文件一致。
+- 撤权后团队应用为空、旧文件路由返回 404、导出进度返回 403；系统管理员降级为 USER 后旧 token 立即返回 401。临时账号因审计/软删除历史受删除保护，最终已移除团队关系并降级为普通用户，无业务资产。
+
+### Result
+
+- 真实测试环境端到端验收完成，当前用户入口为 `http://192.168.8.100:3000/`；Jenkins 记录为 [#28](http://192.168.8.100:18081/job/intelligent-test-agent-release/28/)。复用应用成员、Git、文件 WebSocket、公共路由和快照机制，没有新增部署节点、RunEvent/SSE 或文件 HTTP 代理。
+- 已验证功能、权限、实时撤权、审计先于内容返回、导出结构/摘要/撤权失效和浏览器界面；未在企业环境实际生成接近 2 GiB/5 万文件并验证 10 分钟性能上限，仍保留该性能风险。整组导出测试数据已在撤权后按规则失效并清理。
