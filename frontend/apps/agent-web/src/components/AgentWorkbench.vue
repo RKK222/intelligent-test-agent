@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from "element-plus";
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, toRaw, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, type RouteLocationRaw } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import {
   AgentChat,
@@ -121,6 +121,15 @@ import {
   type ChatContextItem
 } from "../stores/chatContextStore";
 import FigmaShell, { type RuntimeInventoryItem, type RuntimeInventorySummary } from "./FigmaShell.vue";
+import TeamReviewEditor from "./team/TeamReviewEditor.vue";
+import TeamReviewFilePane from "./team/TeamReviewFilePane.vue";
+import TeamReviewPane from "./team/TeamReviewPane.vue";
+import {
+  createTeamManagementController,
+  teamManagementKey,
+  teamScopeLabel,
+  type WorkbenchPerspective
+} from "./team/team-management-controller";
 import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import ExperienceWorkspaceDialog from "./ExperienceWorkspaceDialog.vue";
@@ -256,7 +265,7 @@ import {
 import ReferenceConfigurationDialog from "./ReferenceConfigurationDialog.vue";
 import { canShowReferenceConfiguration } from "./reference-configuration-access";
 import { reconcileAutomationReferenceWorkspace } from "./automation-reference-config-reconciliation";
-import { hasAppAdminCapability, hasSuperAdminCapability } from "../auth/roleCapabilities";
+import { hasAppAdminCapability, hasSuperAdminCapability, hasSystemAdminCapability } from "../auth/roleCapabilities";
 import CustomMenuSettingsPanel from "./settings/CustomMenuSettingsPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import CustomMenuPage from "./CustomMenuPage.vue";
@@ -297,9 +306,12 @@ import {
   parseWorkspacePageRoute,
   restoreWorkspacePageTabs,
   serializeWorkspacePageTabs,
+  storedTabsRequestTeamPerspective,
+  stripLegacyTeamManagementTabs,
   systemMenuKeyFromPageId,
   workspacePageRoute,
   workspacePageTab,
+  workspaceRouteRequestsTeamPerspective,
   type SystemMenuKey,
   type WorkspacePageCloseMode,
   type WorkspacePageId,
@@ -472,6 +484,65 @@ type RawOutputEntry = {
 const modelSelectionUnlocked = ref(false);
 const modelSelectionShortcut = createTripleKeyShortcut("Control");
 const isSuperAdmin = computed(() => !shareMode.value && hasSuperAdminCapability(authStore.currentUser?.roles));
+const canEnterTeamManagement = computed(() => !shareMode.value && hasSystemAdminCapability(authStore.currentUser?.roles));
+const workbenchPerspective = ref<WorkbenchPerspective>("WORK");
+const teamReturnRoute = ref<RouteLocationRaw | null>(null);
+const legacyTeamPerspectivePending = ref(false);
+const teamController = createTeamManagementController(api);
+const teamView = shallowRef(teamController.snapshot());
+teamController.subscribe((next) => {
+  teamView.value = next;
+});
+provide(teamManagementKey, teamController);
+
+const teamContextOptions = computed(() => ({
+  owners: teamView.value.owners.map((owner) => ({
+    id: owner.userId,
+    label: `${owner.username} · ${owner.unifiedAuthId}`
+  })),
+  applications: teamView.value.applications.map((item) => ({
+    id: item.appId,
+    label: `${item.appName}（当前 ${item.currentMemberCount} / 历史 ${item.historicalMemberCount}）`
+  })),
+  templates: teamView.value.templates.map((item) => ({ id: item.workspaceId, label: item.workspaceName })),
+  versions: teamView.value.versions.map((item) => ({ id: item.versionId, label: `${item.version} · ${item.branch}` }))
+}));
+
+function enterTeamManagement() {
+  if (!canEnterTeamManagement.value || workbenchPerspective.value === "TEAM_MANAGEMENT") return;
+  const section = typeof route.query.section === "string" ? route.query.section : "";
+  const leavingLegacyTeam = route.name === "system" && section === "team";
+  if (!leavingLegacyTeam && typeof route.name === "string" && route.name !== "workbench") {
+    teamReturnRoute.value = {
+      name: route.name,
+      query: route.query,
+      params: route.params
+    };
+  } else {
+    teamReturnRoute.value = null;
+  }
+  workbenchPerspective.value = "TEAM_MANAGEMENT";
+  void teamController.enter(isSuperAdmin.value);
+  if (route.name !== "workbench") void router.replace({ name: "workbench" });
+}
+
+function exitTeamManagement() {
+  if (workbenchPerspective.value !== "TEAM_MANAGEMENT") return;
+  const target = teamReturnRoute.value;
+  teamReturnRoute.value = null;
+  workbenchPerspective.value = "WORK";
+  teamController.exit();
+  if (target) void router.push(target);
+}
+
+function toggleTeamManagement() {
+  if (workbenchPerspective.value === "TEAM_MANAGEMENT") exitTeamManagement();
+  else enterTeamManagement();
+}
+
+watch(canEnterTeamManagement, (allowed) => {
+  if (!allowed) exitTeamManagement();
+});
 const canSelectModel = computed(() => isSuperAdmin.value && modelSelectionUnlocked.value);
 watch(isSuperAdmin, () => {
   // 退出超级管理员上下文后立即收回入口；再次进入仍需重新完成三次 Ctrl。
@@ -858,9 +929,26 @@ function customMenuForPage(id: WorkspacePageId): CustomMenuItem | undefined {
 }
 
 async function syncWorkspacePageFromRoute() {
-  if (!routedCenterModeFromRouteName(route.name)) return;
   // 控制台权限依赖异步 current-user；资料尚未返回时保持路由，不抢先误判为无权限。
   if ((route.name === "system" || route.name === "custom-menu") && !authStore.currentUser) return;
+  if (authStore.currentUser && workspaceRouteRequestsTeamPerspective(
+    route.name,
+    route.query.section,
+    workspacePageRoles.value
+  )) {
+    legacyTeamPerspectivePending.value = false;
+    applyWorkspacePageTabsState(stripLegacyTeamManagementTabs(workspacePageTabsState.value));
+    enterTeamManagement();
+    centerMode.value = "editor";
+    return;
+  }
+  if (!routedCenterModeFromRouteName(route.name)) {
+    if (authStore.currentUser && legacyTeamPerspectivePending.value) {
+      legacyTeamPerspectivePending.value = false;
+      enterTeamManagement();
+    }
+    return;
+  }
   const parsed = parseWorkspacePageRoute(
     route.name,
     route.query.section,
@@ -916,15 +1004,16 @@ watch(
       } catch {
         // 禁用存储时从空 Tab 集合开始。
       }
-      restored = restoreWorkspacePageTabs(raw, roles, customMenuIds.value);
+      if (storedTabsRequestTeamPerspective(raw, roles)) legacyTeamPerspectivePending.value = true;
+      restored = stripLegacyTeamManagementTabs(restoreWorkspacePageTabs(raw, roles, customMenuIds.value));
       hydratedWorkspacePageTabsUserId = userId;
       mountedWorkspacePageIds.value = new Set();
     } else {
-      restored = restoreWorkspacePageTabs(
+      restored = stripLegacyTeamManagementTabs(restoreWorkspacePageTabs(
         serializeWorkspacePageTabs(workspacePageTabsState.value),
         roles,
         customMenuIds.value
-      );
+      ));
     }
     applyWorkspacePageTabsState(restored);
     void syncWorkspacePageFromRoute();
@@ -12541,6 +12630,7 @@ function dismissCompactProgressAfterSuccess() {
 
 onBeforeUnmount(() => {
   clearCompactProgressDismissTimer();
+  teamController.exit();
 });
 
 function nativeSessionActionAllowed(action: string, options: { allowBusy?: boolean } = {}): Session | null {
@@ -12815,6 +12905,19 @@ async function handleLogout() {
     :side-question-available="robotQuestionAvailable"
     :side-question-manual-mode="!session?.sessionId"
     :runtime-inventory="runtimeInventoryForShell"
+    :perspective="workbenchPerspective"
+    :can-enter-team-management="canEnterTeamManagement"
+    :team-scope-mode="teamView.scopeMode"
+    :team-scope-locked="teamView.scopeLocked"
+    :team-scope-label="teamScopeLabel(teamView)"
+    :team-owner-user-id="teamView.ownerUserId"
+    :team-owners="teamContextOptions.owners"
+    :team-applications="teamContextOptions.applications"
+    :team-application-id="teamView.selectedAppId"
+    :team-templates="teamContextOptions.templates"
+    :team-template-id="teamView.selectedTemplateId"
+    :team-versions="teamContextOptions.versions"
+    :team-version-id="teamView.selectedVersionId"
     :notifications="notificationItems"
     :notification-unread-count="notificationUnreadCount"
     :notification-filter="notificationFilter"
@@ -12849,6 +12952,11 @@ async function handleLogout() {
     @refresh-notifications="refreshUserNotifications"
     @load-more-notifications="loadMoreUserNotifications"
     @open-notification="handleOpenNotification"
+    @switch-workbench-perspective="toggleTeamManagement"
+    @select-team-scope="(mode, ownerUserId) => teamController.selectScope(mode, ownerUserId)"
+    @select-team-application="teamController.selectApplication"
+    @select-team-template="teamController.selectTemplate"
+    @select-team-version="teamController.selectVersion"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">
@@ -12970,6 +13078,8 @@ async function handleLogout() {
     </template>
 
     <template #files>
+      <TeamReviewFilePane v-if="workbenchPerspective === 'TEAM_MANAGEMENT'" class="team-perspective-pane" />
+      <div v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="team-work-slot">
       <div v-if="selectedManagedApplication || selectedWorkspace" class="managed-workspace-layout">
         <FigmaFileExplorer
           ref="fileExplorerRef"
@@ -13066,10 +13176,12 @@ async function handleLogout() {
       <div v-else class="managed-workspace-empty">
         <p>请选择应用后进入应用版本或个人工作区。</p>
       </div>
+      </div>
     </template>
 
     <template #editor>
-      <main class="managed-editor-main">
+      <TeamReviewEditor v-if="workbenchPerspective === 'TEAM_MANAGEMENT'" class="team-perspective-pane" />
+      <main v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-editor-main">
         <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">
           <WorkspacePageTabBar
             :tabs="workspacePageTabs"
@@ -13392,7 +13504,8 @@ async function handleLogout() {
     </template>
 
     <template #chat>
-      <div class="managed-chat-panel">
+      <TeamReviewPane v-if="workbenchPerspective === 'TEAM_MANAGEMENT'" class="team-perspective-pane" />
+      <div v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-chat-panel">
         <FigmaChatPanel
           :panel-visible="rightPanelOpen"
           :messages="chatMessagesForPanel"
@@ -13841,11 +13954,14 @@ async function handleLogout() {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-.managed-chat-panel {
+.managed-chat-panel,
+.team-perspective-pane,
+.team-work-slot {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  flex: 1 1 auto;
 }
 
 .managed-editor-main {

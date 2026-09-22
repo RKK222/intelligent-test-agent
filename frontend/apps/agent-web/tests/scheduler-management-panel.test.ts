@@ -569,16 +569,16 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
-  it("gives system administrators the team page and inherited application configuration only", async () => {
+  it("gives system administrators configuration only after team review moves to the workbench", async () => {
     const backendApi = api();
     const systemAdmin: CurrentUser = { ...currentUser, roles: ["SYSTEM_ADMIN"] };
-    const view = renderWithApi(SystemManagementPanel, backendApi, systemAdmin, { activeKey: "team" });
+    const view = renderWithApi(SystemManagementPanel, backendApi, systemAdmin, { activeKey: "config" });
 
-    expect(await view.findByText("团队管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
+    expect(view.queryByText("团队管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.getByText("配置管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
     expect(view.queryByText("运行管理", { selector: ".ta-system-menu-text" })).toBeNull();
     expect(view.queryByText("用户管理", { selector: ".ta-system-menu-text" })).toBeNull();
-    expect(view.getByTestId("team-management-panel").getAttribute("data-page-active")).toBe("true");
+    expect(await view.findByRole("heading", { name: "应用 Git 刷新" })).toBeTruthy();
     view.queryClient.clear();
   });
 

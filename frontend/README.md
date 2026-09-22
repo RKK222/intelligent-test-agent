@@ -140,9 +140,9 @@ scheduler 触发。显式模式仅允许连接回环平台 PostgreSQL，并通�
 最后启用入口；若可用超级管理员不是唯一候选，启动前设置
 `TEST_AGENT_LOBEHUB_DEV_OWNER_UNIFIED_AUTH_ID=<统一认证号>`。初始化或聊天服务启动失败会自动审计并关闭入口。
 
-### 系统管理员团队管理
+### 系统管理员团队审阅
 
-`apps/agent-web` 对 `SYSTEM_ADMIN`（以及继承该能力的 `SUPER_ADMIN`）展示“团队管理”。系统管理员维护自己的分页成员名单，并按应用、工作空间、版本、人员和个人 worktree 查看提交、未提交修改与只读文件；超级管理员可在全平台和指定系统管理员团队间切换。`auth/roleCapabilities.ts` 是前端角色能力的唯一判断入口，禁止页面继续分散比较角色字符串。团队文件、搜索和预览统一由 `packages/backend-api` 走 `TEAM_READ_ONLY` 文件 WebSocket；导出下载使用后端返回的协调节点一次性路由，不在浏览器内存拼装 ZIP。
+`apps/agent-web` 对 `SYSTEM_ADMIN`（以及继承该能力的 `SUPER_ADMIN`）在头像菜单提供“切换到管理视角”。管理视角复用工作台三栏，不打开控制台“团队管理”页，也不把他人 worktree 写入当前用户的运行工作空间。系统管理员固定查看自己的团队；超级管理员每次进入默认全平台只读，选中具体系统管理员后才能新增或移除成员。左栏只读浏览成员 worktree，中栏只读打开文件和 Diff，右栏展示贡献、提交和成员抽屉。`auth/roleCapabilities.ts` 是前端角色能力的唯一判断入口。团队文件、搜索、整读和大文件分段预览统一由 `packages/backend-api` 走 `TEAM_READ_ONLY` 文件 WebSocket，切换范围、成员、退出或权限失效时主动关闭连接；导出下载使用后端返回的协调节点一次性路由，不在浏览器内存拼装 ZIP。
 
 ## 本地命令
 

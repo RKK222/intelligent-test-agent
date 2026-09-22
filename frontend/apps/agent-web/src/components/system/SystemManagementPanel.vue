@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal, UserRoundCheck, UsersRound, Waypoints } from "lucide-vue-next";
+import { Activity, BarChart3, BrainCircuit, CalendarClock, Fingerprint, KeyRound, Network, Radar, RefreshCw, Settings2, SlidersHorizontal, UsersRound, Waypoints } from "lucide-vue-next";
 import type { CurrentUser } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../settings/RuntimeManagementPanel.vue";
 import ScheduledTaskManagementPanel from "./ScheduledTaskManagementPanel.vue";
@@ -15,9 +15,8 @@ import ApiKeyManagementPanel from "./ApiKeyManagementPanel.vue";
 import SettingsUserManagementPanel from "../settings/SettingsUserManagementPanel.vue";
 import LocalClientVersionManagementPanel from "./LocalClientVersionManagementPanel.vue";
 import TraceView from "../../views/TraceView.vue";
-import TeamManagementPanel from "./TeamManagementPanel.vue";
 import type { SystemMenuKey } from "../workspace-page-tabs";
-import { hasAppAdminCapability, hasSuperAdminCapability, hasSystemAdminCapability } from "../../auth/roleCapabilities";
+import { hasAppAdminCapability, hasSuperAdminCapability } from "../../auth/roleCapabilities";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -34,11 +33,9 @@ const emit = defineEmits<{
 type SystemMenuItem = { key: SystemMenuKey; label: string; icon: Component };
 
 const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.roles));
-const hasSystemAdmin = computed(() => hasSystemAdminCapability(props.currentUser?.roles));
 const hasSystemAccess = computed(() => hasAppAdminCapability(props.currentUser?.roles));
 
 const items: SystemMenuItem[] = [
-  { key: "team", label: "团队管理", icon: UserRoundCheck },
   { key: "scheduler", label: "定时任务管理", icon: CalendarClock },
   { key: "runtime", label: "运行管理", icon: Activity },
   { key: "users", label: "用户管理", icon: UsersRound },
@@ -54,7 +51,7 @@ const items: SystemMenuItem[] = [
 ];
 const visibleItems = computed<SystemMenuItem[]>(() => {
   if (!hasSuperAdmin.value) {
-    return items.filter((item) => item.key === "config" || (hasSystemAdmin.value && item.key === "team"));
+    return items.filter((item) => item.key === "config");
   }
   return props.supportRevealed
     ? [...items, { key: "support", label: "问题排查只读访问", icon: KeyRound }]
@@ -89,13 +86,8 @@ function selectMenu(key: SystemMenuKey) {
         </el-tooltip>
       </nav>
       <div class="ta-system-content">
-        <TeamManagementPanel
-          v-if="props.activeKey === 'team'"
-          :current-user="currentUser"
-          :page-active="props.pageActive"
-        />
         <ScheduledTaskManagementPanel
-          v-else-if="props.activeKey === 'scheduler'"
+          v-if="props.activeKey === 'scheduler'"
           :current-user="currentUser"
           :page-active="props.pageActive"
         />

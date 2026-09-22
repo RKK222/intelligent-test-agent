@@ -8,8 +8,11 @@ import {
   parseWorkspacePageRoute,
   restoreWorkspacePageTabs,
   serializeWorkspacePageTabs,
+  storedTabsRequestTeamPerspective,
+  stripLegacyTeamManagementTabs,
   workspacePageTab,
   workspacePageRoute,
+  workspaceRouteRequestsTeamPerspective,
   type WorkspacePageTabsState
 } from "../src/components/workspace-page-tabs";
 
@@ -167,13 +170,38 @@ describe("workspace page tabs", () => {
       canonicalize: false
     });
     expect(defaultSystemMenuKey(["APP_ADMIN"])).toBe("config");
-    expect(defaultSystemMenuKey(["SYSTEM_ADMIN"])).toBe("team");
-    expect(canOpenSystemMenu("team", ["SYSTEM_ADMIN"])).toBe(true);
+    expect(defaultSystemMenuKey(["SYSTEM_ADMIN"])).toBe("config");
+    expect(canOpenSystemMenu("team", ["SYSTEM_ADMIN"])).toBe(false);
+    expect(canOpenSystemMenu("team", ["SUPER_ADMIN"])).toBe(false);
+    expect(canOpenSystemMenu("config", ["SYSTEM_ADMIN"])).toBe(true);
     expect(canOpenSystemMenu("runtime", ["SYSTEM_ADMIN"])).toBe(false);
+    expect(workspaceRouteRequestsTeamPerspective("system", "team", ["SYSTEM_ADMIN"])).toBe(true);
+    expect(workspaceRouteRequestsTeamPerspective("system", "team", ["APP_ADMIN"])).toBe(false);
+    expect(workspaceRouteRequestsTeamPerspective("system", "team", ["USER"])).toBe(false);
     expect(parseWorkspacePageRoute("system", "team", ["SYSTEM_ADMIN"])).toEqual({
-      id: "system:team",
-      canonicalize: false
+      id: "system:config",
+      canonicalize: true
     });
+  });
+
+  it("drops a stored team-management tab and asks the workbench to enter management perspective", () => {
+    const raw = serializeWorkspacePageTabs({
+      openIds: ["toolbox", "system:team", "system:config"],
+      activeId: "system:team",
+      lastSystemId: "system:team"
+    });
+    expect(storedTabsRequestTeamPerspective(raw, ["SYSTEM_ADMIN"])).toBe(true);
+    expect(storedTabsRequestTeamPerspective(raw, ["USER"])).toBe(false);
+    expect(stripLegacyTeamManagementTabs({
+      openIds: ["toolbox", "system:team", "system:config"],
+      activeId: "system:team",
+      lastSystemId: "system:team"
+    })).toEqual({
+      openIds: ["toolbox", "system:config"],
+      activeId: "system:config",
+      lastSystemId: "system:config"
+    });
+    expect(restoreWorkspacePageTabs(raw, ["SYSTEM_ADMIN"]).openIds).not.toContain("system:team");
   });
 
   it("keeps the default system route clean and encodes non-default sections", () => {

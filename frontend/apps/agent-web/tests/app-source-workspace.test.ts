@@ -215,8 +215,9 @@ describe("app source workspace state", () => {
 
     expect(agentWorkbenchSource).toContain(':writable="canSaveSelectedDiffFile"');
     expect(agentWorkbenchSource.match(/canSaveDiffFile\(path\)/g)).toHaveLength(2);
-    expect(diffViewerSource).toContain("if (!props.writable || !isDirty.value || !selected.value) return;");
-    expect(diffViewerSource).toContain("readOnly: !isVcsOrAgent || !writable");
+    expect(diffViewerSource).toContain('if (props.reviewMode === "team" || !props.writable || !isDirty.value || !selected.value) return;');
+    expect(diffViewerSource).toContain("readOnly: diffEditorReadOnly(props.source, props.writable, props.reviewMode)");
+    expect(diffViewerSource).toContain('if (reviewMode === "team") return true;');
   });
 
   it("uses the shared ordinary-write guard in every structural mutation handler", () => {

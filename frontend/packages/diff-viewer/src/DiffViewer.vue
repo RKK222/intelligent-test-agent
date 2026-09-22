@@ -2,6 +2,27 @@
 import type * as monaco from "monaco-editor";
 import type { PromptPart, RunDiffFile } from "@test-agent/shared-types";
 
+export type DiffReviewMode = "default" | "team";
+
+/** 团队审阅始终只读，不因 source 或 writable 打开保存。 */
+export function diffEditorReadOnly(
+  source: "run" | "session" | "vcs" | "agent",
+  writable: boolean,
+  reviewMode: DiffReviewMode = "default"
+) {
+  if (reviewMode === "team") return true;
+  const editableSource = source === "vcs" || source === "agent";
+  return !editableSource || !writable;
+}
+
+/** Run 接受、拒绝和引用只属于普通 Diff，团队审阅与 VCS/Agent 都不展示。 */
+export function diffReviewShowsRunActions(
+  source: "run" | "session" | "vcs" | "agent",
+  reviewMode: DiffReviewMode = "default"
+) {
+  return reviewMode !== "team" && source !== "vcs" && source !== "agent";
+}
+
 export type DiffViewerProps = {
   files: RunDiffFile[];
   selectedPath?: string;
@@ -11,6 +32,8 @@ export type DiffViewerProps = {
   rejecting?: boolean;
   /** 父工作台按当前 workspace 与文件作用域计算的写能力；保存快捷键也必须服从该门禁。 */
   writable?: boolean;
+  /** team 隐藏保存、接受、回退和引用，只保留 Monaco 差异渲染。 */
+  reviewMode?: DiffReviewMode;
 };
 
 type FilePromptPart = Extract<PromptPart, { type: "file" }>;
@@ -26,7 +49,8 @@ import { parseUnifiedPatch } from "./unifiedPatch";
 const props = withDefaults(defineProps<DiffViewerProps>(), {
   source: "run",
   viewMode: "split",
-  writable: true
+  writable: true,
+  reviewMode: "default"
 });
 const emit = defineEmits<{
   selectFile: [path: string];
@@ -41,6 +65,8 @@ const emit = defineEmits<{
   dirtyChange: [dirty: boolean];
 }>();
 
+const teamReview = computed(() => props.reviewMode === "team");
+const showRunActions = computed(() => diffReviewShowsRunActions(props.source, props.reviewMode));
 const selected = computed(() => props.files.find((f) => f.path === props.selectedPath) ?? props.files[0]);
 const parsed = computed(() => parseUnifiedPatch(selected.value?.patch ?? ""));
 const hunks = computed(() => (selected.value ? parseDiffHunks(selected.value) : []));
@@ -155,9 +181,9 @@ async function initMonaco(el: HTMLElement) {
   const isVcsOrAgent = props.source === "vcs" || props.source === "agent";
   const inst = monacoLib.editor.createDiffEditor(el, {
     theme: "ta-diff-light",
-    readOnly: !isVcsOrAgent || !props.writable,
+    readOnly: diffEditorReadOnly(props.source, props.writable, props.reviewMode),
     originalEditable: false,
-    renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
+    renderSideBySide: props.reviewMode === "team" || isVcsOrAgent ? true : props.viewMode === "split",
     useInlineViewWhenSpaceIsLimited: false,
     minimap: { enabled: false },
     automaticLayout: true,
@@ -204,7 +230,7 @@ watch(
 );
 
 function handleSave() {
-  if (!props.writable || !isDirty.value || !selected.value) return;
+  if (props.reviewMode === "team" || !props.writable || !isDirty.value || !selected.value) return;
   emit("saveFile", selected.value.path, modifiedModel?.getValue() ?? "");
 }
 
@@ -238,12 +264,12 @@ watch(
 );
 
 watch(
-  () => [props.source, props.viewMode, props.writable] as const,
-  ([src, mode, writable]) => {
+  () => [props.source, props.viewMode, props.writable, props.reviewMode] as const,
+  ([src, mode, writable, reviewMode]) => {
     const isVcsOrAgent = src === "vcs" || src === "agent";
     diffEditor.value?.updateOptions({
-      readOnly: !isVcsOrAgent || !writable,
-      renderSideBySide: isVcsOrAgent ? true : mode === "split"
+      readOnly: diffEditorReadOnly(src, writable, reviewMode),
+      renderSideBySide: reviewMode === "team" || isVcsOrAgent ? true : mode === "split"
     });
   }
 );
@@ -256,6 +282,8 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="!files.length" class="flex h-full min-h-0 flex-col bg-white text-slate-500">
     <div class="flex items-center gap-1 px-3 py-1 border-b border-slate-200 bg-slate-50">
+      <span v-if="teamReview" class="text-[12px] text-slate-700">只读审阅</span>
+      <template v-else>
       <select :value="source" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
         <option value="run">Run</option>
         <option value="session">Session</option>
@@ -267,12 +295,13 @@ onBeforeUnmount(() => {
         <option value="unified">Unified</option>
       </select>
       <Button size="sm" variant="secondary" @click="emit('refresh')">刷新</Button>
+      </template>
     </div>
     <div class="flex flex-1 items-center justify-center text-center text-[12px]">暂无 Diff</div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-white">
     <div class="flex min-h-10 flex-wrap items-center gap-2 bg-slate-50 px-3 py-1">
-      <div v-if="source !== 'vcs' && source !== 'agent'" class="flex items-center gap-1">
+      <div v-if="showRunActions" class="flex items-center gap-1">
         <select :value="source" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
           <option value="run">Run</option>
           <option value="session">Session</option>
@@ -285,7 +314,8 @@ onBeforeUnmount(() => {
         </select>
         <Button size="sm" variant="secondary" @click="emit('refresh')">刷新</Button>
       </div>
-      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{{ sourceTitle(source) }}</div>
+      <div v-if="teamReview" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">只读审阅</div>
+      <div v-else-if="showRunActions" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{{ sourceTitle(source) }}</div>
       <div v-else class="min-w-0 flex-1 flex items-center gap-2">
         <span class="font-mono text-[12px] text-slate-600 truncate max-w-[200px] sm:max-w-[400px]" :title="selected?.path">
           {{ getFileName(selected?.path ?? "") }}
@@ -311,11 +341,11 @@ onBeforeUnmount(() => {
         <span class="min-w-[52px] text-center font-mono text-[11px] text-slate-600">
           {{ selectedHunk ? `${selectedHunk.index + 1}/${hunks.length}` : "0/0" }}
         </span>
-        <Button v-if="source !== 'vcs' && source !== 'agent'" type="button" size="icon" variant="secondary" title="引用 hunk" :disabled="!selected || !selectedHunk" @click="selected && selectedHunk && emit('useHunkContext', hunkToPromptPart(selected, selectedHunk))">
+        <Button v-if="showRunActions" type="button" size="icon" variant="secondary" title="引用 hunk" :disabled="!selected || !selectedHunk" @click="selected && selectedHunk && emit('useHunkContext', hunkToPromptPart(selected, selectedHunk))">
           <MessageSquareQuote class="h-4 w-4" />
         </Button>
       </div>
-      <template v-if="source !== 'vcs' && source !== 'agent'">
+      <template v-if="showRunActions">
         <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'accept-current', selected.path)">当前文件接受</Button>
         <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'reject-current', selected.path)">当前文件拒绝</Button>
         <Button size="sm" variant="primary" :disabled="accepting" @click="emit('acceptRun')">
@@ -328,8 +358,8 @@ onBeforeUnmount(() => {
         </Button>
       </template>
     </div>
-    <div :class="cn('grid min-h-0 flex-1', (source === 'vcs' || source === 'agent') ? 'grid-cols-1' : 'grid-cols-[260px_minmax(0,1fr)]')">
-      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-h-0 overflow-auto border-r border-slate-200 bg-[#fafafa] p-2">
+    <div :class="cn('grid min-h-0 flex-1', showRunActions ? 'grid-cols-[260px_minmax(0,1fr)]' : 'grid-cols-1')">
+      <div v-if="showRunActions" class="min-h-0 overflow-auto border-r border-slate-200 bg-[#fafafa] p-2">
         <button
           v-for="file in files"
           :key="file.path"
@@ -363,7 +393,8 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex min-h-0 flex-1 flex-col min-w-0">
         <!-- Diff Panels Header Hints -->
-        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="flex items-center justify-center gap-2 bg-[#fafafa] px-3 py-1 text-[11px] text-slate-500 font-semibold">
+        <div v-if="teamReview" class="bg-[#fafafa] px-3 py-1 text-center text-[11px] font-semibold text-slate-700">只读审阅，不能保存或执行 Git 操作</div>
+        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="flex items-center justify-center gap-2 bg-[#fafafa] px-3 py-1 text-[11px] text-slate-500 font-semibold">
           <span class="flex items-center gap-1 text-slate-700">
             <span class="text-rose-500 font-bold">◀</span> 基线版本（只读）
           </span>

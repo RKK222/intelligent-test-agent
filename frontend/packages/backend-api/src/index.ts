@@ -768,6 +768,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const supportFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   const teamFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const teamFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  // 关闭代次用于作废切换范围、成员或退出管理视角时仍在握手的连接，避免旧 ticket 完成后重新登记。
+  const teamFileEpochs = new Map<string, number>();
   const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
@@ -931,14 +933,38 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       .map(encodeURIComponent).join(":");
   }
 
+  /** 主动关闭团队只读文件连接。省略 personalWorkspaceId 时关闭全部范围和成员。 */
+  function closeTeamWorkspaceFileConnections(personalWorkspaceId?: string) {
+    const suffix = personalWorkspaceId ? `:${encodeURIComponent(personalWorkspaceId)}` : undefined;
+    const keys = new Set<string>([
+      ...teamFileSockets.keys(),
+      ...teamFileConnections.keys(),
+      ...teamFileEpochs.keys()
+    ]);
+    for (const key of keys) {
+      if (suffix && !key.endsWith(suffix)) continue;
+      teamFileEpochs.set(key, (teamFileEpochs.get(key) ?? 0) + 1);
+      teamFileSockets.get(key)?.close();
+      teamFileSockets.delete(key);
+      teamFileConnections.delete(key);
+    }
+  }
+
+  function teamFileConnectionCurrent(key: string, epoch: number) {
+    return (teamFileEpochs.get(key) ?? 0) === epoch;
+  }
+
   async function ensureTeamWorkspaceFileClient(
     scope: TeamScopeParams,
     personalWorkspaceId: string,
     workspaceId: string
   ): Promise<WorkspaceFileSocketClient> {
     const key = teamSocketKey(scope, personalWorkspaceId);
+    // 连接登记前就占住代次，关闭请求才能打断还在申请 route/ticket 的握手。
+    if (!teamFileEpochs.has(key)) teamFileEpochs.set(key, 0);
+    const epoch = teamFileEpochs.get(key) ?? 0;
     const existing = teamFileSockets.get(key);
-    if (existing?.open) return existing;
+    if (existing?.open && teamFileConnectionCurrent(key, epoch)) return existing;
     const connecting = teamFileConnections.get(key);
     if (connecting) return connecting;
     existing?.close();
@@ -948,11 +974,17 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       const route = await requestFrom<WorkspaceFileRoute>(baseUrl, `${basePath}/file-ws-route${scopeQuery}`, {
         method: "POST"
       });
+      if (!teamFileConnectionCurrent(key, epoch)) {
+        throw new WorkspaceFileTransportError("团队文件连接已关闭");
+      }
       const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
         route.baseUrl.replace(/\/$/, ""),
         `${basePath}/file-ws-tickets${scopeQuery}`,
         { method: "POST", body: JSON.stringify({ linuxServerId: route.linuxServerId }) }
       );
+      if (!teamFileConnectionCurrent(key, epoch)) {
+        throw new WorkspaceFileTransportError("团队文件连接已关闭");
+      }
       let client!: WorkspaceFileSocketClient;
       client = new WorkspaceFileSocketClient(
         toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
@@ -961,8 +993,18 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
           if (teamFileSockets.get(key) === client) teamFileSockets.delete(key);
         }
       );
+      // 握手完成前若范围、成员或权限已经要求关闭，不能把这条连接重新放进缓存。
+      if (!teamFileConnectionCurrent(key, epoch)) {
+        client.close();
+        throw new WorkspaceFileTransportError("团队文件连接已关闭");
+      }
       teamFileSockets.set(key, client);
       await client.ready();
+      if (!teamFileConnectionCurrent(key, epoch) || teamFileSockets.get(key) !== client) {
+        client.close();
+        if (teamFileSockets.get(key) === client) teamFileSockets.delete(key);
+        throw new WorkspaceFileTransportError("团队文件连接已关闭");
+      }
       return client;
     })();
     teamFileConnections.set(key, connection);
@@ -980,11 +1022,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     op: "workspace.list" | "workspace.search" | "workspace.read" | "workspace.read.chunk" | "workspace.read.binary.chunk",
     params: Record<string, unknown>
   ): Promise<T> {
+    const key = teamSocketKey(scope, personalWorkspaceId);
+    const epoch = teamFileEpochs.get(key) ?? 0;
     for (let attempt = 0; ; attempt += 1) {
       try {
+        // 主动关闭后代次已经前进，不能把传输失败重试成一条新的只读连接。
+        if (!teamFileConnectionCurrent(key, epoch)) {
+          throw new WorkspaceFileTransportError("团队文件连接已关闭");
+        }
         const client = await ensureTeamWorkspaceFileClient(scope, personalWorkspaceId, workspaceId);
         return await client.request<T>(op, { workspaceId, ...params });
       } catch (error) {
+        if (!teamFileConnectionCurrent(key, epoch)) {
+          throw new WorkspaceFileTransportError("团队文件连接已关闭", error);
+        }
         if (attempt > 0 || !(error instanceof WorkspaceFileTransportError)) throw error;
       }
     }
@@ -3497,6 +3548,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       );
       return { path: data.path || path, content: data.content ?? "", encoding: "utf-8",
         size: data.size, readonly: true } satisfies FileContent;
+    },
+    /** 团队大文件分段预览，继续走同一条 TEAM_READ_ONLY 连接，不落成可写读取。 */
+    readTeamWorkspaceFilePreviewChunk: async (
+      scope: TeamScopeParams,
+      personalWorkspaceId: string,
+      workspaceId: string,
+      path: string,
+      preview: FilePreviewChunkRequest
+    ) => mapFilePreviewChunk(await teamWorkspaceFileRpc<BackendFilePreviewChunk>(
+      scope, personalWorkspaceId, workspaceId, "workspace.read.chunk", { path, ...preview }
+    )),
+    /** 切换成员、范围、退出管理视角或权限失效时主动关闭团队文件连接。 */
+    closeTeamWorkspaceFileConnections: (personalWorkspaceId?: string) => {
+      closeTeamWorkspaceFileConnections(personalWorkspaceId);
     },
     createTeamExport: (scope: TeamScopeParams, versionId: string) => request<TeamExport>(
       `${workspaceManagementBase}/team/versions/${encodeURIComponent(versionId)}/exports${teamScopeQuery(scope)}`,

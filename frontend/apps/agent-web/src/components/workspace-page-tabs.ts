@@ -148,9 +148,66 @@ export function systemMenuKeyFromPageId(id: WorkspacePageId): SystemMenuKey | nu
 }
 
 export function canOpenSystemMenu(key: SystemMenuKey, roles: string[], supportRevealed = false): boolean {
+  // 团队审阅已迁入工作台管理视角，控制台不再打开 system:team。
+  if (key === "team") return false;
   if (hasSuperAdminCapability(roles)) return key !== "support" || supportRevealed;
-  if (hasSystemAdminCapability(roles)) return key === "team" || key === "config";
+  if (hasSystemAdminCapability(roles)) return key === "config";
   return hasAppAdminCapability(roles) && key === "config";
+}
+
+/** 旧控制台深链仍指向团队页时，系统管理员及以上改为进入管理视角。 */
+export function workspaceRouteRequestsTeamPerspective(
+  routeName: unknown,
+  rawSection: unknown,
+  roles: readonly string[]
+): boolean {
+  return routeName === "system"
+    && typeof rawSection === "string"
+    && rawSection.trim() === "team"
+    && hasSystemAdminCapability(roles);
+}
+
+/** 刷新前保存在 sessionStorage 里的团队标签，用于恢复时转入管理视角。 */
+export function storedTabsRequestTeamPerspective(raw: string | null, roles: readonly string[]): boolean {
+  if (!raw || !hasSystemAdminCapability(roles)) return false;
+  try {
+    const stored = JSON.parse(raw) as { openIds?: unknown; activeId?: unknown; lastSystemId?: unknown };
+    const ids = Array.isArray(stored.openIds) ? stored.openIds : [];
+    return ids.includes("system:team")
+      || stored.activeId === "system:team"
+      || stored.lastSystemId === "system:team";
+  } catch {
+    return false;
+  }
+}
+
+/** 去掉已下线的团队管理标签，并把活动项交给相邻仍打开的页面。 */
+export function stripLegacyTeamManagementTabs(state: WorkspacePageTabsState): WorkspacePageTabsState {
+  if (!state.openIds.includes("system:team")
+    && state.activeId !== "system:team"
+    && state.lastSystemId !== "system:team") {
+    return state;
+  }
+  const removedIndex = state.openIds.indexOf("system:team");
+  const openIds = state.openIds.filter((id) => id !== "system:team");
+  let activeId = state.activeId;
+  if (!activeId || activeId === "system:team" || !openIds.includes(activeId)) {
+    activeId = removedIndex >= 0
+      ? openIds[Math.min(removedIndex, Math.max(openIds.length - 1, 0))] ?? null
+      : openIds[0] ?? null;
+  }
+  let lastSystemId = state.lastSystemId === "system:team" ? null : state.lastSystemId;
+  if (lastSystemId && !openIds.includes(lastSystemId)) lastSystemId = null;
+  if (!lastSystemId) {
+    for (let index = openIds.length - 1; index >= 0; index -= 1) {
+      const candidate = openIds[index];
+      if (candidate && isSystemWorkspacePageId(candidate)) {
+        lastSystemId = candidate;
+        break;
+      }
+    }
+  }
+  return { openIds, activeId, lastSystemId };
 }
 
 export function canOpenWorkspacePage(
@@ -293,9 +350,7 @@ export function restoreWorkspacePageTabs(
 }
 
 export function defaultSystemMenuKey(roles: string[]): SystemMenuKey {
-  return hasSuperAdminCapability(roles) ? "scheduler"
-    : hasSystemAdminCapability(roles) ? "team"
-      : "config";
+  return hasSuperAdminCapability(roles) ? "scheduler" : "config";
 }
 
 export function parseWorkspacePageRoute(
