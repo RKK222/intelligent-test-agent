@@ -13554,7 +13554,11 @@ async function handleLogout() {
     </template>
 
     <template #chat>
-      <TeamReviewPane v-if="workbenchPerspective === 'TEAM_MANAGEMENT'" class="team-perspective-pane" />
+      <TeamReviewPane
+        v-if="workbenchPerspective === 'TEAM_MANAGEMENT'"
+        class="team-perspective-pane"
+        :right-panel-open="rightPanelOpen"
+      />
       <div v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-chat-panel">
         <FigmaChatPanel
           :panel-visible="rightPanelOpen"

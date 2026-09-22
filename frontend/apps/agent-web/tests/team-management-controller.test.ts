@@ -99,7 +99,7 @@ describe("team management controller", () => {
       targetUserId: "member-1"
     });
 
-    await controller.openMemberDrawer();
+    await controller.openMemberDialog();
     expect(api.listSystemAdminTeamMembers).toHaveBeenCalled();
     await controller.removeMember("member-1");
     expect(api.removeSystemAdminTeamMember).toHaveBeenCalledWith(
@@ -125,6 +125,29 @@ describe("team management controller", () => {
       targetUserId: "member-1"
     });
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith();
+  });
+
+  it("opens a team picker before loading members from the global read-only scope", async () => {
+    const api = createApi();
+    const controller = createTeamManagementController(api);
+    await controller.enter(true);
+
+    await controller.openMemberDialog();
+    expect(controller.snapshot().teamPickerDialogOpen).toBe(true);
+    expect(controller.snapshot().memberDialogOpen).toBe(false);
+    expect(api.listSystemAdminTeamMembers).not.toHaveBeenCalled();
+
+    await controller.selectMemberManagementOwner("owner-1");
+    expect(controller.snapshot().scopeMode).toBe("SYSTEM_ADMIN_TEAM");
+    expect(controller.snapshot().ownerUserId).toBe("owner-1");
+    expect(controller.snapshot().teamPickerDialogOpen).toBe(false);
+    expect(controller.snapshot().memberDialogOpen).toBe(true);
+    expect(api.listSystemAdminTeamMembers).toHaveBeenCalledWith(
+      { scopeMode: "SYSTEM_ADMIN_TEAM", ownerUserId: "owner-1" },
+      "",
+      1,
+      20
+    );
   });
 
   it("ignores a late application response after the scope changes", async () => {

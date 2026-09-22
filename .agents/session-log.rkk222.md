@@ -17831,3 +17831,28 @@
 
 - #31 失败候选保持未发布，旧测试服务未被接管或替换；新的 Jenkins 构建必须完成数据库克隆升级、正式发布和健康检查后才能交付。
 - 本次只修复既有测试节点的发布权限和诊断输出，不涉及 API、事件、数据库/Flyway、性能模型、业务安全权限、环境变量内容、generated SDK 或 OpenCode 只读源码；未新增部署节点。
+
+## 2026-09-22 - 重构管理视角团队审阅与成员管理对话框
+
+### Why
+
+- 用户要求管理视角继续保持工作台体验：右栏收起后仍可查看审阅内容，并修复超级管理员在全平台只读范围无法进入成员管理的问题。
+
+### What
+
+- `TeamReviewPane` 改为工作台风格的紧凑审阅面板，成员行使用头像首字母、状态和统计摘要，详情分组改为可折叠区，去除界面中的 `worktree` 文案。
+- 右栏收起时通过 Teleport 保留浮动“团队审阅”入口，打开同一份内容的居中 `role=dialog`；支持关闭按钮、遮罩点击和 Escape。
+- 成员维护改为独立管理对话框；超级管理员处于 `GLOBAL` 时先打开系统管理员团队选择对话框，选定负责人后切换 `SYSTEM_ADMIN_TEAM` 并自动加载成员/候选人。后端授权和既有 API 不变。
+- `AgentWorkbench` 将右栏展开状态传给审阅组件；同步更新前端 README、包说明和控制器/面板 Vitest 覆盖。
+
+### How
+
+- 通过既有 `team-management-controller` 状态与请求代次复用所有成员 API，没有新增 HTTP API、事件协议、数据库或部署节点。
+- `pnpm --dir frontend exec vitest run apps/agent-web/tests/team-management-controller.test.ts apps/agent-web/tests/team-review-panes.test.ts`：17 passed。
+- `pnpm --dir frontend typecheck` 与 `pnpm --dir frontend build` 通过；`git diff --check` 通过。
+- 使用本地 Chrome 运行 Playwright smoke，开发服务器可启动并渲染登录页；未进行需要真实登录和团队数据的浏览器验收。
+
+### Result
+
+- 管理视角的审阅、浮动入口、团队选择和成员增删流程已由前端状态编排统一承载，退出管理视角时状态随控制器清理；全平台只读仍不能直接修改成员。
+- 未修改 `.env*`、generated SDK、OpenCode 源码或后端权限边界；真实登录态和共享环境部署验收仍需在具备账号/数据的环境进行。

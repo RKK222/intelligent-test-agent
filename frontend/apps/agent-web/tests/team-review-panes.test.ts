@@ -73,4 +73,50 @@ describe("team review panes", () => {
     review.unmount();
     files.unmount();
   });
+
+  it("keeps a floating review launcher when the right panel is collapsed", async () => {
+    const controller = createTeamManagementController(api());
+    await controller.enter(true);
+    const provide = { [teamManagementKey as symbol]: controller };
+    const review = mount(TeamReviewPane, {
+      props: { rightPanelOpen: false },
+      global: { provide }
+    });
+
+    const launcher = document.body.querySelector<HTMLButtonElement>("[aria-label='打开团队审阅']");
+    expect(launcher).not.toBeNull();
+    launcher?.click();
+    await review.vm.$nextTick();
+    expect(document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']")).not.toBeNull();
+
+    const close = document.body.querySelector<HTMLButtonElement>("[aria-label='关闭审阅对话框']");
+    close?.click();
+    await review.vm.$nextTick();
+    expect(document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']")).toBeNull();
+    expect(document.body.querySelector("[aria-label='打开团队审阅']")).not.toBeNull();
+    review.unmount();
+  });
+
+  it("opens member management after selecting a system administrator team", async () => {
+    const backend = api();
+    backend.listSystemAdmins.mockResolvedValue({
+      items: [{ userId: "owner-1", username: "系统管理员甲", unifiedAuthId: "owner-auth", department: "质量部" }],
+      total: 1,
+      page: 1,
+      size: 200
+    });
+    const controller = createTeamManagementController(backend);
+    await controller.enter(true);
+    const provide = { [teamManagementKey as symbol]: controller };
+    const review = mount(TeamReviewPane, { global: { provide } });
+
+    await review.get("button").trigger("click");
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).not.toBeNull();
+    const owner = document.body.querySelector<HTMLButtonElement>(".team-owner-option");
+    owner?.click();
+    await review.vm.$nextTick();
+    await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
+    expect(backend.listSystemAdminTeamMembers).toHaveBeenCalled();
+    review.unmount();
+  });
 });

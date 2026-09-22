@@ -110,7 +110,12 @@ export type TeamManagementState = {
   searchResults: FileSearchResult[] | null;
   tabs: TeamReviewTab[];
   activeTabId: string;
-  memberDrawerOpen: boolean;
+  /** 收起右栏后，以居中审阅对话框继续查看当前团队内容。 */
+  reviewDialogOpen: boolean;
+  /** 组员维护对话框；全平台只读范围不会直接打开它。 */
+  memberDialogOpen: boolean;
+  /** 超级管理员在全平台只读范围点击成员管理后，先选择具体团队。 */
+  teamPickerDialogOpen: boolean;
   memberKeyword: string;
   members: TeamUser[];
   memberPage: number;
@@ -148,8 +153,12 @@ export type TeamManagementController = {
   activateTab(tabId: string): void;
   closeTab(tabId: string): void;
   loadMorePreview(tabId: string, loadAll?: boolean): Promise<void>;
-  openMemberDrawer(): Promise<void>;
-  closeMemberDrawer(): void;
+  openReviewDialog(): void;
+  closeReviewDialog(): void;
+  openMemberDialog(): Promise<void>;
+  closeMemberDialog(): void;
+  closeTeamPickerDialog(): void;
+  selectMemberManagementOwner(ownerUserId: string): Promise<void>;
   chooseCandidate(userId: string): void;
   searchMembers(keyword: string): Promise<void>;
   searchCandidates(keyword: string): Promise<void>;
@@ -224,7 +233,9 @@ function emptyState(): TeamManagementState {
     searchResults: null,
     tabs: [],
     activeTabId: "",
-    memberDrawerOpen: false,
+    reviewDialogOpen: false,
+    memberDialogOpen: false,
+    teamPickerDialogOpen: false,
     memberKeyword: "",
     members: [],
     memberPage: 1,
@@ -928,7 +939,7 @@ export function createTeamManagementController(
       state.catalogError = "";
       if (mode !== "GLOBAL") state.reviewRoster = [];
       publish();
-      if (state.memberDrawerOpen) void loadMembers(memberEpoch, scopeKey());
+      if (state.memberDialogOpen) void loadMembers(memberEpoch, scopeKey());
       if (mode !== "GLOBAL") await loadReviewRoster(scopeEpoch);
       await loadApplications(scopeEpoch, catalogEpoch);
     },
@@ -1286,14 +1297,43 @@ export function createTeamManagementController(
         }
       }
     },
-    async openMemberDrawer() {
-      state.memberDrawerOpen = true;
+    openReviewDialog() {
+      state.reviewDialogOpen = true;
       publish();
-      if (canMaintainMembers()) await loadMembers(memberEpoch, scopeKey());
     },
-    closeMemberDrawer() {
-      state.memberDrawerOpen = false;
+    closeReviewDialog() {
+      state.reviewDialogOpen = false;
       publish();
+    },
+    async openMemberDialog() {
+      if (!canMaintainMembers()) {
+        if (state.scopeMode === "GLOBAL") {
+          state.teamPickerDialogOpen = true;
+          publish();
+        }
+        return;
+      }
+      state.memberDialogOpen = true;
+      publish();
+      await loadMembers(memberEpoch, scopeKey());
+    },
+    closeMemberDialog() {
+      state.memberDialogOpen = false;
+      publish();
+    },
+    closeTeamPickerDialog() {
+      state.teamPickerDialogOpen = false;
+      publish();
+    },
+    async selectMemberManagementOwner(ownerUserId: string) {
+      if (!ownerUserId || !state.active) return;
+      state.teamPickerDialogOpen = false;
+      publish();
+      await this.selectScope("SYSTEM_ADMIN_TEAM", ownerUserId);
+      if (!state.active || state.scopeMode !== "SYSTEM_ADMIN_TEAM" || state.ownerUserId !== ownerUserId) return;
+      state.memberDialogOpen = true;
+      publish();
+      await loadMembers(memberEpoch, scopeKey());
     },
     chooseCandidate(userId: string) {
       state.candidateUserId = userId;
