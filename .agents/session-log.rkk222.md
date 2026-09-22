@@ -5,6 +5,19 @@
 
 ## Entries
 
+### 2026-09-23 - 团队管理异步状态修复与端到端验收准备
+
+- Why:
+  - 继续任务 `01a0c625-747c-70e3-95e4-a8301e5e2753`，补齐团队成员管理在负责人目录异步失败时的可恢复状态，并把详细设计、案例设计与共享环境验收证据固化下来。
+- What:
+  - 团队管理控制器新增负责人目录 loading/error/retry 状态，去重并等待负责人请求；团队选择器显示加载、错误重试和空态，成员管理、团队选择器和审阅弹窗统一支持 Escape 关闭。
+  - 新增控制器重试与弹窗 Escape 回归测试；新增 `docs/testing/team-management-test-cases.md`，覆盖路径分析、角色/范围决策、等价类与边界、接口、部署和浏览器验收共 31 个案例；同步前端包说明和文档索引。
+- How:
+  - 前端定向 19 项、全量 Vitest 2325 项通过（1 项跳过），workspace typecheck 与 production build 通过；后端授权、服务和 MyBatis 集成定向回归 11 项通过；`git diff --check` 通过。
+  - 下一步将把本次提交推送 `release`，由 Jenkins 发布 immutable tag，再用真实登录态复验管理视角、团队选择器、Escape 关闭与只读 Diff；不改 API/事件/数据库/Flyway/generated SDK/.env。
+- Result:
+  - 本地代码与测试设计已完成，异步失败不再伪装成空团队，用户可重试；共享环境部署和截图证据待本条提交完成后补齐。
+
 ### 2026-09-22 - Jenkins #33 共享测试环境部署与管理视角验收
 
 - Why:

@@ -41,6 +41,7 @@
 
 - `docs/testing/conversation-scenes.md`：直接对话、历史运行中、Todo、ask、permission、subagent、宠物旁路成功/失败等可重复 fixture 入口。
 - `docs/testing/application-worktree-feature-cases.md`：应用 worktree、feature、角色写权限、发布投影和固定 UI 测试数据案例。
+- `docs/testing/team-management-test-cases.md`：管理视角团队审阅、成员维护、只读文件、撤权、部署验收与截图的设计案例。
 - `docs/testing/app-source-snapshot.md`：应用源码固定提交、多服务器物化、独立进度 WebSocket、文件能力和到期清理的自动化与人工验收。
 - `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。
 - `docs/testing/internal-model-observability-local.md`：企业内部模型调用可观测性的本地验证——用 `tools/mock-model-server.py` 在不部署/不连真实企业端点时复现成功、上游错误、超时、连接失败并核对明细/探活/查询 API。

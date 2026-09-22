@@ -93,8 +93,12 @@ function closeReviewDialog() {
   controller.closeReviewDialog();
 }
 
-function handleReviewDialogKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") closeReviewDialog();
+function handleDialogKeydown(event: KeyboardEvent, dialog: "review" | "team-picker" | "members") {
+  if (event.key !== "Escape") return;
+  event.stopPropagation();
+  if (dialog === "review") closeReviewDialog();
+  else if (dialog === "team-picker") controller.closeTeamPickerDialog();
+  else controller.closeMemberDialog();
 }
 
 async function download() {
@@ -119,7 +123,7 @@ async function download() {
           :aria-modal="!props.rightPanelOpen ? 'true' : undefined"
           :role="props.rightPanelOpen ? 'region' : 'dialog'"
           tabindex="-1"
-          @keydown="!props.rightPanelOpen && handleReviewDialogKeydown($event)"
+          @keydown="!props.rightPanelOpen && handleDialogKeydown($event, 'review')"
         >
           <header class="team-review-header">
             <div class="team-review-heading">
@@ -253,25 +257,30 @@ async function download() {
 
     <Teleport to="body">
       <div v-if="state.teamPickerDialogOpen" class="team-dialog-backdrop" @click.self="controller.closeTeamPickerDialog()">
-        <section class="team-dialog team-dialog--compact" role="dialog" aria-modal="true" aria-label="选择系统管理员团队">
+        <section class="team-dialog team-dialog--compact" role="dialog" aria-modal="true" aria-label="选择系统管理员团队" @keydown="handleDialogKeydown($event, 'team-picker')">
           <header class="team-dialog-header">
             <div><span class="team-review-kicker">成员管理</span><h2>选择系统管理员团队</h2></div>
             <button type="button" aria-label="关闭团队选择" autofocus @click="controller.closeTeamPickerDialog()">关闭</button>
           </header>
           <p class="team-dialog-description">全平台只读只能查看审阅内容。请选择一个系统管理员团队后再维护成员。</p>
+          <p v-if="state.ownersLoading" class="team-review-empty" role="status">正在读取可管理的系统管理员团队…</p>
+          <p v-if="state.ownersError" class="team-review-error" role="alert">
+            {{ state.ownersError }}
+            <button type="button" @click="controller.retryOwners()">重试</button>
+          </p>
           <div class="team-owner-list">
             <button v-for="owner in state.owners" :key="owner.userId" type="button" class="team-owner-option" @click="controller.selectMemberManagementOwner(owner.userId)">
               <span class="team-review-person-avatar" aria-hidden="true">{{ memberInitials(owner.username) }}</span>
               <span><strong>{{ owner.username }}</strong><small>{{ owner.unifiedAuthId }} · {{ owner.department || "未填写部门" }}</small></span>
               <span aria-hidden="true">›</span>
             </button>
-            <p v-if="!state.owners.length" class="team-review-empty">暂无可管理的系统管理员团队。</p>
+            <p v-if="!state.ownersLoading && !state.ownersError && !state.owners.length" class="team-review-empty">暂无可管理的系统管理员团队。</p>
           </div>
         </section>
       </div>
 
       <div v-if="state.memberDialogOpen" class="team-dialog-backdrop" @click.self="controller.closeMemberDialog()">
-        <section class="team-dialog team-dialog--members" role="dialog" aria-modal="true" aria-label="成员管理">
+        <section class="team-dialog team-dialog--members" role="dialog" aria-modal="true" aria-label="成员管理" @keydown="handleDialogKeydown($event, 'members')">
           <header class="team-dialog-header">
             <div><span class="team-review-kicker">{{ scopeDescription }}</span><h2>成员管理</h2></div>
             <button type="button" aria-label="关闭成员管理" autofocus @click="controller.closeMemberDialog()">关闭</button>

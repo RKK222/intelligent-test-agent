@@ -119,4 +119,31 @@ describe("team review panes", () => {
     expect(backend.listSystemAdminTeamMembers).toHaveBeenCalled();
     review.unmount();
   });
+
+  it("closes the team picker and member dialog with Escape", async () => {
+    const backend = api();
+    backend.listSystemAdmins.mockResolvedValue({
+      items: [{ userId: "owner-1", username: "系统管理员甲", unifiedAuthId: "owner-auth", department: "质量部" }],
+      total: 1,
+      page: 1,
+      size: 200
+    });
+    const controller = createTeamManagementController(backend);
+    await controller.enter(true);
+    const provide = { [teamManagementKey as symbol]: controller };
+    const review = mount(TeamReviewPane, { global: { provide } });
+
+    await review.get("button").trigger("click");
+    const picker = document.body.querySelector<HTMLElement>("[role='dialog'][aria-label='选择系统管理员团队']");
+    expect(picker).not.toBeNull();
+    await picker!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).toBeNull();
+
+    await controller.selectMemberManagementOwner("owner-1");
+    const members = document.body.querySelector<HTMLElement>("[role='dialog'][aria-label='成员管理']");
+    expect(members).not.toBeNull();
+    await members!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).toBeNull();
+    review.unmount();
+  });
 });

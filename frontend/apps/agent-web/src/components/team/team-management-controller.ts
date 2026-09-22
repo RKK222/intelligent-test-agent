@@ -86,6 +86,9 @@ export type TeamManagementState = {
   scopeMode: TeamScopeMode;
   ownerUserId: string;
   owners: TeamUser[];
+  ownersLoading: boolean;
+  ownersLoaded: boolean;
+  ownersError: string;
   applications: TeamApplication[];
   templates: TeamWorkspaceTemplate[];
   versions: TeamWorkspaceVersion[];
@@ -159,6 +162,7 @@ export type TeamManagementController = {
   closeMemberDialog(): void;
   closeTeamPickerDialog(): void;
   selectMemberManagementOwner(ownerUserId: string): Promise<void>;
+  retryOwners(): Promise<void>;
   chooseCandidate(userId: string): void;
   searchMembers(keyword: string): Promise<void>;
   searchCandidates(keyword: string): Promise<void>;
@@ -209,6 +213,9 @@ function emptyState(): TeamManagementState {
     scopeMode: "MY_TEAM",
     ownerUserId: "",
     owners: [],
+    ownersLoading: false,
+    ownersLoaded: false,
+    ownersError: "",
     applications: [],
     templates: [],
     versions: [],
@@ -281,6 +288,7 @@ export function createTeamManagementController(
   let fileEpoch = 0;
   let statsEpoch = 0;
   let memberEpoch = 0;
+  let ownersRequest: Promise<void> | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let exportTimer: ReturnType<typeof setInterval> | undefined;
   const listeners = new Set<(snapshot: TeamManagementState) => void>();
@@ -675,16 +683,35 @@ export function createTeamManagementController(
   }
 
   async function loadOwners(scopeTicket: number) {
+    if (!state.active || scopeTicket !== scopeEpoch) return;
+    state.ownersLoading = true;
+    state.ownersError = "";
+    publish();
     try {
       const owners = (await api.listSystemAdmins("", 1, 200)).items;
       if (!state.active || scopeTicket !== scopeEpoch) return;
       state.owners = owners;
+      state.ownersLoaded = true;
+      state.ownersLoading = false;
       publish();
     } catch (error) {
       if (!state.active || scopeTicket !== scopeEpoch) return;
+      state.ownersLoading = false;
+      state.ownersError = error instanceof Error ? error.message : String(error);
       showError(error);
       publish();
     }
+  }
+
+  function ensureOwners(scopeTicket: number) {
+    if (state.ownersLoaded) return Promise.resolve();
+    if (ownersRequest) return ownersRequest;
+    const request = loadOwners(scopeTicket);
+    const wrapped = request.finally(() => {
+      if (ownersRequest === wrapped) ownersRequest = null;
+    });
+    ownersRequest = wrapped;
+    return wrapped;
   }
 
   async function loadMembers(ticket: number, capturedScope: string) {
@@ -881,6 +908,7 @@ export function createTeamManagementController(
     async enter(superAdmin: boolean, seed: TeamReviewContextSeed = {}) {
       stopExportPolling();
       if (searchTimer) clearTimeout(searchTimer);
+      ownersRequest = null;
       scopeEpoch += 1;
       catalogEpoch += 1;
       detailEpoch += 1;
@@ -898,7 +926,7 @@ export function createTeamManagementController(
       publish();
       const scopeTicket = scopeEpoch;
       const catalogTicket = catalogEpoch;
-      if (superAdmin) void loadOwners(scopeTicket);
+      if (superAdmin) void ensureOwners(scopeTicket);
       if (!superAdmin) await loadReviewRoster(scopeTicket);
       await loadApplications(scopeTicket, catalogTicket);
     },
@@ -911,6 +939,7 @@ export function createTeamManagementController(
       fileEpoch += 1;
       statsEpoch += 1;
       memberEpoch += 1;
+      ownersRequest = null;
       api.closeTeamWorkspaceFileConnections();
       state = emptyState();
       publish();
@@ -1310,6 +1339,7 @@ export function createTeamManagementController(
         if (state.scopeMode === "GLOBAL") {
           state.teamPickerDialogOpen = true;
           publish();
+          await ensureOwners(scopeEpoch);
         }
         return;
       }
@@ -1334,6 +1364,12 @@ export function createTeamManagementController(
       state.memberDialogOpen = true;
       publish();
       await loadMembers(memberEpoch, scopeKey());
+    },
+    async retryOwners() {
+      if (!state.active || state.scopeMode !== "GLOBAL") return;
+      state.ownersLoaded = false;
+      state.ownersError = "";
+      await ensureOwners(scopeEpoch);
     },
     chooseCandidate(userId: string) {
       state.candidateUserId = userId;

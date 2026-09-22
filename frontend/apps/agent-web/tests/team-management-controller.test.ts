@@ -150,6 +150,27 @@ describe("team management controller", () => {
     );
   });
 
+  it("waits for the owner catalog and exposes a retry after a transient failure", async () => {
+    const api = createApi();
+    const controller = createTeamManagementController(api);
+    await controller.enter(true);
+    await vi.waitFor(() => expect(controller.snapshot().ownersLoaded).toBe(true));
+    api.listSystemAdmins
+      .mockRejectedValueOnce(new Error("系统管理员团队暂时不可用"))
+      .mockResolvedValueOnce({ items: [user("owner-1", "系统管理员甲")], total: 1, page: 1, size: 200 });
+
+    await controller.openMemberDialog();
+    await controller.retryOwners();
+    expect(controller.snapshot().ownersLoaded).toBe(false);
+    expect(controller.snapshot().ownersError).toContain("系统管理员团队暂时不可用");
+    expect(controller.snapshot().teamPickerDialogOpen).toBe(true);
+
+    await controller.retryOwners();
+    expect(controller.snapshot().ownersLoaded).toBe(true);
+    expect(controller.snapshot().owners).toHaveLength(1);
+    expect(controller.snapshot().ownersError).toBe("");
+  });
+
   it("ignores a late application response after the scope changes", async () => {
     const first = deferred<unknown[]>();
     const second = deferred<unknown[]>();
