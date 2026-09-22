@@ -35,6 +35,10 @@ grep -Fq 'RUNTIME_DATA_ROOT=${RUNTIME_DATA_ROOT:-/data/.testagent}' "${release_s
 grep -Fq 'RUNTIME_SERVICE_HOST=${RUNTIME_SERVICE_HOST:-192.168.8.100}' "${release_script}"
 grep -Fq 'XXL_JOB_ADMIN_PORT=${XXL_JOB_ADMIN_PORT:-18083}' "${release_script}"
 grep -Fq 'XXL_JOB_EXECUTOR_PORT=${XXL_JOB_EXECUTOR_PORT:-9999}' "${release_script}"
+grep -Fq 'WORKER_PROJECT_NAME=${WORKER_PROJECT_NAME:-intelligent-test-agent-jenkins-opencode}' "${release_script}"
+grep -Fq 'WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worker}' "${release_script}"
+grep -Fq 'WORKER_PORT_START=${WORKER_PORT_START:-4096}' "${release_script}"
+grep -Fq 'WORKER_PORT_END=${WORKER_PORT_END:-4105}' "${release_script}"
 grep -Fq 'xxl_job_mysql_port=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_PORT)' "${release_script}"
 grep -Fq 'xxl_job_mysql_database=$(runtime_env_value TEST_AGENT_XXL_JOB_MYSQL_DATABASE)' "${release_script}"
 grep -Fq 'xxl_job_mysql_url="jdbc:mysql://${RUNTIME_SERVICE_HOST}:${xxl_job_mysql_port}/${xxl_job_mysql_database}?' "${release_script}"
@@ -48,6 +52,17 @@ grep -Fq 'chmod 0644 "${release_dir}/backend.jar" "${release_dir}/nginx.conf"' "
 grep -Fq 'chmod -R u=rwX,go=rX "${release_dir}/source" "${release_dir}/frontend"' "${release_script}"
 grep -Fq 'sha256sum -c source.sha256 --quiet' "${release_script}"
 grep -Fq 'mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"' "${release_script}"
+grep -Fq -- '--file "${repository_root}/deploy/internal/opencode-worker.Dockerfile"' "${release_script}"
+grep -Fq -- '--build-arg "MANAGER_BUILD_VERSION=${build_version}"' "${release_script}"
+grep -Fq 'verify-opencode-node-worker-image.sh" "${worker_image}"' "${release_script}"
+grep -Fq 'write_worker_stack "${release_dir}/worker-stack.json" "${worker_image}"' "${release_script}"
+grep -Fq '"OPENCODE_MANAGER_TOKEN": "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?TEST_AGENT_OPENCODE_MANAGER_TOKEN is required}"' "${release_script}"
+grep -Fq '"SYS_DATA_ROOT_DIR": runtime_data_root' "${release_script}"
+grep -Fq '"OPENCODE_BIN": "/usr/local/bin/opencode"' "${release_script}"
+grep -Fq '"volumes": [f"{runtime_data_source}:{runtime_data_root}:rw"]' "${release_script}"
+grep -Fq '"workerImageId": worker_image_id' "${release_script}"
+grep -Fq 'Legacy release does not contain a worker stack and no managed OpenCode worker is running.' "${release_script}"
+grep -Fq 'event=manager_config_update status=applied' "${release_script}"
 grep -Fq 'printf -v cleanup_trap' "${release_script}"
 grep -Fq 'source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)' "${release_script}"
 grep -Fq 'pg_restore --exit-on-error --no-owner --no-privileges --role="$2"' "${release_script}"
@@ -75,8 +90,7 @@ grep -Fq 'proxy_pass http://__RUNTIME_SERVICE_HOST__:__XXL_JOB_ADMIN_PORT__;' \
     "${root_dir}/deploy/local/jenkins-nginx.conf"
 grep -Fq 'for attempt in $(seq 1 120)' "${release_script}"
 grep -Fq 'Backend did not become ready within the deployment window.' "${release_script}"
-if grep -Fq '"SYS_DATA_ROOT_DIR": runtime_data_root' "${release_script}" \
-    || grep -Fq -- '--env SYS_DATA_ROOT_DIR=/verify/data' "${release_script}"; then
+if grep -Fq -- '--env SYS_DATA_ROOT_DIR=/verify/data' "${release_script}"; then
     echo 'Jenkins release attempts to override database-controlled SYS_DATA_ROOT_DIR with an environment variable.' >&2
     exit 1
 fi

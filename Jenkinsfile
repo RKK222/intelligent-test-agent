@@ -71,7 +71,7 @@ pipeline {
             }
         }
 
-        stage('Build backend and frontend') {
+        stage('Build backend, frontend and worker') {
             when {
                 expression { params.ACTION == 'DEPLOY' }
             }

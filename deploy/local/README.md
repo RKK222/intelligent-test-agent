@@ -29,24 +29,33 @@
 - 后端 JAR 结构校验复用固定 Maven JDK 21 构建镜像，Jenkins 宿主只需 Jenkins 自身的 Java 运行时，不要求
   额外安装 JDK `jar` 命令。
 - 现有 `abc` 工作树保持原样。首次成功发布只停止该工作树占用 `18082` 的 Java 和占用 `3000` 的 Vite；
-  `4096` OpenCode 进程、数据库 `SYS_DATA_ROOT_DIR` 指向的 `/data/.testagent` 数据根和未提交文件均保留。
+  数据库 `SYS_DATA_ROOT_DIR` 指向的 `/data/.testagent` 数据根和未提交文件均保留。OpenCode 不再依赖该工作树里的
+  临时进程，而由 Jenkins 发布的 worker/manager 通过同一数据根恢复已有 binding。
 - 企业离线发布仍按 `deploy/internal/README.md` 执行；不能把本地 Jenkins 产物上传到企业内替代标准离线包。
 
 ## 任务结构
 
 流水线参考同机 `precisiontesttool-release` 的人工发布模型：禁并发、保留 30 次记录、`DEPLOY/ROLLBACK` 参数、
 不可变 `release-{BUILD_NUMBER}-{commit前8位}` 标签、发布清单、日志留存和发布后验证。差异在于本项目直接在
-Jenkins 所在测试机用 Docker Compose 管理两个容器，不经过 Portainer：
+Jenkins 所在测试机用两个相互独立的 Docker Compose 项目管理三个容器，不经过 Portainer。应用与 worker 分项目，
+这样回滚早期只有前后端清单的 release 时，应用项目的 `--remove-orphans` 不会误删仍负责进程恢复的 worker：
 
 | 组件 | 容器 | 入口 | 数据 |
 |---|---|---|---|
 | Java 后端 | `test-agent-jenkins-backend` | `http://192.168.8.100:18082` | 宿主 `/data/.testagent` 原路径挂载，必须与数据库 Linux 平台 `SYS_DATA_ROOT_DIR` 完全一致 |
 | XXL Admin / executor | Java 后端内的 Servlet 子上下文与调度执行器 | `http://192.168.8.100:3000/xxl-job-admin/`（同源代理到 `18083`）/ `192.168.8.100:9999` | 复用受控 XXL MySQL 配置 |
 | agent-web | `test-agent-jenkins-frontend` | `http://192.168.8.100:3000` | 不落业务数据 |
-| OpenCode | 现有 `abc` 进程 | `http://127.0.0.1:4096` | Jenkins 不停止、不重建 |
+| OpenCode worker / manager | `test-agent-jenkins-opencode-worker` | 端口池 `192.168.8.100:4096-4105` | 宿主 `/data/.testagent` 按原路径挂载；manager 只连接同机 `18082` Java |
+
+worker 直接复用 `deploy/internal/opencode-worker.Dockerfile`，每次 `DEPLOY` 以不可变 release 标签构建镜像并执行
+`tools/verify-opencode-node-worker-image.sh`，不另写简化版 manager 或 OpenCode 启动器。镜像标签、镜像 ID 和独立
+`worker-stack.json` 摘要写入 schema v2 发布清单；部署时先替换 worker/manager，再替换 Java 和前端。manager 通过
+受控 `runtime.env` 的独立 token 接入本服务器 Java，流水线必须等到容器 healthy 且日志出现已应用的
+`manager_config_update`，不能只凭 worker 容器处于 `Up` 就判成功。旧 schema v1 release 本身没有 worker 清单，回滚
+只允许复用已经运行的受管 worker；若 worker 不存在则在停止当前应用前失败关闭。
 
 发布目录位于 `/data2/deploy/intelligent-test-agent/releases/`，每个标签包含源码快照、后端 JAR、前端静态文件、
-Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
+应用 Compose、worker Compose 模型、逐文件 SHA-256、worker 镜像身份和发布前后 Flyway history。日志位于
 `/data2/deploy/intelligent-test-agent/logs/`；共享缓存继续复用 `/data2/deploy/shared/`。
 源码快照整体只读挂载，`source/backend/logs` 与 `source/temp` 仅作为预建的嵌套挂载点，实际写入分别落到受控
 日志目录和运行时临时目录，不回写不可变发布源码。`/data2` 的 mergerfs 默认 ACL 可能覆盖进程 `umask`，因此
@@ -106,9 +115,12 @@ curl -fsS http://192.168.8.100:3000/xxl-job-admin/actuator/health/readiness
 python3 -c 'import socket; socket.create_connection(("192.168.8.100", 9999), timeout=2).close()'
 curl -fsS http://192.168.8.100:3000/
 docker ps --filter name=test-agent-jenkins-
+docker inspect -f '{{.State.Health.Status}}' test-agent-jenkins-opencode-worker
+docker logs --tail 500 test-agent-jenkins-opencode-worker | grep 'event=manager_config_update status=applied'
 ```
 
 成功条件是后端与 XXL Admin 两个 readiness 均返回 `{"status":"UP"}`、前端及其 XXL 同源代理可访问、executor
-`9999` 可建立 TCP 连接、两个固定容器均为 `Up`，并且 Jenkins 构建页最终状态为 `SUCCESS`。后端首次启动可能需要
+`9999` 可建立 TCP 连接、三个固定容器均为 `Up`、worker 为 `healthy` 且 manager 已接收本机 Java 的运行配置，
+并且 Jenkins 构建页最终状态为 `SUCCESS`。后端首次启动可能需要
 完成 Flyway、配置加载和 Git 初始化，流水线最多等待 240 秒；等待超时或容器停止才判失败，不能在
 `docker compose up` 后只做一次瞬时探测。

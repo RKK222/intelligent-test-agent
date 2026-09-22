@@ -24,6 +24,11 @@ VERIFY_BACKEND_PORT=${VERIFY_BACKEND_PORT:-28082}
 POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-15432}
 DATABASE_CONTAINER=${DATABASE_CONTAINER:-test-agent-postgres}
 PROJECT_NAME=${PROJECT_NAME:-intelligent-test-agent-jenkins}
+WORKER_PROJECT_NAME=${WORKER_PROJECT_NAME:-intelligent-test-agent-jenkins-opencode}
+WORKER_IMAGE_REPOSITORY=${WORKER_IMAGE_REPOSITORY:-test-agent-opencode-worker}
+WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worker}
+WORKER_PORT_START=${WORKER_PORT_START:-4096}
+WORKER_PORT_END=${WORKER_PORT_END:-4105}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 # 用户手册构建会读取 Git 提交时间，使用含 git 的固定 Node 完整镜像。
 NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}
@@ -152,6 +157,25 @@ validate_tcp_port() {
     }
 }
 
+worker_image_for_tag() {
+    local tag=$1
+    validate_tag "${tag}"
+    printf '%s:%s\n' "${WORKER_IMAGE_REPOSITORY}" "${tag}"
+}
+
+manager_build_version() {
+    local commit=${1:-HEAD} epoch
+    epoch=$(git -C "${repository_root}" show -s --format=%ct "${commit}")
+    python3 - "${epoch}" <<'PY'
+from datetime import datetime, timedelta, timezone
+import sys
+
+epoch = int(sys.argv[1])
+beijing = timezone(timedelta(hours=8))
+print(datetime.fromtimestamp(epoch, beijing).strftime("V%Y%m%d.%H%M%S"))
+PY
+}
+
 database_linux_data_root() {
     local database_name=$1 value
     validate_postgres_identifier "${database_name}" database
@@ -173,6 +197,12 @@ validate_host() {
     require_command python3
     validate_tcp_port "${XXL_JOB_ADMIN_PORT}" "XXL Admin"
     validate_tcp_port "${XXL_JOB_EXECUTOR_PORT}" "XXL executor"
+    validate_tcp_port "${WORKER_PORT_START}" "OpenCode worker start"
+    validate_tcp_port "${WORKER_PORT_END}" "OpenCode worker end"
+    [[ "${WORKER_PORT_START}" -le "${WORKER_PORT_END}" ]] || {
+        echo "OpenCode worker port range is reversed: ${WORKER_PORT_START}-${WORKER_PORT_END}" >&2
+        return 1
+    }
     validate_secret_file
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     configured_data_root=$(database_linux_data_root "${source_db_name}")
@@ -239,6 +269,7 @@ validate_runtime_release_access() {
 }
 
 build_release() {
+    local worker_image build_version
     validate_host
     echo '==> Verify Flyway migration naming and immutable bytes'
     maven_run \
@@ -272,6 +303,85 @@ build_release() {
             corepack pnpm typecheck
             corepack pnpm build
         '
+
+    [[ -n "${RELEASE_TAG:-}" ]] || {
+        echo 'RELEASE_TAG is required to build the immutable OpenCode worker image.' >&2
+        return 1
+    }
+    worker_image=$(worker_image_for_tag "${RELEASE_TAG}")
+    build_version=$(manager_build_version "${GIT_COMMIT_FULL:-HEAD}")
+    echo "==> Build and verify immutable OpenCode worker image ${worker_image}"
+    docker build \
+        --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
+        --tag "${worker_image}" \
+        --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
+        "${repository_root}"
+    "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
+}
+
+write_worker_stack() {
+    local output=$1 worker_image=$2
+    python3 - "${output}" "${RUNTIME_DATA_SOURCE}" \
+        "${RUNTIME_DATA_ROOT}" "${WORKER_CONTAINER_NAME}" "${worker_image}" "${BACKEND_PORT}" \
+        "${WORKER_PORT_START}" "${WORKER_PORT_END}" <<'PY'
+import json
+import sys
+
+(
+    output,
+    runtime_data_source,
+    runtime_data_root,
+    container_name,
+    worker_image,
+    backend_port,
+    worker_port_start,
+    worker_port_end,
+) = sys.argv[1:]
+
+stack = {
+    "name": "intelligent-test-agent-jenkins-opencode",
+    "services": {
+        "opencode-worker": {
+            "image": worker_image,
+            "container_name": container_name,
+            "hostname": container_name,
+            "network_mode": "host",
+            "privileged": True,
+            "pids_limit": 8192,
+            "ulimits": {
+                "nofile": {"soft": 262144, "hard": 262144},
+                "nproc": {"soft": 8192, "hard": 8192},
+            },
+            "environment": {
+                "OPENCODE_MANAGER_BACKEND_PORT": backend_port,
+                "OPENCODE_MANAGER_PORT_START": worker_port_start,
+                "OPENCODE_MANAGER_PORT_END": worker_port_end,
+                "OPENCODE_MANAGER_TOKEN": "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?TEST_AGENT_OPENCODE_MANAGER_TOKEN is required}",
+                "SYS_DATA_ROOT_DIR": runtime_data_root,
+                "OPENCODE_MANAGER_STATE_DIR": f"{runtime_data_root}/agent-opencode/manager/jenkins-worker",
+                "OPENCODE_BIN": "/usr/local/bin/opencode",
+                "TEST_AGENT_PROGRAM_ROOT": "/data/testagent/programs",
+                "OPENCODE_ALLOWED_CORS": "",
+                "OPENCODE_MANAGER_HEARTBEAT_INTERVAL": "5s",
+                "OPENCODE_MANAGER_RECONNECT_INTERVAL": "10s",
+            },
+            "volumes": [f"{runtime_data_source}:{runtime_data_root}:rw"],
+            "healthcheck": {
+                "test": ["CMD-SHELL", "pgrep -f 'opencode-manager run' >/dev/null"],
+                "interval": "10s",
+                "timeout": "3s",
+                "retries": 12,
+            },
+            "stop_grace_period": "30s",
+            "restart": "unless-stopped",
+        }
+    },
+}
+
+with open(output, "w", encoding="utf-8") as target:
+    json.dump(stack, target, ensure_ascii=True, indent=2)
+    target.write("\n")
+PY
 }
 
 write_stack() {
@@ -380,10 +490,13 @@ PY
 
 write_manifest() {
     local release_dir=$1 tag=$2 commit=$3
-    local jar_sha nginx_sha stack_sha
+    local jar_sha nginx_sha stack_sha worker_stack_sha worker_image worker_image_id
     jar_sha=$(sha256_file "${release_dir}/backend.jar")
     nginx_sha=$(sha256_file "${release_dir}/nginx.conf")
     stack_sha=$(sha256_file "${release_dir}/stack.json")
+    worker_stack_sha=$(sha256_file "${release_dir}/worker-stack.json")
+    worker_image=$(worker_image_for_tag "${tag}")
+    worker_image_id=$(docker image inspect --format '{{.Id}}' "${worker_image}")
     (
         cd "${release_dir}"
         find frontend -type f -print0 \
@@ -393,18 +506,34 @@ write_manifest() {
             | LC_ALL=C sort -z \
             | xargs -0 sha256sum >source.sha256
     )
-    python3 - "${release_dir}/manifest.json" "${tag}" "${commit}" "${jar_sha}" "${nginx_sha}" "${stack_sha}" "${BUILD_URL:-}" <<'PY'
+    python3 - "${release_dir}/manifest.json" "${tag}" "${commit}" "${jar_sha}" "${nginx_sha}" \
+        "${stack_sha}" "${worker_stack_sha}" "${worker_image}" "${worker_image_id}" "${BUILD_URL:-}" <<'PY'
 import json
 import sys
 
-output, tag, commit, jar_sha, nginx_sha, stack_sha, build_url = sys.argv[1:]
+(
+    output,
+    tag,
+    commit,
+    jar_sha,
+    nginx_sha,
+    stack_sha,
+    worker_stack_sha,
+    worker_image,
+    worker_image_id,
+    build_url,
+) = sys.argv[1:]
 manifest = {
+    "schemaVersion": 2,
     "tag": tag,
     "commit": commit,
     "buildUrl": build_url,
     "backendJarSha256": jar_sha,
     "nginxSha256": nginx_sha,
     "stackSha256": stack_sha,
+    "workerStackSha256": worker_stack_sha,
+    "workerImage": worker_image,
+    "workerImageId": worker_image_id,
     "frontendChecksums": "frontend.sha256",
     "sourceChecksums": "source.sha256",
 }
@@ -412,7 +541,7 @@ with open(output, "w", encoding="utf-8") as target:
     json.dump(manifest, target, ensure_ascii=True, indent=2)
     target.write("\n")
 PY
-    chmod 600 "${release_dir}/manifest.json" "${release_dir}/stack.json" \
+    chmod 600 "${release_dir}/manifest.json" "${release_dir}/stack.json" "${release_dir}/worker-stack.json" \
         "${release_dir}/frontend.sha256" "${release_dir}/source.sha256"
 }
 
@@ -420,10 +549,13 @@ prepare_release() {
     local tag=$1 commit=$2 release_dir=$3
     local backend_jar=${repository_root}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar
     local frontend_dist=${repository_root}/frontend/apps/agent-web/dist
+    local worker_image
     validate_release_dir "${release_dir}" "${tag}"
     validate_commit "${commit}" "${tag}"
     [[ -f "${backend_jar}" ]] || { echo "Missing backend JAR: ${backend_jar}" >&2; return 1; }
     [[ -f "${frontend_dist}/index.html" ]] || { echo "Missing frontend build: ${frontend_dist}" >&2; return 1; }
+    worker_image=$(worker_image_for_tag "${tag}")
+    docker image inspect "${worker_image}" >/dev/null
     [[ ! -e "${release_dir}" ]] || { echo "Immutable release already exists: ${release_dir}" >&2; return 1; }
 
     # 运行容器使用宿主 abc 的 UID 1000；源码和制品只读开放，清单仍单独收紧为 0600。
@@ -447,17 +579,21 @@ prepare_release() {
     ! grep -Eq '__[A-Z0-9_]+__' "${release_dir}/nginx.conf"
     validate_backend_jar "${release_dir}/backend.jar"
     write_stack "${release_dir}" "${release_dir}/stack.json"
-    docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
+    write_worker_stack "${release_dir}/worker-stack.json" "${worker_image}"
+    docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
+    docker compose --env-file "${ENV_FILE}" -p "${WORKER_PROJECT_NAME}" \
+        -f "${release_dir}/worker-stack.json" config --quiet
     write_manifest "${release_dir}" "${tag}" "${commit}"
     validate_manifest "${release_dir}" "${tag}"
 }
 
 validate_manifest() {
     local release_dir=$1 tag=$2 manifest=${release_dir}/manifest.json
-    local commit expected_jar actual_jar expected_nginx actual_nginx expected_stack actual_stack
+    local values schema_version commit expected_jar actual_jar expected_nginx actual_nginx
+    local expected_stack actual_stack expected_worker_stack actual_worker_stack worker_image worker_image_id actual_worker_image_id
     validate_release_dir "${release_dir}" "${tag}"
     [[ -f "${manifest}" ]] || { echo "Missing release manifest: ${manifest}" >&2; return 1; }
-    read -r commit expected_jar expected_nginx expected_stack < <(python3 - "${manifest}" "${tag}" <<'PY'
+    values=$(python3 - "${manifest}" "${tag}" <<'PY'
 import json
 import sys
 
@@ -466,14 +602,26 @@ with open(path, encoding="utf-8") as source:
     manifest = json.load(source)
 if manifest.get("tag") != expected_tag:
     raise SystemExit("Release manifest tag mismatch")
-print(
+schema_version = manifest.get("schemaVersion", 1)
+if schema_version not in {1, 2}:
+    raise SystemExit(f"Unsupported release manifest schema: {schema_version}")
+values = [
+    str(schema_version),
     manifest.get("commit", ""),
     manifest.get("backendJarSha256", ""),
     manifest.get("nginxSha256", ""),
     manifest.get("stackSha256", ""),
-)
+    manifest.get("workerStackSha256", ""),
+    manifest.get("workerImage", ""),
+    manifest.get("workerImageId", ""),
+]
+if any("|" in str(value) for value in values):
+    raise SystemExit("Release manifest contains an invalid delimiter")
+print("|".join(values))
 PY
     )
+    IFS='|' read -r schema_version commit expected_jar expected_nginx expected_stack \
+        expected_worker_stack worker_image worker_image_id <<<"${values}"
     validate_commit "${commit}" "${tag}"
     actual_jar=$(sha256_file "${release_dir}/backend.jar")
     actual_nginx=$(sha256_file "${release_dir}/nginx.conf")
@@ -481,11 +629,35 @@ PY
     [[ "${actual_jar}" == "${expected_jar}" ]] || { echo "Backend JAR checksum mismatch" >&2; return 1; }
     [[ "${actual_nginx}" == "${expected_nginx}" ]] || { echo "Nginx checksum mismatch" >&2; return 1; }
     [[ "${actual_stack}" == "${expected_stack}" ]] || { echo "Stack checksum mismatch" >&2; return 1; }
+    if [[ "${schema_version}" == 2 ]]; then
+        [[ -f "${release_dir}/worker-stack.json" ]] || {
+            echo "Missing worker stack for schema v2 release" >&2
+            return 1
+        }
+        actual_worker_stack=$(sha256_file "${release_dir}/worker-stack.json")
+        [[ "${actual_worker_stack}" == "${expected_worker_stack}" ]] || {
+            echo "Worker stack checksum mismatch" >&2
+            return 1
+        }
+        [[ "${worker_image}" == "$(worker_image_for_tag "${tag}")" ]] || {
+            echo "Worker image tag mismatch" >&2
+            return 1
+        }
+        actual_worker_image_id=$(docker image inspect --format '{{.Id}}' "${worker_image}")
+        [[ "${actual_worker_image_id}" == "${worker_image_id}" ]] || {
+            echo "Worker image ID mismatch" >&2
+            return 1
+        }
+    fi
     (cd "${release_dir}" && sha256sum -c frontend.sha256 --quiet)
     (cd "${release_dir}" && sha256sum -c source.sha256 --quiet)
     validate_backend_jar "${release_dir}/backend.jar"
     validate_runtime_release_access "${release_dir}"
-    docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
+    docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
+    if [[ "${schema_version}" == 2 ]]; then
+        docker compose --env-file "${ENV_FILE}" -p "${WORKER_PROJECT_NAME}" \
+            -f "${release_dir}/worker-stack.json" config --quiet
+    fi
 }
 
 capture_database_history() {
@@ -617,10 +789,11 @@ verify_database_upgrade() {
 
 verify_deployment() {
     local tag=$1 attempt backend_ready=false frontend_ready=false xxl_admin_ready=false xxl_admin_proxy_ready=false
-    local xxl_executor_ready=false
+    local xxl_executor_ready=false worker_ready=false manager_ready=false
     validate_tag "${tag}"
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]]
+    [[ "$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
     for attempt in $(seq 1 120); do
         if curl -fsS --connect-timeout 2 --max-time 5 \
             "${BACKEND_BASE_URL}/actuator/health/readiness" 2>/dev/null \
@@ -692,6 +865,28 @@ PY
         echo "XXL executor did not open its configured port within the deployment window." >&2
         return 1
     }
+    for attempt in $(seq 1 120); do
+        if [[ "$(docker inspect -f '{{.State.Health.Status}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" == healthy ]]; then
+            worker_ready=true
+        fi
+        if grep -Fq 'event=manager_config_update status=applied' \
+            <<<"$(docker logs --tail 500 "${WORKER_CONTAINER_NAME}" 2>&1)"; then
+            manager_ready=true
+        fi
+        if [[ "${worker_ready}" == true && "${manager_ready}" == true ]]; then
+            break
+        fi
+        [[ "$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" == true ]] || break
+        sleep 2
+    done
+    [[ "${worker_ready}" == true ]] || {
+        echo "OpenCode worker did not become healthy within the deployment window." >&2
+        return 1
+    }
+    [[ "${manager_ready}" == true ]] || {
+        echo "OpenCode manager did not receive an applied runtime configuration from this server's backend." >&2
+        return 1
+    }
 }
 
 deploy_release() {
@@ -701,8 +896,18 @@ deploy_release() {
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     validate_postgres_identifier "${source_db_name}" database
     capture_database_history "${release_dir}/pre-deploy-flyway-history.tsv" "${source_db_name}"
+    if [[ -f "${release_dir}/worker-stack.json" ]]; then
+        # worker 使用独立 Compose 项目，避免回滚旧的两容器应用清单时被 --remove-orphans 误删。
+        # 先升级 manager，再替换 Java；manager 会在后端切换窗口内自动重连。
+        docker compose --env-file "${ENV_FILE}" -p "${WORKER_PROJECT_NAME}" \
+            -f "${release_dir}/worker-stack.json" up -d --force-recreate --remove-orphans
+    elif [[ "$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" != true ]]; then
+        echo "Legacy release does not contain a worker stack and no managed OpenCode worker is running." >&2
+        return 1
+    fi
     sudo "${HOST_CONTROL}" stop-legacy
-    docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans
+    docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
+        -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans
     verify_deployment "${tag}"
     capture_database_history "${release_dir}/post-deploy-flyway-history.tsv" "${source_db_name}"
     current_link="${RELEASE_ROOT}/current"
@@ -720,9 +925,13 @@ collect_logs() {
         return 1
     }
     mkdir -p "${output_dir}"
-    docker compose -p "${PROJECT_NAME}" -f "${RELEASE_ROOT}/current/stack.json" logs --no-color --tail 500 2>&1 \
+    docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
+        -f "${RELEASE_ROOT}/current/stack.json" logs --no-color --tail 500 2>&1 \
         | sed -E 's#((PASSWORD|TOKEN|SECRET|AUTHORIZATION)[=:][[:space:]]*)[^[:space:]]+#\1***REDACTED***#Ig' \
         >"${output_dir}/containers.log" || true
+    docker logs --tail 500 "${WORKER_CONTAINER_NAME}" 2>&1 \
+        | sed -E 's#((PASSWORD|TOKEN|SECRET|AUTHORIZATION)[=:][[:space:]]*)[^[:space:]]+#\1***REDACTED***#Ig' \
+        >"${output_dir}/opencode-worker.log" || true
     docker ps --filter 'name=test-agent-jenkins-' \
         --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' \
         >"${output_dir}/containers.tsv" || true

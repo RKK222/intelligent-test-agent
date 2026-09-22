@@ -17916,3 +17916,33 @@
 
 - 已验证右栏收起、浮动入口、审阅弹框和恢复右栏；“收起聊天栏后真实消息发送与模型回复”仍未完成，不能宣称通过。
 - 后续必须先在 `192.168.8.100` 恢复该服务器本机 manager/受管 OpenCode，并保持现有工作区与 `linuxServerId` 一致，再继续真实消息往返与截图。未修改产品代码、API、事件、数据库/Flyway、部署制品、OpenCode 源码或 `.env*`。
+
+## 2026-09-23 - Jenkins 测试发布纳管 OpenCode worker/manager
+
+### Why
+
+- 上一轮真实对话验收确认测试机 Java 和 Web 正常，但同服务器没有在线 manager，数据库中的 `4096` 进程记录已陈旧；
+  现有 Jenkins 只发布前后端，并继续假设 `abc` 工作树会永久维护一个独立 OpenCode 进程，已经不符合当前强制 manager 架构。
+
+### What
+
+- `deploy/local/jenkins-release.sh` 复用企业 `opencode-worker.Dockerfile`，按不可变 release 标签构建并执行现有 worker
+  镜像 smoke；新增独立 worker Compose 清单、schema v2 镜像 ID/清单摘要、manager 配置应用健康门禁和脱敏日志采集。
+- worker 只挂载数据库权威的 `/data/.testagent` 原路径并只接收 manager token，不读取完整后端 `runtime.env`；端口池固定
+  `4096-4105`，通过同机 `18082` WebSocket 接入 Java。worker 与应用分属两个 Compose 项目，避免回滚旧两容器清单时
+  被 `--remove-orphans` 删除；旧 schema v1 回滚仅在已有受管 worker 仍运行时允许继续。
+- 同步 Jenkins 阶段名称、发布契约检查和 `deploy/local/README.md`。
+
+### How
+
+- 目标分支为 `release`；该改动只在既有 `192.168.8.100` 节点增加受管容器，不新增部署节点。
+- `bash -n deploy/local/jenkins-release.sh tools/verify-jenkins-release.sh`、`tools/verify-jenkins-release.sh`、
+  `git diff --check` 均通过；生成的 worker JSON 通过 Python 解析和字段断言，确认不含 `env_file`。
+- `go test ./...` 在 `opencode-manager` 下全部通过。本机 Docker daemon 未启动，完整 Linux worker 镜像构建和运行门禁
+  将由 Jenkins 实机完成，不能用本机静态检查替代。
+
+### Result
+
+- 本地实现和契约检查已完成；共享测试环境部署、manager 在线恢复、`4096` 进程恢复以及收起右栏后的真实消息往返仍待
+  本次 Jenkins 发布后验证。
+- 不涉及 HTTP API、RunEvent/SSE、数据库结构、Flyway、业务权限或 generated SDK；未修改 `.env*` 和 OpenCode 只读源码。
