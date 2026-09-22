@@ -439,6 +439,9 @@ prepare_release() {
         -e "s/__BACKEND_PORT__/${BACKEND_PORT}/g" \
         -e "s/__XXL_JOB_ADMIN_PORT__/${XXL_JOB_ADMIN_PORT}/g" \
         "${script_dir}/jenkins-nginx.conf" >"${release_dir}/nginx.conf"
+    # mergerfs 上的默认 ACL 会覆盖 umask；显式收紧写权限并保留运行 UID 所需的只读/穿越权限。
+    chmod 0644 "${release_dir}/backend.jar" "${release_dir}/nginx.conf"
+    chmod -R u=rwX,go=rX "${release_dir}/source" "${release_dir}/frontend"
     grep -Fq "proxy_pass http://${RUNTIME_SERVICE_HOST}:${BACKEND_PORT};" "${release_dir}/nginx.conf"
     grep -Fq "proxy_pass http://${RUNTIME_SERVICE_HOST}:${XXL_JOB_ADMIN_PORT};" "${release_dir}/nginx.conf"
     ! grep -Eq '__[A-Z0-9_]+__' "${release_dir}/nginx.conf"
@@ -478,8 +481,8 @@ PY
     [[ "${actual_jar}" == "${expected_jar}" ]] || { echo "Backend JAR checksum mismatch" >&2; return 1; }
     [[ "${actual_nginx}" == "${expected_nginx}" ]] || { echo "Nginx checksum mismatch" >&2; return 1; }
     [[ "${actual_stack}" == "${expected_stack}" ]] || { echo "Stack checksum mismatch" >&2; return 1; }
-    (cd "${release_dir}" && sha256sum -c frontend.sha256 >/dev/null)
-    (cd "${release_dir}" && sha256sum -c source.sha256 >/dev/null)
+    (cd "${release_dir}" && sha256sum -c frontend.sha256 --quiet)
+    (cd "${release_dir}" && sha256sum -c source.sha256 --quiet)
     validate_backend_jar "${release_dir}/backend.jar"
     validate_runtime_release_access "${release_dir}"
     docker compose -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet

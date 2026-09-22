@@ -49,7 +49,9 @@ Jenkins 所在测试机用 Docker Compose 管理两个容器，不经过 Portain
 Compose 模型、逐文件 SHA-256 和发布前后 Flyway history。日志位于
 `/data2/deploy/intelligent-test-agent/logs/`；共享缓存继续复用 `/data2/deploy/shared/`。
 源码快照整体只读挂载，`source/backend/logs` 与 `source/temp` 仅作为预建的嵌套挂载点，实际写入分别落到受控
-日志目录和运行时临时目录，不回写不可变发布源码。
+日志目录和运行时临时目录，不回写不可变发布源码。`/data2` 的 mergerfs 默认 ACL 可能覆盖进程 `umask`，因此
+制品准备脚本会显式将 JAR、Nginx 配置、源码和前端资源收紧为“Jenkins 可写、其他运行 UID 只读/可穿越”；
+不能只依赖宿主目录的继承权限。
 
 ## 数据库门禁
 

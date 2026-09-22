@@ -17808,3 +17808,26 @@
 
 - 管理视角可以在不破坏原工作状态的前提下审阅成员、worktree、未提交修改、个人提交、已发布提交和 `SYNC_MERGE`。全平台范围会明确提示先选择具体系统管理员团队。
 - 真实环境的角色、跨节点文件和导出闭环仍以上一轮 Jenkins 发布结果为准；这次界面迁移还没有重新部署。
+
+## 2026-09-22 - 修复 100 测试机 Jenkins 发布制品 ACL 漂移
+
+### Why
+
+- Jenkins #30 在发布契约阶段发现 `shared/runtime.env` 被现场默认 ACL 继承为 `0660`；收紧到 `0640` 后，#31 又在不可变发布准备阶段因 `backend.jar` 继承为 `0660 jenkins:jenkins` 而失败。
+- 发布容器固定以宿主 UID `1000` 运行，必须在停止旧服务前真实读取 JAR；仅依赖 `umask 022` 无法抵抗 mergerfs 目录后来增加的默认 ACL。
+
+### What
+
+- 通过受控 SSH 将 `runtime.env` 恢复为 `0640 root:jenkins`，并只移除发布根目录 `/data2/deploy/intelligent-test-agent/releases` 的默认继承 ACL，保留既有访问 ACL、目录所有者和运行数据。
+- `deploy/local/jenkins-release.sh` 在复制制品后显式把 JAR/Nginx 配置设为 `0644`，把源码和前端目录设为 `u=rwX,go=rX`；逐文件校验改用 `sha256sum --quiet`，失败时不再吞掉具体文件名。
+- 同步 `deploy/local/README.md` 和 `tools/verify-jenkins-release.sh`，锁定 mergerfs ACL 下的运行 UID 只读契约。
+
+### How
+
+- #31 已确认 Checkout、发布契约、Flyway 16 项、后端 26 模块和前端 typecheck/build 均成功；失败点通过 Jenkins 阶段、宿主进程树和 UID `1000` 只读容器复现，`test -r /release/backend.jar` 与 `jar tf` 均因权限拒绝退出 1。
+- 现场移除发布根默认 ACL 后，以 Jenkins 身份创建并自动清理临时候选，确认新文件为 `0644`、源码目录为 `0755`；本地执行 Shell 语法、`tools/verify-jenkins-release.sh` 和 `git diff --check` 均通过。
+
+### Result
+
+- #31 失败候选保持未发布，旧测试服务未被接管或替换；新的 Jenkins 构建必须完成数据库克隆升级、正式发布和健康检查后才能交付。
+- 本次只修复既有测试节点的发布权限和诊断输出，不涉及 API、事件、数据库/Flyway、性能模型、业务安全权限、环境变量内容、generated SDK 或 OpenCode 只读源码；未新增部署节点。
