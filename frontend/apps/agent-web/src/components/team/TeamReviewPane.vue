@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted } from "vue";
 import type { TeamCommit, TeamExportStatus } from "@test-agent/shared-types";
 import {
   canMaintainTeamMembers,
@@ -100,6 +100,20 @@ function handleDialogKeydown(event: KeyboardEvent, dialog: "review" | "team-pick
   else if (dialog === "team-picker") controller.closeTeamPickerDialog();
   else controller.closeMemberDialog();
 }
+
+/**
+ * Teleport 弹窗动态插入 body 后，浏览器不会可靠地把焦点移入带 autofocus 的按钮。
+ * 在组件存活期间从 window 接管 Escape，确保焦点仍停留在底层触发按钮时也能关闭最上层弹窗。
+ */
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key !== "Escape") return;
+  if (state.value.memberDialogOpen) handleDialogKeydown(event, "members");
+  else if (state.value.teamPickerDialogOpen) handleDialogKeydown(event, "team-picker");
+  else if (!props.rightPanelOpen && state.value.reviewDialogOpen) handleDialogKeydown(event, "review");
+}
+
+onMounted(() => window.addEventListener("keydown", handleGlobalKeydown));
+onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
 
 async function download() {
   const url = await controller.downloadExport();
