@@ -16,9 +16,11 @@
 - How:
   - 前端定向 19 项、全量 Vitest 2325 项通过（1 项跳过），workspace typecheck 与 production build 通过；后端授权、服务和 MyBatis 集成定向回归 11 项通过；`git diff --check` 通过。
   - #34 已把 `28343fca937b5a739a2a154cbddc407179c47b0d` 发布为 `release-34-28343fca`，全流水线、克隆库升级和健康检查通过；真实浏览器复现焦点问题后，回归测试改为让焦点停在底层触发按钮并向 window 发送 Escape，修复前失败、修复后通过。
+  - #35 检出 `3fa624177e2d8da64254961ce345eef01f120549` 并发布为 `release-35-3fa62417`；Checkout、发布契约、后端/前端构建、不可变发布包、克隆库升级、发布验证和 Post Actions 全部成功。部署后 backend、XXL backend、XXL frontend readiness 均为 `UP`，前端返回 200，执行器 9999/TCP 可连接。
+  - 真实浏览器强制刷新到 #35 产物后进入管理视角：团队选择弹窗打开时焦点仍停在底层“成员管理”按钮，按 Escape 后弹窗节点消失；同时复核全平台只读、团队空态和 `.opencode/opencode.jsonc` 只读 Diff，并采集管理视角、团队选择、只读 Diff 与 Jenkins 全绿截图。
 - Result:
-  - 异步失败不再伪装成空团队，用户可重试；管理视角、团队选择空态和 Jenkins 全绿流水线已采集截图。焦点修复已完成本地全量验证，仍需通过后续 Jenkins 发布后再做一次 Escape 实机复验。
-  - 不改 API、事件、数据库、Flyway、generated SDK、部署拓扑或 `.env`；测试环境仍没有可管理的系统管理员团队，成员写操作未对共享数据执行。
+  - 异步失败不再伪装成空团队，用户可重试；Escape 焦点问题已完成本地回归、Jenkins 发布和真实浏览器复验，管理视角、团队选择空态、只读 Diff 与全绿流水线均已有截图证据。
+  - 不改 API、事件、数据库、Flyway、generated SDK、部署拓扑或 `.env`；测试环境仍没有可管理的系统管理员团队，因此本轮未对共享数据执行成员增删，成员写路径沿用既有后端权限验收和本轮 11 项定向回归证据。服务端 OpenCode 当前离线，未把对话执行链误报为通过。
 
 ### 2026-09-22 - Jenkins #33 共享测试环境部署与管理视角验收
 
