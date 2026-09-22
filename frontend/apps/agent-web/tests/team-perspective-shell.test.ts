@@ -26,15 +26,24 @@ describe("FigmaShell team perspective", () => {
 
     await wrapper.setProps({
       perspective: "TEAM_MANAGEMENT",
-      teamScopeLocked: false,
-      teamScopeMode: "GLOBAL",
-      teamScopeLabel: "全平台只读",
-      teamApplications: [{ id: "app-1", label: "应用一" }],
-      teamApplicationId: "app-1"
+      apps: [
+        { id: "app-1", name: "应用一", historical: true },
+        { id: "app-2", name: "应用二" }
+      ],
+      selectedAppId: "app-1",
+      localWorkspaces: [],
+      showAppSource: false,
+      workspaceKind: "MANAGED"
     });
-    expect(wrapper.get('[data-testid="team-context-rail"]').text()).toContain("管理范围");
-    expect(wrapper.get('[data-testid="team-scope-selector"]').text()).toContain("全平台只读");
-    expect(wrapper.find('[data-testid="header-context-rail"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="team-context-rail"]').exists()).toBe(false);
+    const rail = wrapper.get('[data-testid="header-context-rail"]');
+    expect(rail.text()).toContain("应用");
+    expect(rail.text()).toContain("工作空间");
+    expect(rail.text()).toContain("版本");
+    await wrapper.get('[aria-label="应用：应用一"]').trigger("click");
+    expect(wrapper.text()).toContain("历史");
+    expect(wrapper.text()).not.toContain("加入其他应用");
+    expect(wrapper.text()).not.toContain("worktree");
     await wrapper.get(".figma-user-avatar-btn").trigger("click");
     expect(wrapper.get('[data-testid="switch-workbench-perspective"]').text()).toContain("返回工作视角");
     wrapper.unmount();

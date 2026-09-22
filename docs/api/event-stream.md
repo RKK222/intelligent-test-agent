@@ -1152,4 +1152,4 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
 
 ## 系统管理员团队代码视图事件边界
 
-团队名单、版本贡献、Git、只读文件和整组导出不新增 RunEvent/SSE 类型。导出进度由前端轮询团队 HTTP API；跨 Java shard 使用内部一次性二进制 WebSocket，它不是 RunEvent、用户通知或公开事件流。角色降级和成员移除通过每次 HTTP/文件 RPC 实时复核生效，不依赖广播事件最终一致性。
+团队名单、版本贡献、Git、只读文件和整组导出不新增 RunEvent/SSE 类型。应用、工作空间和版本列表新增的可选 `targetUserId` 以及响应字段 `membershipState` 只存在于 HTTP，不产生新的事件类型。导出进度由前端轮询团队 HTTP API；跨 Java shard 使用内部一次性二进制 WebSocket，它不是 RunEvent、用户通知或公开事件流。角色降级和成员移除通过每次 HTTP/文件 RPC 实时复核生效，不依赖广播事件最终一致性。

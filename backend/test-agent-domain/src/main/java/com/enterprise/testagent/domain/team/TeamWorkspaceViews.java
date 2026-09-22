@@ -16,7 +16,8 @@ public final class TeamWorkspaceViews {
             String appName,
             boolean enabled,
             long currentMemberCount,
-            long historicalMemberCount) {
+            long historicalMemberCount,
+            TeamMembershipState membershipState) {
     }
 
     public record WorkspaceTemplateView(
@@ -25,10 +26,13 @@ public final class TeamWorkspaceViews {
             String workspaceName,
             String branch,
             String directoryPath,
-            boolean enabled) {
+            boolean enabled,
+            TeamMembershipState membershipState) {
     }
 
-    public record WorkspaceVersionView(ApplicationWorkspaceVersion version) {
+    public record WorkspaceVersionView(
+            ApplicationWorkspaceVersion version,
+            TeamMembershipState membershipState) {
     }
 
     public record PersonalWorkspaceView(PersonalWorkspace workspace, String linuxServerId) {

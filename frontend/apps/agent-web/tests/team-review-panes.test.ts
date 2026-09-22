@@ -1,5 +1,21 @@
 import { mount } from "@vue/test-utils";
+import { defineComponent } from "vue";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../src/components/FigmaFileExplorer.vue", () => ({
+  default: defineComponent({
+    name: "FigmaFileExplorer",
+    props: {
+      readonlyReview: Boolean,
+      canWrite: Boolean,
+      workspaceKind: String,
+      emptyWorkspaceMessage: String,
+      fileTreeError: String
+    },
+    template: "<section data-testid=\"review-explorer\" />"
+  })
+}));
+
 import TeamReviewFilePane from "../src/components/team/TeamReviewFilePane.vue";
 import TeamReviewPane from "../src/components/team/TeamReviewPane.vue";
 import {
@@ -47,11 +63,12 @@ describe("team review panes", () => {
     expect(review.get("button").text()).toContain("成员管理");
     await review.get("button").trigger("click");
     expect(review.text()).toContain(TEAM_MEMBER_SCOPE_HINT);
-    expect(files.text()).not.toContain("新建");
-    expect(files.text()).not.toContain("上传");
-    expect(files.text()).not.toContain("删除");
-    expect(files.text()).not.toContain("重命名");
-    expect(files.find('[aria-label="搜索文件"]').exists()).toBe(true);
+    const explorer = files.getComponent({ name: "FigmaFileExplorer" });
+    expect(explorer.props("readonlyReview")).toBe(true);
+    expect(explorer.props("canWrite")).toBe(false);
+    expect(explorer.props("workspaceKind")).toBe("MANAGED");
+    expect(files.text()).not.toContain("worktree");
+    expect(review.text()).not.toContain("worktree");
 
     review.unmount();
     files.unmount();

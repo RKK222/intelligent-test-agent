@@ -7,5 +7,6 @@ public record TeamWorkspaceTemplateRow(
         String workspaceName,
         String branch,
         String directoryPath,
-        boolean enabled) {
+        boolean enabled,
+        String membershipState) {
 }

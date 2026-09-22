@@ -18,5 +18,6 @@ public record TeamWorkspaceVersionRow(
         String targetCommitHash,
         Instant targetCommitUpdatedAt,
         Instant createdAt,
-        Instant updatedAt) {
+        Instant updatedAt,
+        String membershipState) {
 }

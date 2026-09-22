@@ -36,28 +36,30 @@ public class MyBatisTeamWorkspaceQueryRepository implements TeamWorkspaceQueryRe
     }
 
     @Override
-    public List<ApplicationView> findApplications(boolean globalScope, UserId ownerUserId) {
-        return mapper.findApplications(globalScope, value(ownerUserId)).stream()
+    public List<ApplicationView> findApplications(boolean globalScope, UserId ownerUserId, UserId targetUserId) {
+        return mapper.findApplications(globalScope, value(ownerUserId), value(targetUserId)).stream()
                 .map(row -> new ApplicationView(
-                        row.appId(), row.appName(), row.enabled(), row.currentMemberCount(), row.historicalMemberCount()))
+                        row.appId(), row.appName(), row.enabled(), row.currentMemberCount(),
+                        row.historicalMemberCount(), membership(row.membershipState())))
                 .toList();
     }
 
     @Override
     public List<WorkspaceTemplateView> findWorkspaceTemplates(
-            boolean globalScope, UserId ownerUserId, String appId) {
-        return mapper.findWorkspaceTemplates(globalScope, value(ownerUserId), appId).stream()
+            boolean globalScope, UserId ownerUserId, String appId, UserId targetUserId) {
+        return mapper.findWorkspaceTemplates(globalScope, value(ownerUserId), appId, value(targetUserId)).stream()
                 .map(row -> new WorkspaceTemplateView(
                         row.workspaceId(), row.appId(), row.workspaceName(), row.branch(),
-                        row.directoryPath(), row.enabled()))
+                        row.directoryPath(), row.enabled(), membership(row.membershipState())))
                 .toList();
     }
 
     @Override
     public List<WorkspaceVersionView> findWorkspaceVersions(
-            boolean globalScope, UserId ownerUserId, String applicationWorkspaceId) {
-        return mapper.findWorkspaceVersions(globalScope, value(ownerUserId), applicationWorkspaceId).stream()
-                .map(row -> new WorkspaceVersionView(version(row))).toList();
+            boolean globalScope, UserId ownerUserId, String applicationWorkspaceId, UserId targetUserId) {
+        return mapper.findWorkspaceVersions(
+                        globalScope, value(ownerUserId), applicationWorkspaceId, value(targetUserId)).stream()
+                .map(row -> new WorkspaceVersionView(version(row), membership(row.membershipState()))).toList();
     }
 
     @Override
@@ -117,6 +119,14 @@ public class MyBatisTeamWorkspaceQueryRepository implements TeamWorkspaceQueryRe
 
     private String value(UserId userId) {
         return userId == null ? null : userId.value();
+    }
+
+    /** 列表项始终带成员状态；无法识别时按历史上下文处理，避免把已退出范围标成当前权限。 */
+    private TeamMembershipState membership(String value) {
+        if (value == null || value.isBlank()) {
+            return TeamMembershipState.HISTORICAL;
+        }
+        return TeamMembershipState.valueOf(value);
     }
 
     private static final class MutableContribution {

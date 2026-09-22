@@ -3,14 +3,13 @@ import { computed } from "vue";
 import type { TeamCommit, TeamExportStatus } from "@test-agent/shared-types";
 import {
   canMaintainTeamMembers,
-  TEAM_MEMBER_SCOPE_HINT
+  TEAM_MEMBER_SCOPE_HINT,
+  teamScopeLabel
 } from "./team-management-controller";
 import { useTeamManagementView } from "./useTeamManagementView";
 
 const { controller, state } = useTeamManagementView();
 const canMaintain = computed(() => canMaintainTeamMembers(state.value));
-const contribution = computed(() =>
-  state.value.contributions.find((item) => item.userId === state.value.selectedUserId) ?? null);
 const personalCommits = computed(() =>
   state.value.personalCommits.filter((item) => item.contributionType !== "SYNC_MERGE"));
 const publishedCommits = computed(() =>
@@ -41,15 +40,19 @@ const exportLabels: Record<TeamExportStatus, string> = {
 function statsText(userId: string) {
   const stats = state.value.contributionStats[userId];
   if (!stats) return "统计加载中";
+  if (stats.unavailable) return "统计失败";
   return `发布 ${stats.published} · 个人 ${stats.personal} · 同步 ${stats.sync} · 修改 ${stats.changes}`;
 }
 
-function membershipText(value: string) {
-  return value === "CURRENT" ? "在组" : "历史";
+function membershipText(userId: string) {
+  const membership = state.value.contributions.find((item) => item.userId === userId)?.membershipState;
+  return membership === "HISTORICAL" ? "历史" : "";
 }
 
-function onWorktreeChange(event: Event) {
-  void controller.selectWorktree((event.target as HTMLSelectElement).value);
+function onScopeChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === "GLOBAL") void controller.selectScope("GLOBAL");
+  else void controller.selectScope("SYSTEM_ADMIN_TEAM", value);
 }
 
 function onMemberKeyword(event: Event) {
@@ -71,6 +74,20 @@ async function download() {
     <header class="team-review-header">
       <div>
         <h2>审阅</h2>
+        <p v-if="state.scopeLocked" class="team-review-hint">{{ teamScopeLabel(state) }}</p>
+        <label v-else class="team-review-scope">
+          <span>团队</span>
+          <select
+            aria-label="团队范围"
+            :value="state.scopeMode === 'GLOBAL' ? 'GLOBAL' : state.ownerUserId"
+            @change="onScopeChange"
+          >
+            <option value="GLOBAL">全平台只读</option>
+            <option v-for="owner in state.owners" :key="owner.userId" :value="owner.userId">
+              {{ owner.username }}
+            </option>
+          </select>
+        </label>
         <p v-if="!canMaintain" class="team-review-hint">{{ TEAM_MEMBER_SCOPE_HINT }}</p>
       </div>
       <div class="team-review-actions">
@@ -78,6 +95,11 @@ async function download() {
         <button type="button" :disabled="!state.selectedVersionId" @click="controller.createExport()">整组导出</button>
       </div>
     </header>
+
+    <p v-if="state.catalogError" class="team-review-error" role="alert">
+      {{ state.catalogError }}
+      <button type="button" @click="controller.retryCatalog()">重试</button>
+    </p>
 
     <p v-if="state.errorMessage" class="team-review-error" role="alert">
       {{ state.errorMessage }}
@@ -100,36 +122,22 @@ async function download() {
     </div>
 
     <div class="team-review-scroll">
-      <p v-if="!state.contributions.length" class="team-review-empty">这个版本还没有可审阅的团队成员。</p>
+      <p v-if="state.catalogLoading && !state.reviewRoster.length" class="team-review-empty">正在读取可审阅成员…</p>
+      <p v-else-if="!state.reviewRoster.length" class="team-review-empty">当前范围没有可审阅的成员。</p>
       <button
-        v-for="item in state.contributions"
+        v-for="item in state.reviewRoster"
         :key="item.userId"
         type="button"
         :class="['team-review-person', item.userId === state.selectedUserId && 'is-active']"
         @click="controller.selectMember(item.userId)"
       >
         <span class="team-review-person-name">{{ item.username }}</span>
-        <span>{{ membershipText(item.membershipState) }}</span>
+        <span v-if="membershipText(item.userId)">{{ membershipText(item.userId) }}</span>
         <span class="team-review-person-stats">{{ statsText(item.userId) }}</span>
       </button>
 
-      <div v-if="contribution" class="team-review-detail">
-        <label class="team-review-worktree">
-          <span>worktree</span>
-          <select
-            aria-label="审阅 worktree"
-            :value="state.selectedPersonalWorkspaceId"
-            :disabled="!contribution.personalWorkspaces.length"
-            @change="onWorktreeChange"
-          >
-            <option v-if="!contribution.personalWorkspaces.length" value="">该成员在此版本没有个人 worktree</option>
-            <option
-              v-for="item in contribution.personalWorkspaces"
-              :key="item.personalWorkspaceId"
-              :value="item.personalWorkspaceId"
-            >{{ item.workspaceName }} · {{ item.branch }}</option>
-          </select>
-        </label>
+      <div v-if="state.selectedUserId" class="team-review-detail">
+        <p v-if="state.missingDefaultWorkspace" class="team-review-hint">这个版本还没有名为 default 的个人工作空间。</p>
 
         <section>
           <h3>未提交修改 {{ state.gitStatus?.files.length ?? 0 }}</h3>
@@ -394,13 +402,14 @@ async function download() {
 .team-review-detail {
   padding: 8px;
 }
-.team-review-worktree {
+.team-review-scope {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  margin-top: 6px;
   font-size: 12px;
 }
-.team-review-worktree select,
+.team-review-scope select,
 .team-member-drawer input,
 .team-member-drawer select {
   width: 100%;

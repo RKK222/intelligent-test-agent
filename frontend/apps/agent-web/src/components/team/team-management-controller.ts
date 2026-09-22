@@ -24,11 +24,30 @@ export type TeamContextOption = {
   detail?: string;
 };
 
+/** 进入管理视角时沿用工作视角的应用、工作空间和版本，不回写工作视角。 */
+export type TeamReviewContextSeed = {
+  appId?: string;
+  templateId?: string;
+  versionId?: string;
+};
+
+export type TeamReviewMember = {
+  userId: string;
+  username: string;
+  unifiedAuthId: string;
+  department: string;
+};
+
+const DEFAULT_PERSONAL_WORKSPACE_NAME = "default";
+const TEAM_ROSTER_PAGE_SIZE = 200;
+
 export type TeamContributionStats = {
   published: number;
   personal: number;
   sync: number;
   changes: number;
+  /** 统计请求失败后的终态，避免成员行一直停在“统计加载中”。 */
+  unavailable?: boolean;
 };
 
 export type TeamReviewTab = {
@@ -72,6 +91,7 @@ export type TeamManagementState = {
   versions: TeamWorkspaceVersion[];
   contributions: TeamContribution[];
   contributionStats: Record<string, TeamContributionStats>;
+  reviewRoster: TeamReviewMember[];
   selectedAppId: string;
   selectedTemplateId: string;
   selectedVersionId: string;
@@ -100,6 +120,9 @@ export type TeamManagementState = {
   candidateUserId: string;
   exportJob: TeamExport | null;
   errorMessage: string;
+  catalogError: string;
+  treeError: string;
+  missingDefaultWorkspace: boolean;
   catalogLoading: boolean;
   detailLoading: boolean;
   memberLoading: boolean;
@@ -109,14 +132,13 @@ export type TeamManagementState = {
 export type TeamManagementController = {
   snapshot(): TeamManagementState;
   subscribe(listener: (state: TeamManagementState) => void): () => void;
-  enter(superAdmin: boolean): Promise<void>;
+  enter(superAdmin: boolean, seed?: TeamReviewContextSeed): Promise<void>;
   exit(): void;
   selectScope(mode: TeamScopeMode, ownerUserId?: string): Promise<void>;
   selectApplication(appId: string): Promise<void>;
   selectTemplate(workspaceId: string): Promise<void>;
   selectVersion(versionId: string): Promise<void>;
   selectMember(userId: string): Promise<void>;
-  selectWorktree(personalWorkspaceId: string): Promise<void>;
   toggleDirectory(path: string): Promise<void>;
   setFileSearch(query: string): void;
   openEntry(path: string, directory: boolean): Promise<void>;
@@ -138,6 +160,9 @@ export type TeamManagementController = {
   cancelExport(): Promise<void>;
   downloadExport(): Promise<string | null>;
   dismissError(): void;
+  retryCatalog(): Promise<void>;
+  reloadTree(): Promise<void>;
+  retryTab(tabId: string): Promise<void>;
 };
 
 export const teamManagementKey: InjectionKey<TeamManagementController> = Symbol("teamManagement");
@@ -180,6 +205,7 @@ function emptyState(): TeamManagementState {
     versions: [],
     contributions: [],
     contributionStats: {},
+    reviewRoster: [],
     selectedAppId: "",
     selectedTemplateId: "",
     selectedVersionId: "",
@@ -208,6 +234,9 @@ function emptyState(): TeamManagementState {
     candidateUserId: "",
     exportJob: null,
     errorMessage: "",
+    catalogError: "",
+    treeError: "",
+    missingDefaultWorkspace: false,
     catalogLoading: false,
     detailLoading: false,
     memberLoading: false,
@@ -226,7 +255,7 @@ function accessRevoked(error: unknown) {
 
 /**
  * 管理视角的请求模型。范围、版本和成员各自带代次，迟到响应不能写回新的选择。
- * 这里不进入 SelectedWorkspaceKind，避免把他人 worktree 当成当前用户的运行工作区。
+ * 这里不进入 SelectedWorkspaceKind，避免把他人的个人工作空间写成当前用户的运行工作区。
  */
 export function createTeamManagementController(
   api: TeamApi,
@@ -254,6 +283,7 @@ export function createTeamManagementController(
       versions: state.versions.slice(),
       contributions: state.contributions.slice(),
       contributionStats: { ...state.contributionStats },
+      reviewRoster: state.reviewRoster.slice(),
       personalCommits: state.personalCommits.slice(),
       publishedCommits: state.publishedCommits.slice(),
       commitFiles: state.commitFiles.slice(),
@@ -279,6 +309,32 @@ export function createTeamManagementController(
       scopeMode: state.scopeMode,
       ownerUserId: state.scopeMode === "SYSTEM_ADMIN_TEAM" ? state.ownerUserId : undefined
     };
+  }
+
+  /** 目录查询带上当前审阅成员；文件和 Git 请求仍只使用团队范围。 */
+  function catalogScope(): TeamScopeParams {
+    return {
+      ...scopeParams(),
+      targetUserId: state.selectedUserId || undefined
+    };
+  }
+
+  function reviewMember(user: {
+    userId: string;
+    username: string;
+    unifiedAuthId: string;
+    department?: string | null;
+  }): TeamReviewMember {
+    return {
+      userId: user.userId,
+      username: user.username,
+      unifiedAuthId: user.unifiedAuthId,
+      department: user.department ?? ""
+    };
+  }
+
+  function defaultPersonalWorkspace(item: TeamContribution | undefined) {
+    return item?.personalWorkspaces.find((workspace) => workspace.workspaceName === DEFAULT_PERSONAL_WORKSPACE_NAME) ?? null;
   }
 
   function scopeKey() {
@@ -374,12 +430,12 @@ export function createTeamManagementController(
         const sync = new Set<string>();
         let changes = 0;
         try {
-          for (const worktree of item.personalWorkspaces) {
-            if (ticket !== statsEpoch) return;
+          const workspace = defaultPersonalWorkspace(item);
+          if (workspace && ticket === statsEpoch) {
             const [status, personalItems, publishedItems] = await Promise.all([
-              api.getTeamWorkspaceGitStatus(scopeParams(), worktree.personalWorkspaceId),
-              allCommits(worktree.personalWorkspaceId, "PERSONAL", ticket),
-              allCommits(worktree.personalWorkspaceId, "PUBLISHED", ticket)
+              api.getTeamWorkspaceGitStatus(scopeParams(), workspace.personalWorkspaceId),
+              allCommits(workspace.personalWorkspaceId, "PERSONAL", ticket),
+              allCommits(workspace.personalWorkspaceId, "PUBLISHED", ticket)
             ]);
             if (ticket !== statsEpoch) return;
             changes += status.files.length;
@@ -388,7 +444,7 @@ export function createTeamManagementController(
             }
             for (const commit of personalItems) {
               if (commit.contributionType === "SYNC_MERGE") sync.add(commit.commit);
-              else personal.add(`${worktree.personalWorkspaceId}:${commit.commit}`);
+              else personal.add(`${workspace.personalWorkspaceId}:${commit.commit}`);
             }
           }
           if (ticket === statsEpoch) {
@@ -396,7 +452,13 @@ export function createTeamManagementController(
             publish();
           }
         } catch {
-          // 统计失败不阻断成员列表；详情请求仍会展示精确错误。
+          // 统计失败写入终态，成员列表仍可切换；详情区单独展示错误和重试。
+          if (ticket !== statsEpoch) return;
+          state.contributionStats = {
+            ...state.contributionStats,
+            [item.userId]: { published: 0, personal: 0, sync: 0, changes: 0, unavailable: true }
+          };
+          publish();
         }
       }
     });
@@ -435,7 +497,20 @@ export function createTeamManagementController(
       state.attributionMessage = published.attributionConfirmed ? "" : (published.attributionMessage ?? "无法归属");
       state.detailLoading = false;
       publish();
-      await loadDirectory("", personalWorkspaceId, fileTicket);
+      try {
+        await loadDirectory("", personalWorkspaceId, fileTicket);
+        if (!currentFile(fileTicket, personalWorkspaceId)) return;
+        state.treeError = "";
+        publish();
+      } catch (treeFailure) {
+        if (!currentFile(fileTicket, personalWorkspaceId)) return;
+        if (accessRevoked(treeFailure)) {
+          revokeReading(treeFailure);
+          return;
+        }
+        state.treeError = treeFailure instanceof Error ? treeFailure.message : String(treeFailure);
+        publish();
+      }
     } catch (error) {
       if (!currentDetail(ticket, personalWorkspaceId)) return;
       if (accessRevoked(error)) {
@@ -443,15 +518,18 @@ export function createTeamManagementController(
         return;
       }
       state.detailLoading = false;
+      state.treeError = error instanceof Error ? error.message : String(error);
       showError(error);
       publish();
     }
   }
 
-  function adoptWorktree(userId: string) {
-    const contribution = state.contributions.find((item) => item.userId === userId);
-    state.selectedUserId = contribution?.userId ?? "";
-    state.selectedPersonalWorkspaceId = contribution?.personalWorkspaces[0]?.personalWorkspaceId ?? "";
+  function adoptDefaultWorkspace() {
+    const personal = defaultPersonalWorkspace(
+      state.contributions.find((item) => item.userId === state.selectedUserId)
+    );
+    state.missingDefaultWorkspace = Boolean(state.selectedVersionId && state.selectedUserId && !personal);
+    state.selectedPersonalWorkspaceId = personal?.personalWorkspaceId ?? "";
   }
 
   async function loadContributions(scopeTicket: number, catalogTicket: number) {
@@ -466,7 +544,7 @@ export function createTeamManagementController(
     const versionId = state.selectedVersionId;
     if (!versionId) {
       state.contributions = [];
-      state.selectedUserId = "";
+      state.missingDefaultWorkspace = Boolean(state.selectedUserId);
       state.selectedPersonalWorkspaceId = "";
       publish();
       return;
@@ -474,10 +552,24 @@ export function createTeamManagementController(
     const contributions = await api.listTeamContributions(scopeParams(), versionId);
     if (!currentCatalog(scopeTicket, catalogTicket) || state.selectedVersionId !== versionId) return;
     state.contributions = contributions;
-    if (!contributions.some((item) => item.userId === state.selectedUserId)) {
-      adoptWorktree(contributions[0]?.userId ?? "");
+    const rosterWasEmpty = state.reviewRoster.length === 0;
+    // 全平台没有团队名单，右栏跟随当前版本的可审阅成员；已选成员不因版本变化改成第一人。
+    if (state.scopeMode === "GLOBAL") {
+      const nextRoster = contributions.map(reviewMember);
+      if (state.selectedUserId && !nextRoster.some((item) => item.userId === state.selectedUserId)) {
+        const kept = state.reviewRoster.find((item) => item.userId === state.selectedUserId);
+        if (kept) nextRoster.unshift(kept);
+      }
+      state.reviewRoster = nextRoster;
+      if (!state.selectedUserId) state.selectedUserId = nextRoster[0]?.userId ?? "";
     }
+    adoptDefaultWorkspace();
     publish();
+    // 全平台第一次还没有成员，目录是团队级结果；选定成员后收窄到该成员并保留已有应用。
+    if (rosterWasEmpty && state.selectedUserId) {
+      await loadApplications(scopeTicket, catalogTicket);
+      return;
+    }
     void loadContributionStats(contributions, statsTicket);
     await loadWorktreeDetail(state.selectedPersonalWorkspaceId, detailTicket, fileTicket);
   }
@@ -485,7 +577,7 @@ export function createTeamManagementController(
   async function loadVersions(scopeTicket: number, catalogTicket: number) {
     const templateId = state.selectedTemplateId;
     const versions = templateId
-      ? await api.listTeamWorkspaceVersions(scopeParams(), templateId)
+      ? await api.listTeamWorkspaceVersions(catalogScope(), templateId)
       : [];
     if (!currentCatalog(scopeTicket, catalogTicket) || state.selectedTemplateId !== templateId) return;
     state.versions = versions;
@@ -500,12 +592,14 @@ export function createTeamManagementController(
 
   async function loadTemplates(scopeTicket: number, catalogTicket: number) {
     const appId = state.selectedAppId;
-    const templates = appId ? await api.listTeamWorkspaceTemplates(scopeParams(), appId) : [];
+    const templates = appId ? await api.listTeamWorkspaceTemplates(catalogScope(), appId) : [];
     if (!currentCatalog(scopeTicket, catalogTicket) || state.selectedAppId !== appId) return;
     state.templates = templates;
-    state.selectedTemplateId = templates.some((item) => item.workspaceId === state.selectedTemplateId)
+    // 顶部菜单沿用工作视角，不展示已停用的工作空间；默认选中也必须落在仍可打开的项上。
+    const selectable = templates.filter((item) => item.enabled !== false);
+    state.selectedTemplateId = selectable.some((item) => item.workspaceId === state.selectedTemplateId)
       ? state.selectedTemplateId
-      : (templates[0]?.workspaceId ?? "");
+      : (selectable[0]?.workspaceId ?? "");
     publish();
     await loadVersions(scopeTicket, catalogTicket);
   }
@@ -517,15 +611,18 @@ export function createTeamManagementController(
       state.versions = [];
       state.contributions = [];
       state.catalogLoading = false;
+      state.catalogError = "";
       publish();
       return;
     }
     state.catalogLoading = true;
+    state.catalogError = "";
     publish();
     try {
       const capturedScope = scopeKey();
-      const applications = await api.listTeamApplications(scopeParams());
-      if (!currentCatalog(scopeTicket, catalogTicket) || scopeKey() !== capturedScope) return;
+      const capturedUserId = state.selectedUserId;
+      const applications = await api.listTeamApplications(catalogScope());
+      if (!currentCatalog(scopeTicket, catalogTicket) || scopeKey() !== capturedScope || state.selectedUserId !== capturedUserId) return;
       state.applications = applications;
       state.selectedAppId = applications.some((item) => item.appId === state.selectedAppId)
         ? state.selectedAppId
@@ -540,7 +637,28 @@ export function createTeamManagementController(
         return;
       }
       state.catalogLoading = false;
-      showError(error);
+      state.catalogError = error instanceof Error ? error.message : String(error);
+      publish();
+    }
+  }
+
+  async function loadReviewRoster(scopeTicket: number) {
+    if (state.scopeMode === "GLOBAL") return;
+    try {
+      const page = await api.listSystemAdminTeamMembers(scopeParams(), "", 1, TEAM_ROSTER_PAGE_SIZE);
+      if (!state.active || scopeTicket !== scopeEpoch) return;
+      state.reviewRoster = page.items.map(reviewMember);
+      if (!state.reviewRoster.some((item) => item.userId === state.selectedUserId)) {
+        state.selectedUserId = state.reviewRoster[0]?.userId ?? "";
+      }
+      publish();
+    } catch (error) {
+      if (!state.active || scopeTicket !== scopeEpoch) return;
+      if (accessRevoked(error)) {
+        revokeReading(error);
+        return;
+      }
+      state.catalogError = error instanceof Error ? error.message : String(error);
       publish();
     }
   }
@@ -704,7 +822,20 @@ export function createTeamManagementController(
           revokeReading(chunkError);
           return;
         }
-        showError(chunkError);
+        upsertTab({
+          id: tabId,
+          kind: "file",
+          path,
+          title: fileTitle(path),
+          personalWorkspaceId,
+          content: "",
+          patch: "",
+          status: "",
+          additions: 0,
+          deletions: 0,
+          loadState: "error",
+          errorMessage: chunkError instanceof Error ? chunkError.message : String(chunkError)
+        });
         publish();
       }
     }
@@ -736,7 +867,7 @@ export function createTeamManagementController(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async enter(superAdmin: boolean) {
+    async enter(superAdmin: boolean, seed: TeamReviewContextSeed = {}) {
       stopExportPolling();
       if (searchTimer) clearTimeout(searchTimer);
       scopeEpoch += 1;
@@ -750,10 +881,14 @@ export function createTeamManagementController(
       state.active = true;
       state.scopeLocked = !superAdmin;
       state.scopeMode = superAdmin ? "GLOBAL" : "MY_TEAM";
+      state.selectedAppId = seed.appId ?? "";
+      state.selectedTemplateId = seed.templateId ?? "";
+      state.selectedVersionId = seed.versionId ?? "";
       publish();
       const scopeTicket = scopeEpoch;
       const catalogTicket = catalogEpoch;
       if (superAdmin) void loadOwners(scopeTicket);
+      if (!superAdmin) await loadReviewRoster(scopeTicket);
       await loadApplications(scopeTicket, catalogTicket);
     },
     exit() {
@@ -785,16 +920,16 @@ export function createTeamManagementController(
       state.versions = [];
       state.contributions = [];
       state.contributionStats = {};
-      state.selectedAppId = "";
-      state.selectedTemplateId = "";
-      state.selectedVersionId = "";
-      state.selectedUserId = "";
       state.selectedPersonalWorkspaceId = "";
+      state.missingDefaultWorkspace = false;
       state.exportJob = null;
       state.members = [];
       state.memberTotal = 0;
+      state.catalogError = "";
+      if (mode !== "GLOBAL") state.reviewRoster = [];
       publish();
       if (state.memberDrawerOpen) void loadMembers(memberEpoch, scopeKey());
+      if (mode !== "GLOBAL") await loadReviewRoster(scopeEpoch);
       await loadApplications(scopeEpoch, catalogEpoch);
     },
     async selectApplication(appId: string) {
@@ -807,12 +942,23 @@ export function createTeamManagementController(
       state.contributions = [];
       state.selectedTemplateId = "";
       state.selectedVersionId = "";
-      state.selectedUserId = "";
       state.selectedPersonalWorkspaceId = "";
+      state.missingDefaultWorkspace = false;
       state.exportJob = null;
+      state.catalogError = "";
       stopExportPolling();
       publish();
-      await loadTemplates(scopeEpoch, catalogEpoch);
+      try {
+        await loadTemplates(scopeEpoch, catalogEpoch);
+      } catch (error) {
+        if (!state.active) return;
+        if (accessRevoked(error)) revokeReading(error);
+        else {
+          state.catalogLoading = false;
+          state.catalogError = error instanceof Error ? error.message : String(error);
+          publish();
+        }
+      }
     },
     async selectTemplate(workspaceId: string) {
       if (!state.active || state.selectedTemplateId === workspaceId) return;
@@ -822,12 +968,23 @@ export function createTeamManagementController(
       state.versions = [];
       state.contributions = [];
       state.selectedVersionId = "";
-      state.selectedUserId = "";
       state.selectedPersonalWorkspaceId = "";
+      state.missingDefaultWorkspace = false;
       state.exportJob = null;
+      state.catalogError = "";
       stopExportPolling();
       publish();
-      await loadVersions(scopeEpoch, catalogEpoch);
+      try {
+        await loadVersions(scopeEpoch, catalogEpoch);
+      } catch (error) {
+        if (!state.active) return;
+        if (accessRevoked(error)) revokeReading(error);
+        else {
+          state.catalogLoading = false;
+          state.catalogError = error instanceof Error ? error.message : String(error);
+          publish();
+        }
+      }
     },
     async selectVersion(versionId: string) {
       if (!state.active || state.selectedVersionId === versionId) return;
@@ -835,28 +992,34 @@ export function createTeamManagementController(
       bumpReview(true);
       state.selectedVersionId = versionId;
       state.contributions = [];
-      state.selectedUserId = "";
       state.selectedPersonalWorkspaceId = "";
+      state.missingDefaultWorkspace = false;
       state.exportJob = null;
+      state.catalogError = "";
       stopExportPolling();
       publish();
-      await loadContributions(scopeEpoch, catalogEpoch);
+      try {
+        await loadContributions(scopeEpoch, catalogEpoch);
+      } catch (error) {
+        if (!state.active) return;
+        if (accessRevoked(error)) revokeReading(error);
+        else {
+          state.catalogError = error instanceof Error ? error.message : String(error);
+          publish();
+        }
+      }
     },
     async selectMember(userId: string) {
       if (!state.active || state.selectedUserId === userId) return;
       const previous = state.selectedPersonalWorkspaceId;
+      catalogEpoch += 1;
       bumpReview(false, previous);
-      adoptWorktree(userId);
+      state.selectedUserId = userId;
+      state.selectedPersonalWorkspaceId = "";
+      state.missingDefaultWorkspace = false;
+      state.catalogError = "";
       publish();
-      await loadWorktreeDetail(state.selectedPersonalWorkspaceId, detailEpoch, fileEpoch);
-    },
-    async selectWorktree(personalWorkspaceId: string) {
-      if (!state.active || state.selectedPersonalWorkspaceId === personalWorkspaceId) return;
-      const previous = state.selectedPersonalWorkspaceId;
-      bumpReview(false, previous);
-      state.selectedPersonalWorkspaceId = personalWorkspaceId;
-      publish();
-      await loadWorktreeDetail(personalWorkspaceId, detailEpoch, fileEpoch);
+      await loadApplications(scopeEpoch, catalogEpoch);
     },
     async toggleDirectory(path: string) {
       if (!state.active || !state.selectedPersonalWorkspaceId) return;
@@ -874,7 +1037,7 @@ export function createTeamManagementController(
           if (!currentFile(fileEpoch, state.selectedPersonalWorkspaceId)) return;
           if (accessRevoked(error)) revokeReading(error);
           else {
-            showError(error);
+            state.treeError = error instanceof Error ? error.message : String(error);
             publish();
           }
         }
@@ -929,7 +1092,7 @@ export function createTeamManagementController(
             if (!currentFile(fileEpoch, state.selectedPersonalWorkspaceId)) return;
             if (accessRevoked(error)) revokeReading(error);
             else {
-              showError(error);
+              state.treeError = error instanceof Error ? error.message : String(error);
               publish();
             }
           }
@@ -1025,7 +1188,20 @@ export function createTeamManagementController(
         if (!currentFile(ticket, personalWorkspaceId)) return;
         if (accessRevoked(error)) revokeReading(error);
         else {
-          showError(error);
+          upsertTab({
+            id: tabId,
+            kind: "diff",
+            path,
+            title: fileTitle(path),
+            personalWorkspaceId,
+            content: "",
+            patch: "",
+            status: state.commitFiles.find((item) => item.path === path)?.status ?? "",
+            additions: 0,
+            deletions: 0,
+            loadState: "error",
+            errorMessage: error instanceof Error ? error.message : String(error)
+          });
           publish();
         }
       }
@@ -1098,8 +1274,15 @@ export function createTeamManagementController(
         if (!currentFile(ticket, personalWorkspaceId)) return;
         if (accessRevoked(error)) revokeReading(error);
         else {
-          showError(error);
-          markLoading(false);
+          const current = state.tabs.find((tab) => tab.id === tabId);
+          if (current) {
+            upsertTab({
+              ...current,
+              errorMessage: error instanceof Error ? error.message : String(error),
+              progressive: current.progressive ? { ...current.progressive, loading: false } : undefined
+            });
+          }
+          publish();
         }
       }
     },
@@ -1156,8 +1339,9 @@ export function createTeamManagementController(
         state.mutationLoading = false;
         memberEpoch += 1;
         await loadMembers(memberEpoch, scopeKey());
+        await loadReviewRoster(scopeEpoch);
         catalogEpoch += 1;
-        await loadContributions(scopeEpoch, catalogEpoch);
+        await loadApplications(scopeEpoch, catalogEpoch);
       } catch (error) {
         state.mutationLoading = false;
         showError(error);
@@ -1170,20 +1354,19 @@ export function createTeamManagementController(
       publish();
       try {
         await api.removeSystemAdminTeamMember(scopeParams(), userId);
-        const removed = state.contributions.find((item) => item.userId === userId);
-        removed?.personalWorkspaces.forEach((worktree) => {
-          api.closeTeamWorkspaceFileConnections(worktree.personalWorkspaceId);
-        });
+        api.closeTeamWorkspaceFileConnections();
         if (state.selectedUserId === userId) {
-          bumpReview(false, state.selectedPersonalWorkspaceId);
+          bumpReview(true);
           state.selectedUserId = "";
           state.selectedPersonalWorkspaceId = "";
         }
+        state.reviewRoster = state.reviewRoster.filter((item) => item.userId !== userId);
         state.mutationLoading = false;
         memberEpoch += 1;
         await loadMembers(memberEpoch, scopeKey());
+        await loadReviewRoster(scopeEpoch);
         catalogEpoch += 1;
-        await loadContributions(scopeEpoch, catalogEpoch);
+        await loadApplications(scopeEpoch, catalogEpoch);
       } catch (error) {
         state.mutationLoading = false;
         if (accessRevoked(error)) revokeReading(error);
@@ -1221,6 +1404,34 @@ export function createTeamManagementController(
     dismissError() {
       state.errorMessage = "";
       publish();
+    },
+    async retryCatalog() {
+      if (!state.active) return;
+      catalogEpoch += 1;
+      state.catalogError = "";
+      await loadApplications(scopeEpoch, catalogEpoch);
+    },
+    async reloadTree() {
+      const personalWorkspaceId = state.selectedPersonalWorkspaceId;
+      if (!state.active || !personalWorkspaceId) return;
+      state.treeError = "";
+      publish();
+      try {
+        await loadDirectory("", personalWorkspaceId, fileEpoch);
+      } catch (error) {
+        if (!currentFile(fileEpoch, personalWorkspaceId)) return;
+        if (accessRevoked(error)) revokeReading(error);
+        else {
+          state.treeError = error instanceof Error ? error.message : String(error);
+          publish();
+        }
+      }
+    },
+    async retryTab(tabId: string) {
+      const tab = state.tabs.find((item) => item.id === tabId);
+      if (!tab || !state.active) return;
+      if (tab.kind === "diff") await this.openCommitFile(tab.path);
+      else await readFileTab(tab.path, tab.personalWorkspaceId, fileEpoch);
     }
   };
 }

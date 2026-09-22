@@ -4631,13 +4631,15 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 
 ### 版本与贡献
 
-基址为 `/api/internal/platform/workspace-management/team`。应用范围是当前团队成员所属应用与仍保留个人 worktree 的历史应用并集；移出团队后不再返回当前或历史数据。
+基址为 `/api/internal/platform/workspace-management/team`。应用范围是当前团队成员所属应用与仍保留个人工作区的历史应用并集；移出团队后不再返回当前或历史数据。
+
+应用、工作空间和版本三个列表都接受可选查询参数 `targetUserId`。不传时保持原来的团队级结果；传入后先按范围实时校验角色和团队归属，再只返回该成员当前仍有权限，或已退出应用但仍保留个人工作区的历史上下文。这三项响应增加兼容字段 `membershipState=CURRENT|HISTORICAL`。旧客户端可以忽略它；未传 `targetUserId` 时，只要范围内仍有当前应用成员，该项为 `CURRENT`，否则为 `HISTORICAL`。传入成员后，`CURRENT` 表示该成员仍是应用成员，`HISTORICAL` 表示只剩个人工作区。超级管理员不需要目标应用的个人 Git 权限，代码和提交仍走团队只读授权及目标服务器路由。
 
 | 方法与相对路径 | 用途 |
 |---|---|
-| `GET /applications` | 可见应用及当前/历史成员数 |
-| `GET /applications/{appId}/workspaces` | 应用工作空间模板 |
-| `GET /workspaces/{workspaceId}/versions` | 工作空间版本 |
+| `GET /applications?targetUserId=` | 可见应用、当前/历史成员数和 `membershipState` |
+| `GET /applications/{appId}/workspaces?targetUserId=` | 应用工作空间模板和 `membershipState` |
+| `GET /workspaces/{workspaceId}/versions?targetUserId=` | 工作空间版本和 `membershipState` |
 | `GET /versions/{versionId}/contributions` | 人员、`CURRENT/HISTORICAL` 与同版本多个个人 worktree |
 | `GET /personal-workspaces/{id}/status` | staged、unstaged、untracked 和受限 diff |
 | `GET /personal-workspaces/{id}/commits?kind=PERSONAL|PUBLISHED&offset=&limit=` | 最多 200 条；个人范围为 `baseCommit..HEAD`，发布范围还要求 SCM 身份和版本目标可达 |
@@ -4665,4 +4667,4 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 
 内部精确路径 `/team/export-shards/inspect`、`/build`、`/delete-revoked-artifact` 和 `/receive/ws` 只对通用 Bearer 过滤器豁免，随后分别使用现有 XXL 内部控制 Token或一次性 WebSocket ticket 完成专用鉴权；相邻及子路径不继承豁免，也不接受用户 JWT 直接调用。它们用于权威源节点预检、过滤 shard 传输及团队撤权后的协调节点产物清理。源节点每 worktree 最多两个、全局最多四个并发；明细先原子领取数据库租约。至少一个 worktree 成功即生成 ZIP；失败 worktree、`NO_WORKTREE` 和敏感排除项记录在 `manifest.json`。角色降级、负责人失效或任一团队成员移除后，后续团队请求会实时复核并作废任务；成员移除还会主动取消关联任务并通知协调节点删除产物，协调节点离线时由每分钟清理轮询兜底。
 
-通用错误为 `UNAUTHENTICATED/FORBIDDEN/NOT_FOUND/VALIDATION_ERROR/CONFLICT/GIT_UNAVAILABLE/INTERNAL_ERROR`，均使用统一 `ApiErrorResponse` 且不返回物理路径、凭据、内部 Token 或 Git stderr。团队名单、代码、文件、导出和下载操作统一先写 `TEAM_OVERSIGHT` 审计；文件路径和 User-Agent 在数据库仅保存 SHA-256。兼容性：只新增 internal API 和可选角色能力，不修改旧 URL、RunEvent 或现有响应字段。对应测试为 `RoleCapabilitiesTest`、`SystemAdminTeamRepositoryIntegrationTest`、`SystemAdminTeamPostgresqlIntegrationTest`、`GitWorkspaceServiceRealGitTest`、`WorkspaceFileWebSocketHandlerTest` 和前端角色能力/构建测试。
+通用错误为 `UNAUTHENTICATED/FORBIDDEN/NOT_FOUND/VALIDATION_ERROR/CONFLICT/GIT_UNAVAILABLE/INTERNAL_ERROR`，均使用统一 `ApiErrorResponse` 且不返回物理路径、凭据、内部 Token 或 Git stderr。团队名单、代码、文件、导出和下载操作统一先写 `TEAM_OVERSIGHT` 审计；文件路径和 User-Agent 在数据库仅保存 SHA-256。兼容性：`targetUserId` 与 `membershipState` 都是可选增补。不传 `targetUserId` 时路径、范围参数和原有字段保持不变；旧客户端忽略新增字段。不新增 RunEvent，也不改变文件 WebSocket 协议。对应测试为 `RoleCapabilitiesTest`、`TeamWorkspaceControllerAuthorizationTest`、`MyBatisTeamWorkspaceMemberFilterIntegrationTest`、`SystemAdminTeamRepositoryIntegrationTest`、`SystemAdminTeamPostgresqlIntegrationTest`、`GitWorkspaceServiceRealGitTest`、`WorkspaceFileWebSocketHandlerTest` 和前端角色能力/构建测试。

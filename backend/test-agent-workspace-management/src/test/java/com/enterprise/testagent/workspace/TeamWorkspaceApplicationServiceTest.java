@@ -15,7 +15,9 @@ import com.enterprise.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.enterprise.testagent.domain.managedworkspace.PersonalWorkspaceId;
 import com.enterprise.testagent.domain.team.TeamContributionType;
+import com.enterprise.testagent.domain.team.TeamMembershipState;
 import com.enterprise.testagent.domain.team.TeamWorkspaceQueryRepository;
+import com.enterprise.testagent.domain.team.TeamWorkspaceViews.ApplicationView;
 import com.enterprise.testagent.domain.team.TeamWorkspaceViews.PersonalWorkspaceView;
 import com.enterprise.testagent.domain.team.TeamWorkspaceViews.WorkspaceVersionView;
 import com.enterprise.testagent.domain.user.UserId;
@@ -56,8 +58,8 @@ class TeamWorkspaceApplicationServiceTest {
         ApplicationWorkspaceVersion version = version(repo, member, target);
         when(queries.findPersonalWorkspace(false, member, personal.personalWorkspaceId()))
                 .thenReturn(Optional.of(new PersonalWorkspaceView(personal, "server-a")));
-        when(queries.findWorkspaceVersions(false, member, personal.applicationWorkspaceId().value()))
-                .thenReturn(List.of(new WorkspaceVersionView(version)));
+        when(queries.findWorkspaceVersions(false, member, personal.applicationWorkspaceId().value(), null))
+                .thenReturn(List.of(new WorkspaceVersionView(version, TeamMembershipState.CURRENT)));
         when(identities.resolve(member)).thenReturn(calibrated);
         TeamWorkspaceApplicationService service = new TeamWorkspaceApplicationService(
                 queries, ManagedWorkspacePathResolver.legacyOnly(), new WorkspaceServerIdentity("server-a"),
@@ -70,6 +72,23 @@ class TeamWorkspaceApplicationServiceTest {
         assertThat(page.items()).singleElement().satisfies(commit -> {
             assertThat(commit.subject()).isEqualTo("校准提交");
             assertThat(commit.contributionType()).isEqualTo(TeamContributionType.PUBLISHED_COMMIT.name());
+        });
+    }
+
+    @Test
+    void memberCatalogPreservesHistoricalMembership() {
+        TeamWorkspaceQueryRepository queries = mock(TeamWorkspaceQueryRepository.class);
+        UserId owner = new UserId("owner-1");
+        UserId member = new UserId("member-1");
+        when(queries.findApplications(false, owner, member)).thenReturn(List.of(new ApplicationView(
+                "app-1", "历史应用", true, 0, 1, TeamMembershipState.HISTORICAL)));
+        TeamWorkspaceApplicationService service = new TeamWorkspaceApplicationService(
+                queries, ManagedWorkspacePathResolver.legacyOnly(), new WorkspaceServerIdentity("server-a"),
+                new GitWorkspaceService(), mock(ScmGitIdentityResolver.class));
+
+        assertThat(service.applications(false, owner, member)).singleElement().satisfies(item -> {
+            assertThat(item.appId()).isEqualTo("app-1");
+            assertThat(item.membershipState()).isEqualTo("HISTORICAL");
         });
     }
 

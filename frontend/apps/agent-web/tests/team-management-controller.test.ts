@@ -26,7 +26,7 @@ function worktree(personalWorkspaceId: string) {
   return {
     personalWorkspaceId,
     workspaceId: `ws-${personalWorkspaceId}`,
-    workspaceName: "研发空间",
+    workspaceName: "default",
     branch: "feature/member",
     linuxServerId: "server-1",
     baseCommit: "abc123",
@@ -93,7 +93,11 @@ describe("team management controller", () => {
     expect(controller.snapshot().scopeMode).toBe("MY_TEAM");
     expect(controller.snapshot().scopeLocked).toBe(true);
     expect(canMaintainTeamMembers(controller.snapshot())).toBe(true);
-    expect(api.listTeamApplications).toHaveBeenCalledWith({ scopeMode: "MY_TEAM", ownerUserId: undefined });
+    expect(api.listTeamApplications).toHaveBeenCalledWith({
+      scopeMode: "MY_TEAM",
+      ownerUserId: undefined,
+      targetUserId: "member-1"
+    });
 
     await controller.openMemberDrawer();
     expect(api.listSystemAdminTeamMembers).toHaveBeenCalled();
@@ -115,9 +119,10 @@ describe("team management controller", () => {
 
     await controller.selectScope("SYSTEM_ADMIN_TEAM", "owner-1");
     expect(canMaintainTeamMembers(controller.snapshot())).toBe(true);
-    expect(api.listTeamApplications).toHaveBeenCalledWith({
+    expect(api.listTeamApplications).toHaveBeenLastCalledWith({
       scopeMode: "SYSTEM_ADMIN_TEAM",
-      ownerUserId: "owner-1"
+      ownerUserId: "owner-1",
+      targetUserId: "member-1"
     });
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith();
   });
@@ -166,7 +171,7 @@ describe("team management controller", () => {
     await controller.enter(false);
     const opening = controller.openEntry("src/a.ts", false);
     await vi.waitFor(() => expect(api.readTeamWorkspaceFile).toHaveBeenCalled());
-    await controller.selectWorktree("pw-2");
+    await controller.selectMember("member-2");
     read.resolve({ path: "src/a.ts", content: "stale", encoding: "utf-8", readonly: true });
     await opening;
     expect(controller.snapshot().tabs.some((tab) => tab.content === "stale")).toBe(false);
@@ -273,5 +278,195 @@ describe("team management controller", () => {
       "logs/large.log",
       { offset: 0 }
     );
+  });
+
+  it("selects an enabled workspace when the first template is disabled", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
+    ]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([
+      { workspaceId: "ws-off", appId: "app-1", workspaceName: "停用空间", branch: "old", directoryPath: "repo", enabled: false },
+      { workspaceId: "ws-on", appId: "app-1", workspaceName: "可用空间", branch: "release", directoryPath: "repo", enabled: true }
+    ]);
+    api.listTeamWorkspaceVersions.mockImplementation(async (_scope, workspaceId: string) => [
+      { versionId: `ver-${workspaceId}`, applicationWorkspaceId: workspaceId, appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
+    ]);
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    expect(controller.snapshot().selectedTemplateId).toBe("ws-on");
+    expect(controller.snapshot().selectedVersionId).toBe("ver-ws-on");
+  });
+
+  it("refreshes the platform roster from the current version without replacing the selected member", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 2, historicalMemberCount: 0, membershipState: "CURRENT" },
+      { appId: "app-2", appName: "应用二", enabled: true, currentMemberCount: 2, historicalMemberCount: 0, membershipState: "CURRENT" }
+    ]);
+    api.listTeamWorkspaceTemplates.mockImplementation(async (_scope, appId: string) => [
+      { workspaceId: `ws-${appId}`, appId, workspaceName: "研发空间", branch: "release", directoryPath: "repo", enabled: true, membershipState: "CURRENT" }
+    ]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([
+      { versionId: "ver-1", applicationWorkspaceId: "ws-app-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z", membershipState: "CURRENT" }
+    ]);
+    api.listTeamContributions
+      .mockResolvedValueOnce([contribution("member-1", "pw-1")])
+      .mockResolvedValueOnce([contribution("member-1", "pw-1")])
+      .mockResolvedValue([contribution("member-1", "pw-1"), contribution("member-2", "pw-2")]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(true, { appId: "app-1", templateId: "ws-app-1", versionId: "ver-1" });
+
+    expect(controller.snapshot().selectedUserId).toBe("member-1");
+    expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1"]);
+    await controller.selectApplication("app-2");
+    expect(controller.snapshot().selectedUserId).toBe("member-1");
+    expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1", "member-2"]);
+    await controller.selectMember("member-2");
+    expect(controller.snapshot().selectedAppId).toBe("app-2");
+    expect(controller.snapshot().selectedUserId).toBe("member-2");
+  });
+
+  it("keeps the current application when entering and does not clear the member when the application changes", async () => {
+    const api = createApi();
+    api.listSystemAdminTeamMembers.mockResolvedValue({
+      items: [user("member-1", "成员甲"), user("member-2", "成员乙")],
+      total: 2,
+      page: 1,
+      size: 200
+    });
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0, membershipState: "CURRENT" },
+      { appId: "app-2", appName: "应用二", enabled: true, currentMemberCount: 0, historicalMemberCount: 1, membershipState: "HISTORICAL" }
+    ]);
+    api.listTeamWorkspaceTemplates.mockImplementation(async (_scope, appId: string) => [
+      { workspaceId: `ws-${appId}`, appId, workspaceName: "研发空间", branch: "release", directoryPath: "repo", enabled: true, membershipState: "CURRENT" }
+    ]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([
+      { versionId: "ver-1", applicationWorkspaceId: "ws-app-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z", membershipState: "CURRENT" }
+    ]);
+    api.listTeamContributions.mockResolvedValue([
+      contribution("member-1", "pw-1"),
+      contribution("member-2", "pw-2")
+    ]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(false, { appId: "app-2", templateId: "ws-app-2", versionId: "ver-1" });
+
+    expect(controller.snapshot().selectedAppId).toBe("app-2");
+    expect(controller.snapshot().selectedUserId).toBe("member-1");
+    await controller.selectApplication("app-1");
+    expect(controller.snapshot().selectedUserId).toBe("member-1");
+    expect(controller.snapshot().selectedAppId).toBe("app-1");
+    await controller.selectMember("member-2");
+    expect(controller.snapshot().selectedUserId).toBe("member-2");
+    expect(controller.snapshot().selectedAppId).toBe("app-1");
+    expect(api.listTeamApplications).toHaveBeenLastCalledWith({
+      scopeMode: "MY_TEAM",
+      ownerUserId: undefined,
+      targetUserId: "member-2"
+    });
+  });
+
+  it("shows an empty review state when the version has no default personal workspace", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
+    ]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([
+      { workspaceId: "ws-1", appId: "app-1", workspaceName: "研发空间", branch: "release", directoryPath: "repo", enabled: true }
+    ]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([
+      { versionId: "ver-1", applicationWorkspaceId: "ws-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
+    ]);
+    api.listTeamContributions.mockResolvedValue([{
+      ...contribution("member-1", "pw-named"),
+      personalWorkspaces: [{ ...worktree("pw-named"), workspaceName: "feature-space" }]
+    }]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    expect(controller.snapshot().missingDefaultWorkspace).toBe(true);
+    expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("");
+    expect(api.listTeamWorkspaceFiles).not.toHaveBeenCalled();
+  });
+
+  it("keeps a retryable error when the catalog, preview chunk, or commit diff fails", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockRejectedValueOnce(new Error("应用列表失败"));
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    expect(controller.snapshot().catalogError).toContain("应用列表失败");
+    expect(controller.snapshot().catalogLoading).toBe(false);
+
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
+    ]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([
+      { workspaceId: "ws-1", appId: "app-1", workspaceName: "研发空间", branch: "release", directoryPath: "repo", enabled: true }
+    ]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([
+      { versionId: "ver-1", applicationWorkspaceId: "ws-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
+    ]);
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
+    await controller.retryCatalog();
+    expect(controller.snapshot().catalogError).toBe("");
+    expect(controller.snapshot().selectedAppId).toBe("app-1");
+
+    api.readTeamWorkspaceFile.mockRejectedValue(new BackendApiError(413, {
+      success: false,
+      code: "PAYLOAD_TOO_LARGE",
+      message: "文件超过整读上限",
+      traceId: "trace-large",
+      details: { reason: "PREVIEW_TOO_LARGE", size: 20, maxPreviewBytes: 8 }
+    }));
+    api.readTeamWorkspaceFilePreviewChunk.mockRejectedValueOnce(new Error("分段失败"));
+    await controller.openEntry("logs/large.log", false);
+    expect(controller.snapshot().tabs[0]?.loadState).toBe("error");
+    api.readTeamWorkspaceFilePreviewChunk.mockResolvedValue({
+      path: "logs/large.log",
+      content: "chunk",
+      offset: 0,
+      nextOffset: 5,
+      size: 20,
+      eof: false,
+      warningThresholdBytes: 8,
+      lastModifiedMillis: 10
+    });
+    await controller.retryTab(controller.snapshot().tabs[0]!.id);
+    expect(controller.snapshot().tabs[0]?.content).toBe("chunk");
+
+    api.getTeamWorkspaceCommitDetail.mockResolvedValue({
+      commit: commit("abc"),
+      files: [{ status: "M", path: "src/a.ts" }]
+    });
+    api.getTeamWorkspaceCommitDiff.mockRejectedValueOnce(new Error("差异失败"));
+    await controller.selectCommit(commit("abc"), "PERSONAL");
+    await controller.openCommitFile("src/a.ts");
+    expect(controller.snapshot().tabs.at(-1)?.loadState).toBe("error");
+    api.getTeamWorkspaceCommitDiff.mockResolvedValue({ commit: "abc", path: "src/a.ts", patch: "@@\n+ok\n" });
+    await controller.retryTab(controller.snapshot().tabs.at(-1)!.id);
+    expect(controller.snapshot().tabs.at(-1)?.patch).toContain("+ok");
+  });
+
+  it("records a terminal stats failure when the personal workspace cannot be read", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([
+      { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
+    ]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([
+      { workspaceId: "ws-1", appId: "app-1", workspaceName: "研发空间", branch: "release", directoryPath: "repo", enabled: true }
+    ]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([
+      { versionId: "ver-1", applicationWorkspaceId: "ws-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
+    ]);
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
+    api.getTeamWorkspaceGitStatus.mockRejectedValue(new Error("个人工作区目录不可用"));
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    expect(controller.snapshot().treeError).toContain("个人工作区目录不可用");
+    expect(controller.snapshot().detailLoading).toBe(false);
+    await vi.waitFor(() => {
+      expect(controller.snapshot().contributionStats["member-1"]?.unavailable).toBe(true);
+    });
   });
 });

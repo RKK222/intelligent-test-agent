@@ -3560,6 +3560,8 @@ export type TeamExportStatus = "QUEUED" | "RUNNING" | "READY" | "PARTIAL_READY" 
 export type TeamScopeParams = {
   scopeMode?: TeamScopeMode;
   ownerUserId?: string;
+  /** 只返回该成员当前或历史可审阅的应用、工作空间和版本；省略时保持团队级列表。 */
+  targetUserId?: string;
 };
 
 export type TeamUser = PlatformUserSummary & {
@@ -3574,6 +3576,8 @@ export type TeamApplication = {
   enabled: boolean;
   currentMemberCount: number;
   historicalMemberCount: number;
+  /** 旧响应没有该字段时按当前范围展示。 */
+  membershipState?: TeamMembershipState;
 };
 
 export type TeamWorkspaceTemplate = {
@@ -3583,6 +3587,7 @@ export type TeamWorkspaceTemplate = {
   branch: string;
   directoryPath: string;
   enabled: boolean;
+  membershipState?: TeamMembershipState;
 };
 
 export type TeamWorkspaceVersion = {
@@ -3594,6 +3599,7 @@ export type TeamWorkspaceVersion = {
   status: string;
   targetCommitHash?: string | null;
   updatedAt: string;
+  membershipState?: TeamMembershipState;
 };
 
 export type TeamPersonalWorkspace = {

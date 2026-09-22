@@ -925,7 +925,11 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   }
 
   function teamScopeQuery(scope: TeamScopeParams): string {
-    return query({ scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId });
+    return query({
+      scopeMode: scope.scopeMode ?? "MY_TEAM",
+      ownerUserId: scope.ownerUserId,
+      targetUserId: scope.targetUserId
+    });
   }
 
   function teamSocketKey(scope: TeamScopeParams, personalWorkspaceId: string): string {

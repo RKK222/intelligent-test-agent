@@ -6,5 +6,6 @@ public record TeamWorkspaceApplicationRow(
         String appName,
         boolean enabled,
         long currentMemberCount,
-        long historicalMemberCount) {
+        long historicalMemberCount,
+        String membershipState) {
 }

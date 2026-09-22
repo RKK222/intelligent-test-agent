@@ -31,6 +31,8 @@ export type AppItem = {
   name: string;
   description?: string;
   icon?: string;
+  /** 管理视角中已退出、但仍保留个人工作区或提交记录的应用。 */
+  historical?: boolean;
 };
 
 export type RuntimeInventoryItem = {
@@ -129,17 +131,6 @@ const props = withDefaults(
     /** 工作视角与管理视角分离，不写入当前运行工作区类型。 */
     perspective?: "WORK" | "TEAM_MANAGEMENT";
     canEnterTeamManagement?: boolean;
-    teamScopeMode?: "MY_TEAM" | "SYSTEM_ADMIN_TEAM" | "GLOBAL";
-    teamScopeLocked?: boolean;
-    teamScopeLabel?: string;
-    teamOwnerUserId?: string;
-    teamOwners?: { id: string; label: string }[];
-    teamApplications?: { id: string; label: string }[];
-    teamApplicationId?: string;
-    teamTemplates?: { id: string; label: string }[];
-    teamTemplateId?: string;
-    teamVersions?: { id: string; label: string }[];
-    teamVersionId?: string;
   }>(),
   {
     apps: () => [
@@ -186,15 +177,7 @@ const props = withDefaults(
     showLeftPanel: true,
     showRightPanel: true,
     perspective: "WORK",
-    canEnterTeamManagement: false,
-    teamScopeMode: "MY_TEAM",
-    teamScopeLocked: true,
-    teamScopeLabel: "我的团队",
-    teamOwnerUserId: "",
-    teamOwners: () => [],
-    teamApplications: () => [],
-    teamTemplates: () => [],
-    teamVersions: () => []
+    canEnterTeamManagement: false
   }
 );
 
@@ -252,10 +235,6 @@ const emit = defineEmits<{
   (e: "load-more-notifications"): void;
   (e: "open-notification", notification: UserNotification): void;
   (e: "switch-workbench-perspective"): void;
-  (e: "select-team-scope", mode: "MY_TEAM" | "SYSTEM_ADMIN_TEAM" | "GLOBAL", ownerUserId?: string): void;
-  (e: "select-team-application", appId: string): void;
-  (e: "select-team-template", workspaceId: string): void;
-  (e: "select-team-version", versionId: string): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -266,7 +245,6 @@ const versionMenuOpen = ref(false);
 const headerCreateVersionOpen = ref(false);
 const headerCreateVersionTarget = ref<AppWorkspaceTemplate | null>(null);
 const userMenuOpen = ref(false);
-const teamContextMenu = ref<"scope" | "app" | "template" | "version" | null>(null);
 const runtimeInventoryOpen = ref(false);
 const runtimeInventoryFullscreen = ref(false);
 const runtimeInventoryWidth = ref(520);
@@ -353,7 +331,6 @@ function closeHeaderMenus() {
   closeWorkspaceMenu();
   closeVersionMenu();
   closeUserMenu();
-  teamContextMenu.value = null;
   closeRuntimeInventory();
   // 等待旁路答案时，工作台其它区域仍可正常操作，且不会误关掉结果承载浮层。
   if (!props.sideQuestionLoading) closeRobotQuestion();
@@ -370,40 +347,7 @@ function switchWorkbenchPerspective() {
   emit("switch-workbench-perspective");
 }
 
-function toggleTeamContextMenu(menu: "scope" | "app" | "template" | "version") {
-  teamContextMenu.value = teamContextMenu.value === menu ? null : menu;
-  closeAppMenu();
-  closeWorkspaceMenu();
-  closeVersionMenu();
-  closeUserMenu();
-}
-
-const teamApplicationLabel = computed(() =>
-  props.teamApplications.find((item) => item.id === props.teamApplicationId)?.label || "未选择应用");
-const teamTemplateLabel = computed(() =>
-  props.teamTemplates.find((item) => item.id === props.teamTemplateId)?.label || "未选择工作空间");
-const teamVersionLabel = computed(() =>
-  props.teamVersions.find((item) => item.id === props.teamVersionId)?.label || "未选择版本");
-
-function selectTeamScope(mode: "GLOBAL" | "SYSTEM_ADMIN_TEAM", ownerUserId?: string) {
-  teamContextMenu.value = null;
-  emit("select-team-scope", mode, ownerUserId);
-}
-
-function selectTeamApplication(appId: string) {
-  teamContextMenu.value = null;
-  emit("select-team-application", appId);
-}
-
-function selectTeamTemplate(workspaceId: string) {
-  teamContextMenu.value = null;
-  emit("select-team-template", workspaceId);
-}
-
-function selectTeamVersion(versionId: string) {
-  teamContextMenu.value = null;
-  emit("select-team-version", versionId);
-}
+const contextReview = computed(() => props.perspective === "TEAM_MANAGEMENT");
 
 function selectApp(app: AppItem) {
   emit("select-app", app.id);
@@ -527,8 +471,9 @@ watch(availableWorkspaceTemplates, (templates) => {
 
 function selectHeaderWorkspace(template: AppWorkspaceTemplate) {
   closeWorkspaceMenu();
-  if (!template.versions) {
-    pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
+  // 管理视角由父组件按当前成员保留版本，不在菜单里自动改成第一项。
+  if (contextReview.value || !template.versions) {
+    if (!contextReview.value) pendingHeaderDefaultVersionTemplateId.value = template.workspaceId;
     emit("load-versions", template.workspaceId);
     return;
   }
@@ -2351,149 +2296,6 @@ function submitJoinApp() {
           <span class="figma-context-fixed-badge">不可切换</span>
         </div>
       </div>
-      <div
-        v-else-if="perspective === 'TEAM_MANAGEMENT'"
-        class="figma-header-center"
-        aria-label="管理范围、应用、工作空间和版本"
-      >
-        <div
-          :class="['figma-context-rail', teamContextMenu && 'has-open-menu']"
-          data-testid="team-context-rail"
-        >
-          <div class="figma-app-menu-wrapper" @click.stop>
-            <button
-              type="button"
-              :class="['figma-app-menu-trigger', teamContextMenu === 'scope' && 'is-open']"
-              data-testid="team-scope-selector"
-              aria-haspopup="listbox"
-              :aria-expanded="teamContextMenu === 'scope'"
-              :aria-label="`管理范围：${teamScopeLabel}`"
-              :disabled="teamScopeLocked"
-              @click="toggleTeamContextMenu('scope')"
-            >
-              <span class="figma-context-menu-key">管理范围</span>
-              <span class="figma-app-menu-name figma-context-menu-value">{{ teamScopeLabel }}</span>
-              <ChevronDown v-if="!teamScopeLocked" class="figma-app-menu-chevron" :class="{ 'is-open': teamContextMenu === 'scope' }" />
-            </button>
-            <ul v-if="teamContextMenu === 'scope'" class="figma-app-menu-dropdown" role="listbox">
-              <li
-                :class="['figma-app-menu-item', teamScopeMode === 'GLOBAL' && 'is-active']"
-                role="option"
-                tabindex="0"
-                @mousedown.prevent="selectTeamScope('GLOBAL')"
-              >
-                <div class="figma-app-menu-item-main">
-                  <span class="figma-app-menu-item-name">全平台只读</span>
-                </div>
-              </li>
-              <li class="figma-app-menu-divider" role="presentation" />
-              <li v-if="!teamOwners.length" class="figma-context-menu-empty">暂无系统管理员</li>
-              <li
-                v-for="owner in teamOwners"
-                :key="owner.id"
-                :class="['figma-app-menu-item', teamScopeMode === 'SYSTEM_ADMIN_TEAM' && owner.id === teamOwnerUserId && 'is-active']"
-                role="option"
-                tabindex="0"
-                @mousedown.prevent="selectTeamScope('SYSTEM_ADMIN_TEAM', owner.id)"
-              >
-                <div class="figma-app-menu-item-main">
-                  <span class="figma-app-menu-item-name">{{ owner.label }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <div class="figma-app-menu-wrapper" @click.stop>
-            <button
-              type="button"
-              :class="['figma-app-menu-trigger', teamContextMenu === 'app' && 'is-open']"
-              data-testid="team-app-selector"
-              aria-haspopup="listbox"
-              :aria-expanded="teamContextMenu === 'app'"
-              :aria-label="`应用：${teamApplicationLabel}`"
-              @click="toggleTeamContextMenu('app')"
-            >
-              <span class="figma-context-menu-key">应用</span>
-              <span class="figma-app-menu-name figma-context-menu-value">{{ teamApplicationLabel }}</span>
-              <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': teamContextMenu === 'app' }" />
-            </button>
-            <ul v-if="teamContextMenu === 'app'" class="figma-app-menu-dropdown" role="listbox">
-              <li v-if="!teamApplications.length" class="figma-context-menu-empty">暂无应用</li>
-              <li
-                v-for="item in teamApplications"
-                :key="item.id"
-                :class="['figma-app-menu-item', item.id === teamApplicationId && 'is-active']"
-                role="option"
-                tabindex="0"
-                @mousedown.prevent="selectTeamApplication(item.id)"
-              >
-                <div class="figma-app-menu-item-main">
-                  <span class="figma-app-menu-item-name">{{ item.label }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <div class="figma-workspace-menu-wrapper" @click.stop>
-            <button
-              type="button"
-              :class="['figma-context-menu-trigger', teamContextMenu === 'template' && 'is-open']"
-              data-testid="team-template-selector"
-              aria-haspopup="listbox"
-              :aria-expanded="teamContextMenu === 'template'"
-              :aria-label="`工作空间：${teamTemplateLabel}`"
-              @click="toggleTeamContextMenu('template')"
-            >
-              <span class="figma-context-menu-key">工作空间</span>
-              <span class="figma-context-menu-value">{{ teamTemplateLabel }}</span>
-              <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': teamContextMenu === 'template' }" />
-            </button>
-            <ul v-if="teamContextMenu === 'template'" class="figma-app-menu-dropdown figma-context-menu-dropdown" role="listbox">
-              <li v-if="!teamTemplates.length" class="figma-context-menu-empty">暂无工作空间</li>
-              <li
-                v-for="item in teamTemplates"
-                :key="item.id"
-                :class="['figma-app-menu-item', item.id === teamTemplateId && 'is-active']"
-                role="option"
-                tabindex="0"
-                @mousedown.prevent="selectTeamTemplate(item.id)"
-              >
-                <div class="figma-app-menu-item-main">
-                  <span class="figma-app-menu-item-name">{{ item.label }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <div class="figma-version-menu-wrapper" @click.stop>
-            <button
-              type="button"
-              :class="['figma-context-menu-trigger', teamContextMenu === 'version' && 'is-open']"
-              data-testid="team-version-selector"
-              aria-haspopup="listbox"
-              :aria-expanded="teamContextMenu === 'version'"
-              :aria-label="`版本：${teamVersionLabel}`"
-              @click="toggleTeamContextMenu('version')"
-            >
-              <span class="figma-context-menu-key">版本</span>
-              <span class="figma-context-menu-value">{{ teamVersionLabel }}</span>
-              <ChevronDown class="figma-app-menu-chevron" :class="{ 'is-open': teamContextMenu === 'version' }" />
-            </button>
-            <ul v-if="teamContextMenu === 'version'" class="figma-app-menu-dropdown figma-context-menu-dropdown is-version" role="listbox">
-              <li v-if="!teamVersions.length" class="figma-context-menu-empty">暂无版本</li>
-              <li
-                v-for="item in teamVersions"
-                :key="item.id"
-                :class="['figma-app-menu-item', item.id === teamVersionId && 'is-active']"
-                role="option"
-                tabindex="0"
-                @mousedown.prevent="selectTeamVersion(item.id)"
-              >
-                <div class="figma-app-menu-item-main">
-                  <span class="figma-app-menu-item-name">{{ item.label }}</span>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
       <div v-else class="figma-header-center" aria-label="应用、工作空间和版本">
         <div
           :class="[
@@ -2529,12 +2331,13 @@ function submitJoinApp() {
             >
               <div class="figma-app-menu-item-main">
                 <span class="figma-app-menu-item-name">{{ app.name }}</span>
-                <span v-if="app.description" class="figma-app-menu-item-desc">{{ app.description }}</span>
+                <span v-if="app.historical" class="figma-app-menu-item-desc">历史</span>
+                <span v-else-if="app.description" class="figma-app-menu-item-desc">{{ app.description }}</span>
               </div>
               <span v-if="app.id === selectedApp?.id" class="figma-app-menu-item-check">✓</span>
             </li>
-            <li class="figma-app-menu-divider" />
-            <li class="figma-app-menu-item is-add-app" role="option" tabindex="0" @mousedown.prevent="openAddApp">
+            <li v-if="!contextReview" class="figma-app-menu-divider" />
+            <li v-if="!contextReview" class="figma-app-menu-item is-add-app" role="option" tabindex="0" @mousedown.prevent="openAddApp">
               <div class="figma-app-menu-item-main figma-app-menu-add-item">
                 <span class="figma-app-menu-add-icon">+</span>
                 <span class="figma-app-menu-add-text">加入其他应用</span>
@@ -2781,7 +2584,7 @@ function submitJoinApp() {
                     template.gitAccessStatus === 'INACCESSIBLE' && 'is-git-inaccessible'
                   ]"
                 >
-                  服务器 · {{ managedWorkspaceGitAccessHint(template) || template.branch }}
+                  {{ template.historical ? "历史 · " : "" }}服务器 · {{ managedWorkspaceGitAccessHint(template) || template.branch }}
                 </span>
                 <span v-if="template.workspaceId === headerWorkspaceTemplate?.workspaceId" class="figma-app-menu-item-check">✓</span>
               </button>
@@ -2836,16 +2639,16 @@ function submitJoinApp() {
             >
               <div class="figma-app-menu-item-main">
                 <span class="figma-app-menu-item-name">{{ version.version }}</span>
-                <span class="figma-app-menu-item-desc">{{ version.branch }}</span>
+                <span class="figma-app-menu-item-desc">{{ version.historical ? "历史 · " : "" }}{{ version.branch }}</span>
               </div>
               <span v-if="version.versionId === selectedVersionId" class="figma-app-menu-item-check">✓</span>
             </li>
             <li
-              v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate"
+              v-if="!contextReview && workspaceKind === 'MANAGED' && headerWorkspaceTemplate"
               class="figma-app-menu-divider"
               role="presentation"
             />
-            <li v-if="workspaceKind === 'MANAGED' && headerWorkspaceTemplate" role="presentation">
+            <li v-if="!contextReview && workspaceKind === 'MANAGED' && headerWorkspaceTemplate" role="presentation">
               <button
                 type="button"
                 class="figma-app-menu-item is-add-app figma-version-menu-create"

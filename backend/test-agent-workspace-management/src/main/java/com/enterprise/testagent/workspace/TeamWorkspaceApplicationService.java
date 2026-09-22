@@ -66,30 +66,39 @@ public class TeamWorkspaceApplicationService {
                 scmGitIdentityResolver, "scmGitIdentityResolver must not be null");
     }
 
-    public List<TeamWorkspaceResponses.ApplicationResponse> applications(boolean global, UserId owner) {
-        return queries.findApplications(global, owner).stream()
+    /**
+     * target 为空时返回团队级列表；传入后只返回该成员当前或历史可审阅的应用。
+     * 成员状态随列表返回，供菜单标记历史范围。
+     */
+    public List<TeamWorkspaceResponses.ApplicationResponse> applications(
+            boolean global, UserId owner, UserId target) {
+        return queries.findApplications(global, owner, target).stream()
                 .map(value -> new TeamWorkspaceResponses.ApplicationResponse(
                         value.appId(), value.appName(), value.enabled(),
-                        value.currentMemberCount(), value.historicalMemberCount()))
+                        value.currentMemberCount(), value.historicalMemberCount(),
+                        value.membershipState().name()))
                 .toList();
     }
 
     public List<TeamWorkspaceResponses.WorkspaceTemplateResponse> workspaceTemplates(
-            boolean global, UserId owner, String appId) {
-        return queries.findWorkspaceTemplates(global, owner, appId).stream()
+            boolean global, UserId owner, String appId, UserId target) {
+        return queries.findWorkspaceTemplates(global, owner, appId, target).stream()
                 .map(value -> new TeamWorkspaceResponses.WorkspaceTemplateResponse(
                         value.workspaceId(), value.appId(), value.workspaceName(), value.branch(),
-                        value.directoryPath(), value.enabled()))
+                        value.directoryPath(), value.enabled(), value.membershipState().name()))
                 .toList();
     }
 
     public List<TeamWorkspaceResponses.WorkspaceVersionResponse> versions(
-            boolean global, UserId owner, String workspaceId) {
-        return queries.findWorkspaceVersions(global, owner, workspaceId).stream()
-                .map(value -> value.version())
-                .map(value -> new TeamWorkspaceResponses.WorkspaceVersionResponse(
-                        value.versionId().value(), value.applicationWorkspaceId().value(), value.appId().value(),
-                        value.version(), value.branch(), value.status().name(), value.targetCommitHash(), value.updatedAt()))
+            boolean global, UserId owner, String workspaceId, UserId target) {
+        return queries.findWorkspaceVersions(global, owner, workspaceId, target).stream()
+                .map(value -> {
+                    var version = value.version();
+                    return new TeamWorkspaceResponses.WorkspaceVersionResponse(
+                            version.versionId().value(), version.applicationWorkspaceId().value(),
+                            version.appId().value(), version.version(), version.branch(), version.status().name(),
+                            version.targetCommitHash(), version.updatedAt(), value.membershipState().name());
+                })
                 .toList();
     }
 
@@ -269,7 +278,7 @@ public class TeamWorkspaceApplicationService {
         }
         PersonalWorkspace personal = view.workspace();
         ApplicationWorkspaceVersion version = queries.findWorkspaceVersions(
-                        global, owner, personal.applicationWorkspaceId().value()).stream()
+                        global, owner, personal.applicationWorkspaceId().value(), null).stream()
                 .map(value -> value.version())
                 .filter(value -> value.versionId().equals(personal.versionId()))
                 .findFirst()

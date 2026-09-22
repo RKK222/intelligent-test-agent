@@ -10,6 +10,7 @@
             <arg column="enabled" javaType="_boolean"/>
             <arg column="current_member_count" javaType="_long"/>
             <arg column="historical_member_count" javaType="_long"/>
+            <arg column="membership_state" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -21,6 +22,7 @@
             <arg column="branch" javaType="java.lang.String"/>
             <arg column="directory_path" javaType="java.lang.String"/>
             <arg column="enabled" javaType="_boolean"/>
+            <arg column="membership_state" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -41,6 +43,7 @@
             <arg column="target_commit_updated_at" javaType="java.time.Instant"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="membership_state" javaType="java.lang.String"/>
         </constructor>
     </resultMap>
 
@@ -74,53 +77,100 @@
         </constructor>
     </resultMap>
 
+    <!-- targetUserId 为空时保持原团队列表；有值时只保留该成员的当前权限或历史个人工作区。空值必须声明 VARCHAR，否则 PostgreSQL 无法判断 is null 参数类型。 -->
     <select id="findApplications" resultMap="ApplicationRowMap">
-        select a.app_id, a.app_name, a.enabled,
-               (select count(distinct am.user_id)
-                from application_members am
+        select base.app_id, base.app_name, base.enabled,
+               base.current_member_count, base.historical_member_count,
+               case
+                   when #{targetUserId,jdbcType=VARCHAR} is null or #{targetUserId,jdbcType=VARCHAR} = '' then
+                       case when base.current_member_count > 0 then 'CURRENT' else 'HISTORICAL' end
+                   when exists (
+                       select 1 from application_members target_member
+                       where target_member.app_id = base.app_id
+                         and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                         and target_member.deleted_at is null
+                   ) then 'CURRENT'
+                   else 'HISTORICAL'
+               end as membership_state
+        from (
+            select a.app_id, a.app_name, a.enabled,
+                   (select count(distinct am.user_id)
+                    from application_members am
+                    where am.app_id = a.app_id and am.deleted_at is null
+                      and (#{globalScope} = true or exists (
+                          select 1 from system_admin_team_members team
+                          where team.owner_user_id = #{ownerUserId}
+                            and team.member_user_id = am.user_id and team.deleted_at is null
+                      ))) as current_member_count,
+                   (select count(distinct pw.user_id)
+                    from personal_workspaces pw
+                    where pw.app_id = a.app_id
+                      and (#{globalScope} = true or exists (
+                          select 1 from system_admin_team_members team
+                          where team.owner_user_id = #{ownerUserId}
+                            and team.member_user_id = pw.user_id and team.deleted_at is null
+                      ))
+                      and not exists (
+                          select 1 from application_members current_member
+                          where current_member.app_id = a.app_id
+                            and current_member.user_id = pw.user_id
+                            and current_member.deleted_at is null
+                      )) as historical_member_count
+            from applications a
+            where exists (
+                select 1 from application_members am
                 where am.app_id = a.app_id and am.deleted_at is null
                   and (#{globalScope} = true or exists (
                       select 1 from system_admin_team_members team
                       where team.owner_user_id = #{ownerUserId}
                         and team.member_user_id = am.user_id and team.deleted_at is null
-                  ))) as current_member_count,
-               (select count(distinct pw.user_id)
-                from personal_workspaces pw
+                  ))
+            ) or exists (
+                select 1 from personal_workspaces pw
                 where pw.app_id = a.app_id
                   and (#{globalScope} = true or exists (
                       select 1 from system_admin_team_members team
                       where team.owner_user_id = #{ownerUserId}
                         and team.member_user_id = pw.user_id and team.deleted_at is null
                   ))
-                  and not exists (
-                      select 1 from application_members current_member
-                      where current_member.app_id = a.app_id
-                        and current_member.user_id = pw.user_id
-                        and current_member.deleted_at is null
-                  )) as historical_member_count
-        from applications a
-        where exists (
-            select 1 from application_members am
-            where am.app_id = a.app_id and am.deleted_at is null
-              and (#{globalScope} = true or exists (
-                  select 1 from system_admin_team_members team
-                  where team.owner_user_id = #{ownerUserId}
-                    and team.member_user_id = am.user_id and team.deleted_at is null
-              ))
-        ) or exists (
-            select 1 from personal_workspaces pw
-            where pw.app_id = a.app_id
-              and (#{globalScope} = true or exists (
-                  select 1 from system_admin_team_members team
-                  where team.owner_user_id = #{ownerUserId}
-                    and team.member_user_id = pw.user_id and team.deleted_at is null
-              ))
-        )
-        order by a.app_name, a.app_id
+            )
+        ) base
+        where #{targetUserId,jdbcType=VARCHAR} is null or #{targetUserId,jdbcType=VARCHAR} = ''
+           or exists (
+               select 1 from application_members target_member
+               where target_member.app_id = base.app_id
+                 and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                 and target_member.deleted_at is null
+           )
+           or exists (
+               select 1 from personal_workspaces target_workspace
+               where target_workspace.app_id = base.app_id
+                 and target_workspace.user_id = #{targetUserId,jdbcType=VARCHAR}
+           )
+        order by base.app_name, base.app_id
     </select>
 
     <select id="findWorkspaceTemplates" resultMap="TemplateRowMap">
-        select aw.workspace_id, aw.app_id, aw.workspace_name, aw.branch, aw.directory_path, aw.enabled
+        select aw.workspace_id, aw.app_id, aw.workspace_name, aw.branch, aw.directory_path, aw.enabled,
+               case
+                   when #{targetUserId,jdbcType=VARCHAR} is not null and #{targetUserId,jdbcType=VARCHAR} &lt;&gt; '' then
+                       case when exists (
+                           select 1 from application_members target_member
+                           where target_member.app_id = aw.app_id
+                             and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                             and target_member.deleted_at is null
+                       ) then 'CURRENT' else 'HISTORICAL' end
+                   when exists (
+                       select 1 from application_members am
+                       where am.app_id = aw.app_id and am.deleted_at is null
+                         and (#{globalScope} = true or exists (
+                             select 1 from system_admin_team_members team
+                             where team.owner_user_id = #{ownerUserId}
+                               and team.member_user_id = am.user_id and team.deleted_at is null
+                         ))
+                   ) then 'CURRENT'
+                   else 'HISTORICAL'
+               end as membership_state
         from application_workspaces aw
         where aw.app_id = #{appId}
           and (
@@ -143,6 +193,20 @@
                     ))
               )
           )
+          and (
+              #{targetUserId,jdbcType=VARCHAR} is null or #{targetUserId,jdbcType=VARCHAR} = ''
+              or exists (
+                  select 1 from application_members target_member
+                  where target_member.app_id = aw.app_id
+                    and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                    and target_member.deleted_at is null
+              )
+              or exists (
+                  select 1 from personal_workspaces target_workspace
+                  where target_workspace.application_workspace_id = aw.workspace_id
+                    and target_workspace.user_id = #{targetUserId,jdbcType=VARCHAR}
+              )
+          )
         order by aw.workspace_name, aw.workspace_id
     </select>
 
@@ -150,7 +214,26 @@
         select v.version_id, v.application_workspace_id, v.app_id, v.repository_id,
                v.version, v.branch, v.repo_root_path, v.workspace_root_path,
                v.runtime_workspace_id, v.created_by_user_id, v.status,
-               v.target_commit_hash, v.target_commit_updated_at, v.created_at, v.updated_at
+               v.target_commit_hash, v.target_commit_updated_at, v.created_at, v.updated_at,
+               case
+                   when #{targetUserId,jdbcType=VARCHAR} is not null and #{targetUserId,jdbcType=VARCHAR} &lt;&gt; '' then
+                       case when exists (
+                           select 1 from application_members target_member
+                           where target_member.app_id = v.app_id
+                             and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                             and target_member.deleted_at is null
+                       ) then 'CURRENT' else 'HISTORICAL' end
+                   when exists (
+                       select 1 from application_members am
+                       where am.app_id = v.app_id and am.deleted_at is null
+                         and (#{globalScope} = true or exists (
+                             select 1 from system_admin_team_members team
+                             where team.owner_user_id = #{ownerUserId}
+                               and team.member_user_id = am.user_id and team.deleted_at is null
+                         ))
+                   ) then 'CURRENT'
+                   else 'HISTORICAL'
+               end as membership_state
         from application_workspace_versions v
         where v.application_workspace_id = #{applicationWorkspaceId}
           and (
@@ -171,6 +254,20 @@
                         where team.owner_user_id = #{ownerUserId}
                           and team.member_user_id = pw.user_id and team.deleted_at is null
                     ))
+              )
+          )
+          and (
+              #{targetUserId,jdbcType=VARCHAR} is null or #{targetUserId,jdbcType=VARCHAR} = ''
+              or exists (
+                  select 1 from application_members target_member
+                  where target_member.app_id = v.app_id
+                    and target_member.user_id = #{targetUserId,jdbcType=VARCHAR}
+                    and target_member.deleted_at is null
+              )
+              or exists (
+                  select 1 from personal_workspaces target_workspace
+                  where target_workspace.app_workspace_version_id = v.version_id
+                    and target_workspace.user_id = #{targetUserId,jdbcType=VARCHAR}
               )
           )
         order by v.created_at desc, v.version_id

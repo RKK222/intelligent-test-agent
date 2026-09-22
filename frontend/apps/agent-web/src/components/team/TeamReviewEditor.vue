@@ -38,7 +38,12 @@ const diffFiles = computed<RunDiffFile[]>(() => {
     <div v-if="!activeTab" class="team-editor-empty">
       <p>选择左侧文件，或从右侧打开未提交修改和提交。</p>
     </div>
+    <div v-else-if="activeTab.loadState === 'error'" class="team-editor-body">
+      <p class="team-editor-error" role="alert">{{ activeTab.errorMessage || "内容无法读取" }}</p>
+      <button type="button" @click="controller.retryTab(activeTab.id)">重试</button>
+    </div>
     <div v-else-if="activeTab.kind === 'diff'" class="team-editor-body">
+      <p v-if="activeTab.loadState === 'loading'" class="team-editor-status">正在读取差异…</p>
       <DiffViewer
         review-mode="team"
         :files="diffFiles"
@@ -49,6 +54,12 @@ const diffFiles = computed<RunDiffFile[]>(() => {
     <div v-else class="team-editor-body">
       <div v-if="activeTab.progressive" class="team-editor-preview" role="status">
         <span>已加载 {{ formatPreviewBytes(activeTab.progressive.loadedBytes) }} / {{ formatPreviewBytes(activeTab.progressive.size) }}。继续加载可能占用较多内存。</span>
+        <span v-if="activeTab.errorMessage">{{ activeTab.errorMessage }}</span>
+        <button
+          v-if="activeTab.errorMessage"
+          type="button"
+          @click="controller.loadMorePreview(activeTab.id, false)"
+        >重试</button>
         <button
           v-if="!activeTab.progressive.eof"
           type="button"
@@ -62,10 +73,8 @@ const diffFiles = computed<RunDiffFile[]>(() => {
           @click="controller.loadMorePreview(activeTab.id, true)"
         >加载全部（可能卡顿）</button>
       </div>
-      <p v-if="activeTab.loadState === 'error'" class="team-editor-error" role="alert">{{ activeTab.errorMessage || "文件无法读取" }}</p>
-      <p v-else-if="activeTab.loadState === 'loading'" class="team-editor-status">正在读取文件…</p>
+      <p v-if="activeTab.loadState === 'loading'" class="team-editor-status">正在读取文件…</p>
       <CodeEditor
-        v-if="activeTab.loadState !== 'error'"
         :path="activeTab.path"
         :content="activeTab.content"
         readonly
@@ -134,6 +143,16 @@ const diffFiles = computed<RunDiffFile[]>(() => {
 }
 .team-editor-error {
   color: var(--ta-shell-accent, #c8161d);
+}
+.team-editor-body > button {
+  align-self: flex-start;
+  margin: 0 20px 16px;
+  border: 1px solid var(--ta-shell-border-strong, #d1d5db);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ta-shell-text, #111);
+  padding: 4px 8px;
+  cursor: pointer;
 }
 .team-editor-preview {
   display: flex;

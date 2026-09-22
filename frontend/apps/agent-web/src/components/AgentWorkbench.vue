@@ -127,9 +127,9 @@ import TeamReviewPane from "./team/TeamReviewPane.vue";
 import {
   createTeamManagementController,
   teamManagementKey,
-  teamScopeLabel,
   type WorkbenchPerspective
 } from "./team/team-management-controller";
+import type { AppWorkspaceTemplate } from "./WorkbenchFooter.vue";
 import type { UserNotificationFilter } from "./UserNotificationCenter.vue";
 import FirstLoginGuide from "./FirstLoginGuide.vue";
 import ExperienceWorkspaceDialog from "./ExperienceWorkspaceDialog.vue";
@@ -495,18 +495,7 @@ teamController.subscribe((next) => {
 });
 provide(teamManagementKey, teamController);
 
-const teamContextOptions = computed(() => ({
-  owners: teamView.value.owners.map((owner) => ({
-    id: owner.userId,
-    label: `${owner.username} · ${owner.unifiedAuthId}`
-  })),
-  applications: teamView.value.applications.map((item) => ({
-    id: item.appId,
-    label: `${item.appName}（当前 ${item.currentMemberCount} / 历史 ${item.historicalMemberCount}）`
-  })),
-  templates: teamView.value.templates.map((item) => ({ id: item.workspaceId, label: item.workspaceName })),
-  versions: teamView.value.versions.map((item) => ({ id: item.versionId, label: `${item.version} · ${item.branch}` }))
-}));
+const teamPerspectiveActive = computed(() => workbenchPerspective.value === "TEAM_MANAGEMENT");
 
 function enterTeamManagement() {
   if (!canEnterTeamManagement.value || workbenchPerspective.value === "TEAM_MANAGEMENT") return;
@@ -522,8 +511,20 @@ function enterTeamManagement() {
     teamReturnRoute.value = null;
   }
   workbenchPerspective.value = "TEAM_MANAGEMENT";
-  void teamController.enter(isSuperAdmin.value);
+  void teamController.enter(isSuperAdmin.value, {
+    appId: selectedAppId.value ?? undefined,
+    templateId: selectedWorkspace.value?.applicationWorkspaceId ?? undefined,
+    versionId: selectedVersionId.value ?? undefined
+  });
   if (route.name !== "workbench") void router.replace({ name: "workbench" });
+}
+
+/** 活动栏进入其它页面时退出管理视角，且不把原来的返回地址再导航一次。 */
+function leaveTeamPerspectiveForPageNavigation() {
+  if (workbenchPerspective.value !== "TEAM_MANAGEMENT") return;
+  teamReturnRoute.value = null;
+  workbenchPerspective.value = "WORK";
+  teamController.exit();
 }
 
 function exitTeamManagement() {
@@ -538,6 +539,30 @@ function exitTeamManagement() {
 function toggleTeamManagement() {
   if (workbenchPerspective.value === "TEAM_MANAGEMENT") exitTeamManagement();
   else enterTeamManagement();
+}
+
+function onHeaderSelectApp(appId: string) {
+  if (workbenchPerspective.value === "TEAM_MANAGEMENT") {
+    void teamController.selectApplication(appId);
+    return;
+  }
+  void handleSelectApp(appId);
+}
+
+function onHeaderLoadVersions(templateId: string) {
+  if (workbenchPerspective.value === "TEAM_MANAGEMENT") {
+    void teamController.selectTemplate(templateId);
+    return;
+  }
+  void handleLoadVersions(templateId);
+}
+
+function onHeaderSelectVersion(payload: { template: AppWorkspaceTemplate; version: { versionId: string } }) {
+  if (workbenchPerspective.value === "TEAM_MANAGEMENT") {
+    void teamController.selectVersion(payload.version.versionId);
+    return;
+  }
+  void handleSelectVersion(payload as Parameters<typeof handleSelectVersion>[0]);
 }
 
 watch(canEnterTeamManagement, (allowed) => {
@@ -879,6 +904,7 @@ watch(centerMode, (newMode, oldMode) => {
 });
 
 watch((): RoutedCenterMode | null => routedCenterModeFromRouteName(route.name), (routeMode) => {
+  if (routeMode) leaveTeamPerspectiveForPageNavigation();
   const next = routeCenterTransition(routeMode, centerMode.value, centerModeBeforeRoute.value);
   centerModeBeforeRoute.value = next.beforeRoute;
   centerMode.value = next.mode;
@@ -1029,6 +1055,7 @@ watch(
 
 async function openWorkspacePage(id: WorkspacePageId, replace = false) {
   if (!canOpenWorkspacePage(id, workspacePageRoles.value, supportAccessRevealed.value, customMenuIds.value)) return;
+  leaveTeamPerspectiveForPageNavigation();
   applyWorkspacePageTabsState(openWorkspacePageTab(workspacePageTabsState.value, id));
   mountWorkspacePage(id);
   const target = workspacePageRoute(id, workspacePageRoles.value);
@@ -2202,6 +2229,43 @@ const appTemplatesWithVersions = computed(() =>
     versions: versionsByTemplateId.value[template.workspaceId]
   }))
 );
+const headerApps = computed(() => teamPerspectiveActive.value
+  ? teamView.value.applications.map((app) => ({
+    id: app.appId,
+    name: app.appName,
+    historical: app.membershipState === "HISTORICAL"
+  }))
+  : shellApps.value);
+const headerTemplates = computed<AppWorkspaceTemplate[]>(() => {
+  if (!teamPerspectiveActive.value) return appTemplatesWithVersions.value;
+  const versions = teamView.value.versions.map((version) => ({
+    versionId: version.versionId,
+    applicationWorkspaceId: version.applicationWorkspaceId,
+    appId: version.appId,
+    repositoryId: "",
+    version: version.version,
+    branch: version.branch,
+    status: version.status,
+    targetCommitHash: version.targetCommitHash,
+    createdAt: version.updatedAt,
+    updatedAt: version.updatedAt,
+    historical: version.membershipState === "HISTORICAL"
+  }));
+  return teamView.value.templates.map((template) => ({
+    workspaceId: template.workspaceId,
+    appId: template.appId,
+    repositoryId: "",
+    branch: template.branch,
+    directoryPath: template.directoryPath,
+    workspaceName: template.workspaceName,
+    enabled: template.enabled,
+    createdAt: "",
+    updatedAt: "",
+    standard: true,
+    historical: template.membershipState === "HISTORICAL",
+    versions: template.workspaceId === teamView.value.selectedTemplateId ? versions : undefined
+  }));
+});
 // 当前选中的版本 ID：默认从 selectedWorkspaceId 与 recent 偏好反查；切到版本后由 handleSelectVersion 更新。
 const currentVersionFromWorkspace = ref<string | undefined>(undefined);
 const selectedVersionId = computed(() => currentVersionFromWorkspace.value);
@@ -10887,6 +10951,7 @@ function handleCloseRobotSideQuestion() {
 }
 
 async function openSettingsRoute() {
+  leaveTeamPerspectiveForPageNavigation();
   if (route.name === "settings") {
     settingsOpen.value = true;
     return;
@@ -12860,22 +12925,22 @@ async function handleLogout() {
     :bottom-open="bottomDrawerOpen"
     :show-left-panel="leftPanelOpen"
     :show-right-panel="rightPanelOpen"
-    :apps="shellApps"
-    :joinable-apps="joinableApps"
-    :selected-app-id="selectedAppId"
-    :app-templates="appTemplatesWithVersions"
-    :local-workspaces="localWorkspaces"
-    :show-app-source="Boolean(selectedManagedApplication)"
-    :workspace-kind="selectedWorkspaceKind"
+    :apps="headerApps"
+    :joinable-apps="teamPerspectiveActive ? [] : joinableApps"
+    :selected-app-id="teamPerspectiveActive ? (teamView.selectedAppId || undefined) : selectedAppId"
+    :app-templates="headerTemplates"
+    :local-workspaces="teamPerspectiveActive ? [] : localWorkspaces"
+    :show-app-source="teamPerspectiveActive ? false : Boolean(selectedManagedApplication)"
+    :workspace-kind="teamPerspectiveActive ? 'MANAGED' : selectedWorkspaceKind"
     :app-source-repositories="appSourceRepositories"
     :loading-app-source-repositories="appSourcePickerLoading"
     :app-source-repositories-error="appSourcePickerError"
     :selected-app-source-repository-id="appSourceContext?.repositoryId"
-    :selected-workspace-template-id="selectedWorkspaceKind === 'MANAGED' ? (selectedWorkspace?.applicationWorkspaceId ?? undefined) : undefined"
-    :selected-local-workspace-id="selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedWorkspace?.workspaceId : undefined"
-    :selected-version-id="selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined"
-    :loading-app-templates="loadingAppTemplates"
-    :loading-app-versions="loadingAppVersions"
+    :selected-workspace-template-id="teamPerspectiveActive ? (teamView.selectedTemplateId || undefined) : (selectedWorkspaceKind === 'MANAGED' ? (selectedWorkspace?.applicationWorkspaceId ?? undefined) : undefined)"
+    :selected-local-workspace-id="teamPerspectiveActive ? undefined : (selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedWorkspace?.workspaceId : undefined)"
+    :selected-version-id="teamPerspectiveActive ? (teamView.selectedVersionId || undefined) : (selectedWorkspaceKind === 'MANAGED' ? selectedVersionId : undefined)"
+    :loading-app-templates="teamPerspectiveActive ? teamView.catalogLoading : loadingAppTemplates"
+    :loading-app-versions="teamPerspectiveActive ? teamView.catalogLoading : loadingAppVersions"
     :creating-version="creatingVersion"
     :help-center-open="helpCenterOpen"
     :current-user-name="authStore.currentUser?.username"
@@ -12907,17 +12972,6 @@ async function handleLogout() {
     :runtime-inventory="runtimeInventoryForShell"
     :perspective="workbenchPerspective"
     :can-enter-team-management="canEnterTeamManagement"
-    :team-scope-mode="teamView.scopeMode"
-    :team-scope-locked="teamView.scopeLocked"
-    :team-scope-label="teamScopeLabel(teamView)"
-    :team-owner-user-id="teamView.ownerUserId"
-    :team-owners="teamContextOptions.owners"
-    :team-applications="teamContextOptions.applications"
-    :team-application-id="teamView.selectedAppId"
-    :team-templates="teamContextOptions.templates"
-    :team-template-id="teamView.selectedTemplateId"
-    :team-versions="teamContextOptions.versions"
-    :team-version-id="teamView.selectedVersionId"
     :notifications="notificationItems"
     :notification-unread-count="notificationUnreadCount"
     :notification-filter="notificationFilter"
@@ -12927,11 +12981,11 @@ async function handleLogout() {
     :notifications-error="notificationsError"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
-    @select-app="handleSelectApp"
+    @select-app="onHeaderSelectApp"
     @select-local-workspace="handleSelectLocalWorkspace"
     @open-experience="toggleExperienceWorkspace"
-    @load-versions="handleLoadVersions"
-    @select-version="handleSelectVersion"
+    @load-versions="onHeaderLoadVersions"
+    @select-version="onHeaderSelectVersion"
     @create-version="handleCreateVersion"
     @open-app-source="openAppSourcePicker"
     @load-app-source-repositories="loadAppSourceRepositories"
@@ -12953,10 +13007,6 @@ async function handleLogout() {
     @load-more-notifications="loadMoreUserNotifications"
     @open-notification="handleOpenNotification"
     @switch-workbench-perspective="toggleTeamManagement"
-    @select-team-scope="(mode, ownerUserId) => teamController.selectScope(mode, ownerUserId)"
-    @select-team-application="teamController.selectApplication"
-    @select-team-template="teamController.selectTemplate"
-    @select-team-version="teamController.selectVersion"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">

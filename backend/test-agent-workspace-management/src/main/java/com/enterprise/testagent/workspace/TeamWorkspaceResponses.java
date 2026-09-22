@@ -14,7 +14,8 @@ public final class TeamWorkspaceResponses {
             String appName,
             boolean enabled,
             long currentMemberCount,
-            long historicalMemberCount) {
+            long historicalMemberCount,
+            String membershipState) {
     }
 
     public record WorkspaceTemplateResponse(
@@ -23,7 +24,8 @@ public final class TeamWorkspaceResponses {
             String workspaceName,
             String branch,
             String directoryPath,
-            boolean enabled) {
+            boolean enabled,
+            String membershipState) {
     }
 
     public record WorkspaceVersionResponse(
@@ -34,7 +36,8 @@ public final class TeamWorkspaceResponses {
             String branch,
             String status,
             String targetCommitHash,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String membershipState) {
     }
 
     public record ContributionResponse(

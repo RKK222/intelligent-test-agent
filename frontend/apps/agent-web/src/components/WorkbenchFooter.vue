@@ -18,10 +18,14 @@ export type PreviewMode = "off" | "full" | "split";
 // 透传类型：直接复用后端 VO（ApplicationWorkspaceTemplate / ApplicationWorkspaceVersion），
 // 父组件负责把 versions 懒加载后回填到 template.versions 上。
 export type AppWorkspaceTemplate = ApplicationWorkspaceTemplate & {
-  versions?: ApplicationWorkspaceVersion[];
+  versions?: AppWorkspaceVersion[];
   standard?: boolean;
+  /** 管理视角标记已退出应用但仍可审阅的历史范围。 */
+  historical?: boolean;
 };
-export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
+export type AppWorkspaceVersion = ApplicationWorkspaceVersion & {
+  historical?: boolean;
+};
 
 const props = defineProps<{
   /** 写入路径（编辑器模式显示） */

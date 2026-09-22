@@ -85,9 +85,10 @@ public class TeamWorkspaceController {
     public Mono<ApiResponse<List<ApplicationResponse>>> applications(
             @RequestParam(required = false) TeamScopeMode scopeMode,
             @RequestParam(required = false) String ownerUserId,
+            @RequestParam(required = false) String targetUserId,
             ServerWebExchange exchange) {
-        return blocking(exchange, scopeMode, ownerUserId, "APPLICATION_LIST", "TEAM", null,
-                scope -> workspaces.applications(scope.scope().global(), owner(scope)),
+        return blocking(exchange, scopeMode, ownerUserId, "APPLICATION_LIST", "TEAM", null, targetUserId,
+                scope -> workspaces.applications(scope.scope().global(), owner(scope), target(targetUserId)),
                 new TypeReference<>() { });
     }
 
@@ -96,9 +97,11 @@ public class TeamWorkspaceController {
             @PathVariable String appId,
             @RequestParam(required = false) TeamScopeMode scopeMode,
             @RequestParam(required = false) String ownerUserId,
+            @RequestParam(required = false) String targetUserId,
             ServerWebExchange exchange) {
         return blocking(exchange, scopeMode, ownerUserId, "WORKSPACE_TEMPLATE_LIST", "APPLICATION", appId,
-                scope -> workspaces.workspaceTemplates(scope.scope().global(), owner(scope), appId),
+                targetUserId,
+                scope -> workspaces.workspaceTemplates(scope.scope().global(), owner(scope), appId, target(targetUserId)),
                 new TypeReference<>() { });
     }
 
@@ -107,9 +110,11 @@ public class TeamWorkspaceController {
             @PathVariable String workspaceId,
             @RequestParam(required = false) TeamScopeMode scopeMode,
             @RequestParam(required = false) String ownerUserId,
+            @RequestParam(required = false) String targetUserId,
             ServerWebExchange exchange) {
         return blocking(exchange, scopeMode, ownerUserId, "VERSION_LIST", "WORKSPACE_TEMPLATE", workspaceId,
-                scope -> workspaces.versions(scope.scope().global(), owner(scope), workspaceId),
+                targetUserId,
+                scope -> workspaces.versions(scope.scope().global(), owner(scope), workspaceId, target(targetUserId)),
                 new TypeReference<>() { });
     }
 
@@ -359,14 +364,40 @@ public class TeamWorkspaceController {
             String resourceId,
             java.util.function.Function<AuthorizedScope, T> actionBody,
             TypeReference<ApiResponse<T>> ignored) {
+        return blocking(exchange, mode, ownerUserId, action, resourceType, resourceId, null, actionBody, ignored);
+    }
+
+    /**
+     * 成员上下文查询在返回前实时复核角色和团队归属，并把目标用户写入审计。
+     * 不传 targetUserId 时审计目标保持为空，列表仍是原团队级结果。
+     */
+    private <T> Mono<ApiResponse<T>> blocking(
+            ServerWebExchange exchange,
+            TeamScopeMode mode,
+            String ownerUserId,
+            String action,
+            String resourceType,
+            String resourceId,
+            String targetUserId,
+            java.util.function.Function<AuthorizedScope, T> actionBody,
+            TypeReference<ApiResponse<T>> ignored) {
         return Mono.fromCallable(() -> {
                     AuthorizedScope scope = authorize(exchange, mode, ownerUserId);
+                    var targetUser = targetUserId == null || targetUserId.isBlank()
+                            ? null
+                            : teams.authorizeTarget(
+                                    scope.actor().user().userId(), scope.scope().mode(), scope.scope().ownerUserId(),
+                                    new UserId(targetUserId)).target();
                     T result = actionBody.apply(scope);
-                    teams.recordOutcome(scope.actor(), null, action, resourceType, resourceId, null,
+                    teams.recordOutcome(scope.actor(), targetUser, action, resourceType, resourceId, null,
                             "SUCCESS", null, requestContext(exchange));
                     return ApiResponse.ok(result, RuntimeApiSupport.traceId(exchange));
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private UserId target(String targetUserId) {
+        return targetUserId == null || targetUserId.isBlank() ? null : new UserId(targetUserId);
     }
 
     private <T> Mono<ApiResponse<T>> personal(

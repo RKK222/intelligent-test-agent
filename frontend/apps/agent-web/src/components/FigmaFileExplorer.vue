@@ -81,6 +81,10 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   searchKeyword?: string;
   /** 文件树面板内错误（根目录加载失败时不覆盖全局反馈） */
   fileTreeError?: string | null;
+  /** 管理视角复用同一文件树，只保留浏览、搜索和刷新。 */
+  readonlyReview?: boolean;
+  /** 没有可打开工作区时的说明；管理视角用来提示缺少 default 个人工作空间。 */
+  emptyWorkspaceMessage?: string;
   /** 源码快照模式只关闭 Git/Agent 发布能力，普通文件 WebSocket 写入继续开放。 */
   workspaceKind?: SelectedWorkspaceKind;
   appSourceContext?: AppSourceWorkspaceContext | null;
@@ -173,7 +177,12 @@ const selectedEntries = ref<import("@test-agent/file-explorer").WorkspaceSelecti
 const tab = ref<ExplorerTab>("explorer");
 const totalChangedFileCount = ref<number | null>(null);
 const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? props.changedFiles.length);
-const managedWorkspaceMode = computed(() => (props.workspaceKind ?? "MANAGED") === "MANAGED");
+const managedWorkspaceMode = computed(() =>
+  !props.readonlyReview && (props.workspaceKind ?? "MANAGED") === "MANAGED"
+);
+const showChangesTab = computed(() =>
+  !props.readonlyReview && props.workspaceKind !== "APP_SOURCE" && props.workspaceKind !== "LOCAL_CLIENT"
+);
 const experienceWorkspaceMode = computed(() => props.workspaceKind === "EXPERIENCE");
 // Git diff 文件是当前目录内路径；把当前版本所属目录下传，才能与仓库级阻塞路径做无歧义映射。
 const selectedWorkspaceDirectoryPath = computed(() => {
@@ -458,7 +467,7 @@ defineExpose({
         <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
-        v-if="workspaceKind !== 'APP_SOURCE' && workspaceKind !== 'LOCAL_CLIENT'"
+        v-if="showChangesTab"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -489,7 +498,7 @@ defineExpose({
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="workspaceKind !== 'APP_SOURCE' && workspaceKind !== 'LOCAL_CLIENT'"
+        v-if="showChangesTab"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
@@ -529,7 +538,7 @@ defineExpose({
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
               <span class="figma-fe-section-title" :title="workspaceName">工作空间</span>
               <el-tooltip
-                v-if="personalWorkspaceBranch"
+                v-if="personalWorkspaceBranch && !readonlyReview"
                 :content="`当前 worktree: ${personalWorkspaceBranch}`"
                 placement="top"
                 :show-after="100"
@@ -541,7 +550,7 @@ defineExpose({
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
               <button
-                v-if="tab === 'explorer' && selectedEntries.length > 0"
+                v-if="!readonlyReview && tab === 'explorer' && selectedEntries.length > 0"
                 type="button"
                 class="figma-fe-section-action-btn figma-fe-plane-multi-btn"
                 :title="`缓存并跳转选中的 ${selectedEntries.length} 个文件`"
@@ -624,7 +633,7 @@ defineExpose({
               <button type="button" class="figma-fe-error-retry" @click="emit('refresh')">重试</button>
             </div>
             <div v-else-if="!workspaceId" class="figma-fe-empty-workspace">
-              当前应用尚未切换到可用工作区。
+              {{ emptyWorkspaceMessage || "当前应用尚未切换到可用工作区。" }}
             </div>
             <FileExplorer
               v-else
@@ -638,7 +647,9 @@ defineExpose({
               :loading-path="loadingPath"
               :hide-header="true"
               :hide-tabbar="true"
-              :can-write="!!canWrite"
+              :can-write="!!canWrite && !readonlyReview"
+              :can-download="!readonlyReview"
+              :can-attach="!!canWrite && !readonlyReview"
               :can-undo="canUndo"
               :active-tab="tab"
               :search-results="searchResults"
@@ -731,6 +742,7 @@ defineExpose({
       </template>
     </div>
     <WorkbenchFooter
+      v-if="!readonlyReview"
       :app-name="appName"
       :templates="appTemplates"
       :selected-version-id="selectedVersionId"

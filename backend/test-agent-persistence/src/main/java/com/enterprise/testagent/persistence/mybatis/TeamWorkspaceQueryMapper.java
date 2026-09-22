@@ -10,17 +10,20 @@ public interface TeamWorkspaceQueryMapper {
 
     List<TeamWorkspaceApplicationRow> findApplications(
             @Param("globalScope") boolean globalScope,
-            @Param("ownerUserId") String ownerUserId);
+            @Param("ownerUserId") String ownerUserId,
+            @Param("targetUserId") String targetUserId);
 
     List<TeamWorkspaceTemplateRow> findWorkspaceTemplates(
             @Param("globalScope") boolean globalScope,
             @Param("ownerUserId") String ownerUserId,
-            @Param("appId") String appId);
+            @Param("appId") String appId,
+            @Param("targetUserId") String targetUserId);
 
     List<TeamWorkspaceVersionRow> findWorkspaceVersions(
             @Param("globalScope") boolean globalScope,
             @Param("ownerUserId") String ownerUserId,
-            @Param("applicationWorkspaceId") String applicationWorkspaceId);
+            @Param("applicationWorkspaceId") String applicationWorkspaceId,
+            @Param("targetUserId") String targetUserId);
 
     List<TeamWorkspaceContributionRow> findContributions(
             @Param("globalScope") boolean globalScope,
