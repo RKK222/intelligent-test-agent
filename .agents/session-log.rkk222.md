@@ -17968,3 +17968,25 @@
 ### Result
 
 - #36 保持失败且未发布；旧服务未被替换。新的 Jenkins 构建完成前，真实对话验收仍未通过，不能宣称修复完成。
+
+## 2026-09-23 - 限定恢复 Jenkins BuildKit snapshot 缓存损坏
+
+### Why
+
+- Jenkins #37 已跨过 TLS 下载故障并完成后端、前端检查与构建，但 worker 镜像构建在复制 manager `go.mod` 时报告
+  `failed to stat active key during commit: snapshot ... does not exist`；这是测试机 BuildKit 内部缓存损坏，仍在发布前失败。
+
+### What
+
+- Jenkins worker 首次镜像构建保留缓存；仅当日志精确命中 active key / snapshot 不存在时，自动执行一次 `--no-cache`
+  重建。其它 Dockerfile、依赖、摘要或编译错误不会误触发重试，第二次失败继续失败关闭。
+- 发布契约脚本与测试环境 README 同步锁定这一限定恢复路径。
+
+### How
+
+- 错误识别基于完整 `docker build` 日志并依赖现有 `pipefail`；临时日志在成功和失败路径均清理，不删除或 prune
+  Docker 全局缓存，避免影响同机其它任务。
+
+### Result
+
+- #37 保持失败且没有替换旧服务；待下一次 Jenkins 构建验证无缓存恢复、worker smoke、发布和真实对话闭环。

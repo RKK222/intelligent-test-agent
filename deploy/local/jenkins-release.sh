@@ -269,7 +269,7 @@ validate_runtime_release_access() {
 }
 
 build_release() {
-    local worker_image build_version
+    local worker_image build_version worker_build_log
     validate_host
     echo '==> Verify Flyway migration naming and immutable bytes'
     maven_run \
@@ -311,11 +311,28 @@ build_release() {
     worker_image=$(worker_image_for_tag "${RELEASE_TAG}")
     build_version=$(manager_build_version "${GIT_COMMIT_FULL:-HEAD}")
     echo "==> Build and verify immutable OpenCode worker image ${worker_image}"
-    docker build \
+    worker_build_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build.XXXXXX")
+    if ! docker build \
         --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
         --tag "${worker_image}" \
         --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
-        "${repository_root}"
+        "${repository_root}" 2>&1 | tee "${worker_build_log}"; then
+        # 测试机构建缓存偶发丢失 BuildKit snapshot；只对该明确错误做一次无缓存重建，业务构建错误仍立即失败。
+        if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_build_log}"; then
+            rm -f -- "${worker_build_log}"
+            return 1
+        fi
+        echo 'BuildKit snapshot cache is inconsistent; retrying the worker image once without cache.' >&2
+        if ! docker build --no-cache \
+            --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
+            --tag "${worker_image}" \
+            --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
+            "${repository_root}"; then
+            rm -f -- "${worker_build_log}"
+            return 1
+        fi
+    fi
+    rm -f -- "${worker_build_log}"
     "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
 }
 

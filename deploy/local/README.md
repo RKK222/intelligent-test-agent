@@ -53,6 +53,8 @@ worker 直接复用 `deploy/internal/opencode-worker.Dockerfile`，每次 `DEPLO
 受控 `runtime.env` 的独立 token 接入本服务器 Java，流水线必须等到容器 healthy 且日志出现已应用的
 `manager_config_update`，不能只凭 worker 容器处于 `Up` 就判成功。旧 schema v1 release 本身没有 worker 清单，回滚
 只允许复用已经运行的受管 worker；若 worker 不存在则在停止当前应用前失败关闭。
+若 Docker BuildKit 明确报告内部 snapshot 缓存丢失，流水线只针对该错误自动执行一次 `--no-cache` 重建；其它业务构建
+错误不重试，第二次失败也会保持旧服务不变。
 
 发布目录位于 `/data2/deploy/intelligent-test-agent/releases/`，每个标签包含源码快照、后端 JAR、前端静态文件、
 应用 Compose、worker Compose 模型、逐文件 SHA-256、worker 镜像身份和发布前后 Flyway history。日志位于
