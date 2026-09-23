@@ -424,6 +424,8 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 
 当前 worker 固定 OpenCode `1.18.4` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
 
+外网构建阶段下载 GitHub release、许可证和固定源码时，对 TLS 握手断连等瞬时网络错误执行有界重试；文件大小、SHA-256 和程序版本校验仍是最终准入条件。重试耗尽或任一校验不一致时必须终止构建，不能复用不完整分片或跳过供应链校验。
+
 worker 还固定 Python `3.13.14`：外网 Mac 从 `PYTHON_SOURCE_BASE_URL` 指向的国内镜像下载官方源码，并校验 `23021880` 字节和 SHA-256 `639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690`，再在 Debian 11 bullseye/glibc 2.31 基线上编译。镜像提供 `python3`/`python`、pip、venv、curl、jq、zip/unzip；Git、OpenSSH、ripgrep、Node 和 procps 沿用既有能力。为控制镜像体积和供应链，镜像不保留 gcc/make 等编译器，也不直接烘焙业务第三方库，并通过 `PIP_NO_INDEX=1` 禁止默认访问公网索引。
 
 首批通用第三方库固定为 pandas `3.0.3`、openpyxl `3.1.5`、XlsxWriter `3.2.9`、python-docx `1.2.0`、jsonschema `4.26.0`、orjson `3.11.9` 及完整传递依赖。`deploy/internal/python-libs/requirements-linux-amd64.lock` 对每个 Python 3.13 / Linux amd64 wheel 固定 SHA-256；`package-python-libs.sh` 只下载二进制 wheel，断网安装到独立 `site-packages` 后执行 Excel、Word、pandas、标准 `json`、JSON Schema 和 orjson 功能 smoke，再生成 `FILES.sha256`。归档必须由交付镜像内的 Linux GNU tar 生成并复核；Mac `bsdtar` 可能隐藏自身写入的 `._*` AppleDouble/PAX 成员，目标机出现 `Unsafe or unexpected archive entry` 时不得跳过校验或重算 SHA，必须换用原始、通过 Linux 成员检查的归档。目标机使用下列命令独立部署，脚本先断网验证候选目录，再原子替换 `/data/testagent/python-libs`、只读挂载并重启 worker：

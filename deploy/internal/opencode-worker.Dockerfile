@@ -29,13 +29,14 @@ ARG TINI_SHA256=c5b0666b4cb676901f90dfcb37106783c5fe2077b04590973b885950611b30ee
 ARG RIPGREP_VERSION=15.2.0
 ARG RIPGREP_SHA256=33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c
 
+# Jenkins 与企业出口偶发在 GitHub TLS 握手阶段断连；把所有错误纳入有界重试，避免一次瞬时断连废弃整次发布。
 RUN set -eux; \
-    curl -fL --retry 3 --retry-delay 2 \
+    curl -fL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "https://github.com/krallin/tini/releases/download/v${TINI_VERSION}/tini-static-amd64" \
       -o /tmp/tini; \
     printf '%s  %s\n' "${TINI_SHA256}" /tmp/tini | sha256sum -c -; \
     install -m 0755 /tmp/tini /usr/local/bin/tini; \
-    curl -fL --retry 3 --retry-delay 2 \
+    curl -fL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
       -o /tmp/ripgrep.tar.gz; \
     printf '%s  %s\n' "${RIPGREP_SHA256}" /tmp/ripgrep.tar.gz | sha256sum -c -; \
@@ -122,7 +123,7 @@ RUN set -eux; \
       uuid-dev \
       xz-utils \
       zlib1g-dev; \
-    curl -fL --retry 3 --retry-delay 2 \
+    curl -fL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "${PYTHON_SOURCE_BASE_URL}/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz" \
       -o /tmp/python.tar.xz; \
     test "$(stat -c '%s' /tmp/python.tar.xz)" = "${PYTHON_SOURCE_SIZE}"; \
@@ -215,7 +216,7 @@ RUN set -eux; \
         end=$((OPENCODE_ASSET_SIZE - 1)); \
       fi; \
       part="$(printf '/tmp/opencode-parts/part-%03d' "${index}")"; \
-      curl -fsSL --retry 3 --retry-delay 2 \
+      curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
         --range "${start}-${end}" \
         "${asset_url}" \
         -o "${part}" & \
@@ -234,7 +235,7 @@ RUN set -eux; \
     chmod +x /out/opencode; \
     test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"; \
     rtk_url="${RTK_RELEASE_BASE_URL}/v${RTK_VERSION}/${RTK_ASSET_NAME}"; \
-    curl -fsSL --retry 3 --retry-delay 2 "${rtk_url}" -o /tmp/rtk.tar.gz; \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 "${rtk_url}" -o /tmp/rtk.tar.gz; \
     test "$(stat -c '%s' /tmp/rtk.tar.gz)" = "${RTK_ASSET_SIZE}"; \
     printf '%s  %s\n' "${RTK_ASSET_SHA256}" /tmp/rtk.tar.gz | sha256sum -c -; \
     mkdir -p /tmp/rtk; \
@@ -242,7 +243,7 @@ RUN set -eux; \
     test -f /tmp/rtk/rtk; \
     printf '%s  %s\n' "${RTK_BINARY_SHA256}" /tmp/rtk/rtk | sha256sum -c -; \
     install -m 0755 /tmp/rtk/rtk /out/rtk; \
-    curl -fsSL --retry 3 --retry-delay 2 \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "${RTK_LICENSE_BASE_URL}/v${RTK_VERSION}/LICENSE" \
       -o /out/RTK-LICENSE; \
     printf '%s  %s\n' "${RTK_LICENSE_SHA256}" /out/RTK-LICENSE | sha256sum -c -; \
@@ -276,7 +277,7 @@ RUN set -eux; \
         end=$((CODEX_ASSET_SIZE - 1)); \
       fi; \
       part="$(printf '/tmp/codex-parts/part-%03d' "${index}")"; \
-      curl -fsSL --retry 3 --retry-delay 2 --range "${start}-${end}" "${asset_url}" -o "${part}" & \
+      curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 --range "${start}-${end}" "${asset_url}" -o "${part}" & \
       index=$((index + 1)); \
       start=$((end + 1)); \
     done; \
@@ -288,7 +289,7 @@ RUN set -eux; \
     codex_binary="$(find /tmp/codex-extract -maxdepth 2 -type f -name 'codex*' -print -quit)"; \
     test -n "${codex_binary}"; \
     install -m 0755 "${codex_binary}" /out/codex-official; \
-    curl -fsSL --retry 3 --retry-delay 2 \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "${CODEX_RELEASE_BASE_URL}/rust-v${CODEX_VERSION}/${CODEX_BWRAP_ASSET_NAME}" -o /tmp/bwrap.tar.gz; \
     test "$(stat -c '%s' /tmp/bwrap.tar.gz)" = "${CODEX_BWRAP_ASSET_SIZE}"; \
     printf '%s  %s\n' "${CODEX_BWRAP_ASSET_SHA256}" /tmp/bwrap.tar.gz | sha256sum -c -; \
@@ -297,11 +298,11 @@ RUN set -eux; \
     test -n "${bwrap_binary}"; \
     install -m 0755 "${bwrap_binary}" /out/codex-resources/bwrap; \
     printf '%s  %s\n' "${CODEX_BWRAP_BINARY_SHA256}" /out/codex-resources/bwrap | sha256sum -c -; \
-    curl -fsSL --retry 3 --retry-delay 2 \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/LICENSE" -o /out/LICENSE; \
-    curl -fsSL --retry 3 --retry-delay 2 \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/NOTICE" -o /out/NOTICE; \
-    curl -fsSL --retry 3 --retry-delay 2 \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
       "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/codex-rs/vendor/bubblewrap/COPYING" -o /out/BWRAP-COPYING; \
     printf '%s  %s\n' "${CODEX_LICENSE_SHA256}" /out/LICENSE | sha256sum -c -; \
     printf '%s  %s\n' "${CODEX_NOTICE_SHA256}" /out/NOTICE | sha256sum -c -; \

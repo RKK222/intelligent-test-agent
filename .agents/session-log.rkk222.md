@@ -17946,3 +17946,25 @@
 - 本地实现和契约检查已完成；共享测试环境部署、manager 在线恢复、`4096` 进程恢复以及收起右栏后的真实消息往返仍待
   本次 Jenkins 发布后验证。
 - 不涉及 HTTP API、RunEvent/SSE、数据库结构、Flyway、业务权限或 generated SDK；未修改 `.env*` 和 OpenCode 只读源码。
+
+## 2026-09-23 - 修复 worker 外部制品下载的瞬时 TLS 断连
+
+### Why
+
+- Jenkins #36 已完成后端 26 模块、Flyway 16 项、前端 typecheck/build，但首次构建 worker 时访问 GitHub 出现
+  `SSL_ERROR_SYSCALL`；tini 和一个 OpenCode 分片下载失败，发布在替换现有服务前终止。
+
+### What
+
+- `opencode-worker.Dockerfile` 的固定外部制品下载统一增加 `--retry-all-errors`、8 次有界重试和 20 秒连接超时，覆盖 TLS
+  握手断连，同时保留既有文件大小、SHA-256、程序版本和许可证摘要门禁。
+- `deploy/internal/README.md` 明确瞬时网络错误只允许有界重试，重试耗尽或内容校验不一致仍必须失败关闭。
+
+### How
+
+- 修改沿用现有 worker Dockerfile 和供应链固定值，不新增下载源、镜像、部署节点或校验旁路；将重新通过 Jenkins Linux
+  构建机执行完整下载、镜像 smoke、发布和运行态验证。
+
+### Result
+
+- #36 保持失败且未发布；旧服务未被替换。新的 Jenkins 构建完成前，真实对话验收仍未通过，不能宣称修复完成。
