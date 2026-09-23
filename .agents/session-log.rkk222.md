@@ -18362,3 +18362,27 @@
 
 - 共享资产配置“管理员配置一次、有效成员只读查看且无需资产库 Git 权限”的后端真实接口验收通过；数据库临时验收数据已清理。
 - 现场普通成员的 TestAgent 进程初始化仍是独立阻塞项，待运行时可用后再补文件树和 Run 的浏览器验收。
+
+## 2026-09-23 - 本地服务与模型入口端到端验收
+
+### Why
+
+- 用户要求对本次客户端个人公共能力编辑、公共更新确认和全员模型切换进行端到端验证，必须区分真实浏览器/服务证据与没有本地客户端连接时的不可验证项。
+
+### What
+
+- 按 `intelligent-test-agent-local-startup` 规范使用 JDK 25 和 `.env.test` 重启本地后端、前端、ClickHouse 与 opencode-manager；启动脚本先因 Docker 未运行退出，启动 Docker Desktop 后重试成功。
+- 真实 Chromium 登录工作台后验证三击 Ctrl：普通工作台入口从隐藏变为“切换模型”，打开模型目录并切换到 `Ling 3.0 Flash Fin Free`；刷新后入口重新隐藏，三击 Ctrl 后仍恢复且保留该模型选择。
+- 真实认证请求验证本账号 Client credential 为 `ACTIVE`，但 `/instances/me` 返回 0 个在线实例，工作区列表 `LOCAL_CLIENT` 数为 0；因此没有伪造个人公共能力文件 CRUD/更新确认通过。
+
+### How
+
+- 健康探针：`curl http://127.0.0.1:8080/actuator/health/readiness` 返回 `UP`；前端 `http://127.0.0.1:3000` 返回 HTTP 200；认证 CORS preflight 返回 200 并包含允许来源/方法/请求头。
+- 浏览器：Playwright CLI 登录、三击 Ctrl、打开模型选择器、切换模型、刷新与再次解锁均通过；退出浏览器后删除 CLI 生成的未跟踪快照文件。
+- 既有真实 OpenCode Playwright 用例按认证 token 运行：创建新工作区用例在后端权限边界返回 403；复用工作区重发用例因远端工作区不暴露 `physicalRootPath` 安全退出，未产生持久化测试数据。
+- 收尾检查 `git status` 干净，后端/前端/ClickHouse 仍在预期端口监听，readiness 复检为 `UP`；日志仅见重启过程中的连接中断/恢复记录。
+
+### Result
+
+- 服务启动、健康、CORS、普通工作台模型解锁/切换/本地持久化已取得真实端到端证据。
+- 本地客户端个人副本查看/编辑、Agent/Skill 热加载、Tool 重启、更新确认清空和失败回滚本轮仍未取得真实客户端证据，原因是测试账号当前没有在线 `LOCAL_CLIENT` 实例；此前单元/组件测试不替代这部分现场验收。
