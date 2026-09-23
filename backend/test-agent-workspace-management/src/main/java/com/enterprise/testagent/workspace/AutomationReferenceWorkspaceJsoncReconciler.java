@@ -125,6 +125,80 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
         return output;
     }
 
+    /**
+     * 复用同一个最小 JSONC 编辑器写入共享资产引用；已存在的同别名同路径旧个人引用可原位接管，
+     * 其它别名占用或路径冲突均拒绝覆盖。
+     */
+    String reconcileAssets(String content, String appId, List<AssetPatch> patches) {
+        List<AssetPatch> desired = patches == null ? List.of() : List.copyOf(patches);
+        if ((content == null || content.isBlank()) && desired.isEmpty()) return content == null ? "" : content;
+        String output = content == null || content.isBlank()
+                ? "{\n  \"$schema\": \"" + SCHEMA + "\"\n}\n" : content;
+        output = ensureObject(output, List.of(), "references");
+        Set<String> aliases = new LinkedHashSet<>();
+        for (AssetPatch patch : desired) {
+            if (!appId.equals(patch.appId()) || !aliases.add(requireReferenceAlias(patch.alias()))) {
+                throw invalid("应用资产引用别名重复或应用不匹配");
+            }
+        }
+        ParsedDocument document = parse(output);
+        ObjectNode references = requireObject(document.objectAt(List.of("references")), "配置文件 references 必须是对象");
+        List<ManagedReference> stale = new ArrayList<>();
+        for (Property property : references.properties()) {
+            if (!(property.value() instanceof ObjectNode reference)
+                    || !"asset".equals(stringValue(document.content(), reference, "testagent-reference-kind"))
+                    || !appId.equals(stringValue(document.content(), reference, "testagent-asset-app-id"))) continue;
+            if (!aliases.contains(property.key())) {
+                stale.add(new ManagedReference(property.key(), stringValue(document.content(), reference, "path")));
+            }
+        }
+        for (ManagedReference reference : stale) {
+            output = removeProperty(output, List.of("references"), reference.alias());
+            output = removeUnusedPermission(output, reference.path(), reference.alias());
+        }
+        for (AssetPatch patch : desired) {
+            document = parse(output);
+            references = requireObject(document.objectAt(List.of("references")), "配置文件 references 必须是对象");
+            Property existingProperty = references.property(patch.alias());
+            String previousPath = null;
+            if (existingProperty != null) {
+                ObjectNode existing = requireObject(existingProperty.value(), "资产引用别名已被非对象配置占用");
+                previousPath = stringValue(document.content(), existing, "path");
+                String kind = stringValue(document.content(), existing, "testagent-reference-kind");
+                if (kind == null) {
+                    // 旧版浏览器写入的个人引用没有平台标记，仅允许同别名同路径接管。
+                    if (!patch.path().equals(previousPath)) throw invalid("资产引用别名与个人配置冲突：" + patch.alias());
+                } else if (!"asset".equals(kind)
+                        || !appId.equals(stringValue(document.content(), existing, "testagent-asset-app-id"))
+                        || !patch.repositoryId().equals(stringValue(document.content(), existing, "testagent-asset-repository-id"))) {
+                    throw invalid("资产引用别名已被其它配置占用：" + patch.alias());
+                }
+            }
+            Map<String, Object> fields = new LinkedHashMap<>();
+            fields.put("path", patch.path());
+            fields.put("merge", patch.merge());
+            fields.put("sdd-folder-name", patch.folder());
+            fields.put("description", patch.description());
+            fields.put("testagent-reference-kind", "asset");
+            fields.put("testagent-asset-app-id", patch.appId());
+            fields.put("testagent-asset-repository-id", patch.repositoryId());
+            // READY 代次变化即使逻辑路径不变也必须触发条件写与 OpenCode runtime reload。
+            if (patch.generation() != null) fields.put("testagent-asset-generation", patch.generation());
+            if (existingProperty == null) {
+                output = upsertProperty(output, List.of("references"), patch.alias(), fields);
+            } else {
+                for (Map.Entry<String, Object> field : fields.entrySet()) {
+                    output = upsertProperty(output, List.of("references", patch.alias()), field.getKey(), field.getValue());
+                }
+            }
+            if (previousPath != null && !previousPath.equals(patch.path())) {
+                output = removeUnusedPermission(output, previousPath, patch.alias());
+            }
+            output = upsertExternalDirectoryPermission(output, patch.path());
+        }
+        return output;
+    }
+
     private Map<String, Object> managedValue(Patch patch) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("path", patch.path());
@@ -137,6 +211,9 @@ final class AutomationReferenceWorkspaceJsoncReconciler {
         value.put("testagent-automation-generation", patch.generation());
         return value;
     }
+
+    record AssetPatch(String appId, String repositoryId, String alias, String path,
+                      String folder, boolean merge, String description, Long generation) { }
 
     private String upsertExternalDirectoryPermission(String content, String path) {
         String pattern = path.replaceAll("/+$", "") + "/*";

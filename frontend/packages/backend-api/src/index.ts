@@ -483,6 +483,24 @@ export type ReferenceRepositoryTreeNode = {
   selectable: boolean;
 };
 
+/** 成员可读的应用资产引用；不包含 Git URL、服务器路径或凭据。 */
+export type ApplicationAssetReferenceConfiguration = {
+  repositoryId: string;
+  repositoryName: string;
+  alias: string;
+  directoryPath: string;
+  merge: boolean;
+  sddFolderName: string;
+  description: string;
+  version: number;
+};
+
+export type ApplicationAssetReferenceListing = {
+  configurations: ApplicationAssetReferenceConfiguration[];
+  importPending: boolean;
+  conflicts: { alias: string; reason: string }[];
+};
+
 export type AutomationReferenceConfiguration = {
   generation: number;
   branch: string;
@@ -589,6 +607,8 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const referenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/reference-repositories`;
+  const assetReferenceConfigurationBase = (appId: string) =>
+    `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/asset-reference-configurations`;
   const automationReferenceRepositoryBase = (appId: string) =>
     `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/automation-reference-repositories`;
   const appSourceRepositoryBase = (appId: string) =>
@@ -1540,6 +1560,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     /** 仅返回当前应用关联的 APPLICATION_ASSET_REPOSITORY。 */
     listReferenceRepositories: (appId: string) =>
       request<ReferenceRepositoryStatus[]>(referenceRepositoryBase(appId)),
+    listApplicationAssetReferences: (appId: string) =>
+      request<ApplicationAssetReferenceListing>(assetReferenceConfigurationBase(appId)),
+    saveApplicationAssetReference: (appId: string, repositoryId: string, payload: {
+      directoryPath: string; merge: boolean; description: string; expectedVersion: number;
+    }) => request<ApplicationAssetReferenceConfiguration>(
+      `${assetReferenceConfigurationBase(appId)}/${encodeURIComponent(repositoryId)}`,
+      { method: "PUT", body: JSON.stringify(payload) }
+    ),
+    deleteApplicationAssetReference: (
+      appId: string, repositoryId: string, directoryPath: string, expectedVersion: number
+    ) => request<void>(
+      `${assetReferenceConfigurationBase(appId)}/${encodeURIComponent(repositoryId)}${query({ directoryPath, expectedVersion })}`,
+      { method: "DELETE" }
+    ),
     initializeReferenceRepository: (appId: string, repositoryId: string, branch: string) =>
       request<ReferenceRepositoryStatus>(
         `${referenceRepositoryBase(appId)}/${encodeURIComponent(repositoryId)}/initialize`,

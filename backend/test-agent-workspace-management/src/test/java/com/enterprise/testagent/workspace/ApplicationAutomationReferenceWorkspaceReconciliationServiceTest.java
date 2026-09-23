@@ -24,6 +24,12 @@ import com.enterprise.testagent.domain.configuration.CodeRepositoryId;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.reference.ApplicationAssetReference;
+import com.enterprise.testagent.domain.reference.ApplicationAssetReferenceStore;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryState;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplica;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryOperationType;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.user.UserId;
@@ -99,6 +105,42 @@ class ApplicationAutomationReferenceWorkspaceReconciliationServiceTest {
         assertThat(content.getValue())
                 .contains("// keep", "\"future\": true", "\"automation-tests\"")
                 .contains("\"testagent-automation-generation\":3");
+    }
+
+    @Test
+    void memberWithoutAssetGitCredentialReceivesSharedAssetReferenceBeforeRun() {
+        CodeRepositoryId assetId = new CodeRepositoryId("repo_assets");
+        ApplicationAssetReferenceStore assetStore = mock(ApplicationAssetReferenceStore.class);
+        ReferenceRepositoryRepository referenceRepository = mock(ReferenceRepositoryRepository.class);
+        when(configurationRepository.findRepositoriesByApplication(APP_ID)).thenReturn(List.of(
+                new CodeRepository(assetId, "ssh://git.example.test/assets.git", "资产库", "assets",
+                        CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), false, NOW, NOW)));
+        when(assetStore.list(APP_ID)).thenReturn(List.of(new ApplicationAssetReference(
+                APP_ID, assetId, "docs", "docs-assets", true, "docs", "产品资料", 1, NOW)));
+        when(referenceRepository.findState(assetId)).thenReturn(Optional.of(new ReferenceRepositoryState(
+                assetId, "main", "abc123", 1, ReferenceRepositoryStatus.READY,
+                ReferenceRepositoryOperationType.SYNCHRONIZE, USER_ID, "trace-sync", null, NOW, NOW, NOW)));
+        when(referenceRepository.findReplicas(assetId)).thenReturn(List.of(new ReferenceRepositoryReplica(
+                assetId, SERVER_ID, 1, ReferenceRepositoryReplicaStatus.READY,
+                "main", "abc123", 0, null, null, null, null, NOW, NOW, NOW)));
+        when(agentConfigService.readWorkspaceAgentFile("wrk_main", "opencode.jsonc", null))
+                .thenReturn(new FileContentResponse("opencode.jsonc", "{ // keep\n \"future\":true }", 26));
+        when(agentConfigService.writeWorkspaceAgentFileIfUnchanged(
+                eq("wrk_main"), eq("opencode.jsonc"), eq(true), anyString(), anyString(), eq(null)))
+                .thenReturn(true);
+        var withAssets = new ApplicationAutomationReferenceWorkspaceReconciliationService(
+                configurationRepository, automationRepository, catalogService, agentConfigService,
+                assetStore, referenceRepository, new ObjectMapper());
+
+        var result = withAssets.reconcile(workspace(), USER_ID, "trace-run");
+
+        assertThat(result.configurationChanged()).isTrue();
+        assertThat(result.warnings()).isEmpty();
+        ArgumentCaptor<String> content = ArgumentCaptor.forClass(String.class);
+        verify(agentConfigService).writeWorkspaceAgentFileIfUnchanged(
+                eq("wrk_main"), eq("opencode.jsonc"), eq(true), anyString(), content.capture(), eq(null));
+        assertThat(content.getValue()).contains("// keep", "\"docs-assets\"", "\"testagent-reference-kind\":\"asset\"")
+                .contains("{env:OPENCODE_REFERENCES_DIR}/assets/docs/*", "\"testagent-asset-generation\":1");
     }
 
     @Test

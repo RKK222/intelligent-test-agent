@@ -265,6 +265,7 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 9. 应用引用资产库状态中的 `repositoryPath` 只能由服务端使用当前平台 `OPENCODE_REFERENCES_DIR` 和已校验版本库英文名派生，并且只通过既有 `APP_ADMIN` 接口返回；参数缺失或历史名称非法时返回空。客户端输入不得控制该路径，日志、trace 和错误消息不得记录该物理路径。
+   应用资产共享目录配置的成员读取接口只返回别名、相对目录、描述及版本等安全字段；Git URL、SSH 凭据和物理路径仍留在管理员 Git 接口和服务端。成员必须是启用应用的有效成员，不以资产库 Git 授权作为文件树读取前提；保存/删除仍限管理员，并由服务端校验应用关联、READY 副本、目录和版本。旧个人引用扫描只在工作区所属服务器进行，冲突不自动择一覆盖，离线来源保持待扫描。
 10. `X-Test-Agent-Linux-Server-Id` 只能作为 Nginx 首跳性能提示，不能作为鉴权、binding、Session 归属或运行上下文事实源。Nginx 必须通过静态 `linuxServerId -> Java endpoint` 白名单映射，禁止把头值直接拼成地址；缺失或未知值回退默认 upstream。代理给 Java 前必须删除该头，并清除外部传入的 `X-Test-Agent-Backend-Routed`，后者只允许公共 Java→Java 转发器产生。前端只在页面内存保存 binding ID，仅对用户 OpenCode、会话、Run、SSE 和本地工作区请求发送；登录和共享控制面不得被该提示固定到用户节点。CORS 可允许该头以及排查专用 `X-Support-Access-Grant`，但目标 Java 仍必须重新执行完整鉴权和归属校验。
 11. XXL Admin 只允许经同源 `/xxl-job-admin/` iframe 访问；响应必须包含 `Content-Security-Policy: frame-ancestors 'self'`、`X-Frame-Options: SAMEORIGIN`，会话 Cookie 必须为 `HttpOnly; Secure; SameSite=Lax` 并限制 Path。Nginx/Vite 必须保持同源和路径前缀，不能通过放宽 frame/Cookie 策略解决代理错误。
 12. XXL MySQL 密码和生产 access token 必须从外部配置注入，所有 Java/Admin/executor 使用同一生产 access token；基础配置中的默认 token 仅供本地开发，生产漏配会继承该值并形成已接受但必须由部署检查阻断的风险。executor 端口只对可信 Admin 网络开放。Admin/MySQL health 不进入平台 readiness，但必须独立告警。

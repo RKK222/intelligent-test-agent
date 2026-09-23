@@ -7233,6 +7233,15 @@ function refreshAppSourceAuthorizationOnFocus() {
 }
 
 async function refreshWorkspaceViewAfterReferenceSaved() {
+  try {
+    // 切分支时 JSONC 路径不变，仍须先对账 READY generation；变化时下层已刷新树和运行态。
+    if (await reconcileCurrentAutomationReferences({ quiet: true })) return;
+  } catch (error) {
+    if (error instanceof StaleConversationInteractionError) return;
+    await refreshWorkspaceView();
+    feedback.value = errorFeedback("应用资产引用对账失败", error);
+    return;
+  }
   pendingRuntimeReloadKind = "reference";
   pendingReferenceRuntimeReloadRevision.value += 1;
   await refreshWorkspaceView();
@@ -7267,6 +7276,11 @@ async function refreshWorkspaceView(
   options: WorkspaceViewRefreshOptions = {}
 ) {
   if (!workspaceId) return;
+  const assetTabPaths = workbench.tabs
+    .filter((tab: EditorTab) => isReferenceFilePath(tab.path)
+      && referenceFileInfo(tab.path).kind !== "AUTOMATION_REFERENCE"
+      && referenceFileInfo(tab.path).workspaceId === workspaceId)
+    .map((tab: EditorTab) => tab.path);
   const targets = options.targets ?? workspaceViewRefreshTargets(expandedDirectories.value, workspaceViewDirectoryById);
   for (const settlement of workspaceFileRefreshSettlements(
     workbench.tabs,
@@ -7276,6 +7290,13 @@ async function refreshWorkspaceView(
   }
   latestWorkspaceFileReadByPath.clear();
   const generation = ++workspaceLoadGeneration;
+  // 分支切换后同一路径可能指向新正文；刷新时立即清除旧资产标签缓存。
+  for (const path of assetTabPaths) {
+    workbench.updateTab(path, {
+      content: "", savedContent: "", readonly: true, loadState: "loading",
+      loadError: undefined, hasLoadedSnapshot: false, progressivePreview: undefined
+    });
+  }
   clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   workspaceViewDirectoryById.clear();
@@ -7291,6 +7312,35 @@ async function refreshWorkspaceView(
     if (entriesByDirectory.value[current.id] !== undefined) {
       restoredExpanded.add(current.id);
       expandedDirectories.value = new Set(restoredExpanded);
+    }
+  }
+  // 文件树与已打开标签必须在同一轮刷新后读取当前本机副本，不能保留旧分支正文。
+  for (const path of assetTabPaths) {
+    if (selectedWorkspaceIdRef.value !== workspaceId || workspaceLoadGeneration !== generation) break;
+    const requestGeneration = ++workspaceFileReadSequence;
+    latestWorkspaceFileReadByPath.set(path, requestGeneration);
+    try {
+      const info = referenceFileInfo(path);
+      const file = await api.readWorkspaceViewFile(workspaceId, referenceLocatorFromTab(info));
+      if (selectedWorkspaceIdRef.value !== workspaceId || workspaceLoadGeneration !== generation
+        || latestWorkspaceFileReadByPath.get(path) !== requestGeneration) break;
+      workbench.updateTab(path, {
+        content: file.content, savedContent: file.content, readonly: true,
+        loadState: "loaded", loadError: undefined, hasLoadedSnapshot: true, progressivePreview: undefined
+      });
+    } catch (error) {
+      if (selectedWorkspaceIdRef.value !== workspaceId || workspaceLoadGeneration !== generation
+        || latestWorkspaceFileReadByPath.get(path) !== requestGeneration) break;
+      const largePreview = progressivePreviewRequired(error);
+      if (largePreview) {
+        await startProgressivePreview(path,
+          () => selectedWorkspaceIdRef.value === workspaceId && workspaceLoadGeneration === generation
+            && latestWorkspaceFileReadByPath.get(path) === requestGeneration,
+          "读取引用大文件预览失败");
+        continue;
+      }
+      workbench.updateTab(path, { loadState: "error", loadError: errorFeedback("刷新引用文件失败", error).description,
+        hasLoadedSnapshot: false });
     }
   }
 }
@@ -7583,11 +7633,11 @@ async function refreshCurrentWorkspacePanels() {
   if (!selectedWorkspace.value) return;
   let reconciled = false;
   try {
-    // 用户显式刷新文件树也先走服务端唯一对账器，避免只刷新组合树却仍读取旧自动化配置。
+    // 显式刷新文件树先对账两类共享引用，确保资产分支 READY 代次写入个人 JSONC。
     reconciled = await reconcileCurrentAutomationReferences({ quiet: true });
   } catch (error) {
     if (!(error instanceof StaleConversationInteractionError)) {
-      feedback.value = errorFeedback("自动化引用对账失败", error);
+      feedback.value = errorFeedback("引用配置对账失败", error);
     }
   }
   if (!reconciled) await refreshWorkspaceView();

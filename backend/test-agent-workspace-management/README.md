@@ -24,7 +24,7 @@ Agent 配置分片上传支持浏览器目录选择携带的多层相对路径�
 - `ApplicationAutomationReferenceService` 以不可变 generation 管理每个应用自动化版本库的一套分支、任意层级目录、共享描述和固定目标提交。每个 generation、每台服务器只维护一个共享只读仓库副本；目录只是副本内逻辑选择。在线服务器全部 READY 后才以 CAS 激活，离线节点标记 `DEFERRED` 并由 `ApplicationAutomationReferenceReconciler` 恢复后补齐；更新副本建立新提交代次，Git 指针核验只读本地状态。
 - 自动化共享副本的同步、核验和错误归因统一在引用根目录日志脱敏作用域内执行，Git 命令日志不得输出服务器物理路径；Agent/Skill 的本机快照周期对账只扫描仍启用的应用工作空间模板，已停用的旧自动化模板、版本和 worktree 只保留历史，不再被后台任务读取或投影。
 - `WorkspaceViewApplicationService` 在组合根增加虚拟“自动化代码库”，只装载当前工作树 `.opencode/opencode.jsonc` 中由平台写入且应用、版本库、generation、目录和逻辑配置路径均可重新验证的自动化条目；使用 `AUTOMATION_ROOT/AUTOMATION_REFERENCE` 定位器提供目录、文本、分片和二进制只读读取。每次操作重新授权，不接受客户端物理路径；`.git`、符号链接、越界和全部写/Git/搜索/requirements 操作固定拒绝。
-- 浏览器不再读取、解析或写入自动化 JSONC；它只通过 Agent 配置文件 WebSocket 的 `agent-config.automation-reference.reconcile` 请求后端权威对账。应用资产库仍保留前端 `patchReferenceConfig` 的既有最小补丁，二者不能互相复用实现或形成第二套自动化规则。
+- 浏览器不读取、解析或写入自动化及应用资产 JSONC；两类引用都通过 Agent 配置文件 WebSocket 的 `agent-config.automation-reference.reconcile` 请求后端权威对账。应用资产配置按应用、资产库和相对目录共享；成员进入工作区、显式刷新文件树及 Run 派发前，现有条件写链路将共享引用、READY 副本 generation 和精确目录权限写入个人工作区，并保留无关字段与注释。管理员切换资产库分支后，代次变化即使路径不变也触发条件写和运行态重载。成员无需资产库 Git 权限；暂不可用的本机副本只产生安全告警，不删除共享声明。旧管理员个人配置由所属服务器后台扫描，只有无冲突项自动发布，离线服务器保持待扫描。
 - 存量个人 runtime Workspace 若仍记录在应用目录而配置留在固定 `workspace/.opencode`，Agent 配置读取与组合树可兼容该受控子目录；首次引用保存会写入会话根的标准 `.opencode/opencode.jsonc`，使 OpenCode 从当前 cwd 原生加载同一份 references/permission。不会递归搜索，也不接受客户端物理路径。
 - 应用工作区未创建可选的 `.opencode` 目录时，配置树按空目录返回、单文件读取按 `NOT_FOUND` 返回；真实工作区根目录缺失仍保持 `ROOT_UNAVAILABLE`。没有自动化引用的 Run 不创建空 `.opencode/opencode.jsonc`，只有实际需要写入托管引用时才通过既有条件写链路创建标准目录和配置文件。
 

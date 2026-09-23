@@ -1971,6 +1971,8 @@ migration 会从仍关联自动化版本库的 `application_workspaces`、`appli
 
 `V20260822103625__application_automation_reference_generations_add_alias.sql` 为 `application_automation_reference_generations` 新增非空 `reference_alias varchar(128)`，并用 `automation-{repository.english_name}` 回填已存在的不可变代次；极端旧数据缺少英文名时使用稳定 repository ID 回退。别名属于应用与版本库当前共享配置，管理员修改后随新 generation 整体切换，旧 generation 保留原别名供运行中任务和历史只读标签审计。运行时校验继续由工作空间管理服务和 JSONC 对账共同执行，不新增 JDBC SQL，也不把别名写入 Run 提示词或广播 payload。该 migration 已在本地持久 PostgreSQL 验收库执行，文件必须保持字节不变，SHA-256 为 `0313c4153a77cf0bb6311e2c12320454a993c41db556685876d6881a0726fdce`。
 
+`V20260923184637__application_asset_references_share.sql` 新增 `application_asset_references`（应用、资产库、相对目录主键；应用内别名唯一；版本条件更新）、`application_asset_reference_import_sources`（升级时冻结管理员个人工作区和所属服务器）、`application_asset_reference_import_candidates`、`application_asset_reference_import_results` 和 `application_asset_reference_import_conflicts`。迁移仅创建结构及生产必需的来源身份，不写入个人文件正文、Git 凭据或测试数据。后台仅由来源服务器扫描，离线来源保持 `PENDING` 并退避重试；全部来源完成后按应用原子发布无冲突候选，冲突摘要供管理员处理。MyBatis SQL 位于 `ApplicationAssetReferenceMapper.xml`；旧客户端继续读取原工作区，成员工作区由现有 JSONC 条件写对账。升级前应保留既有 Flyway 版本与 checksum，验证 PostgreSQL 存量库及最终 JAR 内 migration 字节一致。
+
 ## 本地客户端版本管理
 
 `V20260820182024__local_client_releases_create_version_management.sql` 创建本地客户端受签名 release、artifact、

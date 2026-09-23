@@ -1487,6 +1487,16 @@ tree 的兼容模式（不传 `includeCommit` 或传 `false`）保持原 wire �
 
 ### 应用引用资产库 API
 
+应用成员共享的目录配置另由 `/api/internal/platform/workspace-management/applications/{appId}/asset-reference-configurations` 管理，不改变下述管理员 Git 副本接口。`GET` 要求启用应用的有效成员（超级管理员按平台权限例外），只返回 `configurations[]` 中的 `repositoryId/repositoryName/alias/directoryPath/merge/sddFolderName/description/version`；`importPending` 和 `conflicts[]` 仅供管理员查看。响应不包含 Git URL、SSH 凭据、逻辑展开路径或服务器物理路径。`PUT /{repositoryId}` 和 `DELETE /{repositoryId}` 仍仅允许 `APP_ADMIN` 及继承权限的 `SUPER_ADMIN`：
+
+| 方法 | 请求 | 结果 |
+|---|---|---|
+| `GET` Base URL | 无 | 应用成员的安全配置列表；非成员 `FORBIDDEN`。 |
+| `PUT /{repositoryId}` | `{ "directoryPath": "ai-agent/spec", "merge": true, "description": "设计资料", "expectedVersion": 0 }` | 保存并返回共享目录配置；`expectedVersion=0` 为新增，更新提交当前版本。只允许应用关联、总体与本机副本 READY 且目录可配置的资产库；版本变化返回 `CONFLICT`。 |
+| `DELETE /{repositoryId}?directoryPath=...&expectedVersion=...` | 当前相对目录和版本 | 条件删除共享配置；版本变化返回 `CONFLICT`。 |
+
+服务器从目录名和代码库英文名生成固定别名，拒绝绝对路径、`.`、`..`、`.git`、不可配置目录及空描述。成员不需要资产库 Git 权限，也不能调用下述管理员接口；工作区进入、显式文件树刷新和 Run 派发前通过既有 Agent 配置 WebSocket 对账共享 JSONC 引用、READY 副本 generation 与精确目录权限。分支切换后即使逻辑路径不变，generation 变化也必须写入成员 JSONC 并重载运行态；文件树刷新重新读取已打开的资产文件标签，避免保留旧分支正文。旧个人配置由所属服务器后台扫描，未完成服务器保留 `importPending=true`；字段或跨管理员配置冲突在管理员列表中报告，冲突项不自动覆盖。
+
 Base URL：`/api/internal/platform/workspace-management/applications/{appId}/reference-repositories`。该能力只管理当前启用应用已关联、类型为 `APPLICATION_ASSET_REPOSITORY` 的代码库。所有接口要求全局角色 `APP_ADMIN`，`SUPER_ADMIN` 继承该权限；普通成员返回 `FORBIDDEN`。首次初始化时的分支下拉复用配置管理既有 `GET /api/internal/platform/configuration-management/repositories/{repositoryId}/branches`，不新增第二套分支接口。
 
 | 方法 | 路径 | 用途 |

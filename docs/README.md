@@ -41,6 +41,7 @@
 
 - `docs/testing/conversation-scenes.md`：直接对话、历史运行中、Todo、ask、permission、subagent、宠物旁路成功/失败等可重复 fixture 入口。
 - `docs/testing/application-worktree-feature-cases.md`：应用 worktree、feature、角色写权限、发布投影和固定 UI 测试数据案例。
+- `docs/testing/application-asset-reference.md`：应用资产共享引用的权限、个人工作区对账、旧配置冲突迁移及双账号验收。
 - `docs/testing/team-management-test-cases.md`：管理视角团队审阅、成员维护、只读文件、撤权、部署验收与截图的设计案例。
 - `docs/testing/app-source-snapshot.md`：应用源码固定提交、多服务器物化、独立进度 WebSocket、文件能力和到期清理的自动化与人工验收。
 - `docs/testing/xxl-job-integration.md`：XXL-JOB 自动化、双 Java、故障隔离和安全验收清单。

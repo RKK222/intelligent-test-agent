@@ -114,6 +114,7 @@
 - `V20260819125704__automation_workspace_active_versions_create.sql`：已执行的旧模型 migration，文件名、字节和 checksum 必须保持不变，仅用于兼容历史升级。
 - `V20260821113000__application_automation_references_create.sql`：新增应用自动化引用状态、不可变 generation、逐服务器共享副本和 Run 租约表；从旧模板/激活版本中为每个 `(app_id, repository_id)` 迁移最新有效配置，并停用旧自动化工作空间入口但不删除历史数据。持久化统一由 `ApplicationAutomationReferenceMapper.xml` 提供，未新增 JDBC SQL。
 - `V20260822103625__application_automation_reference_generations_add_alias.sql`：为自动化引用不可变代次新增 `reference_alias`，存量配置按 `automation-{repository.english_name}` 前向回填；别名随应用共享配置代次整体切换，旧客户端未传别名时由服务端继续生成相同默认值。该文件已在本地持久 PostgreSQL 验收库执行，必须保持字节不变，SHA-256 为 `0313c4153a77cf0bb6311e2c12320454a993c41db556685876d6881a0726fdce`。
+- `V20260923184637__application_asset_references_share.sql`：新增应用资产共享配置及旧管理员个人工作区的一次性扫描来源、候选、结果和冲突表。迁移只冻结旧来源身份，不在数据库中读取个人文件；所属 Java 服务器后台扫描后按应用原子发布无冲突候选。关系型访问全部位于 `ApplicationAssetReferenceMapper.xml`，配置更新和删除均使用版本条件写。
 - `V20260822075000__application_automation_reference_read_leases_create.sql`：新增只保存令牌 SHA-256 的历史自动化标签租约；MyBatis XML 以当前 READY 条件插入、完整用户/工作区/应用/版本库/generation 绑定续期，并在 Run/标签租约均释放后原子退役旧 generation、清理各服务器本地 replica 行。
 - `V20260702180000__add_code_repository_deployment_mode.sql`：为 `code_repositories` 增加非空 `deployment_mode`（`EXTERNAL`/`INTERNAL`，存量默认外部），并把 `english_name` 扩展到 128 字符。
 - `V20260703141000__create_run_session_scopes.sql`：创建 `run_session_scopes` 和 `run_session_scope_sessions`，并为 `run_events` 预留可空 session scope 与 `raw_event_id` 列；metadata 使用 `metadata_json text`，不使用 JSONB。

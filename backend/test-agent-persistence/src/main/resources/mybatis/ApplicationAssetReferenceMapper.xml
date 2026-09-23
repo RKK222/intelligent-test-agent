@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.enterprise.testagent.persistence.mybatis.ApplicationAssetReferenceMapper">
+    <resultMap id="configuration" type="com.enterprise.testagent.persistence.mybatis.ApplicationAssetReferenceMapper$ConfigurationRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="directory_path" javaType="java.lang.String"/>
+            <arg column="alias" javaType="java.lang.String"/>
+            <arg column="merge_enabled" javaType="boolean"/>
+            <arg column="sdd_folder_name" javaType="java.lang.String"/>
+            <arg column="description" javaType="java.lang.String"/>
+            <arg column="version" javaType="long"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="source" type="com.enterprise.testagent.persistence.mybatis.ApplicationAssetReferenceMapper$ImportSourceRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="candidate" type="com.enterprise.testagent.persistence.mybatis.ApplicationAssetReferenceMapper$ImportCandidateRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="directory_path" javaType="java.lang.String"/>
+            <arg column="alias" javaType="java.lang.String"/>
+            <arg column="merge_enabled" javaType="boolean"/>
+            <arg column="sdd_folder_name" javaType="java.lang.String"/>
+            <arg column="description" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+    <resultMap id="conflict" type="com.enterprise.testagent.persistence.mybatis.ApplicationAssetReferenceMapper$ImportConflictRow">
+        <constructor>
+            <arg column="alias" javaType="java.lang.String"/>
+            <arg column="reason" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <select id="list" resultMap="configuration">
+        select app_id, repository_id, directory_path, alias, merge_enabled,
+               sdd_folder_name, description, version, updated_at
+        from application_asset_references where app_id = #{appId}
+        order by repository_id, directory_path
+    </select>
+    <insert id="insert">
+        insert into application_asset_references(app_id, repository_id, directory_path, alias,
+            merge_enabled, sdd_folder_name, description, version, updated_at)
+        values (#{row.appId}, #{row.repositoryId}, #{row.directoryPath}, #{row.alias},
+            #{row.mergeEnabled}, #{row.sddFolderName}, #{row.description}, #{row.version}, #{row.updatedAt})
+        on conflict do nothing
+    </insert>
+    <update id="update">
+        update application_asset_references set merge_enabled = #{row.mergeEnabled},
+            description = #{row.description}, version = version + 1, updated_at = #{row.updatedAt}
+        where app_id = #{row.appId} and repository_id = #{row.repositoryId}
+          and directory_path = #{row.directoryPath} and version = #{expectedVersion}
+    </update>
+    <delete id="delete">
+        delete from application_asset_references
+        where app_id = #{appId} and repository_id = #{repositoryId}
+          and directory_path = #{directoryPath} and version = #{expectedVersion}
+    </delete>
+
+    <select id="claimLocalSources" resultMap="source">
+        with claimable as (
+            select workspace_id from application_asset_reference_import_sources
+            where linux_server_id = #{linuxServerId}
+              and (status = 'PENDING' or (status = 'SCANNING' and lease_until &lt; #{now}))
+              and (next_retry_at is null or next_retry_at &lt;= #{now})
+            order by workspace_id limit #{limit} for update skip locked
+        )
+        update application_asset_reference_import_sources s
+        set status = 'SCANNING', lease_until = #{leaseUntil}, next_retry_at = null
+        from claimable c where s.workspace_id = c.workspace_id
+        returning s.workspace_id, s.app_id, s.linux_server_id
+    </select>
+    <delete id="deleteCandidates">
+        delete from application_asset_reference_import_candidates where workspace_id = #{workspaceId}
+    </delete>
+    <insert id="insertCandidate">
+        insert into application_asset_reference_import_candidates(workspace_id, app_id, repository_id,
+            directory_path, alias, merge_enabled, sdd_folder_name, description)
+        values (#{row.workspaceId}, #{row.appId}, #{row.repositoryId}, #{row.directoryPath},
+            #{row.alias}, #{row.mergeEnabled}, #{row.sddFolderName}, #{row.description})
+    </insert>
+    <update id="finishSource">
+        update application_asset_reference_import_sources
+        set status = 'DONE', lease_until = null, next_retry_at = null, scanned_at = #{now}, safe_error = null
+        where workspace_id = #{workspaceId}
+    </update>
+    <update id="retrySource">
+        update application_asset_reference_import_sources
+        set status = 'PENDING', lease_until = null, next_retry_at = #{retryAt}, safe_error = #{safeError}
+        where workspace_id = #{workspaceId}
+    </update>
+    <select id="readyImportApplications" resultType="string">
+        select s.app_id from application_asset_reference_import_sources s
+        left join application_asset_reference_import_results r on r.app_id = s.app_id
+        where r.app_id is null
+        group by s.app_id
+        having count(*) filter (where s.status != 'DONE') = 0
+        order by s.app_id limit 100
+    </select>
+    <insert id="claimImportApplication">
+        insert into application_asset_reference_import_results(app_id, completed_at)
+        values (#{appId}, #{now}) on conflict do nothing
+    </insert>
+    <select id="candidates" resultMap="candidate">
+        select workspace_id, app_id, repository_id, directory_path, alias, merge_enabled,
+               sdd_folder_name, description
+        from application_asset_reference_import_candidates where app_id = #{appId}
+        order by alias, workspace_id
+    </select>
+    <insert id="recordConflict">
+        insert into application_asset_reference_import_conflicts(app_id, alias, reason, detected_at)
+        values (#{appId}, #{alias}, #{reason}, #{now})
+        on conflict (app_id, alias) do update set reason = excluded.reason, detected_at = excluded.detected_at
+    </insert>
+    <delete id="clearConflict">
+        delete from application_asset_reference_import_conflicts
+        where app_id = #{appId} and alias = #{alias}
+    </delete>
+    <select id="conflicts" resultMap="conflict">
+        select alias, reason from application_asset_reference_import_conflicts
+        where app_id = #{appId} order by alias
+    </select>
+    <select id="countPendingImport" resultType="int">
+        select count(*) from application_asset_reference_import_sources s
+        left join application_asset_reference_import_results r on r.app_id = s.app_id
+        where s.app_id = #{appId} and r.app_id is null
+    </select>
+</mapper>

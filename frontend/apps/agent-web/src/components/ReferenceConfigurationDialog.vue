@@ -3,15 +3,14 @@ import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } fr
 import {
   BackendApiError,
   type BackendApiClient,
+  type ApplicationAssetReferenceConfiguration,
+  type ApplicationAssetReferenceListing,
   type ReferenceRepositoryStatus,
   type ReferenceRepositoryTreeNode
 } from "@test-agent/backend-api";
 import { Button, copyTextToClipboard, Input, Spinner, Textarea } from "@test-agent/ui-kit";
 import { Check, ChevronDown, ChevronRight, Copy, File, Folder, GitBranch, LibraryBig, RefreshCw, X } from "lucide-vue-next";
 import {
-  ReferenceConfigValidationError,
-  inspectReferenceConfig,
-  patchReferenceConfig,
   type ReferenceConfigInspection,
   type ReferenceConfigTarget,
   type ReferenceConfigValue
@@ -24,7 +23,6 @@ import {
   REFERENCE_REPOSITORY_ACTIVE_STATUSES as ACTIVE_STATUSES
 } from "./reference-repository-operation-state";
 
-const OPENCODE_CONFIG_PATH = "opencode.jsonc";
 const POLL_INTERVAL_MS = 2_000;
 const PENDING_REFRESH_CONFIRMATION_WINDOW_MS = 30_000;
 
@@ -63,6 +61,9 @@ type RepositoryOperationProgress = {
 };
 
 const repositories = ref<ReferenceRepositoryStatus[]>([]);
+const assetListing = ref<ApplicationAssetReferenceListing>({ configurations: [], importPending: false, conflicts: [] });
+const assetListingLoading = ref(false);
+const assetListingError = ref<Notice | null>(null);
 const listLoading = ref(false);
 const listError = ref<Notice | null>(null);
 const selectedRepositoryId = ref<string | null>(null);
@@ -79,7 +80,6 @@ const configMode = ref<ReferenceConfigInspection["mode"] | null>(null);
 const configTarget = ref<ReferenceConfigTarget | null>(null);
 const form = ref<ReferenceConfigValue>({ path: "", merge: true, sddFolderName: "", description: "" });
 const baseline = ref<ReferenceConfigValue | null>(null);
-const permissionNeedsUpdate = ref(false);
 const configNotice = ref<(Notice & { kind: "error" | "success" }) | null>(null);
 const dialogElement = ref<HTMLElement | null>(null);
 
@@ -116,6 +116,7 @@ let pendingWorkspaceRefreshPollTimer: ReturnType<typeof setTimeout> | null = nul
 let pendingWorkspaceRefreshSequence = 0;
 let operationRequestSequence = 0;
 let repositoryRequestSequence = 0;
+let assetListingRequestSequence = 0;
 const repositoryResponseTokens = new Map<string, number>();
 let restoreFocusTo: HTMLElement | null = null;
 let workspaceRefreshContextKey = "";
@@ -130,6 +131,10 @@ const vInitialFocus = {
 
 const selectedRepository = computed(() =>
   repositories.value.find((repository) => repository.repositoryId === selectedRepositoryId.value) ?? null
+);
+const selectedAssetConfig = computed<ApplicationAssetReferenceConfiguration | null>(() =>
+  assetListing.value.configurations.find((item) => item.repositoryId === selectedRepositoryId.value
+    && item.directoryPath === selectedFolderPath.value) ?? null
 );
 
 const operationRepository = computed(() => {
@@ -206,21 +211,14 @@ const formModified = computed(() => {
 const submitEnabled = computed(() => {
   if (!configTarget.value || configLoading.value || configSaving.value || !normalizedForm.value.description) return false;
   return configMode.value === "create"
-    || (configMode.value === "update" && (formModified.value || permissionNeedsUpdate.value));
+    || (configMode.value === "update" && formModified.value);
 });
 
 function notice(error: unknown, fallback: string): Notice {
   if (error instanceof BackendApiError) {
     return { message: error.message || fallback, traceId: error.traceId || undefined };
   }
-  if (error instanceof ReferenceConfigValidationError) {
-    return { message: error.message };
-  }
   return { message: error instanceof Error ? error.message : fallback };
-}
-
-function isFileMissing(error: unknown) {
-  return error instanceof BackendApiError && (error.code === "FILE_NOT_FOUND" || error.code === "NOT_FOUND");
 }
 
 function beginRepositoryRequest() {
@@ -376,7 +374,6 @@ function resetSelectionState() {
   configTarget.value = null;
   configMode.value = null;
   baseline.value = null;
-  permissionNeedsUpdate.value = false;
   configNotice.value = null;
   operationProgress.value = null;
   operationTerminating.value = false;
@@ -408,6 +405,24 @@ async function loadRepositories(dialogToken: number) {
       listLoading.value = false;
       // 关闭后重开时首轮列表即使失败，也要恢复尚未确认切换结果的有限补偿轮询。
       if (hasPollablePendingWorkspaceRefresh()) schedulePendingWorkspaceRefreshPoll(dialogToken);
+    }
+  }
+}
+
+async function loadAssetConfigurations(dialogToken: number) {
+  const requestToken = ++assetListingRequestSequence;
+  assetListingLoading.value = true;
+  assetListingError.value = null;
+  try {
+    const result = await api.listApplicationAssetReferences(props.appId);
+    if (contextIsCurrent(dialogToken) && requestToken === assetListingRequestSequence) assetListing.value = result;
+  } catch (error) {
+    if (contextIsCurrent(dialogToken) && requestToken === assetListingRequestSequence) {
+      assetListingError.value = notice(error, "加载应用资产引用失败");
+    }
+  } finally {
+    if (contextIsCurrent(dialogToken) && requestToken === assetListingRequestSequence) {
+      assetListingLoading.value = false;
     }
   }
 }
@@ -680,7 +695,6 @@ async function confirmSwitchBranch() {
     configTarget.value = null;
     configMode.value = null;
     baseline.value = null;
-    permissionNeedsUpdate.value = false;
     await applyOperationStatus(next, dialogToken, selectionToken, responseToken);
   } catch (error) {
     if (error instanceof BackendApiError && !error.retryable) {
@@ -925,15 +939,6 @@ function nodeSelectable(node: VisibleTreeNode) {
   return node.directory && node.highlighted && node.selectable;
 }
 
-async function readWorkspaceConfig(workspaceId = props.workspaceId): Promise<string> {
-  try {
-    return (await api.readWorkspaceAgentFile(workspaceId, OPENCODE_CONFIG_PATH)).content;
-  } catch (error) {
-    if (isFileMissing(error)) return "";
-    throw error;
-  }
-}
-
 async function selectFolder(node: VisibleTreeNode) {
   if (!nodeSelectable(node) || !selectedRepository.value) return;
   const repository = selectedRepository.value;
@@ -946,28 +951,19 @@ async function selectFolder(node: VisibleTreeNode) {
   const selectionToken = selectionGeneration;
   selectedFolderPath.value = node.path;
   configTarget.value = target;
-  configLoading.value = true;
+  configLoading.value = false;
   configMode.value = null;
   baseline.value = null;
-  permissionNeedsUpdate.value = false;
   configNotice.value = null;
-  try {
-    const content = await readWorkspaceConfig();
-    if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) || selectedFolderPath.value !== node.path) return;
-    const inspection = inspectReferenceConfig(content, target);
-    configMode.value = inspection.mode;
-    form.value = { ...inspection.value };
-    baseline.value = { ...inspection.baseline };
-    permissionNeedsUpdate.value = inspection.permissionNeedsUpdate;
-  } catch (error) {
-    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === node.path) {
-      configNotice.value = { ...notice(error, "读取引用配置失败"), kind: "error" };
-    }
-  } finally {
-    if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === node.path) {
-      configLoading.value = false;
-    }
-  }
+  if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) return;
+  const current = assetListing.value.configurations.find((item) => item.repositoryId === repository.repositoryId
+    && item.directoryPath === node.path);
+  const value: ReferenceConfigValue = current
+    ? { path: target.path, merge: current.merge, sddFolderName: current.sddFolderName, description: current.description }
+    : { path: target.path, merge: true, sddFolderName: target.folder, description: "" };
+  configMode.value = current ? "update" : "create";
+  form.value = { ...value };
+  baseline.value = { ...value };
 }
 
 async function submitConfig() {
@@ -977,9 +973,7 @@ async function submitConfig() {
   const dialogToken = dialogGeneration;
   const selectionToken = selectionGeneration;
   const folderPath = selectedFolderPath.value;
-  const workspaceId = props.workspaceId;
-  // 提交快照与响应式表单彻底解耦；迟到输入只能保持 dirty，不能改变已发出的磁盘内容。
-  const submittedTarget = { ...target };
+  // 提交快照与响应式表单彻底解耦；迟到输入不能改变已发出的共享配置。
   const submitted: ReferenceConfigValue = {
     path: form.value.path,
     merge: form.value.merge,
@@ -989,22 +983,29 @@ async function submitConfig() {
   configSaving.value = true;
   configNotice.value = null;
   try {
-    // 保存前重新读取磁盘正文，再由 helper 对最新 JSONC 做字段级补丁，避免覆盖并发写入的未知配置。
-    const latest = await readWorkspaceConfig(workspaceId);
-    if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) || selectedFolderPath.value !== folderPath) return;
-    const output = patchReferenceConfig(latest, {
-      ...submittedTarget,
-      merge: submitted.merge,
-      sddFolderName: submitted.sddFolderName,
-      description: submitted.description
+    const saved = await api.saveApplicationAssetReference(props.appId, repository.repositoryId, {
+      directoryPath: folderPath!, merge: submitted.merge, description: submitted.description,
+      expectedVersion: selectedAssetConfig.value?.version ?? 0
     });
-    await api.writeWorkspaceAgentFile(workspaceId, OPENCODE_CONFIG_PATH, output);
     if (!contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) || selectedFolderPath.value !== folderPath) return;
+    assetListing.value = {
+      ...assetListing.value,
+      configurations: [...assetListing.value.configurations.filter((item) =>
+        item.repositoryId !== saved.repositoryId || item.directoryPath !== saved.directoryPath), saved]
+    };
     baseline.value = { ...submitted };
     configMode.value = "update";
-    permissionNeedsUpdate.value = false;
-    configNotice.value = { kind: "success", message: "引用配置已保存" };
+    configNotice.value = { kind: "success", message: "应用资产引用已对全体成员保存" };
     emit("saved");
+    await loadAssetConfigurations(dialogToken);
+    try {
+      await api.reconcileWorkspaceAutomationReferences(props.workspaceId);
+    } catch (error) {
+      if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId)) {
+        configNotice.value = { ...notice(error, "当前工作区刷新失败"),
+          kind: "error", message: "共享配置已保存，当前工作区刷新失败；请重新进入工作区" };
+      }
+    }
   } catch (error) {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === folderPath) {
       configNotice.value = { ...notice(error, "保存引用配置失败"), kind: "error" };
@@ -1013,6 +1014,34 @@ async function submitConfig() {
     if (contextIsCurrent(dialogToken, selectionToken, repository.repositoryId) && selectedFolderPath.value === folderPath) {
       configSaving.value = false;
     }
+  }
+}
+
+async function deleteConfig() {
+  const current = selectedAssetConfig.value;
+  if (!current || !props.canManage || configSaving.value) return;
+  configSaving.value = true;
+  try {
+    await api.deleteApplicationAssetReference(props.appId, current.repositoryId,
+      current.directoryPath, current.version);
+    assetListing.value = { ...assetListing.value, configurations: assetListing.value.configurations.filter((item) =>
+      item.repositoryId !== current.repositoryId || item.directoryPath !== current.directoryPath) };
+    configMode.value = "create";
+    baseline.value = { path: form.value.path, merge: true, sddFolderName: form.value.sddFolderName, description: "" };
+    form.value = { ...baseline.value };
+    configNotice.value = { kind: "success", message: "应用资产引用已删除" };
+    emit("saved");
+    await loadAssetConfigurations(dialogGeneration);
+    try {
+      await api.reconcileWorkspaceAutomationReferences(props.workspaceId);
+    } catch (error) {
+      configNotice.value = { ...notice(error, "当前工作区刷新失败"),
+        kind: "error", message: "共享配置已删除，当前工作区刷新失败；请重新进入工作区" };
+    }
+  } catch (error) {
+    configNotice.value = { ...notice(error, "删除应用资产引用失败"), kind: "error" };
+  } finally {
+    configSaving.value = false;
   }
 }
 
@@ -1088,6 +1117,7 @@ watch(
     listError.value = null;
     selectedRepositoryId.value = null;
     if (open) {
+      void loadAssetConfigurations(dialogGeneration);
       if (props.canManage) void loadRepositories(dialogGeneration);
     }
   },
@@ -1098,7 +1128,6 @@ watch(
   () => props.canManage,
   (canManage) => {
     if (!canManage) {
-      if (activeReferenceKind.value === "asset") activeReferenceKind.value = "automation";
       referenceKindForcedReadonly = true;
       return;
     }
@@ -1178,7 +1207,6 @@ onBeforeUnmount(() => {
           :inert="branchSwitchConfirmation || modalOperationOpen ? true : undefined"
         >
           <button
-            v-if="canManage"
             type="button"
             :class="{ 'is-active': activeReferenceKind === 'asset' }"
             :aria-pressed="activeReferenceKind === 'asset'"
@@ -1192,13 +1220,36 @@ onBeforeUnmount(() => {
           >自动化代码库</button>
         </nav>
 
+        <div v-if="activeReferenceKind === 'asset' && !canManage" class="reference-dialog-body">
+          <section class="reference-configuration-column" aria-label="应用资产库只读配置">
+            <div class="reference-column-heading">应用资产库（只读）</div>
+            <div v-if="assetListingLoading" class="reference-state">正在加载应用资产引用…</div>
+            <div v-else-if="assetListingError" class="reference-state is-error" role="alert">
+              {{ assetListingError.message }}
+              <button type="button" class="reference-inline-action" @click="loadAssetConfigurations(dialogGeneration)">重试</button>
+            </div>
+            <div v-else-if="assetListing.configurations.length === 0" class="reference-state">管理员尚未配置应用资产引用。</div>
+            <ul v-else class="reference-server-list">
+              <li v-for="item in assetListing.configurations" :key="`${item.repositoryId}:${item.directoryPath}`">
+                <strong>{{ item.repositoryName }} · {{ item.alias }}</strong>
+                <span>{{ item.directoryPath }}</span>
+                <small>{{ item.description }}</small>
+              </li>
+            </ul>
+          </section>
+        </div>
+
         <div
-          v-if="activeReferenceKind === 'asset'"
+          v-if="activeReferenceKind === 'asset' && canManage"
           class="reference-dialog-body"
           :aria-hidden="branchSwitchConfirmation || operationProgress ? 'true' : undefined"
           :inert="branchSwitchConfirmation || operationProgress ? true : undefined"
         >
           <aside class="reference-repository-column" aria-label="应用资产库">
+            <div v-if="assetListing.importPending" class="reference-state" role="status">历史个人引用正在后台迁移，未完成的服务器会继续重试。</div>
+            <div v-for="conflict in assetListing.conflicts" :key="conflict.alias" class="reference-state is-error" role="alert">
+              {{ conflict.alias }}：{{ conflict.reason }}
+            </div>
             <div class="reference-column-heading">
               <span>应用资产库</span>
               <Spinner v-if="listLoading" class="h-3.5 w-3.5" />
@@ -1587,6 +1638,7 @@ onBeforeUnmount(() => {
                       <code v-if="configNotice.traceId">traceId: {{ configNotice.traceId }}</code>
                     </div>
                     <div class="reference-form-actions">
+                      <Button v-if="selectedAssetConfig" type="button" variant="ghost" :disabled="configSaving" @click="deleteConfig">删除应用配置</Button>
                       <Button
                         type="button"
                         :disabled="!submitEnabled"

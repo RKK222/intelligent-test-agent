@@ -13,7 +13,11 @@ import com.enterprise.testagent.domain.configuration.CodeRepository;
 import com.enterprise.testagent.domain.configuration.CodeRepositoryType;
 import com.enterprise.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.enterprise.testagent.domain.opencodeprocess.LinuxServerId;
+import com.enterprise.testagent.domain.reference.ApplicationAssetReference;
+import com.enterprise.testagent.domain.reference.ApplicationAssetReferenceStore;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryRepository;
 import com.enterprise.testagent.domain.reference.ReferenceRepositoryReplicaStatus;
+import com.enterprise.testagent.domain.reference.ReferenceRepositoryStatus;
 import com.enterprise.testagent.domain.user.UserId;
 import com.enterprise.testagent.domain.workspace.Workspace;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -46,6 +51,8 @@ public class ApplicationAutomationReferenceWorkspaceReconciliationService {
     private final ApplicationAutomationReferenceRepository automationRepository;
     private final AutomationWorkspaceReferenceCatalogService catalogService;
     private final AgentConfigApplicationService agentConfigService;
+    private final ApplicationAssetReferenceStore assetStore;
+    private final ReferenceRepositoryRepository referenceRepository;
     private final AutomationReferenceWorkspaceJsoncReconciler jsoncReconciler;
 
     public ApplicationAutomationReferenceWorkspaceReconciliationService(
@@ -54,10 +61,26 @@ public class ApplicationAutomationReferenceWorkspaceReconciliationService {
             AutomationWorkspaceReferenceCatalogService catalogService,
             AgentConfigApplicationService agentConfigService,
             ObjectMapper objectMapper) {
+        this(configurationRepository, automationRepository, catalogService, agentConfigService,
+                null, null, objectMapper);
+    }
+
+    /** 生产装配同时对账应用共享资产和自动化引用；旧测试构造器保持兼容。 */
+    @Autowired
+    public ApplicationAutomationReferenceWorkspaceReconciliationService(
+            ConfigurationManagementRepository configurationRepository,
+            ApplicationAutomationReferenceRepository automationRepository,
+            AutomationWorkspaceReferenceCatalogService catalogService,
+            AgentConfigApplicationService agentConfigService,
+            ApplicationAssetReferenceStore assetStore,
+            ReferenceRepositoryRepository referenceRepository,
+            ObjectMapper objectMapper) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository);
         this.automationRepository = Objects.requireNonNull(automationRepository);
         this.catalogService = Objects.requireNonNull(catalogService);
         this.agentConfigService = Objects.requireNonNull(agentConfigService);
+        this.assetStore = assetStore;
+        this.referenceRepository = referenceRepository;
         this.jsoncReconciler = new AutomationReferenceWorkspaceJsoncReconciler(
                 Objects.requireNonNull(objectMapper));
     }
@@ -109,7 +132,36 @@ public class ApplicationAutomationReferenceWorkspaceReconciliationService {
                     generation.description()));
         }
 
-        boolean changed = reconcileConfiguration(workspace, appId, patches);
+        List<AutomationReferenceWorkspaceJsoncReconciler.AssetPatch> assetPatches = new ArrayList<>();
+        if (assetStore != null && referenceRepository != null) {
+            var linkedAssets = configurationRepository.findRepositoriesByApplication(appId).stream()
+                    .filter(repository -> CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value()
+                            .equals(repository.repositoryType()))
+                    .collect(java.util.stream.Collectors.toMap(CodeRepository::repositoryId,
+                            repository -> repository, (first, ignored) -> first));
+            for (ApplicationAssetReference asset : assetStore.list(appId)) {
+                CodeRepository repository = linkedAssets.get(asset.repositoryId());
+                if (repository == null) continue;
+                var state = referenceRepository.findState(asset.repositoryId()).orElse(null);
+                boolean localReady = state != null && state.status() == ReferenceRepositoryStatus.READY
+                        && referenceRepository.findReplicas(asset.repositoryId()).stream().anyMatch(replica ->
+                        replica.linuxServerId().equals(linuxServerId)
+                                && replica.generation() == state.generation()
+                                && replica.status() == ReferenceRepositoryReplicaStatus.READY
+                                && state.targetCommitHash().equals(replica.currentCommitHash()));
+                if (!localReady) {
+                    warnings.add(asset.alias() + "：当前服务器资产副本尚未就绪，暂不可读取");
+                }
+                // 服务器临时不可用时保留声明和精确权限，副本恢复后无需用户重新配置。
+                assetPatches.add(new AutomationReferenceWorkspaceJsoncReconciler.AssetPatch(
+                        appId.value(), asset.repositoryId().value(), asset.alias(),
+                        "{env:OPENCODE_REFERENCES_DIR}/" + repository.englishName() + "/" + asset.directoryPath(),
+                        asset.sddFolderName(), asset.merge(), asset.description(),
+                        localReady ? state.generation() : null));
+            }
+        }
+
+        boolean changed = reconcileConfiguration(workspace, appId, patches, assetPatches);
         if (!warnings.isEmpty()) {
             LOGGER.warn(
                     "Automation references partially unavailable, appId={}, workspaceId={}, skippedCount={}, traceId={}",
@@ -124,11 +176,13 @@ public class ApplicationAutomationReferenceWorkspaceReconciliationService {
     private boolean reconcileConfiguration(
             Workspace workspace,
             ApplicationId appId,
-            List<AutomationReferenceWorkspaceJsoncReconciler.Patch> patches) {
+            List<AutomationReferenceWorkspaceJsoncReconciler.Patch> patches,
+            List<AutomationReferenceWorkspaceJsoncReconciler.AssetPatch> assetPatches) {
         boolean observedChange = false;
         for (int attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
             ConfigurationSnapshot snapshot = readWorkspaceConfiguration(workspace);
             String reconciled = jsoncReconciler.reconcile(snapshot.content(), appId.value(), patches);
+            reconciled = jsoncReconciler.reconcileAssets(reconciled, appId.value(), assetPatches);
             if (reconciled.equals(snapshot.content())) {
                 return observedChange;
             }

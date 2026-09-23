@@ -1719,7 +1719,14 @@ test("workspace directory move keeps expanded descendants and reloads a pending 
 });
 
 test("workspace tree merges references with source colors and exposes non-merged aliases", async ({ page }) => {
+  const fileOperations: string[] = [];
+  const workspaceViewContents = {
+    "REFERENCE:docs-assets:guide.md": "reference guide",
+    "REFERENCE:docs-assets:same.md": "collision",
+    "REFERENCE:spec-assets:spec.md": "standalone spec"
+  };
   await mockBackendApi(page, {
+    fileOperations,
     personalWorkspaces: {
       awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
     },
@@ -1831,11 +1838,7 @@ test("workspace tree merges references with source colors and exposes non-merged
         truncated: false
       }
     },
-    workspaceViewContents: {
-      "REFERENCE:docs-assets:guide.md": "reference guide",
-      "REFERENCE:docs-assets:same.md": "collision",
-      "REFERENCE:spec-assets:spec.md": "standalone spec"
-    }
+    workspaceViewContents
   });
 
   await gotoWorkbench(page, { selectConversation: false });
@@ -1858,6 +1861,17 @@ test("workspace tree merges references with source colors and exposes non-merged
   await page.keyboard.press("End");
   await page.keyboard.type(" must remain readonly");
   await expect(page.locator(".monaco-editor")).not.toContainText("must remain readonly");
+
+  // 两台副本完成新分支同步后，同路径资产文件的已打开标签也必须随显式刷新重读。
+  await page.evaluate(() => (window as Window & {
+    __taSetWorkspaceViewContent?: (key: string, content: string) => void;
+  }).__taSetWorkspaceViewContent?.("REFERENCE:docs-assets:guide.md", "new branch guide"));
+  await page.getByLabel("更多工作空间操作").click();
+  await page.getByRole("button", { name: "刷新文件树", exact: true }).click();
+  await expect.poll(() => fileOperations.filter((operation) => operation === "workspace.view.read").length)
+    .toBeGreaterThan(1);
+  await expect(page.locator(".monaco-editor")).toContainText("new branch guide");
+  await expect(page.locator(".monaco-editor")).not.toContainText("reference guide");
 
   await alias.click();
   const standalone = page.getByRole("button", { name: "spec.md", exact: true });
@@ -11493,6 +11507,11 @@ async function mockBackendApi(
           : path;
         Object.assign(contents, deletedAgentFileSnapshots.get(`${scope}:${treePath}`) ?? {});
       }
+    };
+    (window as Window & {
+      __taSetWorkspaceViewContent?: (key: string, content: string) => void;
+    }).__taSetWorkspaceViewContent = (key, content) => {
+      (workspaceViewContents as Record<string, string>)[key] = content;
     };
     class MockWorkspaceFileWebSocket {
       static CONNECTING = 0;

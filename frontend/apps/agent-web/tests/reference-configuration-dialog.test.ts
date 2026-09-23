@@ -46,6 +46,10 @@ function api(overrides: Record<string, unknown> = {}) {
     })),
     getReferenceRepositoryStatus: vi.fn().mockResolvedValue(status()),
     listReferenceRepositoryTree: vi.fn().mockResolvedValue([]),
+    listApplicationAssetReferences: vi.fn().mockResolvedValue({ configurations: [], importPending: false, conflicts: [] }),
+    saveApplicationAssetReference: vi.fn().mockResolvedValue(configuredAsset()),
+    deleteApplicationAssetReference: vi.fn().mockResolvedValue(undefined),
+    reconcileWorkspaceAutomationReferences: vi.fn().mockResolvedValue({ changed: true, warnings: [] }),
     readWorkspaceAgentFile: vi.fn().mockRejectedValue(new BackendApiError(500, {
       success: false,
       code: "FILE_NOT_FOUND",
@@ -57,12 +61,17 @@ function api(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function configuredAsset(description = "旧说明") {
+  return { repositoryId: "repo-assets", repositoryName: "需求资产库", alias: "docs-requirements",
+    directoryPath: "docs", merge: true, sddFolderName: "docs", description, version: 1 };
+}
+
 const mountedWrappers: Array<ReturnType<typeof mount>> = [];
 
-function render(mockApi: ReturnType<typeof api>) {
+function render(mockApi: ReturnType<typeof api>, canManage = true) {
   const wrapper = mount(ReferenceConfigurationDialog, {
     attachTo: document.body,
-    props: { open: true, appId: "app-demo", workspaceId: "wrk-personal" },
+    props: { open: true, appId: "app-demo", workspaceId: "wrk-personal", canManage },
     global: {
       provide: { api: mockApi },
       stubs: { Teleport: true }
@@ -103,6 +112,22 @@ describe("ReferenceConfigurationDialog", () => {
     vi.useRealTimers();
     for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount();
     document.body.innerHTML = "";
+  });
+
+  it("shows a member the shared reference without exposing Git or write controls", async () => {
+    const mockApi = api({ listApplicationAssetReferences: vi.fn().mockResolvedValue({
+      configurations: [configuredAsset("产品资料")], importPending: false, conflicts: []
+    }) });
+    const wrapper = render(mockApi, false);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("应用资产库（只读）");
+    expect(wrapper.text()).toContain("docs-requirements");
+    expect(wrapper.text()).toContain("产品资料");
+    expect(wrapper.text()).not.toContain("ssh://git.example.test");
+    expect(wrapper.find('button[aria-label="保存引用配置"]').exists()).toBe(false);
+    expect(mockApi.listReferenceRepositories).not.toHaveBeenCalled();
+    expect(mockApi.saveApplicationAssetReference).not.toHaveBeenCalled();
   });
 
   it("lists the current application's asset repositories with Chinese/English names and Git URL", async () => {
@@ -1490,7 +1515,7 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.text()).not.toContain("trace_transient");
   });
 
-  it("synchronizes an initialized repository, exposes only blue selectable root folders, and saves through workspace RPC", async () => {
+  it("synchronizes an initialized repository, exposes only blue selectable root folders, and saves shared configuration", async () => {
     vi.useFakeTimers();
     const mockApi = api({
       listReferenceRepositoryTree: vi.fn().mockImplementation((_appId: string, _repositoryId: string, path: string) =>
@@ -1539,31 +1564,15 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="保存引用配置"]').trigger("click");
     await flushPromises();
 
-    expect(mockApi.readWorkspaceAgentFile).toHaveBeenCalledWith("wrk-personal", "opencode.jsonc");
-    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledWith(
-      "wrk-personal",
-      "opencode.jsonc",
-      expect.stringContaining('"description": "产品需求与接口约束"')
-    );
+    expect(mockApi.saveApplicationAssetReference).toHaveBeenCalledWith("app-demo", "repo-assets", {
+      directoryPath: "docs", merge: true, description: "产品需求与接口约束", expectedVersion: 0
+    });
+    expect(mockApi.reconcileWorkspaceAutomationReferences).toHaveBeenCalledWith("wrk-personal");
+    expect(mockApi.writeWorkspaceAgentFile).not.toHaveBeenCalled();
     expect(wrapper.emitted("saved")).toEqual([[]]);
   });
 
-  it("saves only a configured nested spec beside an existing docs reference without mounting its parent", async () => {
-    const existing = `{
-  "references": {
-    "docs-requirements": {
-      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
-      "merge": true,
-      "sdd-folder-name": "docs",
-      "description": "产品需求"
-    }
-  },
-  "permission": {
-    "external_directory": {
-      "{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"
-    }
-  }
-}`;
+  it("saves only the selected nested spec path to the shared configuration", async () => {
     const mockApi = api({
       listReferenceRepositoryTree: vi.fn().mockImplementation(
         (_appId: string, _repositoryId: string, path: string) => Promise.resolve(path === ""
@@ -1605,12 +1614,7 @@ describe("ReferenceConfigurationDialog", () => {
                 selectable: false
               }
             ])
-      ),
-      readWorkspaceAgentFile: vi.fn().mockResolvedValue({
-        path: "opencode.jsonc",
-        content: existing,
-        size: existing.length
-      })
+      )
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1653,40 +1657,21 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="保存引用配置"]').trigger("click");
     await flushPromises();
 
-    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
-    expect(written).toContain('"docs-requirements"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
-    expect(written).toContain('"spec-requirements"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec"');
-    expect(written).toContain('"sdd-folder-name": "spec"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/spec/*": "allow"');
-    expect(written).not.toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/ai-agent/*": "allow"');
+    expect(mockApi.saveApplicationAssetReference).toHaveBeenCalledWith("app-demo", "repo-assets", {
+      directoryPath: "ai-agent/spec", merge: true, description: "需求用例与设计资料", expectedVersion: 0
+    });
+    expect(mockApi.writeWorkspaceAgentFile).not.toHaveBeenCalled();
   });
 
-  it("loads an existing local reference, enables Update only after a change, and preserves unknown fields", async () => {
-    const existing = `{
-  // keep root comment
-  "references": {
-    "docs-requirements": {
-      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
-      "merge": true,
-      "sdd-folder-name": "docs",
-      "description": "旧说明",
-      "hidden": true,
-    },
-  },
-  "permission": {
-    "external_directory": {
-      "{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow",
-    },
-  },
-}`;
+  it("loads an existing shared reference and updates only after a change", async () => {
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length })
+      listApplicationAssetReferences: vi.fn().mockResolvedValue({
+        configurations: [configuredAsset()], importPending: false, conflicts: []
+      })
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1706,38 +1691,21 @@ describe("ReferenceConfigurationDialog", () => {
     await wrapper.get('button[aria-label="更新引用配置"]').trigger("click");
     await flushPromises();
 
-    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
-    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
-    expect(written).toContain("// keep root comment");
-    expect(written).toContain('"hidden": true');
-    expect(written).toContain('"merge": false');
-    expect(written).toContain('"references"');
-    expect(written).toContain('"permission"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
+    expect(mockApi.saveApplicationAssetReference).toHaveBeenCalledWith("app-demo", "repo-assets", {
+      directoryPath: "docs", merge: false, description: "旧说明", expectedVersion: 1
+    });
+    expect(mockApi.writeWorkspaceAgentFile).not.toHaveBeenCalled();
   });
 
-  it("enables Update for permission drift and repairs it without changing the description", async () => {
-    const existing = `{
-  "references": {
-    "docs-requirements": {
-      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
-      "merge": true,
-      "sdd-folder-name": "docs",
-      "description": "现有说明"
-    }
-  }
-}`;
-    const readWorkspaceAgentFile = vi.fn().mockResolvedValue({
-      path: "opencode.jsonc",
-      content: existing,
-      size: existing.length
-    });
+  it("does not ask an admin to update an unchanged shared reference", async () => {
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readWorkspaceAgentFile
+      listApplicationAssetReferences: vi.fn().mockResolvedValue({
+        configurations: [configuredAsset("现有说明")], importPending: false, conflicts: []
+      })
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1745,39 +1713,21 @@ describe("ReferenceConfigurationDialog", () => {
 
     const updateButton = wrapper.get('button[aria-label="更新引用配置"]');
     expect(wrapper.get('textarea[aria-label="描述（description）"]').element).toHaveProperty("value", "现有说明");
-    expect(updateButton.attributes()).not.toHaveProperty("disabled");
-
-    await updateButton.trigger("click");
-    await flushPromises();
-
-    expect(readWorkspaceAgentFile).toHaveBeenCalledTimes(2);
-    expect(mockApi.writeWorkspaceAgentFile).toHaveBeenCalledTimes(1);
-    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
-    expect(written).toContain('"docs-requirements"');
-    expect(written).toContain('"description": "现有说明"');
-    expect(written).toContain('"{env:OPENCODE_REFERENCES_DIR}/requirements/docs/*": "allow"');
-    expect(wrapper.get('button[aria-label="更新引用配置"]').attributes()).toHaveProperty("disabled");
+    expect(updateButton.attributes()).toHaveProperty("disabled");
+    expect(mockApi.saveApplicationAssetReference).not.toHaveBeenCalled();
   });
 
-  it("writes an immutable submitted snapshot and never marks edits made during the pending write as clean", async () => {
-    const pendingWrite = deferred<void>();
-    const existing = `{
-  "references": {
-    "docs-requirements": {
-      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
-      "merge": true,
-      "sdd-folder-name": "docs",
-      "description": "旧说明"
-    }
-  }
-}`;
+  it("submits an immutable shared snapshot and keeps edits made during pending save dirty", async () => {
+    const pendingWrite = deferred<ReturnType<typeof configuredAsset>>();
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length }),
-      writeWorkspaceAgentFile: vi.fn().mockReturnValue(pendingWrite.promise)
+      listApplicationAssetReferences: vi.fn().mockResolvedValue({
+        configurations: [configuredAsset()], importPending: false, conflicts: []
+      }),
+      saveApplicationAssetReference: vi.fn().mockReturnValue(pendingWrite.promise)
     });
     const wrapper = render(mockApi);
     await flushPromises();
@@ -1791,16 +1741,16 @@ describe("ReferenceConfigurationDialog", () => {
     expect(wrapper.get('select[aria-label="是否合并（merge）"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.get('textarea[aria-label="描述（description）"]').attributes()).toHaveProperty("disabled");
     expect(wrapper.get('button[aria-label="选择需求资产库"]').attributes()).toHaveProperty("disabled");
-    const written = mockApi.writeWorkspaceAgentFile.mock.calls[0]?.[2] as string;
-    expect(written).toContain('"merge": false');
-    expect(written).toContain('"description": "提交时说明"');
+    expect(mockApi.saveApplicationAssetReference).toHaveBeenCalledWith("app-demo", "repo-assets", {
+      directoryPath: "docs", merge: false, description: "提交时说明", expectedVersion: 1
+    });
 
     // 浏览器会阻止 disabled 控件输入；直接改 setup state 模拟已排队的迟到组件事件，验证 baseline 仍绑定提交快照。
     const internalInstance = wrapper.vm.$ as unknown as { setupState: { form: { description: string } } };
     const setupState = internalInstance.setupState;
     setupState.form.description = "写入等待期间的新说明";
     await wrapper.vm.$nextTick();
-    pendingWrite.resolve();
+    pendingWrite.resolve(configuredAsset("提交时说明"));
     await flushPromises();
 
     expect(wrapper.get('textarea[aria-label="描述（description）"]').element).toHaveProperty("value", "写入等待期间的新说明");
@@ -1808,25 +1758,17 @@ describe("ReferenceConfigurationDialog", () => {
   });
 
   it("fences a pending save across close and reopen so the old finally cannot clear the new saving state", async () => {
-    const firstWrite = deferred<void>();
-    const secondWrite = deferred<void>();
-    const existing = `{
-  "references": {
-    "docs-requirements": {
-      "path": "{env:OPENCODE_REFERENCES_DIR}/requirements/docs",
-      "merge": true,
-      "sdd-folder-name": "docs",
-      "description": "旧说明"
-    }
-  }
-}`;
+    const firstWrite = deferred<ReturnType<typeof configuredAsset>>();
+    const secondWrite = deferred<ReturnType<typeof configuredAsset>>();
     const mockApi = api({
       synchronizeReferenceRepository: vi.fn().mockResolvedValue(status()),
       listReferenceRepositoryTree: vi.fn().mockResolvedValue([
         { path: "docs", name: "docs", directory: true, size: 0, highlighted: true, selectable: true }
       ]),
-      readWorkspaceAgentFile: vi.fn().mockResolvedValue({ path: "opencode.jsonc", content: existing, size: existing.length }),
-      writeWorkspaceAgentFile: vi.fn()
+      listApplicationAssetReferences: vi.fn().mockResolvedValue({
+        configurations: [configuredAsset()], importPending: false, conflicts: []
+      }),
+      saveApplicationAssetReference: vi.fn()
         .mockReturnValueOnce(firstWrite.promise)
         .mockReturnValueOnce(secondWrite.promise)
     });
@@ -1848,15 +1790,15 @@ describe("ReferenceConfigurationDialog", () => {
     await flushPromises();
     expect(wrapper.get('textarea[aria-label="描述（description）"]').attributes()).toHaveProperty("disabled");
 
-    firstWrite.resolve();
+    firstWrite.resolve(configuredAsset("第一次保存"));
     await flushPromises();
     expect(wrapper.get('textarea[aria-label="描述（description）"]').attributes()).toHaveProperty("disabled");
-    expect(wrapper.text()).not.toContain("引用配置已保存");
+    expect(wrapper.text()).not.toContain("应用资产引用已对全体成员保存");
 
-    secondWrite.resolve();
+    secondWrite.resolve(configuredAsset("第二次保存"));
     await flushPromises();
     expect(wrapper.get('textarea[aria-label="描述（description）"]').attributes()).not.toHaveProperty("disabled");
-    expect(wrapper.text()).toContain("引用配置已保存");
+    expect(wrapper.text()).toContain("应用资产引用已对全体成员保存");
   });
 
   it("discards stale status responses after switching repositories and stops polling when closed", async () => {
