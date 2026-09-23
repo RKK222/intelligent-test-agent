@@ -18269,3 +18269,26 @@
 - `release` 分支现在支持客户端个人公共能力查看/编辑和普通用户三击 Ctrl 模型切换；分享模式仍不可切换模型，服务器受管模式公共 Git 权限保持不变。
 - 公共能力“确认更新后清空个人修改、离线确认后重连继续、激活失败恢复个人副本”的更新协议尚未在本轮改造；当前更新仍保留个人副本，不会静默删除，需后续补齐显式确认标记和 attempt 持久化语义后再宣称完整覆盖。
 - 未运行真实本地客户端四类能力端到端冒烟，也未连接共享环境；现场验收仍需覆盖重启保留、热加载、Tool 重启、失败回滚和公共包更新确认。
+
+## 2026-09-23 - 资产共享配置 MyBatis 读取回归修复与 #50 验收
+
+### Why
+
+- #50（`ffebbbe1b`）部署后，管理员和普通成员读取共享资产配置列表在数据库尚无配置时均可返回 200；建立一次可回收的 `docs` 临时配置后，列表接口返回 500。
+- 该回归会直接阻断“管理员保存后成员只读查看”，必须在继续验收前修复并重新发布。
+
+### What
+
+- 修正 `ApplicationAssetReferenceMapper.xml` 构造映射：`merge_enabled` 使用 MyBatis primitive 别名 `_boolean`，`version` 使用 `_long`，与 Java record 的 primitive 构造参数一致。
+- 新增 `MyBatisApplicationAssetReferenceStoreIntegrationTest`，用 H2 真实执行 XML mapper，覆盖有数据时共享引用列表读取。
+
+### How
+
+- 通过测试环境 API 复现：管理员临时保存 `docs` 后，管理员/成员 GET `asset-reference-configurations` 均为 HTTP 500；成员访问管理员专用 `reference-repositories` 为 403。
+- JDK 25 下运行 `mvn -q -f backend/pom.xml -pl test-agent-persistence -am -Dtest=MyBatisApplicationAssetReferenceStoreIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`，通过。
+- #50 readiness 为 UP、前端 3000 返回 200；普通成员工作台仍因 `OPENCODE_UNAVAILABLE` 无法选择版本，文件树与 Run 尚未宣称通过。临时 `docs` 配置待修复版本发布后用 API 删除并复核空列表。
+
+### Result
+
+- 代码修复待推送到内网 GitLab release 并经 Jenkins 新构建发布；此前 #50 不能作为共享配置“有数据读取”通过证据。
+- 未修改 `.env*`、OpenCode 源码、无关并行工作区改动；本次新增数据库行仅为可回收验收数据，完成后删除。
