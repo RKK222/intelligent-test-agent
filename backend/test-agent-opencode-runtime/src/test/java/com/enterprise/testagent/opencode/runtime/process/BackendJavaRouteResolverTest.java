@@ -176,6 +176,18 @@ class BackendJavaRouteResolverTest {
     }
 
     @Test
+    void skipsRemoteBackendThatOnlyAdvertisesLoopbackAddress() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(backendSnapshot("bjp_server_b", "server-b", "http://127.0.0.1:8080", NOW)),
+                List.of(
+                        managerSnapshot("ctr_a_ready", "server-a", NOW, "bjp_current_backend", 10, 1),
+                        managerSnapshot("ctr_b_ready", "server-b", NOW, "bjp_server_b", 10, 0))));
+
+        assertThat(resolver.selectLeastLoadedInitializableServer())
+                .contains(new LinuxServerId("server-a"));
+    }
+
+    @Test
     void excludesServersWithoutCapacityConnectedManagerOrRoutableJava() {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
                 List.of(

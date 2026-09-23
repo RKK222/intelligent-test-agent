@@ -18386,3 +18386,24 @@
 
 - 服务启动、健康、CORS、普通工作台模型解锁/切换/本地持久化已取得真实端到端证据。
 - 本地客户端个人副本查看/编辑、Agent/Skill 热加载、Tool 重启、更新确认清空和失败回滚本轮仍未取得真实客户端证据，原因是测试账号当前没有在线 `LOCAL_CLIENT` 实例；此前单元/组件测试不替代这部分现场验收。
+
+## 2026-09-24 - 修复共享 Redis 下普通成员 OpenCode 首次路由
+
+### Why
+
+- 共享测试环境与本机开发服务共用 Redis 时，本机 Java 的 `127.0.0.1:8080` heartbeat 会被共享后端看见。未绑定的普通成员首次查询/初始化可能选中该 loopback 节点，随后被错误转发到共享后端自身的 `127.0.0.1`，真实接口返回登录重定向，成员 OpenCode 无法初始化。
+
+### What
+
+- `BackendJavaRouteResolver.selectLeastLoadedInitializableServer()` 现在排除远端只监听 `localhost`、`127.0.0.0/8`、`0.0.0.0` 或 IPv6 loopback 的 Java；当前 Java 仍可使用本机 listenUrl，生产多服务器仍按可达 `listenUrl` 参与负载选择。
+- 新增 resolver 回归测试，并同步 `docs/deployment/backend.md` 的路由/候选语义。
+
+### How
+
+- JDK 25 下运行 `mvn -q -f backend/pom.xml -pl test-agent-opencode-runtime -am -Dtest=BackendJavaRouteResolverTest -Dsurefire.failIfNoSpecifiedTests=false test`，通过。
+- 现场只读 Redis 核对出共享环境同时存在 `dev-192-168-8-100` 与本机 `kakadeMacBook-Pro.local` 两个 backend snapshot；本机快照 listenUrl 为 `http://127.0.0.1:8080`。普通成员 `asset_ref_e2e_20260923` 的旧版本 `/processes/me` 请求实测返回 302 到本机登录地址，管理员 `888888888` 已绑定共享节点并返回 READY。
+
+### Result
+
+- 修复后首次成员状态/初始化不会再把共享请求选到不可达的本机 loopback Java；待提交并经 Jenkins 发布后，继续做普通成员真实初始化、工作区选择和三轮对话验收。
+- 不涉及数据库结构、Flyway、OpenCode 源码、API/事件 wire 或环境文件；当前仍有共享环境发布与真实成员对话待完成。

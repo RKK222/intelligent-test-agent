@@ -17,6 +17,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeManagerBackendCon
 import com.enterprise.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
@@ -24,6 +25,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -247,7 +249,11 @@ public class BackendJavaRouteResolver {
             processTotals.merge(linuxServerId, (long) container.currentProcesses(), Long::sum);
 
             BackendJavaProcess selectedBackend = selectedBackends.get(linuxServerId);
+            // 共享 Redis 可能同时存在本机开发 Java 的 heartbeat。它通常只监听
+            // 127.0.0.1，不能作为远端候选返回给共享测试/企业后端，否则转发会落到
+            // 目标服务器自身的 loopback，而不是本机 manager 所在的后端。
             if (selectedBackend != null
+                    && isRoutableInitialAllocationBackend(linuxServerId, selectedBackend)
                     && container.canAcceptProcess()
                     && isConnected(snapshot, selectedBackend.backendProcessId())) {
                 initializableServers.add(linuxServerId);
@@ -260,6 +266,35 @@ public class BackendJavaRouteResolver {
                         .thenComparing(Comparator.naturalOrder()))
                 .findFirst()
                 .map(LinuxServerId::new);
+    }
+
+    /**
+     * 首次分配必须只选择当前 Java 或带可达监听地址的远端 Java。
+     * <p>loopback 地址只对它所在主机有效；把它作为 Redis 全局候选会让另一台
+     * 后端把请求错误转发到自己的 127.0.0.1。生产远端地址由部署配置提供，解析失败
+     * 时安全拒绝候选，避免把不可验证的地址用于跨服务器转发。
+     */
+    private boolean isRoutableInitialAllocationBackend(
+            String linuxServerId,
+            BackendJavaProcess backend) {
+        if (isCurrent(linuxServerId)) {
+            return true;
+        }
+        try {
+            String host = URI.create(backend.listenUrl()).getHost();
+            if (host == null || host.isBlank()) {
+                return false;
+            }
+            String normalized = host.trim().toLowerCase(Locale.ROOT);
+            return !normalized.equals("localhost")
+                    && !normalized.equals("ip6-localhost")
+                    && !normalized.equals("0.0.0.0")
+                    && !normalized.equals("::")
+                    && !normalized.equals("::1")
+                    && !normalized.startsWith("127.");
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     /**
