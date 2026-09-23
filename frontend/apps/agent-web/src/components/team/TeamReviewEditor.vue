@@ -36,7 +36,7 @@ const diffFiles = computed<RunDiffFile[]>(() => {
       </div>
     </div>
     <div v-if="!activeTab" class="team-editor-empty">
-      <p>选择左侧文件，或从右侧打开未提交修改和提交。</p>
+      <p>选择左侧文件或变更，或从团队审阅打开提交。</p>
     </div>
     <div v-else-if="activeTab.loadState === 'error'" class="team-editor-body">
       <p class="team-editor-error" role="alert">{{ activeTab.errorMessage || "内容无法读取" }}</p>

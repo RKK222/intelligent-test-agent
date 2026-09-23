@@ -9,6 +9,7 @@ vi.mock("../src/components/FigmaFileExplorer.vue", () => ({
       readonlyReview: Boolean,
       canWrite: Boolean,
       workspaceKind: String,
+      changedFiles: Array,
       emptyWorkspaceMessage: String,
       fileTreeError: String
     },
@@ -52,6 +53,57 @@ function api() {
 }
 
 describe("team review panes", () => {
+  it("shows the selected member's uncommitted changes in the left pane", async () => {
+    const backend = api();
+    backend.listSystemAdminTeamMembers.mockResolvedValue({ items: [{ userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", status: "ACTIVE", roles: ["USER"] }], total: 1, page: 1, size: 200 });
+    backend.listTeamApplications.mockResolvedValue([{ appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }]);
+    backend.listTeamWorkspaceTemplates.mockResolvedValue([{ workspaceId: "template-1", appId: "app-1", workspaceName: "空间", branch: "release", directoryPath: "repo", enabled: true }]);
+    backend.listTeamWorkspaceVersions.mockResolvedValue([{ versionId: "version-1", applicationWorkspaceId: "template-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }]);
+    backend.listTeamContributions.mockResolvedValue([{
+      userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", membershipState: "CURRENT",
+      personalWorkspaces: [{ personalWorkspaceId: "personal-1", workspaceId: "runtime-1", workspaceName: "default", branch: "feature/member", linuxServerId: "server-1", baseCommit: "abc", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }]
+    }]);
+    backend.getTeamWorkspaceGitStatus.mockResolvedValue({ files: [{ path: "src/a.ts", rawStatus: " M", status: "modified", staged: false, patch: "@@ -1 +1 @@", additions: 1, deletions: 1 }], stagedCount: 0, unstagedCount: 1, untrackedCount: 0 });
+    const controller = createTeamManagementController(backend);
+    await controller.enter(false);
+    await vi.waitFor(() => expect(controller.snapshot().gitStatus?.files).toHaveLength(1));
+    const files = mount(TeamReviewFilePane, { global: { provide: { [teamManagementKey as symbol]: controller } } });
+    expect(files.getComponent({ name: "FigmaFileExplorer" }).props("changedFiles")).toEqual([
+      { path: "src/a.ts", patch: "@@ -1 +1 @@", status: "modified", additions: 1, deletions: 1 }
+    ]);
+    files.getComponent({ name: "FigmaFileExplorer" }).vm.$emit("openDiff", "src/a.ts");
+    await files.vm.$nextTick();
+    expect(controller.snapshot().tabs.some((tab) => tab.kind === "diff" && tab.path === "src/a.ts")).toBe(true);
+    files.unmount();
+  });
+
+  it("builds a bounded read-only chat snapshot from the selected member workspace", async () => {
+    const backend = api();
+    backend.listSystemAdminTeamMembers.mockResolvedValue({ items: [{ userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", status: "ACTIVE", roles: ["USER"] }], total: 1, page: 1, size: 200 });
+    backend.listTeamApplications.mockResolvedValue([{ appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }]);
+    backend.listTeamWorkspaceTemplates.mockResolvedValue([{ workspaceId: "template-1", appId: "app-1", workspaceName: "空间", branch: "release", directoryPath: "repo", enabled: true }]);
+    backend.listTeamWorkspaceVersions.mockResolvedValue([{ versionId: "version-1", applicationWorkspaceId: "template-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }]);
+    backend.listTeamContributions.mockResolvedValue([{
+      userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", membershipState: "CURRENT",
+      personalWorkspaces: [{ personalWorkspaceId: "personal-1", workspaceId: "runtime-1", workspaceName: "default", branch: "feature/member", linuxServerId: "server-1", baseCommit: "abc", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }]
+    }]);
+    backend.searchTeamWorkspaceFiles.mockResolvedValue([
+      { path: "src/app.ts", name: "app.ts", directory: false, size: 20 },
+      { path: ".env", name: ".env", directory: false, size: 20 }
+    ]);
+    backend.readTeamWorkspaceFile.mockResolvedValue({ path: "src/app.ts", content: "export const answer = 42;", encoding: "utf-8", readonly: true });
+    const controller = createTeamManagementController(backend);
+    await controller.enter(false);
+    const part = await controller.prepareChatContext();
+    expect(part?.type).toBe("text");
+    expect((part as { text: string }).text).toContain("src/app.ts");
+    expect((part as { text: string }).text).toContain("answer = 42");
+    expect((part as { text: string }).text).not.toContain(".env");
+    expect(backend.readTeamWorkspaceFile).toHaveBeenCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "personal-1", "runtime-1", "src/app.ts"
+    );
+  });
+
   it("explains why platform-wide scope cannot change members and keeps the file tree read-only", async () => {
     const controller = createTeamManagementController(api());
     await controller.enter(true);
@@ -85,9 +137,17 @@ describe("team review panes", () => {
 
     const launcher = document.body.querySelector<HTMLButtonElement>("[aria-label='打开团队审阅']");
     expect(launcher).not.toBeNull();
+    const manageMembers = document.body.querySelector<HTMLButtonElement>("[aria-label='管理团队成员']");
+    expect(manageMembers).not.toBeNull();
+    manageMembers?.click();
+    await review.vm.$nextTick();
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).not.toBeNull();
+    controller.closeTeamPickerDialog();
     launcher?.click();
     await review.vm.$nextTick();
-    expect(document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']")).not.toBeNull();
+    const dialog = document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']");
+    expect(dialog).not.toBeNull();
+    expect(dialog?.textContent).not.toContain("未提交修改");
 
     const close = document.body.querySelector<HTMLButtonElement>("[aria-label='关闭审阅对话框']");
     close?.click();

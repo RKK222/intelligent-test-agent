@@ -10454,7 +10454,7 @@ function toggleWorkspaceViewDirectory(entry: WorkspaceViewEntry) {
   expandedDirectories.value = next;
 }
 
-function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
+async function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 历史切换完成前，当前 session 仍可能是上一会话；父层再次设防，避免绕过按钮状态误发 Run。
   if (historySwitchingSessionId.value) {
     return;
@@ -10534,6 +10534,19 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区，再发送任务。" };
     return;
   }
+  let teamMemberContext: PromptPart | undefined;
+  if (teamPerspectiveActive.value) {
+    try {
+      teamMemberContext = await teamController.prepareChatContext();
+    } catch (error) {
+      feedback.value = {
+        kind: "error",
+        title: "成员工作区读取失败",
+        description: error instanceof Error ? error.message : "当前成员工作区暂时无法读取，请刷新团队审阅后重试。"
+      };
+      return;
+    }
+  }
   if (resendEditDraft.value) {
     const editedPrompt = prompt.trim();
     const resendValidation = validateChatSend(editedPrompt, []);
@@ -10561,6 +10574,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   const extraPromptParts = [
     ...chatContextParts,
     ...diffContextParts.value,
+    ...(teamMemberContext ? [teamMemberContext] : []),
     ...(codeKnowledgePart ? [codeKnowledgePart] : [])
   ];
   // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，

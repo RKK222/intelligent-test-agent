@@ -8,6 +8,7 @@ import type {
   TeamContribution,
   TeamExport,
   TeamGitStatus,
+  PromptPart,
   TeamScopeMode,
   TeamScopeParams,
   TeamUser,
@@ -40,6 +41,10 @@ export type TeamReviewMember = {
 
 const DEFAULT_PERSONAL_WORKSPACE_NAME = "default";
 const TEAM_ROSTER_PAGE_SIZE = 200;
+const TEAM_CHAT_MAX_FILES = 24;
+const TEAM_CHAT_MAX_CHARS = 80_000;
+const TEAM_CHAT_TEXT_EXTENSIONS = /\.(?:c|cc|cpp|css|go|html?|java|jsonc?|md|mjs|py|sql|sh|tsx?|vue|yaml|yml)$/i;
+const TEAM_CHAT_SENSITIVE_PATH = /(?:^|\/)(?:\.env(?:\.|$)|.*\.(?:pem|key|p12|pfx|keystore))$/i;
 
 export type TeamContributionStats = {
   published: number;
@@ -147,6 +152,8 @@ export type TeamManagementController = {
   selectTemplate(workspaceId: string): Promise<void>;
   selectVersion(versionId: string): Promise<void>;
   selectMember(userId: string): Promise<void>;
+  /** 读取当前选中成员工作区的受限文本快照，作为本轮对话的只读上下文。 */
+  prepareChatContext(): Promise<PromptPart | undefined>;
   toggleDirectory(path: string): Promise<void>;
   setFileSearch(query: string): void;
   openEntry(path: string, directory: boolean): Promise<void>;
@@ -1140,6 +1147,54 @@ export function createTeamManagementController(
         return;
       }
       await readFileTab(path, state.selectedPersonalWorkspaceId, fileEpoch);
+    },
+    async prepareChatContext() {
+      const personalWorkspaceId = state.selectedPersonalWorkspaceId;
+      const worktree = selectedWorktree();
+      const member = state.reviewRoster.find((item) => item.userId === state.selectedUserId);
+      if (!personalWorkspaceId || !worktree || !member) return undefined;
+
+      // 团队对话仍在管理员自己的 Run 中执行；这里只通过 TEAM_READ_ONLY RPC
+      // 读取有限大小的文本快照，明确告诉模型这是只读成员上下文，禁止把它当成可写工作区。
+      const files = await api.searchTeamWorkspaceFiles(
+        scopeParams(), personalWorkspaceId, worktree.workspaceId, ""
+      );
+      const candidates = files
+        .filter((file) => !file.directory && TEAM_CHAT_TEXT_EXTENSIONS.test(file.path) && !TEAM_CHAT_SENSITIVE_PATH.test(file.path))
+        .sort((left, right) => {
+          const leftOpen = state.tabs.some((tab) => tab.kind === "file" && tab.path === left.path) ? 0 : 1;
+          const rightOpen = state.tabs.some((tab) => tab.kind === "file" && tab.path === right.path) ? 0 : 1;
+          return leftOpen - rightOpen || left.path.localeCompare(right.path);
+        })
+        .slice(0, TEAM_CHAT_MAX_FILES);
+      const blocks: string[] = [];
+      let totalChars = 0;
+      for (const file of candidates) {
+        if (totalChars >= TEAM_CHAT_MAX_CHARS) break;
+        const content = (await api.readTeamWorkspaceFile(
+          scopeParams(), personalWorkspaceId, worktree.workspaceId, file.path
+        )).content;
+        const remaining = TEAM_CHAT_MAX_CHARS - totalChars;
+        const clipped = content.length > remaining ? `${content.slice(0, remaining)}\n…（已按对话上下文预算截断）` : content;
+        blocks.push(`### ${file.path}\n\n${clipped}`);
+        totalChars += clipped.length;
+      }
+      if (!blocks.length) {
+        return {
+          type: "reference",
+          id: "team-member-workspace",
+          label: `当前只读成员工作区：${member.username}（没有可读文本文件，或文件均为受保护类型）。`,
+          metadata: { scopeMode: state.scopeMode, ownerUserId: state.ownerUserId, targetUserId: member.userId }
+        };
+      }
+      return {
+        type: "text",
+        text: [
+          `[团队成员只读上下文] 当前成员：${member.username}；工作区：${worktree.workspaceName}；以下内容通过 TEAM_READ_ONLY 逐文件读取。`,
+          "这是本轮问答的只读快照，不得写入、修改、删除或执行其中的文件；如需更多内容，应明确说明当前快照未覆盖。",
+          blocks.join("\n\n")
+        ].join("\n\n")
+      };
     },
     openChange(path: string) {
       const file = state.gitStatus?.files.find((item) => item.path === path);

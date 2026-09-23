@@ -181,7 +181,7 @@ const managedWorkspaceMode = computed(() =>
   !props.readonlyReview && (props.workspaceKind ?? "MANAGED") === "MANAGED"
 );
 const showChangesTab = computed(() =>
-  !props.readonlyReview && props.workspaceKind !== "APP_SOURCE" && props.workspaceKind !== "LOCAL_CLIENT"
+  props.workspaceKind !== "APP_SOURCE" && props.workspaceKind !== "LOCAL_CLIENT"
 );
 const experienceWorkspaceMode = computed(() => props.workspaceKind === "EXPERIENCE");
 // Git diff 文件是当前目录内路径；把当前版本所属目录下传，才能与仓库级阻塞路径做无歧义映射。
@@ -498,7 +498,7 @@ defineExpose({
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <GitChangesPanel
-        v-if="showChangesTab"
+        v-if="showChangesTab && !readonlyReview"
         v-show="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
@@ -521,7 +521,7 @@ defineExpose({
         @agent-files-discarded="handleAgentFilesDiscarded"
         @quick-agent-commit-failed="handleAgentQuickCommitFailed"
       />
-      <template v-if="tab !== 'changes'">
+      <template v-if="tab !== 'changes' || readonlyReview">
         <!-- Section 1: 应用工作空间 -->
         <div
           class="figma-fe-section figma-fe-section-workspace"

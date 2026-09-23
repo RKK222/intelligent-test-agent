@@ -4663,7 +4663,7 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 - `POST /personal-workspaces/{id}/file-ws-route` 返回权威 Java 的 `WorkspaceFileRouteResponse`。
 - `POST /personal-workspaces/{id}/file-ws-tickets` 接收 `{linuxServerId}`，签发一次性 `TEAM_READ_ONLY` ticket；浏览器随后连接既有平台文件 WebSocket。
 - 每条 `workspace.list/search/read/read.chunk` RPC 都重新复核账号、实时角色、团队关系、目标用户、版本/worktree 映射和服务器归属；只读 diff 仍走上述 Git HTTP API。
-- `.opencode` 可读取；`.git`、路径穿越、符号链接和特殊设备文件拒绝。写入、上传、删除、移动、Git 变更、终端、配置修改、会话附加和普通工作区下载均返回 `FORBIDDEN`。
+- `.opencode` 可读取；`.git`、路径穿越、符号链接和特殊设备文件拒绝。写入、上传、删除、移动、Git 变更、终端、配置修改、直接挂接为可写会话工作区和普通工作区下载均返回 `FORBIDDEN`。管理视角对话只能在发送前复用这些 RPC 读取有限大小的只读文本快照，快照进入管理员自己的 Run，不改变工作区或工具权限。
 
 ### 整组导出
 

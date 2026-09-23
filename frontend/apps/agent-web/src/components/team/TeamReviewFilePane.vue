@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { RunDiffFile } from "@test-agent/shared-types";
 import FigmaFileExplorer from "../FigmaFileExplorer.vue";
 import { useTeamManagementView } from "./useTeamManagementView";
 
 const { controller, state } = useTeamManagementView();
 const expandedDirectories = computed(() => new Set(state.value.expandedPaths));
+const changedFiles = computed<RunDiffFile[]>(() => (state.value.gitStatus?.files ?? []).map((file) => ({
+  path: file.path,
+  patch: file.patch,
+  additions: file.additions,
+  deletions: file.deletions,
+  status: file.status
+})));
 const activePath = computed(() =>
   state.value.tabs.find((tab) => tab.id === state.value.activeTabId)?.path ?? "");
 const runtimeWorkspaceId = computed(() => {
@@ -35,7 +43,7 @@ function refresh() {
     :entries-by-directory="state.entriesByDirectory"
     :expanded-directories="expandedDirectories"
     :active-path="activePath"
-    :changed-files="[]"
+    :changed-files="changedFiles"
     :can-write="false"
     :search-results="state.searchResults ?? undefined"
     :search-keyword="state.searchQuery"
@@ -43,6 +51,7 @@ function refresh() {
     :empty-workspace-message="emptyMessage"
     @toggle-directory="controller.toggleDirectory"
     @open-file="controller.openEntry($event, false)"
+    @open-diff="controller.openChange(typeof $event === 'string' ? $event : $event.path)"
     @search="controller.setFileSearch"
     @refresh="refresh"
   />

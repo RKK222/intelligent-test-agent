@@ -169,7 +169,7 @@ const launcherStyle = computed(() => ({
                 <h2>团队审阅</h2>
                 <span class="team-review-scope-chip">{{ scopeDescription }}</span>
               </div>
-              <p class="team-review-subtitle">查看成员的文件变化、提交和发布归属</p>
+              <p class="team-review-subtitle">查看成员的提交和发布归属；文件变化请看左侧</p>
               <label v-if="!state.scopeLocked" class="team-review-scope">
                 <span>团队范围</span>
                 <div class="team-review-select-wrapper">
@@ -291,29 +291,6 @@ const launcherStyle = computed(() => ({
             <div v-if="state.selectedUserId" class="team-review-detail">
               <p v-if="state.missingDefaultWorkspace" class="team-review-hint">这个版本还没有名为 default 的个人工作空间。</p>
 
-              <details class="team-review-group" open>
-                <summary>
-                  <span>未提交修改</span>
-                  <strong class="team-badge">{{ state.gitStatus?.files.length ?? 0 }}</strong>
-                </summary>
-                <div class="team-review-group-body">
-                  <p class="team-review-metrics">已暂存 {{ state.gitStatus?.stagedCount ?? 0 }} · 未暂存 {{ state.gitStatus?.unstagedCount ?? 0 }} · 未跟踪 {{ state.gitStatus?.untrackedCount ?? 0 }}</p>
-                  <div class="team-review-lines">
-                    <button
-                      v-for="file in state.gitStatus?.files ?? []"
-                      :key="`${file.rawStatus}:${file.path}`"
-                      type="button"
-                      class="team-review-line"
-                      @click="controller.openChange(file.path)"
-                    >
-                      <code :class="['team-status-tag', file.rawStatus.includes('M') ? 'is-modified' : file.rawStatus.includes('A') ? 'is-added' : 'is-other']">{{ file.rawStatus }}</code>
-                      <span class="team-file-path" :title="file.path">{{ file.path }}</span>
-                      <span class="team-diff-counts"><span class="team-diff-add">+{{ file.additions }}</span> / <span class="team-diff-del">-{{ file.deletions }}</span></span>
-                    </button>
-                  </div>
-                </div>
-              </details>
-
               <details class="team-review-group">
                 <summary>
                   <span>个人提交</span>
@@ -419,6 +396,17 @@ const launcherStyle = computed(() => ({
         >
           <span class="team-review-launcher-dot" aria-hidden="true" />
           <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "团队审阅") : "团队审阅" }}</span>
+        </button>
+        <div class="team-review-launcher-divider" aria-hidden="true" />
+        <button
+          type="button"
+          class="team-review-launcher-chat-btn"
+          aria-label="管理团队成员"
+          title="管理团队成员"
+          @click="openMemberManagement"
+        >
+          <Users :size="13" />
+          <span>成员</span>
         </button>
         <div class="team-review-launcher-divider" aria-hidden="true" />
         <button

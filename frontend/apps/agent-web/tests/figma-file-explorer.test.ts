@@ -89,7 +89,7 @@ describe("FigmaFileExplorer", () => {
     expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(true);
   });
 
-  it("reuses the file tree for review without write, download, or git changes", () => {
+  it("reuses the file tree for review with read-only changes but without Git mutations", async () => {
     const wrapper = shallowMount(FigmaFileExplorer, {
       props: {
         readonlyReview: true,
@@ -97,19 +97,22 @@ describe("FigmaFileExplorer", () => {
         personalWorkspaceBranch: "feature/member",
         entriesByDirectory: { "": [] },
         expandedDirectories: new Set<string>(),
-        changedFiles: [],
+        changedFiles: [{ path: "src/a.ts", patch: "@@ -1 +1 @@", additions: 1, deletions: 1, status: "modified" }],
         emptyWorkspaceMessage: "这个版本还没有名为 default 的个人工作空间。"
       }
     });
 
     expect(wrapper.find('button[aria-label="新建或上传到工作区根目录"]').exists()).toBe(false);
-    expect(wrapper.find('button[aria-label="变更"]').exists()).toBe(false);
+    expect(wrapper.find('button[aria-label="变更"]').exists()).toBe(true);
+    await wrapper.get('button[aria-label="变更"]').trigger("click");
     expect(wrapper.find('button[aria-label="拉取远程"]').exists()).toBe(false);
     expect(wrapper.find(".figma-fe-section-worktree").exists()).toBe(false);
     expect(wrapper.findComponent(GitChangesPanel).exists()).toBe(false);
     expect(wrapper.findComponent(WorkbenchFooter).exists()).toBe(false);
     expect(wrapper.findComponent(AgentConfigPanel).exists()).toBe(false);
     const explorer = wrapper.findComponent(FileExplorer);
+    expect(explorer.props("activeTab")).toBe("changes");
+    expect(explorer.props("changedFiles")).toHaveLength(1);
     expect(explorer.props("canWrite")).toBe(false);
     expect(explorer.props("canDownload")).toBe(false);
     expect(explorer.props("canAttach")).toBe(false);

@@ -94,10 +94,11 @@ flowchart TD
 | TC-15 沿用上下文 | 工作视角先选 `app-1/workspace-1/version-1`；进入管理视角 | 版本 `version-1` | 顶部上下文舱沿用三项；管理视角内切换不回写工作视角 |
 | TC-16 停用工作空间过滤 | 返回停用模板和可用模板 | `enabled=false/true` | 默认只选可用模板；停用模板不成为当前上下文 |
 | TC-17 无 default 工作空间 | 成员有 `feature-space`，无 `default` | `workspaceName=feature-space` | 显示“没有名为 default 的个人工作空间”；不读取目录、不假设物理路径 |
-| TC-18 只读文件与 Diff | 选择小文件和未提交修改 | `path=.opencode/opencode.jsonc` | 文件以只读编辑器打开；DiffViewer `writable=false`；不显示保存、Git、终端、下载、加入对话操作 |
+| TC-18 只读文件与 Diff | 在左侧“变更”页选择未提交修改，再选择小文件 | `path=.opencode/opencode.jsonc` | 左侧展示成员真实未提交文件和数量，点击打开只读 Diff；文件以只读编辑器打开；DiffViewer `writable=false`；审阅弹窗不重复列未提交修改；不显示保存、Git 写操作、终端、下载、加入对话操作 |
 | TC-19 大文件分段预览 | 首次整读返回 413；读取分段；继续加载一段；触发失败后重试 | `size=20`, `maxPreviewBytes=8` | 展示首段和进度；继续加载追加内容；失败保留已读内容并可重试 |
 | TC-20 迟到响应隔离 | 打开成员 A 文件后切换成员 B；让 A 的文件响应最后到达 | `A=pw-1`, `B=pw-2` | A 内容不出现在 B 的标签页；关闭 `pw-1` 连接；当前工作区为 `pw-2` |
 | TC-21 401/403 实时撤权 | 文件读取中返回 401 或 403 | `traceId=trace-revoked` | 关闭所有团队文件连接、清空只读缓存、展示统一错误；不得继续读迟到帧 |
+| TC-22 管理视角只读对话 | 选中成员后发送“概括当前工作区” | `TEAM_READ_ONLY`、文本文件超过上下文预算 | 发送前按当前范围逐次读取受限文本快照；Run 仍使用管理员工作区；消息明确只读快照边界；不调用成员工作区写操作；撤权或读取失败时不发送 |
 | TC-22 提交分组 | 返回个人、已发布和 `SYNC_MERGE` 提交 | `commitType=PERSONAL_COMMIT/PUBLISHED_COMMIT/SYNC_MERGE` | 三组数量互斥且可展开；提交 Diff 仍是只读 |
 | TC-23 整组导出取消 | 选择版本发起导出；轮询到 RUNNING；点击取消 | `exportId=export-1` | 状态变为 CANCELLED；停止轮询；不产生下载跳转 |
 | TC-24 离开管理视角清理 | 管理视角打开文件和成员弹窗；点击活动栏工具箱/控制台 | `perspective=TEAM_MANAGEMENT` | 退出管理视角，关闭文件连接和弹窗，清空管理缓存，目标页面正常打开 |

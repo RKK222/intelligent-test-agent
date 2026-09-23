@@ -18197,3 +18197,28 @@
   通过证据，最终使用可用 Agent 完成真实模型往返并取得 `SUCCEEDED`。
 - 本次验收收尾仅新增截图和会话记录；产品代码、HTTP API、RunEvent/SSE、数据库结构/Flyway、性能、安全权限、
   部署拓扑、generated SDK、OpenCode 只读源码和 `.env*` 均未再修改。
+
+## 2026-09-23 - 团队审阅左侧变更与成员只读对话上下文
+
+### Why
+
+- 用户要求收起面板后可直接管理团队成员，审阅弹窗不重复展示左侧已有的未提交变更，并希望右侧对话能真实读取当前选中成员工作区。
+
+### What
+
+- 浮动审阅胶囊增加“成员”入口，复用既有成员/团队选择对话框；审阅弹窗移除“未提交修改”重复分组。
+- 左侧只读文件树接入成员真实 Git 状态的“变更”页和只读 Diff；补充组件测试与团队管理验收用例。
+- 管理视角发送消息前，通过现有 `TEAM_READ_ONLY` 文件 WebSocket 逐次检索并读取受限文本快照（排除凭据类文件，限制文件数和字符数），快照进入管理员自己的 Run，不改变工作区或工具权限。
+- 同步更新团队审阅 README、包说明、安全标准、HTTP API 说明和测试用例。
+
+### How
+
+- `pnpm --filter @test-agent/agent-web exec vitest run --environment jsdom tests/team-review-panes.test.ts tests/figma-file-explorer.test.ts`：30 项通过。
+- `pnpm --filter @test-agent/agent-web exec vue-tsc --noEmit --pretty false`：通过。
+- `pnpm --filter @test-agent/agent-web build`：通过；仅保留既有大 chunk / ineffective dynamic import 警告。
+- `git diff --check`：通过。
+
+### Result
+
+- 产品代码尚未走新的 Jenkins 发布；本地登录页没有可复用的真实账号，因此未宣称共享环境已完成本轮成员工作区对话验收。
+- 现有共享环境第 46 次发布的旧版本真实对话截图仍只证明管理员自己的 Run 往返，不证明成员工作区上下文读取；后续发布后需用选中成员发起一轮真实问答并核对请求审计与只读边界。
