@@ -97,6 +97,30 @@ describe("team review panes", () => {
     review.unmount();
   });
 
+  it("emits open-chat from the floating review launcher and shifts position when chat opens", async () => {
+    const controller = createTeamManagementController(api());
+    await controller.enter(true);
+    const provide = { [teamManagementKey as symbol]: controller };
+    const review = mount(TeamReviewPane, {
+      props: { rightPanelOpen: false, chatOpen: false },
+      global: { provide }
+    });
+
+    const launcherGroup = document.body.querySelector<HTMLElement>(".team-review-launcher-group");
+    expect(launcherGroup).not.toBeNull();
+    expect(launcherGroup?.style.right).toBe("10px");
+
+    const chatBtn = document.body.querySelector<HTMLButtonElement>("[aria-label='打开AI对话']");
+    expect(chatBtn).not.toBeNull();
+    chatBtn?.click();
+    await review.vm.$nextTick();
+    expect(review.emitted("open-chat")).toHaveLength(1);
+
+    await review.setProps({ chatOpen: true });
+    expect(launcherGroup?.style.right).toBe("460px");
+    review.unmount();
+  });
+
   it("opens member management after selecting a system administrator team", async () => {
     const backend = api();
     backend.listSystemAdmins.mockResolvedValue({

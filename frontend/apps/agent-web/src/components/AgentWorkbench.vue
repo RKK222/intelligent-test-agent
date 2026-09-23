@@ -510,6 +510,8 @@ function enterTeamManagement() {
   } else {
     teamReturnRoute.value = null;
   }
+  savedRightPanelOpen.value = rightPanelOpen.value;
+  rightPanelOpen.value = false;
   workbenchPerspective.value = "TEAM_MANAGEMENT";
   void teamController.enter(isSuperAdmin.value, {
     appId: selectedAppId.value ?? undefined,
@@ -524,6 +526,7 @@ function leaveTeamPerspectiveForPageNavigation() {
   if (workbenchPerspective.value !== "TEAM_MANAGEMENT") return;
   teamReturnRoute.value = null;
   workbenchPerspective.value = "WORK";
+  rightPanelOpen.value = savedRightPanelOpen.value;
   teamController.exit();
 }
 
@@ -532,6 +535,7 @@ function exitTeamManagement() {
   const target = teamReturnRoute.value;
   teamReturnRoute.value = null;
   workbenchPerspective.value = "WORK";
+  rightPanelOpen.value = savedRightPanelOpen.value;
   teamController.exit();
   if (target) void router.push(target);
 }
@@ -13231,6 +13235,12 @@ async function handleLogout() {
 
     <template #editor>
       <TeamReviewEditor v-if="workbenchPerspective === 'TEAM_MANAGEMENT'" class="team-perspective-pane" />
+      <TeamReviewPane
+        v-if="workbenchPerspective === 'TEAM_MANAGEMENT'"
+        :right-panel-open="false"
+        :chat-open="rightPanelOpen"
+        @open-chat="rightPanelOpen = true"
+      />
       <main v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-editor-main">
         <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">
           <WorkspacePageTabBar
@@ -13554,12 +13564,7 @@ async function handleLogout() {
     </template>
 
     <template #chat>
-      <TeamReviewPane
-        v-if="workbenchPerspective === 'TEAM_MANAGEMENT'"
-        class="team-perspective-pane"
-        :right-panel-open="rightPanelOpen"
-      />
-      <div v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-chat-panel">
+      <div class="managed-chat-panel">
         <FigmaChatPanel
           :panel-visible="rightPanelOpen"
           :messages="chatMessagesForPanel"
