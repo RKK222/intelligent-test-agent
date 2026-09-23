@@ -18130,3 +18130,48 @@
 
 - #42 未发布，旧服务保持不变；此次变更只增加宿主门禁可观测性和超时保护，不宣称部署或真实对话验收完成。
 - 下一步必须通过新的 Jenkins immutable DEPLOY，随后再做 backend/frontend/worker 健康检查、收起右侧栏后的真实模型对话和截图验证。
+
+## 2026-09-23 - 最新代码 Jenkins 发布与收起态真实对话验收闭环
+
+### Why
+
+- 用户要求使用最新代码完成端到端验收，必须实际验证团队管理视角右侧对话面板收起、浮动入口重新展开，
+  并与真实模型完成一次成功问答，不能只依赖组件测试或静态截图。
+- Jenkins #45 在克隆数据库升级前因 PostgreSQL 普通连接槽耗尽而失败；`max_connections=100`，大量空闲连接
+  占满了非超级用户可用槽位，临时升级需要的多个连接无法同时建立。
+
+### What
+
+- 保持发布提交 `2d728159d3f7aa1ab3629c5c1f17aab3bd8886fd` 不变，通过标准 Jenkins
+  `ACTION=DEPLOY` 重新发布；Jenkins #46 成功，发布标签为 `release-46-2d728159`。
+- 只终止测试机数据库中来自 `192.168.8.101`、数据库为 `test_agent` 且处于 `idle` 的连接，未终止活动事务、
+  未改 PostgreSQL 全局参数，也未触碰其它数据库连接；随后克隆数据库升级门禁通过。
+- 新增两张真实浏览器验收截图：
+  - `.agents/evidence/team-review-collapsed-dialog-20260923.jpg`：右侧栏收起后中央只读区铺满，右下角保留
+    `888888888 / 对话` 浮动入口。
+  - `.agents/evidence/team-review-real-dialog-20260923.jpg`：从浮动入口重新展开后保留会话，真实消息和模型回复可见，
+    页面运行状态为 `SUCCEEDED`。
+
+### How
+
+- Jenkins #46 完整通过后端 26 模块构建、Flyway 16 项不可变字节校验、前端全部 workspace typecheck、
+  `agent-web` 生产构建、OpenCode 1.18.4 worker 镜像 smoke、克隆数据库升级和发布后校验。
+- 发布后实测 backend readiness `18082` 返回 `UP/200`、Web `3000` 返回 `200`、worker `4096` 返回
+  `healthy=true/version=1.18.4/200`，executor `9999` TCP 可达。
+- 本地定向回归 `pnpm --dir frontend exec vitest run apps/agent-web/tests/team-review-panes.test.ts` 通过，
+  共 5 项测试。
+- 真实浏览器在团队管理视角收起右栏后，通过浮动“对话”入口重新展开；选用可用的
+  `zhi-fu-ce-shi` Agent 发送：
+  `最新代码团队管理收起态真实对话验收 20260923：请只回复“最新收起态对话验收通过”，不要修改任何文件。`
+  模型实际回复 `最新收起态对话验收通过`，运行终态为 `SUCCEEDED`，耗时 17 秒；再次收起并重新展开后，
+  同一消息与回复仍完整保留。
+
+### Result
+
+- 最新代码已在共享测试环境完成 Jenkins 发布和真实浏览器端到端验收；访问地址为
+  `http://192.168.8.100:3000`，Jenkins 构建为
+  `http://192.168.8.100:18081/job/intelligent-test-agent-release/46/`。
+- 默认 `build` Agent 曾受 OpenCode 免费额度耗尽影响，白盒分析服务也曾返回 HTTP 500；这两次失败均未作为
+  通过证据，最终使用可用 Agent 完成真实模型往返并取得 `SUCCEEDED`。
+- 本次验收收尾仅新增截图和会话记录；产品代码、HTTP API、RunEvent/SSE、数据库结构/Flyway、性能、安全权限、
+  部署拓扑、generated SDK、OpenCode 只读源码和 `.env*` 均未再修改。
