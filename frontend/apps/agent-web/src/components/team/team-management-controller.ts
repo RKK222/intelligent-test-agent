@@ -1188,12 +1188,28 @@ export function createTeamManagementController(
         };
       }
       return {
-        type: "text",
-        text: [
-          `[团队成员只读上下文] 当前成员：${member.username}；工作区：${worktree.workspaceName}；以下内容通过 TEAM_READ_ONLY 逐文件读取。`,
-          "这是本轮问答的只读快照，不得写入、修改、删除或执行其中的文件；如需更多内容，应明确说明当前快照未覆盖。",
+        type: "file",
+        name: `成员工作区只读快照-${member.username}.md`,
+        mimeType: "text/markdown",
+        content: [
+          `# 团队成员只读上下文`,
+          `- 当前成员：${member.username}`,
+          `- 工作区：${worktree.workspaceName}`,
+          "- 读取方式：TEAM_READ_ONLY 逐文件读取",
+          "- 约束：这是本轮问答的只读快照，不得写入、修改、删除或执行其中的文件；如需更多内容，应明确说明当前快照未覆盖。",
+          "",
           blocks.join("\n\n")
-        ].join("\n\n")
+        ].join("\n"),
+        source: {
+          contextType: "team_workspace_snapshot",
+          deliveryMode: "native"
+        },
+        metadata: {
+          targetUserId: member.userId,
+          workspaceId: worktree.workspaceId,
+          scopeMode: state.scopeMode,
+          ownerUserId: state.ownerUserId
+        }
       };
     },
     openChange(path: string) {

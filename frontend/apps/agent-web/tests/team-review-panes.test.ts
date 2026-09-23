@@ -95,10 +95,11 @@ describe("team review panes", () => {
     const controller = createTeamManagementController(backend);
     await controller.enter(false);
     const part = await controller.prepareChatContext();
-    expect(part?.type).toBe("text");
-    expect((part as { text: string }).text).toContain("src/app.ts");
-    expect((part as { text: string }).text).toContain("answer = 42");
-    expect((part as { text: string }).text).not.toContain(".env");
+    expect(part?.type).toBe("file");
+    expect((part as { name: string }).name).toContain("成员甲");
+    expect((part as { content: string }).content).toContain("src/app.ts");
+    expect((part as { content: string }).content).toContain("answer = 42");
+    expect((part as { content: string }).content).not.toContain(".env");
     expect(backend.readTeamWorkspaceFile).toHaveBeenCalledWith(
       { scopeMode: "MY_TEAM", ownerUserId: undefined }, "personal-1", "runtime-1", "src/app.ts"
     );
