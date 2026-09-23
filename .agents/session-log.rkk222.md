@@ -18011,3 +18011,28 @@
 ### Result
 
 - #37 保持失败且没有替换旧服务；待下一次 Jenkins 构建验证无缓存恢复、worker smoke、发布和真实对话闭环。
+
+## 2026-09-23 - 为持续 BuildKit snapshot 损坏增加 legacy builder 兜底
+
+### Why
+
+- Jenkins #38 的完整 `consoleText` 证明首次 BuildKit 构建与 `--no-cache` 重试都在
+  `COPY opencode-manager/go.mod opencode-manager/go.sum ./` 处报告同一 `snapshot ... does not exist`；
+  原有一次无缓存重试没有改变损坏的 BuildKit 状态，发布阶段未开始。
+
+### What
+
+- worker 镜像构建在第二次仍命中同一精确 snapshot 错误时，增加一次
+  `DOCKER_BUILDKIT=0 docker build --no-cache` legacy builder 兜底；构建日志仍按错误类型分流，
+  业务 Dockerfile、下载、摘要或编译错误不会触发该兜底。
+- 更新 Jenkins 发布契约校验和测试环境 README，明确三段有界恢复路径；不执行全局 Docker cache prune。
+
+### How
+
+- 本地通过 `bash -n deploy/local/jenkins-release.sh tools/verify-jenkins-release.sh`、
+  `tools/verify-jenkins-release.sh` 与 `git diff --check`；提交前已回顾全部 `.agents/session-log*.md`。
+- 待 Jenkins 以本提交重新执行 immutable worker 构建、镜像 smoke、数据库克隆升级和发布验证。
+
+### Result
+
+- #38 保持失败且旧服务未替换；当前真实对话与截图验收仍未完成，不能宣称端到端通过。
