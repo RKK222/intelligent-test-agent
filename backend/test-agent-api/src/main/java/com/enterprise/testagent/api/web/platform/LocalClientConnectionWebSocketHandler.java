@@ -431,7 +431,8 @@ public class LocalClientConnectionWebSocketHandler implements WebSocketHandler {
                         }
                         requirePublicCapabilities(state).requestUpdate(
                                 state.userId(), state.clientInstanceId(),
-                                request.expectedBundleDigest(), frame.traceId());
+                                request.expectedBundleDigest(),
+                                request.confirmedDiscardPersonalChanges(), frame.traceId());
                     });
             case PUBLIC_CAPABILITY_CHUNK_REQUEST -> {
                 LocalClientPayloads.PublicCapabilityChunkRequest request = codec.payload(

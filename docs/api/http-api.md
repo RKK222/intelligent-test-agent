@@ -4574,7 +4574,7 @@ manifest 的 `contentDigest` 是有序文件清单的内容摘要，`bundleDiges
 | Method | Path | 权限与说明 |
 |---|---|---|
 | `GET` | `/api/internal/platform/local-opencode-client/instances/me` | 当前用户实例列表；每项 additive 增加 `publicCapabilities`。旧客户端返回 `supported=false`。 |
-| `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/public-capabilities/updates` | 当前用户确认更新自己的指定实例。body 为 `{ "expectedBundleDigest": "<sha256>" }`；必须匹配当前待更新摘要。离线确认保存为待处理命令，重连后继续。 |
+| `POST` | `/api/internal/platform/local-opencode-client/instances/{clientInstanceId}/public-capabilities/updates` | 当前用户确认更新自己的指定实例。body 为 `{ "expectedBundleDigest": "<sha256>", "confirmedDiscardPersonalChanges": true? }`；摘要必须匹配当前待更新版本。存在本机个人修改时必须显式传 `true`，否则客户端拒绝覆盖并保留草稿。离线确认及该标记保存为待处理命令，重连后继续。 |
 | `GET` | `/api/internal/platform/workspace-management/agent-config/public/client-capabilities/{bundleDigest}/artifact` | `SUPER_ADMIN` 下载与固定公共 commit 对应的完整 `public-capabilities.tar.gz`，供客户端安装构建使用。 |
 
 `publicCapabilities` 包含 `supported/activeCommit/activeDigest/pendingCommit/pendingDigest/status/errorCode/reportedAt`、

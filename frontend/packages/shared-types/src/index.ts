@@ -325,6 +325,8 @@ export type LocalClientPublicCapabilities = {
   skillCount?: number | null;
   toolCount?: number | null;
   requiresRestart?: boolean | null;
+  /** 客户端上报存在个人副本修改时，确认更新会清空该副本。 */
+  personalChanges?: boolean | null;
   changeSummaryJson?: string | null;
   reportedAt?: string | null;
   updatedAt?: string | null;

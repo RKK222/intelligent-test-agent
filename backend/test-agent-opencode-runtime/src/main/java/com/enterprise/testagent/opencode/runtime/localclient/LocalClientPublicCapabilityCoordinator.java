@@ -37,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class LocalClientPublicCapabilityCoordinator {
 
     public static final String PROTOCOL_CAPABILITY = "PUBLIC_CAPABILITY_SYNC_V1";
+    public static final String PERSONAL_EDIT_CAPABILITY = "PUBLIC_CAPABILITY_PERSONAL_EDIT_V1";
     private static final Logger LOGGER = LoggerFactory.getLogger(LocalClientPublicCapabilityCoordinator.class);
     private static final int DISPATCH_LIMIT = 200;
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -82,7 +83,7 @@ public class LocalClientPublicCapabilityCoordinator {
             LocalClientPayloads.PublicCapabilityVersion payload,
             String traceId) {
         requireCoordinates(instanceId, generation, payload.clientInstanceId(), payload.connectionGeneration());
-        LocalClientInstance instance = requireCapableOwned(userId, instanceId);
+        LocalClientInstance instance = requireCapableOwned(userId, instanceId, false);
         Instant now = Instant.now(clock);
         LocalClientPublicCapabilityModels.Release latest = repository.findLatestAvailableRelease().orElse(null);
         String activeCommit = optionalCommit(payload.activeCommit());
@@ -125,7 +126,20 @@ public class LocalClientPublicCapabilityCoordinator {
             LocalClientInstanceId instanceId,
             String expectedBundleDigest,
             String traceId) {
-        LocalClientInstance instance = requireCapableOwned(userId, instanceId);
+        return requestUpdate(userId, instanceId, expectedBundleDigest, false, traceId);
+    }
+
+    /**
+     * 用户确认清空个人副本时，标记编码到 commandId，复用既有 attempt 持久化而不新增数据库字段。
+     */
+    @Transactional
+    public UpdateRequestResult requestUpdate(
+            UserId userId,
+            LocalClientInstanceId instanceId,
+            String expectedBundleDigest,
+            boolean confirmedDiscardPersonalChanges,
+            String traceId) {
+        LocalClientInstance instance = requireCapableOwned(userId, instanceId, confirmedDiscardPersonalChanges);
         String digest = requiredDigest(expectedBundleDigest);
         LocalClientPublicCapabilityModels.InstanceState state = repository.findInstanceState(instanceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.CONFLICT, "客户端尚未上报公共能力状态"));
@@ -142,6 +156,11 @@ public class LocalClientPublicCapabilityCoordinator {
                 .filter(attempt -> !attempt.status().terminal())
                 .orElse(null);
         if (existing != null) {
+            if (confirmedDiscardPersonalChanges && !isConfirmedDiscardCommand(existing.commandId())) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "已有未确认清空个人修改的公共能力更新，请等待其失败后重试");
+            }
             dispatchFor(instanceId, traceId);
             return new UpdateRequestResult(existing.commandId(), existing.status().name(), digest);
         }
@@ -151,7 +170,8 @@ public class LocalClientPublicCapabilityCoordinator {
                 .orElse(0L);
         Instant now = Instant.now(clock);
         LocalClientPublicCapabilityModels.Attempt attempt = new LocalClientPublicCapabilityModels.Attempt(
-                requestId("lcpc_"), instanceId, userId, generation, release.sourceCommit(), release.bundleDigest(),
+                requestId(confirmedDiscardPersonalChanges ? "lcpcd_" : "lcpc_"),
+                instanceId, userId, generation, release.sourceCommit(), release.bundleDigest(),
                 LocalClientPublicCapabilityModels.AttemptStatus.PENDING, null, now, now, null);
         repository.insertAttempt(attempt);
         repository.saveInstanceState(new LocalClientPublicCapabilityModels.InstanceState(
@@ -277,7 +297,8 @@ public class LocalClientPublicCapabilityCoordinator {
             return;
         }
         LocalClientInstance instance = instanceRepository.findById(attempt.clientInstanceId()).orElse(null);
-        if (instance == null || !supports(instance)) {
+        // 只有携带“清空个人副本”语义的命令要求新 capability；普通旧更新仍保持兼容。
+        if (instance == null || !supportsUpdateCommands(instance, attempt.commandId())) {
             return;
         }
         long generation = connection.generation();
@@ -312,7 +333,8 @@ public class LocalClientPublicCapabilityCoordinator {
                 codec.payload(new LocalClientPayloads.PublicCapabilityUpdateCommand(
                         attempt.commandId(), attempt.clientInstanceId().value(), generation,
                         release.sourceCommit(), release.bundleDigest(), release.artifactSha256(),
-                        release.compressedSize(), chunks, requiresRestart, release.manifestJson()))));
+                        release.compressedSize(), chunks, requiresRestart, release.manifestJson(),
+                        isConfirmedDiscardCommand(attempt.commandId())))));
     }
 
     private void sendAvailable(
@@ -399,20 +421,38 @@ public class LocalClientPublicCapabilityCoordinator {
         }
     }
 
-    private LocalClientInstance requireCapableOwned(UserId userId, LocalClientInstanceId instanceId) {
+    private LocalClientInstance requireCapableOwned(
+            UserId userId, LocalClientInstanceId instanceId, boolean requirePersonalEdit) {
         LocalClientInstance instance = instanceRepository.findById(instanceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "本地客户端实例不存在"));
         if (!instance.userId().equals(userId)) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端实例不属于当前用户");
         }
-        if (!supports(instance)) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "本地客户端未声明 PUBLIC_CAPABILITY_SYNC_V1 能力");
+        boolean capable = requirePersonalEdit
+                ? supports(instance) && instance.selfUpdateCapabilities().contains(PERSONAL_EDIT_CAPABILITY)
+                : supports(instance);
+        if (!capable) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    requirePersonalEdit
+                            ? "本地客户端未声明 PUBLIC_CAPABILITY_PERSONAL_EDIT_V1 能力"
+                            : "本地客户端未声明 PUBLIC_CAPABILITY_SYNC_V1 能力");
         }
         return instance;
     }
 
     private static boolean supports(LocalClientInstance instance) {
         return instance.selfUpdateCapabilities().contains(PROTOCOL_CAPABILITY);
+    }
+
+    private static boolean supportsUpdateCommands(LocalClientInstance instance, String commandId) {
+        return supports(instance)
+                && (!isConfirmedDiscardCommand(commandId)
+                || instance.selfUpdateCapabilities().contains(PERSONAL_EDIT_CAPABILITY));
+    }
+
+    private static boolean isConfirmedDiscardCommand(String commandId) {
+        return commandId != null && commandId.startsWith("lcpcd_");
     }
 
     private LocalClientPublicCapabilityModels.Attempt requireAttempt(
@@ -449,7 +489,7 @@ public class LocalClientPublicCapabilityCoordinator {
         }
         LocalClientPublicCapabilityModels.Attempt attempt = null;
         if (pendingCommandId != null && !pendingCommandId.isBlank()) {
-            if (!pendingCommandId.matches("lcpc_[a-f0-9]{32}")) {
+            if (!pendingCommandId.matches("lcpc(?:d)?_[a-f0-9]{32}")) {
                 throw validation("公共能力待恢复 commandId 无效");
             }
             attempt = repository.findAttempt(pendingCommandId).orElse(null);

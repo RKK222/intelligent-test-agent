@@ -178,9 +178,10 @@ describe("SettingsPersonalPanel local-client version state", () => {
     ));
     const confirmation = vi.mocked(ElMessageBox.confirm).mock.calls[0]?.[0];
     expect(confirmation).toContain("检测到跨版本或 Tool/依赖差异时将安全重启本地 OpenCode");
+    expect(confirmation).toContain("本机个人公共能力修改（如有）会在确认后清空");
     expect(confirmation).not.toContain("macOS");
     await waitFor(() => expect(client.requestLocalClientPublicCapabilityUpdate)
-      .toHaveBeenCalledWith("lci_device", digest));
+      .toHaveBeenCalledWith("lci_device", digest, true));
   });
 
   it("lets the web fallback select one directory without navigating on single click", async () => {

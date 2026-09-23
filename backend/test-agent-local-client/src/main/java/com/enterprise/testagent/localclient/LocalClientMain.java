@@ -163,22 +163,29 @@ public final class LocalClientMain {
 
     /**
      * 客户端可能在原子切换后、服务端 ACK 前退出；启动时先用真实 OpenCode 验证新目录，
-     * 失败则恢复 previousDigest。下载阶段中断只终止该次尝试，不触碰当前能力版本。
+     * 失败则恢复 previousDigest 及覆盖前的个人备份。下载阶段中断只终止该次尝试，不触碰当前能力版本。
      */
     static void recoverPublicCapabilityActivation(
             LocalClientPublicCapabilityStore store,
             OpencodeProcessSupervisor supervisor) {
         LocalClientPublicCapabilityStore.State state = store.snapshot();
         if ("PENDING".equals(state.status()) || "DOWNLOADING".equals(state.status())) {
+            if (state.pendingCommandId() != null) {
+                store.deletePersonalBackup(state.pendingCommandId());
+            }
             store.recordStatus("FAILED", "CLIENT_RESTARTED_DURING_UPDATE");
             return;
         }
         if (!"APPLYING".equals(state.status())) {
             return;
         }
+        LocalClientPublicCapabilityStore.PersonalBackup personalBackup = state.pendingCommandId() == null
+                ? null
+                : store.existingPersonalBackup(state.pendingCommandId(), state.previousDigest());
         var health = supervisor.reloadPublicCapabilities(true);
         if (health.success() && health.opencodeHealthy() && supervisor.validatePublicCapabilityCatalog()) {
             store.completeActivation();
+            store.deletePersonalBackup(personalBackup);
             return;
         }
         org.slf4j.LoggerFactory.getLogger(LocalClientMain.class).warn(
@@ -186,11 +193,13 @@ public final class LocalClientMain {
                 health.processStatus(), health.opencodeHealthy());
         try {
             store.rollback(state.previousDigest(), "OPENCODE_ACTIVATION_FAILED");
+            store.restorePersonalBackup(personalBackup);
             var restored = supervisor.reloadPublicCapabilities(true);
             if (!restored.success() || !restored.opencodeHealthy()
                     || !supervisor.validatePublicCapabilityCatalog()) {
                 throw new IllegalStateException("公共能力回滚后 OpenCode 未恢复健康: " + restored.message());
             }
+            store.deletePersonalBackup(personalBackup);
         } catch (Exception exception) {
             throw new IllegalStateException("公共能力崩溃恢复失败", exception);
         }

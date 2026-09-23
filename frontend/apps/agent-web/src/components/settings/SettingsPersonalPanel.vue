@@ -200,12 +200,16 @@ async function confirmPublicCapabilityUpdate(client: LocalClientInstance) {
     ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
     : "连续的 Agent/Skill 更新将热加载；检测到跨版本或 Tool/依赖差异时将安全重启本地 OpenCode。";
   await ElMessageBox.confirm(
-    `${summary}，${publicCapabilityChangeSummary(capability)}。${restart}公共 Tool 将使用你当前操作系统登录账号的本机权限运行，不会提权。`,
+    `${summary}，${publicCapabilityChangeSummary(capability)}。${restart}公共 Tool 将使用你当前操作系统登录账号的本机权限运行，不会提权。本机个人公共能力修改（如有）会在确认后清空，取消则保留。`,
     "更新本地公共能力",
     { confirmButtonText: "确认更新", cancelButtonText: "暂不更新", type: "warning" }
   );
   await runLocalClientAction(async () => {
-    await api.requestLocalClientPublicCapabilityUpdate(client.clientInstanceId, capability.pendingDigest!);
+    await api.requestLocalClientPublicCapabilityUpdate(
+      client.clientInstanceId,
+      capability.pendingDigest!,
+      true
+    );
     ElMessage.success(client.online ? "更新命令已发送" : "已确认，客户端重连后继续更新");
     await loadLocalClientState(true);
   });

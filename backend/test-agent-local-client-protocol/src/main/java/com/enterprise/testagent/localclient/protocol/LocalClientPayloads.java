@@ -285,7 +285,16 @@ public final class LocalClientPayloads {
     public record PublicCapabilityUpdateRequest(
             String clientInstanceId,
             long connectionGeneration,
-            String expectedBundleDigest) {
+            String expectedBundleDigest,
+            @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean confirmedDiscardPersonalChanges) {
+
+        /** 兼容未携带清空确认标记的旧网页/客户端调用，默认不得覆盖个人修改。 */
+        public PublicCapabilityUpdateRequest(
+                String clientInstanceId,
+                long connectionGeneration,
+                String expectedBundleDigest) {
+            this(clientInstanceId, connectionGeneration, expectedBundleDigest, false);
+        }
     }
 
     /** 用户确认后下发的不可变制品坐标；客户端逐片拉取，服务端不发送任意 URL。 */
@@ -299,7 +308,24 @@ public final class LocalClientPayloads {
             long artifactSize,
             int chunkCount,
             boolean requiresRestart,
-            String manifestJson) {
+            String manifestJson,
+            @JsonInclude(JsonInclude.Include.NON_DEFAULT) boolean confirmedDiscardPersonalChanges) {
+
+        /** 兼容旧测试夹具和未携带清空确认标记的服务端帧，默认保留个人副本。 */
+        public PublicCapabilityUpdateCommand(
+                String commandId,
+                String clientInstanceId,
+                long connectionGeneration,
+                String sourceCommit,
+                String bundleDigest,
+                String artifactSha256,
+                long artifactSize,
+                int chunkCount,
+                boolean requiresRestart,
+                String manifestJson) {
+            this(commandId, clientInstanceId, connectionGeneration, sourceCommit, bundleDigest, artifactSha256,
+                    artifactSize, chunkCount, requiresRestart, manifestJson, false);
+        }
     }
 
     /** 每次只请求一个 256 KiB 分片，用连接背压自然约束能力制品传输。 */

@@ -64,11 +64,15 @@ final class LocalClientPublicCapabilityUpdater {
         requireCoordinates(command.clientInstanceId(), command.connectionGeneration());
         requireDigest(command.bundleDigest());
         requireDigest(command.artifactSha256());
-        if (command.commandId() == null || !command.commandId().matches("lcpc_[a-f0-9]{32}")
+        if (command.commandId() == null || !command.commandId().matches("lcpc(?:d)?_[a-f0-9]{32}")
                 || command.sourceCommit() == null || !command.sourceCommit().matches("[0-9a-f]{40,64}")
                 || command.artifactSize() < 1
                 || command.chunkCount() < 1) {
             throw new IllegalArgumentException("公共能力更新命令无效");
+        }
+        if (LocalClientPublicCapabilityStore.confirmedDiscardPersonalChanges(command.commandId())
+                != command.confirmedDiscardPersonalChanges()) {
+            throw new IllegalArgumentException("公共能力更新确认标记与 commandId 不一致");
         }
         if (download != null && download.command().commandId().equals(command.commandId())) {
             LOGGER.info("local_client_public_capability_download_resumed commandId={} nextSequence={} receivedBytes={}",
@@ -172,11 +176,19 @@ final class LocalClientPublicCapabilityUpdater {
         return store.snapshot();
     }
 
+    synchronized boolean hasPersonalChanges() {
+        return store.hasPersonalChanges();
+    }
+
     private void apply(Download current) throws Exception {
         long startedNanos = System.nanoTime();
         LOGGER.info("local_client_public_capability_apply_started commandId={} bundleDigest={} requiresRestart={}",
                 current.command().commandId(), current.command().bundleDigest(),
                 current.command().requiresRestart());
+        if (store.hasPersonalChanges() && !current.command().confirmedDiscardPersonalChanges()) {
+            fail(current, "PERSONAL_CHANGES_CONFIRMATION_REQUIRED");
+            return;
+        }
         report(current, "APPLYING", null);
         // 在原子链接真正切换前，本地状态仍是下载/准备阶段；重启时不能误把旧 active 当成已激活目标。
         store.recordStatus("DOWNLOADING", null);
@@ -187,21 +199,31 @@ final class LocalClientPublicCapabilityUpdater {
                 LocalClientDiagnostics.elapsedMillis(startedNanos));
         String previousDigest = null;
         boolean activated = false;
+        LocalClientPublicCapabilityStore.PersonalBackup personalBackup = null;
         try {
+            if (current.command().confirmedDiscardPersonalChanges()) {
+                personalBackup = store.backupPersonalConfig(current.command().commandId());
+            }
             previousDigest = store.activate(candidate);
             activated = true;
+            // 只有候选版本已经原子切换后才清除个人副本；失败路径仍可由备份恢复。
+            if (personalBackup != null) {
+                store.clearPersonalConfig();
+            }
             var health = supervisor.reloadPublicCapabilities(current.command().requiresRestart());
             if (!health.success() || !health.opencodeHealthy()
                     || !supervisor.validatePublicCapabilityCatalog()) {
                 throw new IllegalStateException("公共能力激活后 OpenCode 健康或目录校验失败");
             }
             store.completeActivation();
+            store.deletePersonalBackup(personalBackup);
             report(current, "SUCCEEDED", null);
             LOGGER.info("local_client_public_capability_apply_completed commandId={} bundleDigest={} durationMs={}",
                     current.command().commandId(), current.command().bundleDigest(),
                     LocalClientDiagnostics.elapsedMillis(startedNanos));
         } catch (Exception activationFailure) {
             if (!activated) {
+                store.deletePersonalBackup(personalBackup);
                 throw activationFailure;
             }
             LOGGER.warn("local_client_public_capability_activation_failed commandId={} bundleDigest={} durationMs={} rootFailureType={}",
@@ -209,11 +231,14 @@ final class LocalClientPublicCapabilityUpdater {
                     LocalClientDiagnostics.elapsedMillis(startedNanos),
                     LocalClientDiagnostics.rootFailureType(activationFailure));
             store.rollback(previousDigest, "OPENCODE_ACTIVATION_FAILED");
+            // 回滚链接后恢复原个人副本，随后健康检查必须针对用户实际会加载的目录。
+            store.restorePersonalBackup(personalBackup);
             var restored = supervisor.reloadPublicCapabilities(true);
             if (!restored.success() || !restored.opencodeHealthy()
                     || !supervisor.validatePublicCapabilityCatalog()) {
                 throw new IllegalStateException("公共能力回滚后 OpenCode 未恢复健康", activationFailure);
             }
+            store.deletePersonalBackup(personalBackup);
             store.recordStatus("ROLLED_BACK", "OPENCODE_ACTIVATION_FAILED");
             report(current, "ROLLED_BACK", "OPENCODE_ACTIVATION_FAILED");
             LOGGER.info("local_client_public_capability_rolled_back commandId={} bundleDigest={} durationMs={}",

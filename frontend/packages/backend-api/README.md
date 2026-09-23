@@ -101,5 +101,6 @@ corepack pnpm test -- backend-api
 `contextToken`、幂等 `clientRequestId` 和可选 `editedPrompt`；响应返回替代 Run 与可选重发元数据。该方法继续复用动态
 `X-Test-Agent-Linux-Server-Id` 路由提示，不直连 OpenCode server；client 只把修改文本放入实际请求 body，不持久化或写入调试日志。
 
-`requestLocalClientPublicCapabilityUpdate(clientInstanceId, expectedBundleDigest)` 调用当前用户实例的公共能力确认接口；
+`requestLocalClientPublicCapabilityUpdate(clientInstanceId, expectedBundleDigest, confirmedDiscardPersonalChanges?)` 调用当前用户实例的公共能力确认接口；
 digest 必须来自刚读取的 `LocalClientInstance.publicCapabilities.pendingDigest`，组件不能自造目标版本或下载地址。
+存在本机个人公共能力修改时，只有用户明确确认清空后才传入第三个参数 `true`；取消或缺少确认时服务端不覆盖个人副本。

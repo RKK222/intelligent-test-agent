@@ -32,6 +32,10 @@ Client key、统一认证号或上游模型密钥。
 `rtkEnabled`，默认关闭。旧客户端不会收到该字段，客户端只有在下一次受管启动或重启时才应用开关。
 
 声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 的客户端还接受浏览器经平台文件 WebSocket 转发的 `agent-config.*` 个人副本操作。
+
+公共能力更新请求和安装命令带 `confirmedDiscardPersonalChanges` 标记。客户端存在个人副本时，缺少该标记会
+拒绝覆盖并保留草稿；确认后先备份，激活失败恢复备份。服务端使用 `lcpcd_` commandId 区分已确认 attempt，
+复用现有持久化表，不新增数据库字段。
 服务端 ticket 固定 `scope=PUBLIC`、`runtimeKind=LOCAL_CLIENT`、`clientInstanceId` 和 `connectionGeneration`，客户端只把
 `agents/**`、`skills/**`、`tools/**` 映射到不可变签名基线的个人副本；manifest、根级依赖、`node_modules`、符号链接和特殊文件
 始终拒绝。`agent-config.restore` 不带 path 时清除整份个人副本，恢复签名基线；每条 RPC 都重新校验 capability、用户归属和代次。

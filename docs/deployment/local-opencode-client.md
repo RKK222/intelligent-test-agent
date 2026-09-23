@@ -58,6 +58,10 @@ unzip -tq deploy/internal/dist/local-opencode-client/TestAgent-Local-Client-Win1
 个人副本。旧客户端未声明该 capability 时网页应提示升级/重连并保持只读。所有 Tool 依赖必须来自签名包离线闭包，不能在
 企业现场执行 npm 或访问公网 registry。
 
+公共能力包更新若检测到个人副本，网页和托盘确认框必须明确提示清空语义；取消保留草稿，确认后客户端先备份，
+只有新签名包健康激活成功才删除，失败或进程崩溃恢复时回滚并恢复个人副本。离线确认的清空标记随既有更新
+attempt 持久化，重连后继续，旧客户端无个人编辑 capability 时不接收该命令。
+
 **机器：外网 Mac（允许联网）**。以下命令在 /Users/huang/workspace/intelligent-test-agent-gitee 执行。构建使用当前工作树；git status --short 用于留存输入，不要求为空，但不得有未解决冲突，也不得清理、stash 或切换其他人的并行改动。
 
 ~~~bash

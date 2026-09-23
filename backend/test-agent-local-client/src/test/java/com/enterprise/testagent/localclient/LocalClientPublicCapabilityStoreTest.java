@@ -88,6 +88,29 @@ class LocalClientPublicCapabilityStoreTest {
     }
 
     @Test
+    void backsUpAndRestoresPersonalCopyWithItsOriginalBaselineMarker() throws Exception {
+        LocalClientPublicCapabilityStore store = new LocalClientPublicCapabilityStore(temporaryDirectory);
+        PackageFixture fixture = packageFixture("agents/public.md", "signed baseline", COMMIT_ONE, false);
+        LocalClientPublicCapabilityStore.Candidate candidate = store.installArchive(
+                write("personal-backup.tar.gz", fixture.archive()), COMMIT_ONE, fixture.digest());
+        store.activate(candidate);
+        store.completeActivation();
+
+        Path personal = store.preparePersonalConfig();
+        Files.writeString(personal.resolve("agents/public.md"), "personal draft");
+        LocalClientPublicCapabilityStore.PersonalBackup backup =
+                store.backupPersonalConfig("lcpcd_" + "a".repeat(32));
+        store.clearPersonalConfig();
+
+        assertThat(store.hasPersonalChanges()).isFalse();
+        store.restorePersonalBackup(backup);
+        assertThat(store.hasPersonalChanges()).isTrue();
+        assertThat(store.activeConfigDirectory().resolve("agents/public.md")).hasContent("personal draft");
+        store.deletePersonalBackup(backup);
+        assertThat(backup.directory()).doesNotExist();
+    }
+
+    @Test
     void installsActivatesAndRollsBackImmutableRevisions() throws Exception {
         LocalClientPublicCapabilityStore store = new LocalClientPublicCapabilityStore(temporaryDirectory);
         PackageFixture first = packageFixture("agents/public.md", "first", COMMIT_ONE, false);

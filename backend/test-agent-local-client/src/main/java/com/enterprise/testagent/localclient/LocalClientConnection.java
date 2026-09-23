@@ -230,8 +230,19 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 : publicCapabilityUpdater.snapshot();
     }
 
+    boolean publicCapabilityHasPersonalChanges() {
+        return publicCapabilityUpdater != null && publicCapabilityUpdater.hasPersonalChanges();
+    }
+
     /** 托盘确认只提交平台已通知且仍保存在本地状态中的目标摘要。 */
     void requestPublicCapabilityUpdate(String expectedDigest) {
+        requestPublicCapabilityUpdate(expectedDigest, false);
+    }
+
+    /**
+     * 用户明确确认后才允许覆盖个人公共能力副本；确认标记随离线 attempt 一并持久化到服务端。
+     */
+    void requestPublicCapabilityUpdate(String expectedDigest, boolean confirmedDiscardPersonalChanges) {
         long currentGeneration = generation.get();
         if (publicCapabilityUpdater == null
                 || connectionState.get() != LocalClientRuntimeSnapshot.ConnectionState.ONLINE
@@ -248,7 +259,8 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 requestId("trace_"),
                 currentGeneration,
                 codec.payload(new LocalClientPayloads.PublicCapabilityUpdateRequest(
-                        stateStore.read().clientInstanceId(), currentGeneration, expectedDigest))));
+                        stateStore.read().clientInstanceId(), currentGeneration, expectedDigest,
+                        confirmedDiscardPersonalChanges))));
     }
 
     /** 中断当前连接并唤醒同一重连循环，不创建旁路连接。 */

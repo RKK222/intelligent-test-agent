@@ -31,6 +31,7 @@ final class LocalClientPublicCapabilityStore {
     private final Path quarantine;
     private final Path currentLink;
     private final Path personalDirectory;
+    private final Path personalBackups;
     private final Path personalMarker;
     private final Path stateFile;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
@@ -44,6 +45,7 @@ final class LocalClientPublicCapabilityStore {
         this.quarantine = root.resolve("quarantine");
         this.currentLink = root.resolve("current");
         this.personalDirectory = root.resolve("personal");
+        this.personalBackups = root.resolve("personal-backups");
         this.personalMarker = root.resolve("personal-edit.json");
         this.stateFile = root.resolve("state.json");
         this.state = readState();
@@ -146,6 +148,72 @@ final class LocalClientPublicCapabilityStore {
     synchronized void clearPersonalConfig() throws IOException {
         deleteTree(personalDirectory);
         Files.deleteIfExists(personalMarker);
+    }
+
+    /**
+     * 更新覆盖前先复制个人副本和其基线标记。备份位于受控能力根目录内，不参与 OpenCode 加载。
+     */
+    synchronized PersonalBackup backupPersonalConfig(String commandId) throws IOException {
+        requireCommandId(commandId);
+        if (!hasPersonalChanges()) {
+            return null;
+        }
+        String baselineDigest = Files.readString(personalMarker, StandardCharsets.UTF_8).trim();
+        if (!baselineDigest.matches("[0-9a-f]{64}")) {
+            throw new SecurityException("个人公共能力基线标记无效");
+        }
+        Files.createDirectories(personalBackups);
+        Path backup = personalBackups.resolve(commandId);
+        deleteTree(backup);
+        try {
+            copyTree(personalDirectory, backup);
+        } catch (IOException | RuntimeException exception) {
+            deleteTree(backup);
+            throw exception;
+        }
+        return new PersonalBackup(backup, baselineDigest);
+    }
+
+    /** 激活失败时恢复覆盖前的个人副本，并重新写入其基线摘要。 */
+    synchronized void restorePersonalBackup(PersonalBackup backup) throws IOException {
+        if (backup == null) {
+            return;
+        }
+        if (!Files.isDirectory(backup.directory(), LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(backup.directory())) {
+            throw new SecurityException("个人公共能力备份目录不可用");
+        }
+        Path staging = root.resolve("personal.restore.next");
+        deleteTree(staging);
+        copyTree(backup.directory(), staging);
+        deleteTree(personalDirectory);
+        atomicMove(staging, personalDirectory);
+        Files.writeString(personalMarker, backup.baselineDigest(), StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+    }
+
+    synchronized void deletePersonalBackup(PersonalBackup backup) {
+        if (backup != null) {
+            deleteTree(backup.directory());
+        }
+    }
+
+    /** 启动恢复阶段重新绑定仍存在的备份；备份目录本身不携带可执行配置元数据。 */
+    synchronized PersonalBackup existingPersonalBackup(String commandId, String baselineDigest) {
+        requireCommandId(commandId);
+        Path backup = personalBackups.resolve(commandId);
+        if (!Files.isDirectory(backup, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(backup)) {
+            return null;
+        }
+        if (baselineDigest == null || !baselineDigest.matches("[0-9a-f]{64}")) {
+            throw new SecurityException("个人公共能力恢复基线摘要无效");
+        }
+        return new PersonalBackup(backup, baselineDigest);
+    }
+
+    synchronized void deletePersonalBackup(String commandId) {
+        requireCommandId(commandId);
+        deleteTree(personalBackups.resolve(commandId));
     }
 
     /** 个人编辑器恢复单个文件时，从当前签名基线复制；不存在的基线文件按删除处理。 */
@@ -279,11 +347,19 @@ final class LocalClientPublicCapabilityStore {
     }
 
     synchronized Path incomingArchive(String commandId) throws IOException {
-        if (commandId == null || !commandId.matches("lcpc_[a-f0-9]{32}")) {
-            throw new IllegalArgumentException("公共能力 commandId 无效");
-        }
+        requireCommandId(commandId);
         Files.createDirectories(incoming);
         return incoming.resolve(commandId + ".public-capabilities.tar.gz");
+    }
+
+    static boolean confirmedDiscardPersonalChanges(String commandId) {
+        return commandId != null && commandId.startsWith("lcpcd_");
+    }
+
+    private static void requireCommandId(String commandId) {
+        if (commandId == null || !commandId.matches("lcpc(?:d)?_[a-f0-9]{32}")) {
+            throw new IllegalArgumentException("公共能力 commandId 无效");
+        }
     }
 
     private Candidate validate(Path config, String expectedCommit, String expectedDigest) throws IOException {
@@ -486,6 +562,9 @@ final class LocalClientPublicCapabilityStore {
     }
 
     record Candidate(String sourceCommit, String bundleDigest, boolean requiresRestart, Path configDirectory) {
+    }
+
+    record PersonalBackup(Path directory, String baselineDigest) {
     }
 
     record State(

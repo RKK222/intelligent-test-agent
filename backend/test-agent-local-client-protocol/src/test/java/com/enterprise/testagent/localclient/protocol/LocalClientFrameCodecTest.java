@@ -203,6 +203,39 @@ class LocalClientFrameCodecTest {
     }
 
     @Test
+    void shouldRoundTripPublicCapabilityDiscardConfirmation() {
+        LocalClientPayloads.PublicCapabilityUpdateRequest request =
+                new LocalClientPayloads.PublicCapabilityUpdateRequest(
+                        "lci_device", 9L, "d".repeat(64), true);
+        LocalClientPayloads.PublicCapabilityUpdateCommand command =
+                new LocalClientPayloads.PublicCapabilityUpdateCommand(
+                        "lcpcd_" + "a".repeat(32), "lci_device", 9L, "c".repeat(40),
+                        "d".repeat(64), "e".repeat(64), 1L, 1, false, "{}", true);
+        assertThat(codec.payload(codec.decode(codec.encode(new LocalClientFrame(
+                LocalClientProtocol.VERSION, LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_REQUEST,
+                "req-confirm", "trace-confirm", 9L, codec.payload(request)))),
+                LocalClientPayloads.PublicCapabilityUpdateRequest.class)
+                .confirmedDiscardPersonalChanges()).isTrue();
+        assertThat(codec.payload(codec.decode(codec.encode(new LocalClientFrame(
+                LocalClientProtocol.VERSION, LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_COMMAND,
+                command.commandId(), "trace-confirm", 9L, codec.payload(command)))),
+                LocalClientPayloads.PublicCapabilityUpdateCommand.class)
+                .confirmedDiscardPersonalChanges()).isTrue();
+    }
+
+    @Test
+    void shouldOmitFalseDiscardConfirmationForLegacyClients() {
+        LocalClientPayloads.PublicCapabilityUpdateCommand command =
+                new LocalClientPayloads.PublicCapabilityUpdateCommand(
+                        "lcpc_" + "a".repeat(32), "lci_device", 9L, "c".repeat(40),
+                        "d".repeat(64), "e".repeat(64), 1L, 1, false, "{}");
+        String encoded = codec.encode(new LocalClientFrame(
+                LocalClientProtocol.VERSION, LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_COMMAND,
+                command.commandId(), "trace-legacy", 9L, codec.payload(command)));
+        assertThat(encoded).doesNotContain("confirmedDiscardPersonalChanges");
+    }
+
+    @Test
     void shouldRejectUnsupportedVersionAndMissingGeneration() {
         LocalClientFrame unsupported = new LocalClientFrame(
                 "local-opencode-client.v2",

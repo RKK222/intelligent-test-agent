@@ -1442,10 +1442,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<{ revoked: boolean }>(`${localClientBase}/credentials/me`, { method: "DELETE" }),
     listMyLocalClientInstances: () =>
       request<LocalClientInstance[]>(`${localClientBase}/instances/me`),
-    requestLocalClientPublicCapabilityUpdate: (clientInstanceId: string, expectedBundleDigest: string) =>
+    requestLocalClientPublicCapabilityUpdate: (
+      clientInstanceId: string,
+      expectedBundleDigest: string,
+      confirmedDiscardPersonalChanges = false
+    ) =>
       request<LocalClientPublicCapabilityUpdateRequest>(
         `${localClientBase}/instances/${encodeURIComponent(clientInstanceId)}/public-capabilities/updates`,
-        { method: "POST", body: JSON.stringify({ expectedBundleDigest }) }
+        {
+          method: "POST",
+          body: JSON.stringify({
+            expectedBundleDigest,
+            ...(confirmedDiscardPersonalChanges ? { confirmedDiscardPersonalChanges: true } : {})
+          })
+        }
       ),
     listLocalClientRolloutUsers: (page = 1, size = 50) =>
       request<PageResponse<LocalClientRolloutUser>>(

@@ -18317,3 +18317,25 @@
 
 - 代码修复待推送到内网 GitLab release 并经 Jenkins 新构建发布；此前 #50 不能作为共享配置“有数据读取”通过证据。
 - 未修改 `.env*`、OpenCode 源码、无关并行工作区改动；本次新增数据库行仅为可回收验收数据，完成后删除。
+
+## 2026-09-23 - 公共能力更新确认清空个人修改与失败恢复
+
+### Why
+
+- 延续本日公共能力个人编辑改造，补齐“确认后清空个人修改、离线确认持久化、激活失败恢复个人副本”的剩余链路，避免公共包更新覆盖本机草稿。
+
+### What
+
+- `PUBLIC_CAPABILITY_UPDATE_REQUEST/COMMAND` 增加 `confirmedDiscardPersonalChanges`；确认语义编码为 `lcpcd_` commandId，复用现有 attempt 持久化，不新增数据库字段；普通旧客户端的 false 字段不序列化，保持协议兼容。
+- 本地客户端检测到个人副本且缺少确认时以 `PERSONAL_CHANGES_CONFIRMATION_REQUIRED` 失败；确认后先复制个人备份，签名候选激活并通过 OpenCode 健康/目录校验后才清除，失败回滚时恢复备份；启动崩溃恢复也处理遗留备份。
+- 托盘和网页确认框明确提示“确认后清空本机个人修改，取消保留”；旧客户端未声明个人编辑能力时不接收带清空语义的命令。同步更新协议、HTTP/事件、安全、客户端和运行时文档，并补充协议、store、coordinator、前端回归测试。
+
+### How
+
+- JDK 17 初次 Maven 编译因项目要求 release 21 失败，切换本机 OpenJDK 25 后通过：`mvn -pl test-agent-local-client-protocol,test-agent-local-client,test-agent-opencode-runtime,test-agent-api -am -Dtest=LocalClientFrameCodecTest,LocalClientPublicCapabilityStoreTest,LocalClientPublicCapabilityUpdaterTest,LocalClientPublicCapabilityCoordinatorTest,LocalClientMainTest -Dsurefire.failIfNoSpecifiedTests=false test`（全部通过）。
+- `corepack pnpm test -- apps/agent-web/tests/settings-personal-local-client.test.ts` 实际按仓库配置运行全量 2330 passed / 1 skipped；`corepack pnpm --filter @test-agent/backend-api typecheck` 与 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；`git diff --check` 通过。
+
+### Result
+
+- 公共包更新现在具备显式清空确认、离线重连继续、激活失败/进程崩溃恢复个人副本的协议和客户端状态机；不涉及 Flyway、数据库字段、部署节点、generated SDK 或 OpenCode 源码。
+- 尚未做真实本地客户端四类能力端到端冒烟或共享环境 Jenkins 发布；代码提交后需按用户要求推送 `release` 的已配置远程，并在现场验证确认/取消、断线和回滚。

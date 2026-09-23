@@ -141,6 +141,38 @@ class LocalClientPublicCapabilityCoordinatorTest {
     }
 
     @Test
+    void confirmedDiscardUsesPersistentCommandMarkerAndWireFlag() {
+        when(repository.findInstanceState(INSTANCE_ID)).thenReturn(Optional.of(updateAvailableState()));
+        when(repository.findReleaseByDigest(DIGEST)).thenReturn(Optional.of(release()));
+        when(repository.findAttempt(INSTANCE_ID, DIGEST)).thenReturn(Optional.empty());
+        when(connectionStore.find(INSTANCE_ID)).thenReturn(Optional.empty());
+        when(repository.findDispatchableAttempts(anyInt())).thenReturn(List.of());
+
+        var requested = coordinator.requestUpdate(USER_ID, INSTANCE_ID, DIGEST, true, "trace_confirmed");
+        assertThat(requested.commandId()).startsWith("lcpcd_");
+
+        LocalClientPublicCapabilityModels.Attempt attempt = new LocalClientPublicCapabilityModels.Attempt(
+                requested.commandId(), INSTANCE_ID, USER_ID, 0L, COMMIT, DIGEST,
+                LocalClientPublicCapabilityModels.AttemptStatus.PENDING, null, NOW, NOW, null);
+        RecordingSender sender = new RecordingSender();
+        connectionRegistry.register(INSTANCE_ID, USER_ID, 8L, "model-grant", sender);
+        when(repository.findDispatchableAttempts(anyInt())).thenReturn(List.of(attempt));
+        when(repository.bindAttemptGeneration(attempt.commandId(), 0L, 8L, NOW)).thenReturn(true);
+        when(repository.findAttempt(attempt.commandId())).thenReturn(Optional.of(
+                new LocalClientPublicCapabilityModels.Attempt(
+                        attempt.commandId(), INSTANCE_ID, USER_ID, 8L, COMMIT, DIGEST,
+                        LocalClientPublicCapabilityModels.AttemptStatus.PENDING, null, NOW, NOW, null)));
+        when(repository.transitionAttempt(attempt.commandId(), "PENDING", "SENT", null, NOW)).thenReturn(true);
+
+        coordinator.reconcile();
+
+        LocalClientPayloads.PublicCapabilityUpdateCommand command = new LocalClientFrameCodec().payload(
+                sender.frames.stream().filter(frame -> frame.type() == LocalClientFrameType.PUBLIC_CAPABILITY_UPDATE_COMMAND)
+                        .findFirst().orElseThrow(), LocalClientPayloads.PublicCapabilityUpdateCommand.class);
+        assertThat(command.confirmedDiscardPersonalChanges()).isTrue();
+    }
+
+    @Test
     void repeatedTerminalStatusReturnsIdempotentAck() {
         LocalClientPublicCapabilityModels.Attempt succeeded = new LocalClientPublicCapabilityModels.Attempt(
                 "lcpc_" + "b".repeat(32), INSTANCE_ID, USER_ID, 4L, COMMIT, DIGEST,
@@ -200,7 +232,8 @@ class LocalClientPublicCapabilityCoordinatorTest {
     private static LocalClientInstance instance() {
         return new LocalClientInstance(
                 INSTANCE_ID, USER_ID, "Mac", "darwin", "arm64", "0.1.0", "1.18.4", "1",
-                List.of(LocalClientPublicCapabilityCoordinator.PROTOCOL_CAPABILITY), false,
+                List.of(LocalClientPublicCapabilityCoordinator.PROTOCOL_CAPABILITY,
+                        LocalClientPublicCapabilityCoordinator.PERSONAL_EDIT_CAPABILITY), false,
                 null, null, null, NOW.minusSeconds(60), NOW, NOW, null);
     }
 

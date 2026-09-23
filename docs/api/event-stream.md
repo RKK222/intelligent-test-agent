@@ -1134,8 +1134,8 @@ relay token、Cookie、profile 或页面数据发送到平台。旧服务端可�
 |---|---|---|
 | `PUBLIC_CAPABILITY_VERSION` | client→server | 注册完成后上报已激活 commit/摘要、待处理 commit/摘要/commandId、状态、错误码和观测时间；用于重启恢复与平台 attempt 收敛。 |
 | `PUBLIC_CAPABILITY_AVAILABLE` | server→client | 只通知新完整包、Agent/Skill/Tool 数量、变更摘要及是否需要重启，不代表用户已同意。 |
-| `PUBLIC_CAPABILITY_UPDATE_REQUEST` | client→server | 托盘用户显式确认；网页确认使用对应 HTTP POST。 |
-| `PUBLIC_CAPABILITY_UPDATE_COMMAND` | server→client | 绑定 `commandId + clientInstanceId + generation + commit + bundleDigest` 的安装命令和制品元数据。 |
+| `PUBLIC_CAPABILITY_UPDATE_REQUEST` | client→server | 托盘用户显式确认；网页确认使用对应 HTTP POST。请求可带 `confirmedDiscardPersonalChanges=true`，仅在用户确认清空本机个人副本时发送。 |
+| `PUBLIC_CAPABILITY_UPDATE_COMMAND` | server→client | 绑定 `commandId + clientInstanceId + generation + commit + bundleDigest` 的安装命令和制品元数据，并携带同名清空确认标记。确认语义编码在现有 attempt 的 `lcpcd_` commandId 中，无需新增数据库字段。 |
 | `PUBLIC_CAPABILITY_CHUNK_REQUEST` | client→server | 客户端按序请求一个 256 KiB 有界分片。 |
 | `BINARY_CHUNK` | server→client | 返回该序号的 Base64 制品内容；已经写入的旧序号重复帧幂等忽略，未来序号乱序、摘要或总大小不一致使该次安装失败。 |
 | `PUBLIC_CAPABILITY_UPDATE_STATUS` / `PUBLIC_CAPABILITY_UPDATE_STATUS_ACK` | 双向 | `DOWNLOADING → APPLYING → SUCCEEDED|FAILED|ROLLED_BACK` 的幂等状态收敛。 |
@@ -1144,6 +1144,11 @@ relay token、Cookie、profile 或页面数据发送到平台。旧服务端可�
 不做增量覆盖。实例离线时网页可以先确认，但平台不会代替用户确认。Agent/Skill-only 变更激活后调用
 `/global/dispose`；Tool 或依赖变更重启本地 OpenCode。客户端只有在健康和 `/agent`、`/command`、
 `/experimental/tool/ids` 均可用后才上报成功，否则原子回切上一版本。
+
+客户端发现本机存在个人公共能力修改时，未带确认标记的更新命令会以
+`PERSONAL_CHANGES_CONFIRMATION_REQUIRED` 稳定失败并保留草稿。用户确认清空后，客户端先备份个人副本，
+仅在新签名版本激活后删除；健康检查或 Tool 重启失败时回滚签名版本并恢复该备份。旧客户端若未声明
+`PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 不会接收带新确认语义的安装命令，保持只读。
 
 客户端进程若在 `PENDING/DOWNLOADING` 中退出，重启后通过 `PUBLIC_CAPABILITY_VERSION` 把旧命令收敛为
 `FAILED/CLIENT_RESTARTED_DURING_UPDATE`，平台可重新生成命令；若在原子切换后的 `APPLYING` 中退出，重启后必须先启动并

@@ -290,6 +290,7 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 - 客户端个人公共能力必须声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`；旧客户端、离线客户端和 generation 不匹配的旧连接统一失败关闭。
 - `agent-config/file-ws-route` 对本地公共 scope 只接受逻辑引用 `LOCAL_CLIENT_PERSONAL:{clientInstanceId}:{connectionGeneration}` 或等价的绑定字段，后端通过公共路由解析器选择持有连接的 Java。每次签 ticket 和每条 RPC 都重新校验当前登录用户、客户端 owner、在线 generation、目标 JVM 与 capability；不接受浏览器提交绝对根路径。
 - 客户端个人副本以签名基线复制创建，基线目录不可写。文件白名单严格为 `agents/**`、`skills/**`、`tools/**`；manifest、根级依赖、`node_modules`、符号链接、特殊文件、路径穿越和越界目录均拒绝。恢复操作只能回到当前签名基线，不得写服务器公共 Git。
+- 公共包更新覆盖个人副本前必须携带用户明确确认标记；该标记只绑定当前实例、当前 generation 和待更新摘要，并通过既有 attempt 的受控 commandId 持久化。未确认统一拒绝覆盖；失败回滚必须恢复个人副本，日志只输出稳定错误码、traceId 和操作类型。
 - Tool 代码明确以当前操作系统用户权限在本机执行；日志、错误和审计只记录稳定错误码、traceId、操作类型及必要的路径摘要，不输出文件正文、物理路径、凭据或 Tool 内容。分享模式仍不能取得该 ticket，也不能切换模型。
 
 工作区文件与 Agent 配置文件操作属于受控 WebSocket 例外。前端不得直连 opencode server 或任意文件服务，必须先通过平台后端解析目标服务器，再使用目标后端的一次性 ticket 建立 WebSocket。实现和后续扩展必须满足：

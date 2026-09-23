@@ -39,6 +39,7 @@ public class LocalClientPublicCapabilityController {
                     userId,
                     new LocalClientInstanceId(clientInstanceId),
                     request.expectedBundleDigest(),
+                    Boolean.TRUE.equals(request.confirmedDiscardPersonalChanges()),
                     traceId), traceId);
         } catch (IllegalArgumentException exception) {
             throw new PlatformException(
@@ -46,6 +47,12 @@ public class LocalClientPublicCapabilityController {
         }
     }
 
-    public record UpdateRequest(String expectedBundleDigest) {
+    public record UpdateRequest(
+            String expectedBundleDigest,
+            Boolean confirmedDiscardPersonalChanges) {
+
+        public UpdateRequest(String expectedBundleDigest) {
+            this(expectedBundleDigest, Boolean.FALSE);
+        }
     }
 }

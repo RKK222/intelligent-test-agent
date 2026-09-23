@@ -342,12 +342,14 @@ final class LocalClientTray implements AutoCloseable {
         if (available == null) {
             return;
         }
+        boolean hasPersonalChanges = connection.publicCapabilityHasPersonalChanges();
         String message = "检测到新的公共能力版本。\n"
                 + changeSummary(available.changeSummaryJson()) + "\n"
                 + (available.requiresRestart()
                         ? "包含 Tool 或依赖变化，将重启本地 OpenCode。"
                         : "仅 Agent/Skill 变化，将热加载配置。")
-                + "\n公共 Tool 使用当前 macOS 登录账号权限运行，不会提权。";
+                + "\n公共 Tool 使用当前操作系统登录账号权限运行，不会提权。"
+                + (hasPersonalChanges ? "\n确认后会清空本机个人公共能力修改；取消则继续保留。" : "");
         int result = JOptionPane.showConfirmDialog(
                 null,
                 message,
@@ -355,7 +357,7 @@ final class LocalClientTray implements AutoCloseable {
                 JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.PLAIN_MESSAGE);
         if (result == JOptionPane.OK_OPTION) {
-            connection.requestPublicCapabilityUpdate(available.bundleDigest());
+            connection.requestPublicCapabilityUpdate(available.bundleDigest(), hasPersonalChanges);
             displayMessage("公共能力更新", "已确认，正在下载完整能力包", TrayIcon.MessageType.INFO);
         }
     }
