@@ -5,6 +5,27 @@
 
 ## Entries
 
+### 2026-09-23 - 更新管理视角用户手册
+
+### Why
+
+- 最近上线的系统管理员管理视角已进入工作台，但用户手册只有角色表和零散权限说明，缺少团队审阅、只读文件、成员维护和超级管理员范围切换的操作路径。
+
+### What
+
+- 更新 `settings.md`，补充管理视角进入、应用/工作空间/版本上下文、团队审阅、提交分类、整组导出、成员维护和空态/撤权边界。
+- 更新 `feature-overview.md` 与 `faq.md`，补充管理视角入口、只读能力以及文件树空态和成员管理排查。
+- 更新帮助中心 FAQ 上下文预算和回归断言，避免新增手册内容截断既有排查问答。
+
+### How
+
+- 目标分支为 `release`，不新增部署节点；未修改 API、事件、数据库、部署配置、环境文件、generated SDK 或 OpenCode 源码。
+- `corepack pnpm --filter @test-agent/user-manual build`、`corepack pnpm exec vitest run apps/agent-web/tests/help-center.test.ts`（17/17）、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `git diff --check` 均通过。
+
+### Result
+
+- 内置用户手册与当前管理视角实现保持一致，宠物问答可以读取新增管理视角 FAQ，生成帮助站点不引入生成文件到 Git。
+
 ### 2026-09-23 - 团队管理异步状态修复与端到端验收准备
 
 - Why:

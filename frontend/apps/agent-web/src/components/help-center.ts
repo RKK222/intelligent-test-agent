@@ -178,11 +178,11 @@ export function stripMarkdownFrontmatter(content: string): string {
 export function buildManualQuestionPrompt(topic: HelpTopicId, question: string): string {
   const currentTopic = helpTopicById(topic);
   const normalizedQuestion = question.trim().slice(0, 500);
-  // 常见问题和周更页都覆盖多个场景；dev 周更另含长期记忆，放宽但仍保持单章有界。
+  // 常见问题和周更页都覆盖多个场景；FAQ 增加管理视角后适度放宽，仍保持单章有界。
   const contextLimit = currentTopic.id === "weekly-updates"
     ? 7_200
     : currentTopic.id === "faq"
-      ? 5_800
+      ? 6_200
       : 2_800;
   const manualContext = stripMarkdownFrontmatter(currentTopic.content).trim().slice(0, contextLimit);
   return [

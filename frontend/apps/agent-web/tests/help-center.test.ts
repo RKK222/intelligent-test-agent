@@ -205,6 +205,14 @@ describe("help center", () => {
     expect(faq).toContain("为什么看不到“应用运行态更新”？");
     expect(faq).toContain("RTK 命令改写在哪里开，为什么没有立即生效？");
     expect(faq).toContain("为什么输入 `/` 看不到 concise-output？");
+    expect(settings).toContain("系统管理员：进入管理视角");
+    expect(settings).toContain("未提交修改");
+    expect(settings).toContain("全平台只读");
+    expect(settings).toContain("暂无可管理的系统管理员团队");
+    expect(overview).toContain("管理视角与团队审阅");
+    expect(overview).toContain("整组导出");
+    expect(faq).toContain("为什么进入管理视角后文件树是空的？");
+    expect(faq).toContain("为什么超级管理员不能直接维护成员？");
   });
 
   it("permanently keeps game content out of every user manual document", () => {
