@@ -30,6 +30,8 @@ WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worke
 WORKER_PORT_START=${WORKER_PORT_START:-4096}
 WORKER_PORT_END=${WORKER_PORT_END:-4105}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
+# 宿主机检查必须有界结束，避免远端 Docker/数据库/端口探测异常时无声占住 Jenkins。
+HOST_CHECK_TIMEOUT_SECONDS=${HOST_CHECK_TIMEOUT_SECONDS:-60}
 # 用户手册构建会读取 Git 提交时间，使用含 git 的固定 Node 完整镜像。
 NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}
 # 体验工作区和应用资产运行期需要执行 Git；复用已固定的 Maven JDK 21 镜像，避免使用不含 Git 的纯 JRE 镜像。
@@ -157,6 +159,14 @@ validate_tcp_port() {
     }
 }
 
+validate_timeout() {
+    local value=$1
+    [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
+        echo "Invalid host check timeout: ${value}" >&2
+        return 1
+    }
+}
+
 worker_image_for_tag() {
     local tag=$1
     validate_tag "${tag}"
@@ -179,7 +189,7 @@ PY
 database_linux_data_root() {
     local database_name=$1 value
     validate_postgres_identifier "${database_name}" database
-    value=$(docker exec "${DATABASE_CONTAINER}" sh -lc \
+    value=$(timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker exec "${DATABASE_CONTAINER}" sh -lc \
         'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$1" -At -c "select parameter_value from common_parameters where parameter_english = '\''SYS_DATA_ROOT_DIR'\'' and platform = '\''linux'\''"' \
         sh "${database_name}")
     [[ "${value}" == /* && "${value}" != *$'\n'* ]] || {
@@ -191,6 +201,9 @@ database_linux_data_root() {
 
 validate_host() {
     local item source_db_name configured_data_root
+    require_command timeout
+    validate_timeout "${HOST_CHECK_TIMEOUT_SECONDS}"
+    echo "==> Validate Jenkins host prerequisites (timeout ${HOST_CHECK_TIMEOUT_SECONDS}s)"
     require_command docker
     require_command curl
     require_command git
@@ -204,6 +217,7 @@ validate_host() {
         return 1
     }
     validate_secret_file
+    echo '    - database runtime data root'
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     configured_data_root=$(database_linux_data_root "${source_db_name}")
     [[ "${configured_data_root}" == "${RUNTIME_DATA_ROOT}" ]] || {
@@ -224,9 +238,12 @@ validate_host() {
             return 1
         }
     done
-    docker info >/dev/null
-    docker run --rm "${JAVA_RUNTIME_IMAGE}" sh -euc 'command -v java >/dev/null; command -v git >/dev/null'
-    sudo "${HOST_CONTROL}" status
+    echo '    - Docker daemon'
+    timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker info >/dev/null
+    echo "    - runtime image ${JAVA_RUNTIME_IMAGE}"
+    timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker run --rm "${JAVA_RUNTIME_IMAGE}" sh -euc 'command -v java >/dev/null; command -v git >/dev/null'
+    echo "    - fixed host control ${HOST_CONTROL}"
+    timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" sudo "${HOST_CONTROL}" status
 }
 
 maven_run() {

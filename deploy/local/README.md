@@ -56,6 +56,9 @@ worker 直接复用 `deploy/internal/opencode-worker.Dockerfile`，每次 `DEPLO
 若 Docker BuildKit 明确报告内部 snapshot 缓存丢失，流水线先针对该错误自动执行一次 `--no-cache` 重建；若仍命中同一
 错误，则只清理 BuildKit builder 自身缓存后再执行一次 `--no-cache` 重建。清理不删除镜像、容器或卷；其它业务构建错误
 不重试，最终失败也会保持旧服务不变。
+Jenkins 宿主门禁中的数据库路径查询、Docker daemon/运行时镜像检查和固定端口控制脚本均受
+`HOST_CHECK_TIMEOUT_SECONDS`（默认 60 秒）限制，并在每项检查前输出阶段标记；远端依赖失去响应时应快速失败并保留
+旧服务，而不是无声占满整次流水线超时窗口。
 
 发布目录位于 `/data2/deploy/intelligent-test-agent/releases/`，每个标签包含源码快照、后端 JAR、前端静态文件、
 应用 Compose、worker Compose 模型、逐文件 SHA-256、worker 镜像身份和发布前后 Flyway history。日志位于

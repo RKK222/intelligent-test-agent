@@ -18085,3 +18085,27 @@
 ### Result
 
 - #41 未发布，旧服务保持不变；收起右栏后的真实对话和截图验收仍未完成，不能宣称端到端通过。
+
+## 2026-09-23 - Jenkins #42 宿主门禁无输出超时保护
+
+### Why
+
+- Jenkins #42 使用提交 `9a68d2d39` 启动后持续执行约 47 分钟，控制台只停在 `jenkins-release.sh build`
+  的 shell 步骤，没有进入 Flyway、后端或前端构建；线程转储显示正在等待该脚本子进程完成。
+- 由于 `build` 会再次调用 `validate_host`，数据库路径查询、Docker daemon/运行时镜像检查或固定端口控制脚本任一远端依赖失去响应时，原脚本会无声占满 Jenkins 的 150 分钟超时窗口。
+
+### What
+
+- `deploy/local/jenkins-release.sh` 新增 `HOST_CHECK_TIMEOUT_SECONDS`（默认 60 秒）和 `timeout` 门禁：数据库 `SYS_DATA_ROOT_DIR` 查询、`docker info`、运行时镜像 Java/Git 检查、固定 host-control `status` 均有界执行。
+- `validate_host` 在每项外部检查前输出阶段标记，超时后快速失败并保留旧服务；同步更新 Jenkins 合约校验和本地 Jenkins README。
+
+### How
+
+- 按用户已授权范围通过 Jenkins 状态页取消 #42，确认页面显示 `Aborted by user admin`；未修改测试机运行容器、镜像、数据库或发布目录。
+- 本地执行 `bash -n deploy/local/jenkins-release.sh tools/verify-jenkins-release.sh`、
+  `tools/verify-jenkins-release.sh`、`git diff --check` 均通过；待新提交由 Jenkins 重新构建。
+
+### Result
+
+- #42 未发布，旧服务保持不变；此次变更只增加宿主门禁可观测性和超时保护，不宣称部署或真实对话验收完成。
+- 下一步必须通过新的 Jenkins immutable DEPLOY，随后再做 backend/frontend/worker 健康检查、收起右侧栏后的真实模型对话和截图验证。
