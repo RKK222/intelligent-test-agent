@@ -18060,3 +18060,28 @@
 
 - #40 未发布，旧服务保持不变；需继续执行 Jenkins 构建、worker smoke、运行态健康检查及收起右栏后的真实
   对话与截图验收。
+
+## 2026-09-23 - Jenkins #41 确认 BuildKit snapshot 错误不受 bind mount 绕过
+
+### Why
+
+- Jenkins #41（提交 `166a2c5b6`）已完成后端 `BUILD SUCCESS` 和前端 typecheck/build，但 worker 构建在
+  `RUN --mount=type=bind,source=opencode-manager,...` 层仍报告同一
+  `failed to stat active key during commit: snapshot ... does not exist`；说明损坏位于测试机 BuildKit
+  builder 状态，不只是 `COPY` 指令。
+
+### What
+
+- 发布脚本在第二次精确命中 snapshot 错误后，改为执行一次 `docker builder prune --all --force`，再用
+  BuildKit `--no-cache` 重建；不再调用不支持 Dockerfile bind mount 的 legacy builder。
+- 新增第三段恢复日志的清理路径，并同步更新 `deploy/local/README.md`。
+
+### How
+
+- 通过 Jenkins #41 控制台截图和状态页确认错误位置与时间（11:19:18），按用户既有授权取消陈旧构建并确认
+  “已终止 / Aborted by user”；未替换远端服务或删除容器、镜像、卷。
+- 待下一次 Jenkins 构建验证 builder cache 清理、worker smoke、发布和真实对话闭环。
+
+### Result
+
+- #41 未发布，旧服务保持不变；收起右栏后的真实对话和截图验收仍未完成，不能宣称端到端通过。

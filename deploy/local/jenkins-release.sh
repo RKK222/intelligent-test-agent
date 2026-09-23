@@ -313,6 +313,7 @@ build_release() {
     echo "==> Build and verify immutable OpenCode worker image ${worker_image}"
     worker_build_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build.XXXXXX")
     worker_retry_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-retry.XXXXXX")
+    worker_recovery_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-recovery.XXXXXX")
     if ! docker build \
         --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
         --tag "${worker_image}" \
@@ -320,7 +321,7 @@ build_release() {
         "${repository_root}" 2>&1 | tee "${worker_build_log}"; then
         # 测试机构建缓存偶发丢失 BuildKit snapshot；只对该明确错误做一次无缓存重建，业务构建错误仍立即失败。
         if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_build_log}"; then
-            rm -f -- "${worker_build_log}"
+            rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
             return 1
         fi
         echo 'BuildKit snapshot cache is inconsistent; retrying the worker image once without cache.' >&2
@@ -330,23 +331,25 @@ build_release() {
             --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
             "${repository_root}" 2>&1 | tee "${worker_retry_log}"; then
             if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_retry_log}"; then
-                rm -f -- "${worker_build_log}" "${worker_retry_log}"
+                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
                 return 1
             fi
-            # 共享测试机的 Docker BuildKit 状态损坏时，legacy builder 不使用同一套 snapshot
-            # 元数据；仅在两次均命中该精确错误时启用一次，任何业务构建错误仍立即失败。
-            echo 'BuildKit snapshot cache remains inconsistent; retrying once with the legacy Docker builder.' >&2
-            if ! DOCKER_BUILDKIT=0 docker build --no-cache \
+            # 两次均命中同一精确错误时，只清理 BuildKit 自己的构建缓存再重试一次；
+            # 不删除镜像、容器或卷，业务构建错误仍立即失败。worker Dockerfile 使用
+            # BuildKit 的只读上下文挂载，不能退回不支持该语法的 legacy builder。
+            echo 'BuildKit snapshot cache remains inconsistent; pruning builder cache before one final retry.' >&2
+            docker builder prune --all --force
+            if ! docker build --no-cache \
                 --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
                 --tag "${worker_image}" \
                 --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
-                "${repository_root}"; then
-                rm -f -- "${worker_build_log}" "${worker_retry_log}"
+                "${repository_root}" 2>&1 | tee "${worker_recovery_log}"; then
+                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
                 return 1
             fi
         fi
     fi
-    rm -f -- "${worker_build_log}" "${worker_retry_log}"
+    rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
     "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
 }
 
