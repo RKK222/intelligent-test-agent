@@ -9,6 +9,7 @@ import {
   Globe2,
   Loader2,
   Plus,
+  RotateCcw,
   RefreshCw,
   Upload,
   MoreHorizontal
@@ -76,6 +77,10 @@ const props = defineProps<{
   personalRuntimeReloading?: Scope | null;
   /** 运行中任务不允许 dispose，避免释放正在使用的 workspace 实例。 */
   runtimeBusy?: boolean;
+  /** LOCAL_CLIENT 模式下的客户端稳定实例与连接代次。 */
+  localClientInstanceId?: string;
+  localClientConnectionGeneration?: number;
+  localClientOnline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -96,6 +101,13 @@ const api = createBackendApiClient({
   routeLinuxServerId: () => props.routeLinuxServerId
 });
 const workspaceCanWrite = computed(() => props.canManageWorkspaceConfig ?? props.canWrite);
+const localClientSelected = computed(() => Boolean(props.localClientInstanceId?.trim()));
+const localPersonalMode = computed(() => Boolean(
+  localClientSelected.value
+  && props.localClientConnectionGeneration
+  && props.localClientConnectionGeneration > 0
+  && props.localClientOnline !== false
+));
 
 const status = ref<{ PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus }>({});
 const entriesByScope = ref<Record<Scope, Record<string, FileTreeEntry[]>>>({ PUBLIC: {}, WORKSPACE: {} });
@@ -240,12 +252,12 @@ async function refreshAll(notifySkippedFile = true) {
     if (status.value.PUBLIC?.enabled !== false && publicFileTargetAvailable()) {
       tasks.push(loadDirectory("PUBLIC", "", true));
     }
-    if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
+    if (props.workspaceId && !localClientSelected.value) tasks.push(loadDirectory("WORKSPACE", "", true));
     await Promise.allSettled(tasks);
     if (token !== refreshAllToken) return;
     await Promise.all([
       reloadExpandedDirectories("PUBLIC", expandedSnapshot.PUBLIC),
-      reloadExpandedDirectories("WORKSPACE", expandedSnapshot.WORKSPACE)
+      ...(localClientSelected.value ? [] : [reloadExpandedDirectories("WORKSPACE", expandedSnapshot.WORKSPACE)])
     ]);
     if (token !== refreshAllToken) return;
     await refreshActiveEditorFile(undefined, notifySkippedFile);
@@ -258,6 +270,16 @@ async function refreshAll(notifySkippedFile = true) {
 
 async function refreshStatus(token: number) {
   const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {};
+  if (localClientSelected.value) {
+    next.PUBLIC = {
+      scope: "PUBLIC",
+      enabled: localPersonalMode.value,
+      writable: localPersonalMode.value && props.canWrite,
+      agentDirectory: localPersonalMode.value ? "本机个人公共能力" : "本地客户端未连接"
+    };
+    if (token === refreshAllToken) status.value = next;
+    return;
+  }
   const workspaceId = props.workspaceId;
   const publicStatusPromise = withTimeout(api.getPublicAgentConfigStatus(), "加载公共 Agent 状态超时");
   const workspaceStatusPromise = workspaceId
@@ -363,6 +385,9 @@ async function ensureCurrentUserPublicWorktree(
 }
 
 function worktreeId(scope: Scope) {
+  if (scope === "PUBLIC" && localPersonalMode.value) {
+    return `LOCAL_CLIENT_PERSONAL:${props.localClientInstanceId}:${props.localClientConnectionGeneration}`;
+  }
   // 应用级配置直接使用当前版本个人 workspace 的 Git 根，不再挂载独立 Agent worktree。
   return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : undefined;
 }
@@ -377,7 +402,8 @@ function emitFilesMutated(
       scope,
       ...mutation,
       worktreeId: worktreeId(scope),
-      linuxServerId: publicWorktree.value?.linuxServerId ?? undefined
+      linuxServerId: publicWorktree.value?.linuxServerId
+        ?? (localPersonalMode.value ? props.routeLinuxServerId : undefined)
     });
     return;
   }
@@ -409,7 +435,9 @@ function isCurrentAgentFileContext(file: {
     return false;
   }
   if (file.scope === "PUBLIC") {
-    const currentLinuxServerId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? "";
+    const currentLinuxServerId = publicWorktree.value?.linuxServerId
+      ?? (localPersonalMode.value ? props.routeLinuxServerId : publicConfigLinuxServerId.value)
+      ?? "";
     return (file.linuxServerId ?? "") === currentLinuxServerId;
   }
   return Boolean(file.workspaceId) && file.workspaceId === props.workspaceId;
@@ -433,6 +461,9 @@ const hiddenReadOnlyConfigRootEntries = new Set([
 
 function visibleEntries(scope: Scope, path: string) {
   const entries = entriesByScope.value[scope][path] ?? [];
+  if (scope === "PUBLIC" && localClientSelected.value) {
+    return entries.filter((entry) => /^(?:agents|skills|tools)(?:\/|$)/.test(entry.path.replaceAll("\\", "/")));
+  }
   if (canWriteScope(scope) || path !== "") {
     return entries;
   }
@@ -444,6 +475,10 @@ function canWriteScope(scope: Scope) {
   return scope === "PUBLIC" ? props.canWrite : workspaceCanWrite.value;
 }
 
+function publicWriteTargetAvailable() {
+  return localPersonalMode.value || Boolean(publicWorktree.value?.worktreeId);
+}
+
 /** 文件逐个提交；Skill 以 skills 下的一级包目录作为一个完整 Git 提交单元。 */
 function quickCommitKind(entry: Pick<FileTreeEntry, "path" | "type">): AgentQuickCommitRequest["kind"] | null {
   const path = entry.path.replaceAll("\\", "/").replace(/^\/+|\/+$/g, "");
@@ -453,7 +488,7 @@ function quickCommitKind(entry: Pick<FileTreeEntry, "path" | "type">): AgentQuic
 }
 
 function canQuickCommitEntry(entry: FileTreeEntry): boolean {
-  return quickCommitKind(entry) !== null;
+  return !localClientSelected.value && quickCommitKind(entry) !== null;
 }
 
 function quickGitCommitRequest(
@@ -473,7 +508,7 @@ function quickGitCommitRequest(
 }
 
 function requestQuickGitCommit(scope: Scope, entry: FileTreeEntry) {
-  if (busy.value) return;
+  if (busy.value || localClientSelected.value) return;
   const request = quickGitCommitRequest(scope, entry);
   if (request) emit("request-git-commit", request);
 }
@@ -481,7 +516,7 @@ function requestQuickGitCommit(scope: Scope, entry: FileTreeEntry) {
 /** Agent 配置树复用工作空间的新建面板，作用域只负责补齐文件路由上下文。 */
 function openCreateEntryDialog(scope: Scope, directory: string) {
   if (!canWriteScope(scope) || busy.value) return;
-  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "PUBLIC" && (!publicWriteTargetAvailable() || status.value.PUBLIC?.enabled === false)) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   createEntryScope.value = scope;
   createEntryDialog.value?.open(directory);
@@ -500,21 +535,30 @@ function isWorkspaceAgentDiffPath(path: string) {
 }
 
 function canCreateInDirectory(scope: Scope, path: string) {
+  if (scope === "PUBLIC" && localPersonalMode.value) {
+    return path === "" || /^(?:agents|skills|tools)(?:\/|$)/.test(path.replaceAll("\\", "/"));
+  }
   return scope === "PUBLIC" || path === "" || isWorkspaceAgentDiffPath(path);
 }
 
 function canDeleteEntry(scope: Scope, path: string) {
+  if (scope === "PUBLIC" && localPersonalMode.value) {
+    return /^(?:agents|skills|tools)(?:\/|$)/.test(path.replaceAll("\\", "/"));
+  }
   return scope === "PUBLIC" || isWorkspaceAgentDiffPath(path);
 }
 
 function canRenameEntry(scope: Scope, path: string) {
+  if (scope === "PUBLIC" && localPersonalMode.value) {
+    return /^(?:agents|skills|tools)(?:\/|$)/.test(path.replaceAll("\\", "/"));
+  }
   return scope === "PUBLIC" || isWorkspaceAgentDiffPath(path);
 }
 
 /** 文件和目录沿用工作空间删除确认面板，作用域仅负责补齐 Agent 文件路由。 */
 function openDeleteEntryDialog(scope: Scope, entry: FileTreeEntry) {
   if (!canWriteScope(scope) || busy.value || !canDeleteEntry(scope, entry.path)) return;
-  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "PUBLIC" && (!publicWriteTargetAvailable() || status.value.PUBLIC?.enabled === false)) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   deleteEntryScope.value = scope;
   deleteEntryDialog.value?.open({ path: entry.path, type: entry.type });
@@ -684,7 +728,7 @@ async function createAgentEntry(directory: string, name: string, type: "file" | 
 /** 公共/应用 Agent 文件共用普通文件树的右键行内改名交互与专用 Agent 配置 RPC。 */
 async function renameAgentEntry(scope: Scope, path: string, name: string) {
   if (!canWriteScope(scope) || busy.value || !canRenameEntry(scope, path)) return;
-  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "PUBLIC" && (!publicWriteTargetAvailable() || status.value.PUBLIC?.enabled === false)) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   const parent = parentDirectory(path);
   const nextPath = agentEntryPath(parent, name);
@@ -987,6 +1031,14 @@ const personalRuntimeReloadDisabled = computed(() =>
 function requestPersonalRuntimeReload(scope: Scope) {
   if (personalRuntimeReloadDisabled.value) return;
   if (scope === "PUBLIC") {
+    if (localPersonalMode.value) {
+      emit("personal-runtime-reload", {
+        scope,
+        worktreeId: worktreeId(scope),
+        linuxServerId: props.routeLinuxServerId
+      });
+      return;
+    }
     const currentWorktree = publicWorktree.value;
     if (!currentWorktree?.worktreeId || !currentWorktree.linuxServerId) {
       errorMessage.value = "请先创建或切换到当前用户的公共个人 worktree";
@@ -1001,6 +1053,30 @@ function requestPersonalRuntimeReload(scope: Scope) {
   }
   if (!props.workspaceId) return;
   emit("personal-runtime-reload", { scope, workspaceId: props.workspaceId });
+}
+
+/** 客户端个人副本恢复到签名公共版本；恢复后仍通过父层统一触发运行态收敛。 */
+async function restorePublicPersonalConfig() {
+  if (!localPersonalMode.value || !canWriteScope("PUBLIC") || busy.value) return;
+  if (!window.confirm("恢复公共版本会清除本机个人公共能力修改，是否继续？")) return;
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    await api.restorePublicAgentConfig(worktreeId("PUBLIC"), await publicFileLinuxServerId());
+    await refreshAll();
+    emitFilesMutated("PUBLIC", { paths: ["agents", "skills", "tools"] });
+    emit("personal-runtime-reload", {
+      scope: "PUBLIC",
+      worktreeId: worktreeId("PUBLIC"),
+      linuxServerId: props.routeLinuxServerId
+    });
+    notifySuccess("已恢复签名公共版本", "本机个人修改已清除");
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "恢复公共版本失败");
+    notifyError("恢复公共版本失败", errorMessage.value);
+  } finally {
+    busy.value = false;
+  }
 }
 
 // “更新公共配置”操作的正在进行状态标记，用以控制按钮禁用和加载动效
@@ -1303,6 +1379,15 @@ const activePublicRepository = computed(() => {
 });
 
 const publicSource = computed(() => {
+  if (localClientSelected.value) {
+    return {
+      mode: "local",
+      name: "本机个人副本",
+      serverName: "本地客户端",
+      serverId: "",
+      path: "本机个人公共能力"
+    };
+  }
   const repository = activePublicRepository.value;
   const serverId = publicWorktree.value?.linuxServerId
     ?? publicConfigLinuxServerId.value
@@ -1331,6 +1416,7 @@ const publicSource = computed(() => {
 const publicRootBadge = computed(() => {
   const source = publicSource.value;
   if (!source.serverName && !source.name) return "";
+  if (source.mode === "local") return "本机个人副本";
   return source.mode === "worktree"
     ? ["worktree", source.name, source.serverName || source.serverId].filter(Boolean).join(" · ")
     : ["直接", source.serverName || source.serverId].filter(Boolean).join(" · ");
@@ -1352,6 +1438,7 @@ function joinLinuxPath(root: string, child: string) {
  * 公共个人分支以当前 worktree 为准，应用配置以 workspace 状态中的实际 Agent 目录为准。
  */
 function agentAbsolutePath(scope: Scope, path: string): string | undefined {
+  if (scope === "PUBLIC" && localClientSelected.value) return undefined;
   const root = scope === "PUBLIC" ? publicSource.value.path : status.value.WORKSPACE?.agentDirectory;
   return root ? joinLinuxPath(root.replace(/\\/g, "/"), path.replace(/\\/g, "/").replace(/^\/+/, "")) : undefined;
 }
@@ -1418,6 +1505,7 @@ function automaticPublicServer(repositories: PublicAgentRepositoryStatus[]) {
 
 /** 管理员只访问本人 worktree；普通用户可直接访问任一已初始化服务器上的共享只读副本。 */
 function publicFileTargetAvailable() {
+  if (localPersonalMode.value) return true;
   if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
     return true;
   }
@@ -1432,6 +1520,9 @@ function publicFileTargetAvailable() {
  * 公共仓库或个人 worktree 不可用时给出稳定原因，避免展开后只剩空白区域被误认为页面崩溃。
  */
 const publicRootUnavailableMessage = computed(() => {
+  if (localClientSelected.value && !localPersonalMode.value) {
+    return "本地客户端当前离线或未声明个人公共能力编辑能力，请重连或升级客户端后重试。";
+  }
   if (refreshing.value || !status.value.PUBLIC || status.value.PUBLIC.enabled === false || errorMessage.value) {
     return "";
   }
@@ -1454,6 +1545,7 @@ const publicRootUnavailableMessage = computed(() => {
 });
 
 async function publicFileLinuxServerId() {
+  if (localPersonalMode.value) return props.routeLinuxServerId ?? "";
   if (publicWorktree.value?.worktreeId && publicWorktree.value.linuxServerId) {
     return publicWorktree.value.linuxServerId;
   }
@@ -1625,7 +1717,7 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
 /** 公共级和应用级根目录共用工作空间同款新建/上传面板，并额外开放 Agent/Skill 模板类型。 */
 function openCreateConfigModal(scope: Scope) {
   if (!canWriteScope(scope) || busy.value) return;
-  if (scope === "PUBLIC" && (!publicWorktree.value?.worktreeId || status.value.PUBLIC?.enabled === false)) return;
+  if (scope === "PUBLIC" && (!publicWriteTargetAvailable() || status.value.PUBLIC?.enabled === false)) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   createEntryScope.value = scope;
   rootCreateEntryDialog.value?.open("");
@@ -1648,7 +1740,7 @@ async function createAgentTemplate(
 ) {
   const scope = createEntryScope.value;
   if (!canWriteScope(scope) || busy.value) return;
-  if (scope === "PUBLIC" && !publicWorktree.value?.worktreeId) return;
+  if (scope === "PUBLIC" && !publicWriteTargetAvailable()) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   const displayName = rawName.trim();
   const englishDisplayName = rawEnglishName?.trim() || defaultEnglishDisplayName(displayName);
@@ -2076,12 +2168,12 @@ defineExpose({
             class="agent-icon-btn"
             title="新建或上传公共配置"
             aria-label="新建或上传公共配置"
-            :disabled="busy || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
+            :disabled="busy || status.PUBLIC?.enabled === false || !publicWriteTargetAvailable()"
             @click="openCreateConfigModal('PUBLIC')"
           >
             <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
-          <div v-if="canWrite" class="agent-more-menu-container">
+          <div v-if="canWrite && !localClientSelected" class="agent-more-menu-container">
             <button
               type="button"
               class="agent-icon-btn"
@@ -2122,7 +2214,7 @@ defineExpose({
             class="agent-icon-btn"
             title="Agent 配置更新（公共）：加载本人 worktree，未提交内容不会删除"
             aria-label="Agent 配置更新（公共）"
-            :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || !publicWorktree?.worktreeId"
+            :disabled="personalRuntimeReloadDisabled || status.PUBLIC?.enabled === false || (localClientSelected ? !localPersonalMode : !publicWorktree?.worktreeId)"
             @click="requestPersonalRuntimeReload('PUBLIC')"
           >
             <RefreshCw
@@ -2131,9 +2223,25 @@ defineExpose({
               :stroke-width="1.5"
             />
           </button>
+          <button
+            v-if="canWrite && localPersonalMode"
+            type="button"
+            class="agent-icon-btn"
+            title="恢复签名公共版本"
+            aria-label="恢复签名公共版本"
+            :disabled="busy || status.PUBLIC?.enabled === false"
+            @click="restorePublicPersonalConfig"
+          >
+            <RotateCcw class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
+        <div v-if="localClientSelected" class="agent-local-notice" role="status">
+          <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+          <span v-if="localPersonalMode">Tool 代码会以当前操作系统用户权限在本机执行。</span>
+          <span v-else>本地客户端当前离线或版本过旧，请重连或升级后再编辑本机个人公共能力。</span>
+        </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <div v-else-if="publicRootUnavailableMessage" class="agent-empty-state" role="status">
           <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -2179,6 +2287,7 @@ defineExpose({
         />
       </div>
 
+      <template v-if="!localClientSelected">
       <div class="agent-root-row" :class="{ active: isRootActive('WORKSPACE') }">
         <el-tooltip content="应用自定义 agents 及 skills，应用可以自己心中修改和发布" placement="top-start" :show-after="50">
           <button
@@ -2255,6 +2364,7 @@ defineExpose({
           @git-commit="(entry) => requestQuickGitCommit('WORKSPACE', entry)"
         />
       </div>
+      </template>
     </div>
 
     <FileEntryCreateDialog
@@ -2710,6 +2820,20 @@ defineExpose({
   padding: 5px 8px;
   font-size: 12px;
   color: #9a3412;
+}
+
+.agent-local-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 8px 6px 22px;
+  border: 1px solid #fed7aa;
+  border-radius: 5px;
+  background: #fff7ed;
+  padding: 6px 8px;
+  color: #9a3412;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .agent-empty-state {

@@ -605,6 +605,13 @@ AI 整轮回复反馈接口 `/api/internal/platform/opencode-runtime/runs/{runId
 
 ## Platform File WebSocket
 
+`LOCAL_CLIENT` 的公共 Agent 配置复用同一 route/ticket/RPC 通道，但不访问服务器公共 Git：route 请求使用逻辑
+`worktreeId=LOCAL_CLIENT_PERSONAL:{clientInstanceId}:{connectionGeneration}`（或显式的本地实例与代数字段），目标 Java
+由 `BackendJavaRouteResolver` 解析。ticket 固定 `runtimeKind=LOCAL_CLIENT`、`scope=PUBLIC`、用户/实例/generation，
+每条 RPC 重新校验在线代次、用户归属和 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`。客户端只允许
+`agents/**`、`skills/**`、`tools/**`，签名基线和运行支撑文件只读；`agent-config.restore` 不带 `path` 表示恢复整份
+签名公共版本。旧客户端或离线客户端失败关闭，浏览器不提交绝对根路径，也不新增 HTTP 文件代理。
+
 平台文件 WebSocket 不产生 RunEvent/SSE，属于前端工作区文件和 Agent 配置文件操作的受控双向 RPC 通道。工作区文件先调用 `POST /api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` 定位目标后端；Agent 配置文件先调用 `POST /api/internal/platform/workspace-management/agent-config/file-ws-route` 定位目标后端。旧 `/api/workspaces/{workspaceId}/file-ws-route` 和 HTTP 文件接口已作废，返回 `410 API_GONE`。公共 Agent 直接目录模式必须在 route 请求中提供已初始化服务器 `linuxServerId`，公共 worktree 模式由 `worktreeId` 落库服务器决定目标。随后都在目标后端调用 `POST /api/internal/platform/workspace-management/file-ws/tickets` 创建一次性 ticket，最后连接：
 
 ```text
@@ -682,20 +689,21 @@ route 响应已经包含目标 Java `baseUrl`，客户端必须在该目标地�
 | `workspace.rename` | `workspaceId`, `path`, `name` | `null`；仅支持同一父目录内重命名普通文件或目录，目标已存在返回 `CONFLICT` |
 | `workspace.status` | `workspaceId`, `path` | `FileStatusResponse` |
 | `workspace.delete` | `workspaceId`, `path` | `null`；删除普通文件或递归删除目录树，不跟随符号链接；工作区根目录和任意层级 `.git` 元数据禁止删除 |
-| `agent-config.list` | `scope`, `workspaceId?`, `worktreeId?`, `path?` | `FileTreeEntryResponse[]`；用于公共级/工作空间级 Agent 配置文件；Agent Markdown 和 Skill 目录项可选返回 `displayName/displayNameEn` 供中文主名称、英文辅助名称展示，稳定文件身份仍是英文 `path/name` |
+| `agent-config.list` | `scope`, `workspaceId?`, `worktreeId?`, `path?` | `FileTreeEntryResponse[]`；用于公共级/工作空间级 Agent 配置文件；LOCAL_CLIENT 公共 scope 只读个人副本，需 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`；Agent Markdown 和 Skill 目录项可选返回 `displayName/displayNameEn` 供中文主名称、英文辅助名称展示，稳定文件身份仍是英文 `path/name` |
 | `agent-config.read` | `scope`, `workspaceId?`, `worktreeId?`, `path` | `FileContentResponse` |
 | `agent-config.read.chunk` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `offset`, `expectedSize?`, `expectedLastModifiedMillis?` | `FilePreviewChunkResponse`；公共/应用 Agent 大文件渐进只读预览，权限和 ticket 绑定逐段复核 |
-| `agent-config.write` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `content` | `null`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承） |
+| `agent-config.write` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `content` | `null`；服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 需 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承） |
 | `agent-config.automation-reference.reconcile` | `scope=WORKSPACE`, `workspaceId` | `{ changed, warnings }`；仅接受当前工作区且禁止独立 Agent worktree，应用普通成员可调用；服务端自行解析应用、版本库、当前 generation 和本机副本，客户端不提交 JSONC、路径或代次 |
 | `agent-config.upload.begin` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `size` | `{ uploadId, chunkBytes, totalBytes }`；开始不限制总大小的分片上传；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）并限制在 Agent 配置 Diff 白名单 |
 | `agent-config.upload.chunk` | `scope`, `workspaceId?`, `worktreeId?`, `uploadId`, `index`, `contentBase64` | `{ uploadedBytes, totalBytes }`；同一连接内连续上传有界分片 |
 | `agent-config.upload.complete` | `scope`, `workspaceId?`, `worktreeId?`, `uploadId` | `{ size }`；校验大小后安全发布且不覆盖同名内容 |
 | `agent-config.upload.abort` | `scope`, `workspaceId?`, `worktreeId?`, `uploadId` | `null`；中止并删除临时文件 |
 | `agent-config.upload` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `contentBase64` | `null`；旧客户端兼容操作，仍受预览大小上限约束；权限和白名单与分片上传相同 |
-| `agent-config.rename` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `name` | `null`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；仅同目录改名，底层复用工作空间文件服务的路径与重名校验 |
+| `agent-config.rename` | `scope`, `workspaceId?`, `worktreeId?`, `path`, `name` | `null`；服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 需 capability，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；仅同目录改名，底层复用工作空间文件服务的路径与重名校验 |
 | `agent-config.copy` | `scope`, `workspaceId?`, `worktreeId?`, `sourcePath`, `targetPath` | `null`；复制普通文件且不覆盖同名目标，应用级同时校验源和目标白名单 |
 | `agent-config.move` | `scope`, `workspaceId?`, `worktreeId?`, `sourcePath`, `targetPath` | `null`；移动文件或目录且不覆盖目标，拒绝目录移入自身后代，应用级同时校验源和目标白名单 |
-| `agent-config.delete` | `scope`, `workspaceId?`, `worktreeId?`, `path` | `null`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；文件直接删除，目录递归删除且不跟随符号链接，复用根目录、`.git` 和越界路径保护 |
+| `agent-config.delete` | `scope`, `workspaceId?`, `worktreeId?`, `path` | `null`；服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 需 capability，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；文件直接删除，目录递归删除且不跟随符号链接，复用根目录、`.git` 和越界路径保护 |
+| `agent-config.restore` | `scope=PUBLIC`, `worktreeId`, `path?` | `null`；LOCAL_CLIENT 个人 scope 恢复单个文件或在省略 `path` 时清除个人副本；每次重新校验用户、实例 generation 和 capability |
 | `hub.asset.read` | `revisionId`, `path` | `FileContentResponse`；仅 `mode=agent-skill-hub, scope=HUB` 的独立只读 ticket，按不可变修订读取 UTF-8 正文 |
 | `hub.reference.create` | `assetId`, `aliasTechnicalId?`, `workspaceId` | `ReferenceResponse`；仅当前个人工作区的 `agent-config/WORKSPACE` ticket 且 `APP_ADMIN`，递归写入已发布精确依赖 |
 | `hub.reference.remove` | `assetId`, `workspaceId` | `ReferenceResponse`；从当前个人 worktree 移除唯一引用并进入 `PENDING_REMOVE`，后续 push 确认远端路径消失后正式解除 |

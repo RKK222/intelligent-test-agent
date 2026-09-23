@@ -18242,3 +18242,30 @@
 ## Result
 
 - 只读快照的模型输入与用户可见对话展示解耦，成员工作区正文不再直接出现在用户气泡中；共享环境发布和真实成员问答仍待最新 Jenkins 构建完成后验证。
+
+## 2026-09-23 - 客户端公共能力个人编辑与全员模型切换
+
+### Why
+
+- 用户要求在 `LOCAL_CLIENT` 模式开放已登录普通用户的公共 Agent/Skill/Tool 个人副本编辑，且所有非分享模式工作台用户三击 Ctrl 都能显示或隐藏模型选择入口。
+- 服务器公共 Git、签名能力基线和运行支撑文件必须保持隔离；本地文件操作仍需走既有 route/ticket/WebSocket RPC，并用客户端实例和连接代次做 fencing。
+
+### What
+
+- 新增 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 能力声明；本地客户端首次写入时把签名基线复制到独立个人目录，严格限制 `agents/**`、`skills/**`、`tools/**`，支持完整文件 CRUD、上传、恢复单文件或整份签名版本，拒绝路径穿越、符号链接、特殊文件和运行支撑文件。
+- 扩展 Agent 配置 route/ticket/RPC：逻辑引用绑定 `clientInstanceId + connectionGeneration`，每次 RPC 重新校验用户归属、在线代次、目标 Java 和 capability；前端本地模式隐藏服务器 worktree/Git 操作，并提示 Tool 按当前操作系统用户权限执行。
+- 模型入口改为“已登录且非分享模式 + 三击 Ctrl 解锁”，覆盖普通工作台用户；本地 Agent/Skill 变更继续 dispose 热加载，Tool 变更通过受管客户端重启。
+- 同步后端、前端、协议、API、事件流、安全、客户端部署说明与回归测试；未修改 OpenCode 源码、环境文件或数据库结构。
+
+### How
+
+- 后端：`mvn -pl test-agent-local-client -am -Dtest=LocalClientBuildInfoTest,LocalClientRegistrationFramesTest,LocalClientVersionCheckTest,LocalClientPublicCapabilityStoreTest,LocalClientFileRpcHandlerTest -Dsurefire.failIfNoSpecifiedTests=false test`，20 项通过。
+- 路由与 ticket：`mvn -pl test-agent-api,test-agent-opencode-runtime -am -Dtest=AgentConfigControllerTest,WorkspaceFileSocketTicketServiceTest,WorkspaceFileWebSocketHandlerTest -Dsurefire.failIfNoSpecifiedTests=false test`，80 项通过。
+- 前端：`corepack pnpm typecheck`（frontend）通过；定向 Vitest 4 个文件 333 项通过、1 项跳过；普通用户三击 Ctrl Playwright 用例通过；`git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期条目，确认没有覆盖其它开发者未提交成果。
+
+### Result
+
+- `release` 分支现在支持客户端个人公共能力查看/编辑和普通用户三击 Ctrl 模型切换；分享模式仍不可切换模型，服务器受管模式公共 Git 权限保持不变。
+- 公共能力“确认更新后清空个人修改、离线确认后重连继续、激活失败恢复个人副本”的更新协议尚未在本轮改造；当前更新仍保留个人副本，不会静默删除，需后续补齐显式确认标记和 attempt 持久化语义后再宣称完整覆盖。
+- 未运行真实本地客户端四类能力端到端冒烟，也未连接共享环境；现场验收仍需覆盖重启保留、热加载、Tool 重启、失败回滚和公共包更新确认。

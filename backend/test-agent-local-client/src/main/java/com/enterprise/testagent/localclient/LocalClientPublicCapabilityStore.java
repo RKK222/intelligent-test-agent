@@ -30,6 +30,8 @@ final class LocalClientPublicCapabilityStore {
     private final Path incoming;
     private final Path quarantine;
     private final Path currentLink;
+    private final Path personalDirectory;
+    private final Path personalMarker;
     private final Path stateFile;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final LocalClientTarGzExtractor extractor = new LocalClientTarGzExtractor();
@@ -41,6 +43,8 @@ final class LocalClientPublicCapabilityStore {
         this.incoming = root.resolve("incoming");
         this.quarantine = root.resolve("quarantine");
         this.currentLink = root.resolve("current");
+        this.personalDirectory = root.resolve("personal");
+        this.personalMarker = root.resolve("personal-edit.json");
         this.stateFile = root.resolve("state.json");
         this.state = readState();
     }
@@ -100,7 +104,70 @@ final class LocalClientPublicCapabilityStore {
         if (!Files.isDirectory(candidate) || !Files.isSymbolicLink(currentLink)) {
             throw new IllegalStateException("公共能力 current 链接不可用");
         }
-        return candidate;
+        return hasPersonalChanges() ? personalDirectory : candidate;
+    }
+
+    synchronized Path activeConfigDirectory() {
+        if (state.activeDigest() == null || !Files.isSymbolicLink(currentLink)) {
+            throw new IllegalStateException("公共能力基线尚未激活");
+        }
+        return hasPersonalChanges() ? personalDirectory : currentLink.toAbsolutePath().normalize();
+    }
+
+    /**
+     * 为当前用户创建可编辑副本。签名 revision 永远不直接写入，个人目录只在首次修改时从当前基线复制。
+     */
+    synchronized Path preparePersonalConfig() throws IOException {
+        if (state.activeDigest() == null) {
+            throw new IllegalStateException("公共能力基线尚未激活");
+        }
+        Path baseline = currentLink.toRealPath();
+        if (!Files.isDirectory(baseline, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(baseline)) {
+            throw new IllegalStateException("公共能力基线目录不可用");
+        }
+        if (!hasPersonalChanges()) {
+            Path staging = root.resolve("personal.next");
+            deleteTree(staging);
+            copyTree(baseline, staging);
+            atomicMove(staging, personalDirectory);
+            Files.writeString(personalMarker, state.activeDigest(), StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+        }
+        return personalDirectory;
+    }
+
+    synchronized boolean hasPersonalChanges() {
+        return Files.isRegularFile(personalMarker, LinkOption.NOFOLLOW_LINKS)
+                && Files.isDirectory(personalDirectory, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isSymbolicLink(personalDirectory);
+    }
+
+    /** 清除个人副本，恢复使用当前签名公共基线。 */
+    synchronized void clearPersonalConfig() throws IOException {
+        deleteTree(personalDirectory);
+        Files.deleteIfExists(personalMarker);
+    }
+
+    /** 个人编辑器恢复单个文件时，从当前签名基线复制；不存在的基线文件按删除处理。 */
+    synchronized void restorePersonalPath(String relativePath) throws IOException {
+        String normalized = requirePersonalPath(relativePath);
+        Path personalRoot = preparePersonalConfig();
+        Path baseline = currentLink.toRealPath().resolve(normalized).normalize();
+        Path target = personalRoot.resolve(normalized).normalize();
+        if (!target.startsWith(personalRoot)) throw new SecurityException("个人能力路径越界");
+        deleteTree(target);
+        if (Files.exists(baseline, LinkOption.NOFOLLOW_LINKS)) {
+            copyTree(baseline, target);
+        }
+    }
+
+    static String requirePersonalPath(String relativePath) {
+        String value = relativePath == null ? "" : relativePath.replace('\\', '/');
+        if (value.isBlank() || value.startsWith("/") || value.contains("..")
+                || !value.matches("(?:agents|skills|tools)(?:/[^/\\\\]+)*")) {
+            throw new SecurityException("个人公共能力路径无效");
+        }
+        return value;
     }
 
     synchronized Candidate installArchive(Path archive, String expectedCommit, String expectedDigest) throws Exception {
@@ -371,6 +438,24 @@ final class LocalClientPublicCapabilityStore {
             });
         } catch (IOException ignored) {
         }
+    }
+
+    private static void copyTree(Path source, Path target) throws IOException {
+        if (Files.isSymbolicLink(source)) throw new SecurityException("公共能力目录不允许符号链接");
+        if (Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
+            Files.createDirectories(target);
+            try (var children = Files.list(source)) {
+                for (Path child : children.toList()) {
+                    copyTree(child, target.resolve(child.getFileName().toString()));
+                }
+            }
+            return;
+        }
+        if (!Files.isRegularFile(source, LinkOption.NOFOLLOW_LINKS)) {
+            throw new SecurityException("公共能力目录仅允许普通文件");
+        }
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING, LinkOption.NOFOLLOW_LINKS);
     }
 
     private static String contentDigest(Map<String, String> files) {

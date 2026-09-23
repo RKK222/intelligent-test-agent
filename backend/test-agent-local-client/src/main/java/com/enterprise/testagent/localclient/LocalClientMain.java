@@ -124,7 +124,7 @@ public final class LocalClientMain {
                 }
                 recoverPublicCapabilityActivation(publicCapabilities, supervisor);
                 LocalClientFileRpcHandler fileRpcHandler = new LocalClientFileRpcHandler(
-                        workspaceRegistry, objectMapper);
+                        workspaceRegistry, objectMapper, new LocalGitAccessChecker(), publicCapabilities);
                 LocalClientConnection connection = new LocalClientConnection(
                         configuration,
                         credentials,

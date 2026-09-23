@@ -2203,6 +2203,13 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         { path },
         { worktreeId, linuxServerId }
       ),
+    restorePublicAgentConfig: (worktreeId?: string | null, linuxServerId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "PUBLIC",
+        "agent-config.restore",
+        {},
+        { worktreeId, linuxServerId }
+      ),
     createPublicAgentWorktree: (payload: AgentConfigWorktreePayload) =>
       request<AgentConfigWorktree>(`${agentConfigBase}/public/worktrees`, {
         method: "POST",

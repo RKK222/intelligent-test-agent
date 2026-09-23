@@ -646,7 +646,9 @@ public class LocalWorkspaceApplicationService {
         values.put("nightExecution", true);
         values.put("terminal", false);
         values.put("gitPublish", false);
+        // 本地只开放用户自己的签名公共能力个人副本，不代表开放服务端 Git 公共配置。
         values.put("agentConfig", false);
+        values.put("personalAgentConfig", true);
         values.put("protectedAgentExecution", true);
         values.put("attachments", true);
         values.put("collaboration", false);

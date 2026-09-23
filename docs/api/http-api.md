@@ -1317,11 +1317,11 @@ WebSocket 客户端按不超过 256 KiB 的 binary frame 顺序发送归档，�
 
 Agent 配置文件上传使用同一文件 WebSocket 上的 `agent-config.upload.begin/chunk/complete` 分片 RPC，主动取消时调用 `agent-config.upload.abort`。`begin` 请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`path` 和本机文件 `size`，返回服务端生成的 `uploadId` 与 `chunkBytes`；后续分片和完成请求必须继续携带相同 scope/workspace/worktree 绑定。公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）。上传不设置应用层总大小上限，复用工作空间文件服务的重名、路径、分片顺序和声明大小校验，不覆盖同名条目；安全目标路径缺失的父目录会在 `begin` 阶段递归创建，以支持浏览器目录上传，浏览器 `FileList` 无法表达的纯空目录不会单独创建；应用级路径以当前个人 worktree 的 `.opencode/` 为固定根，允许任意安全相对子路径，不枚举 OpenCode 子目录。旧 `agent-config.upload` 单帧 Base64 操作只为旧客户端保留，仍受预览大小上限约束。
 
-Agent 配置文件改名使用 `agent-config.rename`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`path` 和新文件名 `name`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承），普通成员返回 `FORBIDDEN`。该操作只允许同目录改名并复用工作空间文件服务的名称、重名和路径安全校验。
+Agent 配置文件改名使用 `agent-config.rename`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`path` 和新文件名 `name`；服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 由 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 授权，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承），其它普通成员返回 `FORBIDDEN`。该操作只允许同目录改名并复用工作空间文件服务的名称、重名和路径安全校验。
 
-Agent 配置普通文件复制和文件/目录移动分别使用 `agent-config.copy` 与 `agent-config.move`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`sourcePath` 和 `targetPath`。公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；应用级操作同时校验源、目标均位于当前个人 worktree 的 `.opencode/**`。复制不覆盖同名目标且仅支持普通文件；移动不覆盖目标，并拒绝把目录移动到自身后代。多选由前端在同一目标连接上逐项调用，协议保持单项原子结果，部分失败不会回滚此前成功项。
+Agent 配置普通文件复制和文件/目录移动分别使用 `agent-config.copy` 与 `agent-config.move`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId`、`sourcePath` 和 `targetPath`。服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 由 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 授权，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）；应用级操作同时校验源、目标均位于当前个人 worktree 的 `.opencode/**`。复制不覆盖同名目标且仅支持普通文件；移动不覆盖目标，并拒绝把目录移动到自身后代。多选由前端在同一目标连接上逐项调用，协议保持单项原子结果，部分失败不会回滚此前成功项。
 
-Agent 配置文件或目录删除使用 `agent-config.delete`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId` 和 `path`；公共 scope 仅 `SUPER_ADMIN`，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）。目录删除递归执行且不跟随符号链接，并复用工作空间文件服务对根目录、`.git` 元数据和越界路径的保护；成功后前端立即刷新对应 Agent 树和 Git Changes。
+Agent 配置文件或目录删除使用 `agent-config.delete`，请求携带 `scope`、可选 `workspaceId`、可选 `worktreeId` 和 `path`；服务器公共 scope 仅 `SUPER_ADMIN`，LOCAL_CLIENT 个人公共 scope 由 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 授权，工作空间 scope 仅 `APP_ADMIN`（`SUPER_ADMIN` 继承）。目录删除递归执行且不跟随符号链接，并复用工作空间文件服务对根目录、`.git` 元数据和越界路径的保护；成功后前端立即刷新对应 Agent 树和 Git Changes。
 
 请求体：
 
@@ -4426,6 +4426,19 @@ Workspace、Session、Run、夜间任务、模型目录和文件 route 响应追
 客户端灰度。该名单只控制网页中的下载、实例状态、本地工作区和个人客户端设置可见性，不是客户端 WSS
 鉴权、制品下载鉴权或 client key 生命周期的一部分；关闭灰度不会断开客户端。即使前端被篡改，后端连接
 认证仍必须校验有效 client key。
+
+## 本地客户端公共能力个人副本
+
+客户端注册 capability `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 后，`LOCAL_CLIENT` 工作区的已登录用户可以通过既有
+Agent 文件 WebSocket 查看和编辑自己客户端上的公共能力个人副本。浏览器提交的 route 只能使用
+`LOCAL_CLIENT_PERSONAL:{clientInstanceId}:{connectionGeneration}` 逻辑引用（或等价的实例/代数字段），平台后端通过
+公共 Java 路由解析器定位连接持有节点；ticket 绑定用户、客户端实例、connection generation、`scope=PUBLIC` 和该
+capability，每条 RPC 重新校验这些事实。个人目录首次写入时从签名基线复制，签名 revision 只读；允许的相对路径仅为
+`agents/**`、`skills/**`、`tools/**`，manifest、根级依赖、`node_modules`、符号链接、特殊文件和路径穿越均拒绝。
+
+`agent-config.restore` 可恢复单个文件；省略 `path` 时清除个人副本并回到签名公共版本。Agent/Skill 保存复用 dispose
+热加载，Tool 保存由受管客户端重启；运行中保存由工作台记为待生效并在空闲时处理。旧客户端或离线客户端不降级到服务器
+公共 Git，统一返回升级/重连提示。公共 Git、worktree、提交、推送和发布接口不属于该模式。
 
 ## 本地工作区受保护 Agent/Skill API
 

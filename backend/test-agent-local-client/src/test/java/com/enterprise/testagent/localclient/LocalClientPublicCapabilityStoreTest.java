@@ -60,6 +60,34 @@ class LocalClientPublicCapabilityStoreTest {
     }
 
     @Test
+    void createsAnIsolatedPersonalCopyAndSupportsRestoreAndClear() throws Exception {
+        LocalClientPublicCapabilityStore store = new LocalClientPublicCapabilityStore(temporaryDirectory);
+        PackageFixture fixture = packageFixture("agents/public.md", "signed baseline", COMMIT_ONE, false);
+        LocalClientPublicCapabilityStore.Candidate candidate = store.installArchive(
+                write("personal-copy.tar.gz", fixture.archive()), COMMIT_ONE, fixture.digest());
+        store.activate(candidate);
+        store.completeActivation();
+
+        Path personal = store.preparePersonalConfig();
+        Files.writeString(personal.resolve("agents/public.md"), "personal draft");
+
+        assertThat(store.hasPersonalChanges()).isTrue();
+        assertThat(store.activeConfigDirectory()).isEqualTo(personal);
+        assertThat(store.activeConfigDirectory().resolve("agents/public.md")).hasContent("personal draft");
+        assertThat(temporaryDirectory.resolve("public-capabilities/current/agents/public.md"))
+                .hasContent("signed baseline");
+
+        store.restorePersonalPath("agents/public.md");
+        assertThat(store.activeConfigDirectory().resolve("agents/public.md")).hasContent("signed baseline");
+        assertThatThrownBy(() -> store.restorePersonalPath("../outside.md"))
+                .isInstanceOf(SecurityException.class);
+
+        store.clearPersonalConfig();
+        assertThat(store.hasPersonalChanges()).isFalse();
+        assertThat(store.activeConfigDirectory().resolve("agents/public.md")).hasContent("signed baseline");
+    }
+
+    @Test
     void installsActivatesAndRollsBackImmutableRevisions() throws Exception {
         LocalClientPublicCapabilityStore store = new LocalClientPublicCapabilityStore(temporaryDirectory);
         PackageFixture first = packageFixture("agents/public.md", "first", COMMIT_ONE, false);

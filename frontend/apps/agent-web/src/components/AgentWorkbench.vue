@@ -480,10 +480,11 @@ type RawOutputEntry = {
   occurredAt: string;
 };
 
-// 模型切换是超级管理员的隐藏运维入口，默认不展示，避免普通操作误触。
+// 模型切换是所有正常工作台用户都可使用的隐藏入口，分享模式仍保持只读。
 const modelSelectionUnlocked = ref(false);
 const modelSelectionShortcut = createTripleKeyShortcut("Control");
 const isSuperAdmin = computed(() => !shareMode.value && hasSuperAdminCapability(authStore.currentUser?.roles));
+const modelSelectionContext = computed(() => !shareMode.value && Boolean(authStore.currentUser));
 const canEnterTeamManagement = computed(() => !shareMode.value && hasSystemAdminCapability(authStore.currentUser?.roles));
 const workbenchPerspective = ref<WorkbenchPerspective>("WORK");
 const teamReturnRoute = ref<RouteLocationRaw | null>(null);
@@ -572,9 +573,9 @@ function onHeaderSelectVersion(payload: { template: AppWorkspaceTemplate; versio
 watch(canEnterTeamManagement, (allowed) => {
   if (!allowed) exitTeamManagement();
 });
-const canSelectModel = computed(() => isSuperAdmin.value && modelSelectionUnlocked.value);
-watch(isSuperAdmin, () => {
-  // 退出超级管理员上下文后立即收回入口；再次进入仍需重新完成三次 Ctrl。
+const canSelectModel = computed(() => modelSelectionContext.value && modelSelectionUnlocked.value);
+watch(modelSelectionContext, () => {
+  // 离开正常工作台或退出登录后立即收回入口；再次进入仍需重新完成三次 Ctrl。
   modelSelectionUnlocked.value = false;
   modelSelectionShortcut.reset();
 }, { immediate: true });
@@ -1413,9 +1414,9 @@ function onSupportAccessShortcutKeydown(event: KeyboardEvent) {
   }
 }
 
-/** 捕获阶段识别超级管理员的模型切换手势；每完成三次 Ctrl 就切换一次入口显隐。 */
+/** 捕获阶段识别正常工作台用户的模型切换手势；每完成三次 Ctrl 就切换一次入口显隐。 */
 function onModelSelectionShortcutKeydown(event: KeyboardEvent) {
-  if (!isSuperAdmin.value) {
+  if (!modelSelectionContext.value) {
     modelSelectionShortcut.reset();
     return;
   }
@@ -1964,7 +1965,12 @@ function selectedCapabilityEnabled(capability: string): boolean {
 const selectedAttachmentsEnabled = computed(() => selectedCapabilityEnabled("attachments"));
 const selectedCollaborationEnabled = computed(() => selectedCapabilityEnabled("collaboration"));
 const selectedBrowserTerminalEnabled = computed(() => selectedCapabilityEnabled("terminal"));
-const selectedAgentConfigEnabled = computed(() => selectedCapabilityEnabled("agentConfig"));
+const selectedPersonalAgentConfigEnabled = computed(() =>
+  selectedWorkspaceIsLocal.value && selectedRuntimeCapabilities.value.personalAgentConfig === true
+);
+const selectedAgentConfigEnabled = computed(() =>
+  selectedCapabilityEnabled("agentConfig") || selectedPersonalAgentConfigEnabled.value
+);
 const selectedGitPublishEnabled = computed(() => selectedCapabilityEnabled("gitPublish"));
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
 const sessionRuntimeStateQueryKey = ["sessions", "runtime-state"] as const;
@@ -4633,7 +4639,7 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   }
   pendingRuntimeRestartRequired = pendingRuntimeRestartRequired
     || requiresManagedRestartForAgentConfigFile(agent.scope, agent.path);
-  if (agent.scope === "PUBLIC") {
+  if (agent.scope === "PUBLIC" && !isLocalPersonalAgentRoute(agent.worktreeId)) {
     if (!agent.worktreeId) {
       return new Error("公共 Agent 个人 worktree 路由缺失，无法只热加载当前用户");
     }
@@ -4652,6 +4658,10 @@ async function refreshRuntimeCatalogAfterAgentConfigSave(
   }
   await reloadReferenceRuntimeIfIdle();
   return lastRuntimeReloadError;
+}
+
+function isLocalPersonalAgentRoute(worktreeId?: string | null): boolean {
+  return Boolean(worktreeId && worktreeId.startsWith("LOCAL_CLIENT_PERSONAL:"));
 }
 
 /** 手动公共重载已完成同一次保存待办时，立即消费该代次，避免 finally 再触发第二次 dispose。 */
@@ -4703,6 +4713,32 @@ async function handlePersonalRuntimeReload(payload: {
       title: "当前任务运行中",
       description: "当前用户仍有运行中的 Session，结束后再重载个人运行态。"
     };
+    return;
+  }
+  if (payload.scope === "PUBLIC" && isLocalPersonalAgentRoute(payload.worktreeId)) {
+    runtimeReloadLock.value = "PUBLIC";
+    try {
+      if (!opencodeProcessReady.value) {
+        feedback.value = {
+          kind: "info",
+          title: "本机个人配置将在启动时加载",
+          description: "当前本地 OpenCode 未就绪；保存内容已保留。"
+        };
+        return;
+      }
+      // 本地 Tool 代码可能被 ESM 缓存，手动重载统一走受管重启以保证目录真实生效。
+      await api.restartMyOpencodeProcess(false);
+      await Promise.all([agentsQuery.refetch(), commandsQuery.refetch()]);
+      feedback.value = {
+        kind: "success",
+        title: "本机个人公共能力已更新",
+        description: "已重新加载当前用户的本地 OpenCode，其他用户不受影响。"
+      };
+    } catch (error) {
+      feedback.value = errorFeedback("本机个人公共能力重载失败", error);
+    } finally {
+      if (runtimeReloadLock.value === "PUBLIC") runtimeReloadLock.value = null;
+    }
     return;
   }
   const publicRuntimeRoute = payload.scope === "PUBLIC"
@@ -13014,7 +13050,7 @@ async function handleLogout() {
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :can-play-pet-games="isSuperAdmin"
-    :can-manage-public-agent-config="selectedWorkspaceKind === 'MANAGED' && selectedAgentConfigEnabled && isSuperAdmin"
+    :can-manage-public-agent-config="(selectedWorkspaceKind === 'MANAGED' && selectedAgentConfigEnabled && isSuperAdmin) || (selectedWorkspaceKind === 'LOCAL_CLIENT' && selectedPersonalAgentConfigEnabled)"
     :can-manage-workspace-agent-config="selectedAgentConfigEnabled && isAppAdmin && appSourceCapabilities.canPublishApplicationAgentConfig"
     :personal-runtime-reloading="personalRuntimeReloading"
     :runtime-busy="runtimeReloadBusy"
@@ -13222,9 +13258,12 @@ async function handleLogout() {
           :workspace-git-enabled="selectedGitPublishEnabled"
           :agent-config-enabled="selectedAgentConfigEnabled"
           :can-manage-agent-config="selectedAgentConfigEnabled && appSourceCapabilities.canPublishApplicationAgentConfig && isAppAdmin"
-          :can-manage-public-config="selectedAgentConfigEnabled && selectedWorkspaceKind === 'MANAGED' && isSuperAdmin"
+          :can-manage-public-config="(selectedAgentConfigEnabled && selectedWorkspaceKind === 'MANAGED' && isSuperAdmin) || (selectedWorkspaceKind === 'LOCAL_CLIENT' && selectedPersonalAgentConfigEnabled)"
+          :local-client-instance-id="selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedWorkspace?.localClientInstanceId ?? undefined : undefined"
+          :local-client-connection-generation="selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedLocalEndpoint?.connectionGeneration : undefined"
+          :local-client-online="selectedWorkspaceKind === 'LOCAL_CLIENT' ? selectedLocalEndpoint?.online : undefined"
           :api-base-url="apiBaseUrl"
-          :route-linux-server-id="routeLinuxServerId"
+          :route-linux-server-id="selectedWorkspaceKind === 'LOCAL_CLIENT' ? (selectedLocalEndpoint?.linuxServerId ?? routeLinuxServerId) : routeLinuxServerId"
           :route-linux-server-resolved="routeLinuxServerResolved"
           :public-worktree-mount-request="publicWorktreeMountRequest"
           :workspace-id="selectedWorkspace?.workspaceId"

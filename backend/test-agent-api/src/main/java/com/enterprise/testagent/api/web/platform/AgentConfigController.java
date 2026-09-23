@@ -323,11 +323,18 @@ public class AgentConfigController {
     public ApiResponse<AgentConfigDtos.FileRouteResponse> fileWebSocketRoute(
             @RequestBody(required = false) AgentConfigDtos.FileRouteRequest request,
             ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
+        var principal = AuthWebSupport.getAuthPrincipal(exchange);
         if (fileRoutingService == null) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "Agent 配置文件 WebSocket 路由不可用");
         }
-        return ApiResponse.ok(fileRoutingService.route(request), RuntimeApiSupport.traceId(exchange));
+        // 兼容旧的公共/工作空间路由 mock 与调用方；只有本地个人 scope 需要把登录用户带入 owner fencing。
+        boolean localPersonal = request != null
+                && ((request.worktreeId() != null && request.worktreeId().startsWith("LOCAL_CLIENT_PERSONAL:"))
+                || (request.localClientInstanceId() != null && !request.localClientInstanceId().isBlank()));
+        AgentConfigDtos.FileRouteResponse route = localPersonal
+                ? fileRoutingService.route(request, principal.userId())
+                : fileRoutingService.route(request);
+        return ApiResponse.ok(route, RuntimeApiSupport.traceId(exchange));
     }
 
     @PostMapping("/public/worktrees")

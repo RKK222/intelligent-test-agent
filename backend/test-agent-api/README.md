@@ -33,6 +33,8 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
   `REGISTERED`，不在 handler 中拼接供应商或模型。
 
 - 当前用户 OpenCode 受管启动/重启会在公共启动程序中自动选择同服有效公共个人配置；初始化首次创建 `public-{userId}` worktree 后也会自动加载。API 只返回既有 `publicWorktreePreparation` 结果，不新增轮询接口；准备或加载异常不回滚已健康进程。
+- `LOCAL_CLIENT` 的公共 Agent 文件 route/ticket 在请求中使用 `LOCAL_CLIENT_PERSONAL:{clientInstanceId}:{connectionGeneration}` 逻辑引用，后端通过 `BackendJavaRouteResolver` 定位持有连接的 Java；客户端 capability 必须包含 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`。每条 `agent-config.*` RPC 重新核对登录用户、在线代次和 capability，浏览器永远不能提交绝对根路径。
+- 本地个人公共能力不进入公共 Git、worktree 或发布接口；公共 Git route、提交、推送、冲突和 rollout 操作在客户端模式隐藏且后端仍拒绝。工具代码以本机当前操作系统用户权限运行，日志只记录稳定错误码和 traceId。
 - 暴露 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - 工作空间列表和应用工作空间模板响应增量返回 `gitAccessStatus/gitAccessReason/gitAccessMessage/gitAccessCheckedAt`。API 只投影持久化巡检事实；没有结果时字段为 `null`，只有明确 `INACCESSIBLE` 由前端置灰，`UNKNOWN` 仍保持可选。为兼容旧客户端历史数据，本地工作区的 `INACCESSIBLE + NOT_GIT_REPOSITORY` 在响应时规范化为 `UNKNOWN`，普通目录不因缺少 Git 元数据而不可用。响应不包含仓库 URL、本地路径、Git 命令或 stderr。
 - 旧 runtime/workspace `/api/...` 兼容 URL 由 `LegacyApiGoneWebFilter` 在进入 Controller 前统一返回 `410 API_GONE`；登录认证 `/api/auth/login|login-by-unified-auth|logout|me|refresh` 保留为稳定入口。只有密码登录和 AAM 兑换是精确匿名路径，静态 API Token 兼容边界不扩大；AAM 兑换在 `boundedElastic` 执行阻塞式外部验真和用户仓储编排，只返回平台 Token，不暴露上游地址、响应或错误正文。

@@ -51,7 +51,16 @@ final class AgentConfigDtos {
     record FileContentRequest(String path, String content, String worktreeId) {
     }
 
-    record FileRouteRequest(String scope, String workspaceId, String worktreeId, String linuxServerId) {
+    record FileRouteRequest(
+            String scope,
+            String workspaceId,
+            String worktreeId,
+            String linuxServerId,
+            String localClientInstanceId,
+            Long connectionGeneration) {
+        FileRouteRequest(String scope, String workspaceId, String worktreeId, String linuxServerId) {
+            this(scope, workspaceId, worktreeId, linuxServerId, null, null);
+        }
     }
 
     record FileRouteResponse(

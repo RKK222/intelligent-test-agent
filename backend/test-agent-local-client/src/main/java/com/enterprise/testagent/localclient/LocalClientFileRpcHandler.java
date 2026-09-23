@@ -18,27 +18,90 @@ final class LocalClientFileRpcHandler {
     private final LocalWorkspaceRegistry workspaceRegistry;
     private final WorkspaceFileService fileService;
     private final LocalGitAccessChecker gitAccessChecker;
+    private final LocalClientPublicCapabilityStore publicCapabilityStore;
     private final ObjectMapper objectMapper;
     private final Map<String, ActiveUpload> uploads = new ConcurrentHashMap<>();
     private final Semaphore uploadSlots = new Semaphore(MAX_ACTIVE_UPLOADS);
 
     LocalClientFileRpcHandler(LocalWorkspaceRegistry workspaceRegistry, ObjectMapper objectMapper) {
-        this(workspaceRegistry, objectMapper, new LocalGitAccessChecker());
+        this(workspaceRegistry, objectMapper, new LocalGitAccessChecker(), null);
     }
 
     LocalClientFileRpcHandler(
             LocalWorkspaceRegistry workspaceRegistry,
             ObjectMapper objectMapper,
             LocalGitAccessChecker gitAccessChecker) {
+        this(workspaceRegistry, objectMapper, gitAccessChecker, null);
+    }
+
+    LocalClientFileRpcHandler(
+            LocalWorkspaceRegistry workspaceRegistry,
+            ObjectMapper objectMapper,
+            LocalGitAccessChecker gitAccessChecker,
+            LocalClientPublicCapabilityStore publicCapabilityStore) {
         this.workspaceRegistry = workspaceRegistry;
         this.objectMapper = objectMapper;
         this.fileService = new WorkspaceFileService();
         this.gitAccessChecker = gitAccessChecker;
+        this.publicCapabilityStore = publicCapabilityStore;
     }
 
     JsonNode handle(LocalClientPayloads.FileRequest request) {
         JsonNode params = request.parameters() == null ? objectMapper.createObjectNode() : request.parameters();
         Object result = switch (request.operation()) {
+            case "agent-config.status" -> Map.of(
+                    "supported", publicCapabilityStore != null,
+                    "personalized", publicCapabilityStore != null && publicCapabilityStore.hasPersonalChanges());
+            case "agent-config.list" -> fileService.listDirectory(agentRoot(), agentPath(params, true));
+            case "agent-config.read" -> fileService.readContent(agentRoot(), agentPath(params, false));
+            case "agent-config.read.chunk" -> fileService.readContentChunk(
+                    agentRoot(), agentPath(params, false), nonNegativeLong(params, "offset"),
+                    optionalLong(params, "expectedSize"), optionalLong(params, "expectedLastModifiedMillis"));
+            case "agent-config.write" -> {
+                fileService.writeContent(editableAgentRoot(), agentPath(params, false), requiredText(params, "content"));
+                yield null;
+            }
+            case "agent-config.upload.begin" -> beginAgentUpload(params);
+            case "agent-config.upload.chunk" -> appendAgentUpload(params);
+            case "agent-config.upload.complete" -> completeAgentUpload(params);
+            case "agent-config.upload.abort" -> {
+                abortUpload(requiredText(params, "uploadId"));
+                yield null;
+            }
+            case "agent-config.rename" -> {
+                String path = agentPath(params, false);
+                editableAgentRoot();
+                fileService.renameFile(agentRoot(), path, requiredText(params, "name"));
+                yield null;
+            }
+            case "agent-config.copy" -> {
+                editableAgentRoot();
+                fileService.copyFile(agentRoot(), agentPath(params, "sourcePath"), agentPath(params, "targetPath"));
+                yield null;
+            }
+            case "agent-config.move" -> {
+                editableAgentRoot();
+                fileService.moveFile(agentRoot(), agentPath(params, "sourcePath"), agentPath(params, "targetPath"));
+                yield null;
+            }
+            case "agent-config.delete" -> {
+                editableAgentRoot();
+                fileService.deleteFile(agentRoot(), agentPath(params, false));
+                yield null;
+            }
+            case "agent-config.restore" -> {
+                try {
+                    String path = text(params, "path");
+                    if (path == null || path.isBlank()) {
+                        requireCapabilityStore().clearPersonalConfig();
+                    } else {
+                        requireCapabilityStore().restorePersonalPath(path);
+                    }
+                } catch (java.io.IOException exception) {
+                    throw new IllegalStateException("personal public capability restore failed", exception);
+                }
+                yield null;
+            }
             case "directory.list" -> workspaceRegistry.listAbsolute(
                     requiredOneOf(params, "absolutePath", "path"), integer(params, "limit", 1000));
             case "workspace.validateRoot" -> workspaceRegistry.validate(requiredText(params, "absolutePath"));
@@ -141,6 +204,50 @@ final class LocalClientFileRpcHandler {
         }
     }
 
+    private UploadStarted beginAgentUpload(JsonNode params) {
+        if (!uploadSlots.tryAcquire()) throw new IllegalStateException("too many active local uploads");
+        WorkspaceFileUpload upload = null;
+        try {
+            upload = fileService.beginUpload(
+                    editableAgentRoot(), agentPath(params, false),
+                    nonNegativeLongOneOf(params, "expectedBytes", "size"));
+            String uploadId = "lpa_" + UUID.randomUUID().toString().replace("-", "");
+            ActiveUpload active = new ActiveUpload("__public-agent__", "personal", upload);
+            uploads.put(uploadId, active);
+            return new UploadStarted(uploadId, upload.chunkBytes(), upload.expectedBytes());
+        } catch (RuntimeException exception) {
+            if (upload != null) upload.abort();
+            uploadSlots.release();
+            throw exception;
+        }
+    }
+
+    private UploadProgress appendAgentUpload(JsonNode params) {
+        ActiveUpload active = uploads.get(requiredText(params, "uploadId"));
+        if (active == null || !"__public-agent__".equals(active.workspaceId())) {
+            throw new IllegalArgumentException("personal upload session is invalid");
+        }
+        active.upload().append(nonNegativeLong(params, "index"), requiredText(params, "contentBase64"));
+        return new UploadProgress(active.upload().uploadedBytes(), active.upload().expectedBytes());
+    }
+
+    private UploadProgress completeAgentUpload(JsonNode params) {
+        String uploadId = requiredText(params, "uploadId");
+        ActiveUpload active = uploads.remove(uploadId);
+        if (active == null || !"__public-agent__".equals(active.workspaceId())) {
+            throw new IllegalArgumentException("personal upload session is invalid");
+        }
+        try {
+            long size = active.upload().complete();
+            uploadSlots.release();
+            return new UploadProgress(size, size);
+        } catch (RuntimeException exception) {
+            active.upload().abort();
+            uploadSlots.release();
+            throw exception;
+        }
+    }
+
     private UploadProgress appendUpload(LocalClientPayloads.FileRequest request, JsonNode params) {
         ActiveUpload active = requireUpload(request, requiredText(params, "uploadId"));
         active.upload().append(nonNegativeLong(params, "index"), requiredText(params, "contentBase64"));
@@ -181,6 +288,35 @@ final class LocalClientFileRpcHandler {
 
     private String root(LocalClientPayloads.FileRequest request) {
         return workspaceRegistry.requireRoot(requiredWorkspaceId(request), request.rootDigest());
+    }
+
+    private LocalClientPublicCapabilityStore requireCapabilityStore() {
+        if (publicCapabilityStore == null) throw new IllegalStateException("public capability editing is unavailable");
+        return publicCapabilityStore;
+    }
+
+    private String agentRoot() {
+        LocalClientPublicCapabilityStore store = requireCapabilityStore();
+        return store.activeConfigDirectory().toString();
+    }
+
+    private String editableAgentRoot() {
+        try {
+            return requireCapabilityStore().preparePersonalConfig().toString();
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("personal public capability directory unavailable", exception);
+        }
+    }
+
+    private static String agentPath(JsonNode params, boolean allowRoot) {
+        String field = params.has("path") ? "path" : params.has("sourcePath") ? "sourcePath" : "targetPath";
+        String value = text(params, field);
+        if (allowRoot && (value == null || value.isBlank())) return "";
+        return LocalClientPublicCapabilityStore.requirePersonalPath(value);
+    }
+
+    private static String agentPath(JsonNode params, String field) {
+        return LocalClientPublicCapabilityStore.requirePersonalPath(requiredText(params, field));
     }
 
     private static String requiredWorkspaceId(LocalClientPayloads.FileRequest request) {

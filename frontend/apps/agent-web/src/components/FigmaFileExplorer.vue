@@ -69,6 +69,10 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   personalRuntimeReloading?: "PUBLIC" | "WORKSPACE" | null;
   /** 运行中任务不允许 dispose。 */
   runtimeBusy?: boolean;
+  /** LOCAL_CLIENT 的客户端实例与连接代次，用于打开本机个人公共能力。 */
+  localClientInstanceId?: string;
+  localClientConnectionGeneration?: number;
+  localClientOnline?: boolean;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
   /** 是否显示当前应用的引用配置入口；普通成员也可只读查看自动化引用。 */
@@ -180,6 +184,12 @@ const displayedChangedFileCount = computed(() => totalChangedFileCount.value ?? 
 const managedWorkspaceMode = computed(() =>
   !props.readonlyReview && (props.workspaceKind ?? "MANAGED") === "MANAGED"
 );
+const localPersonalAgentMode = computed(() =>
+  !props.readonlyReview
+  && props.workspaceKind === "LOCAL_CLIENT"
+  && Boolean(props.localClientInstanceId)
+);
+const agentConfigMode = computed(() => managedWorkspaceMode.value || localPersonalAgentMode.value);
 const showChangesTab = computed(() =>
   props.workspaceKind !== "APP_SOURCE" && props.workspaceKind !== "LOCAL_CLIENT"
 );
@@ -340,7 +350,7 @@ function onResizeEnd() {
 }
 
 function refreshAgents() {
-  if (!managedWorkspaceMode.value) return;
+  if (!agentConfigMode.value) return;
   agentConfigPanelRef.value?.refreshAll();
 }
 
@@ -685,7 +695,7 @@ defineExpose({
 
         <!-- Resizer divider: only show if both sections are expanded -->
         <div
-          v-if="managedWorkspaceMode && workspaceExpanded && agentsExpanded"
+          v-if="agentConfigMode && workspaceExpanded && agentsExpanded"
           class="figma-fe-resize-handle"
           @mousedown="onResizeStart"
           role="separator"
@@ -693,7 +703,7 @@ defineExpose({
         />
 
         <!-- Section 2: agents -->
-        <div v-if="managedWorkspaceMode" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div v-if="agentConfigMode" class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
           <div class="figma-fe-section-header">
             <button
               type="button"
@@ -702,7 +712,7 @@ defineExpose({
             >
               <ChevronDown v-if="agentsExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span class="figma-fe-section-title">Agents</span>
+              <span class="figma-fe-section-title">{{ localPersonalAgentMode ? '本机个人公共能力' : 'Agents' }}</span>
             </button>
             <div class="figma-fe-section-actions" v-if="agentsExpanded">
                <button
@@ -729,6 +739,9 @@ defineExpose({
               :can-manage-workspace-config="canManageAgentConfig ?? !!canWrite"
               :personal-runtime-reloading="personalRuntimeReloading"
               :runtime-busy="runtimeBusy"
+              :local-client-instance-id="localClientInstanceId"
+              :local-client-connection-generation="localClientConnectionGeneration"
+              :local-client-online="localClientOnline"
               :hide-header="true"
               :hide-git-ops="true"
               :active-path="activePath"

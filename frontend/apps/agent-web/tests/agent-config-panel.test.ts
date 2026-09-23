@@ -34,6 +34,7 @@ const apiClientMock = vi.hoisted(() => ({
   movePublicAgentFile: vi.fn(),
   moveWorkspaceAgentFile: vi.fn(),
   deletePublicAgentFile: vi.fn(),
+  restorePublicAgentConfig: vi.fn(),
   deleteWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
   updatePublicAgentConfigAndPush: vi.fn(),
@@ -117,6 +118,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.movePublicAgentFile.mockResolvedValue(undefined);
     apiClientMock.moveWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.deletePublicAgentFile.mockResolvedValue(undefined);
+    apiClientMock.restorePublicAgentConfig.mockResolvedValue(undefined);
     apiClientMock.deleteWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
@@ -1318,6 +1320,41 @@ describe("AgentConfigPanel", () => {
     ]]);
   });
 
+  it("shows the local personal capability tree for normal users without Git controls", async () => {
+    apiClientMock.listPublicAgentFiles.mockImplementation(async (path: string) => path === ""
+      ? [
+          { path: "agents", name: "agents", type: "directory" },
+          { path: "skills", name: "skills", type: "directory" },
+          { path: "tools", name: "tools", type: "directory" }
+        ]
+      : []);
+    const { view } = renderPanel(undefined, {
+      canWrite: true,
+      localClientInstanceId: "lci_personal",
+      localClientConnectionGeneration: 8,
+      localClientOnline: true
+    });
+
+    expect(await view.findByText("本机个人副本")).toBeTruthy();
+    expect(view.getByText("Tool 代码会以当前操作系统用户权限在本机执行。")).toBeTruthy();
+    expect(view.queryByText("应用级")).toBeNull();
+    expect(view.queryByText("创建公共 worktree")).toBeNull();
+    expect(apiClientMock.getPublicAgentConfigStatus).not.toHaveBeenCalled();
+    expect(apiClientMock.listWorkspaceAgentFiles).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "",
+      "LOCAL_CLIENT_PERSONAL:lci_personal:8",
+      "linux-1"
+    ));
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await fireEvent.click(view.getByRole("button", { name: "恢复签名公共版本" }));
+    await waitFor(() => expect(apiClientMock.restorePublicAgentConfig).toHaveBeenCalledWith(
+      "LOCAL_CLIENT_PERSONAL:lci_personal:8",
+      "linux-1"
+    ));
+  });
+
 });
 
 type PublicWorktree = {
@@ -1361,6 +1398,9 @@ function renderPanel(
     runtimeBusy?: boolean;
     routeLinuxServerId?: string;
     routeLinuxServerResolved?: boolean;
+    localClientInstanceId?: string;
+    localClientConnectionGeneration?: number;
+    localClientOnline?: boolean;
     publicWorktreeMountRequest?: {
       revision: number;
       worktreeId: string;
@@ -1382,7 +1422,10 @@ function renderPanel(
       runtimeBusy: options?.runtimeBusy ?? false,
       routeLinuxServerId: options?.routeLinuxServerId !== undefined ? options.routeLinuxServerId : "linux-1",
       routeLinuxServerResolved: options?.routeLinuxServerResolved ?? true,
-      publicWorktreeMountRequest: options?.publicWorktreeMountRequest
+      publicWorktreeMountRequest: options?.publicWorktreeMountRequest,
+      localClientInstanceId: options?.localClientInstanceId,
+      localClientConnectionGeneration: options?.localClientConnectionGeneration,
+      localClientOnline: options?.localClientOnline
     },
     global: {
       plugins: [pinia]

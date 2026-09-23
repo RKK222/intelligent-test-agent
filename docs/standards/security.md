@@ -285,6 +285,13 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 
 ## 平台文件 WebSocket 安全例外
 
+### LOCAL_CLIENT 公共能力个人副本
+
+- 客户端个人公共能力必须声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`；旧客户端、离线客户端和 generation 不匹配的旧连接统一失败关闭。
+- `agent-config/file-ws-route` 对本地公共 scope 只接受逻辑引用 `LOCAL_CLIENT_PERSONAL:{clientInstanceId}:{connectionGeneration}` 或等价的绑定字段，后端通过公共路由解析器选择持有连接的 Java。每次签 ticket 和每条 RPC 都重新校验当前登录用户、客户端 owner、在线 generation、目标 JVM 与 capability；不接受浏览器提交绝对根路径。
+- 客户端个人副本以签名基线复制创建，基线目录不可写。文件白名单严格为 `agents/**`、`skills/**`、`tools/**`；manifest、根级依赖、`node_modules`、符号链接、特殊文件、路径穿越和越界目录均拒绝。恢复操作只能回到当前签名基线，不得写服务器公共 Git。
+- Tool 代码明确以当前操作系统用户权限在本机执行；日志、错误和审计只记录稳定错误码、traceId、操作类型及必要的路径摘要，不输出文件正文、物理路径、凭据或 Tool 内容。分享模式仍不能取得该 ticket，也不能切换模型。
+
 工作区文件与 Agent 配置文件操作属于受控 WebSocket 例外。前端不得直连 opencode server 或任意文件服务，必须先通过平台后端解析目标服务器，再使用目标后端的一次性 ticket 建立 WebSocket。实现和后续扩展必须满足：
 
 1. `file-ws-route` 必须基于当前登录用户的 opencode 进程解析目标后端，并强校验 `workspace.linuxServerId == opencodeProcess.linuxServerId == targetBackend.linuxServerId`；历史 `workspace.linuxServerId` 为空时只能在 root path 校验成功后回填。应用源码 Runtime Workspace 例外地以数据库当前 active generation 的 READY replica 作为精确目标服务器，历史 Workspace 信息不得触发本机回绑或本机降级；目标 Java 继续由公共 `BackendJavaRouteResolver` 选择，入口转发只用 `BackendHttpForwarder`，文件内容不经过 Java→Java HTTP 代理。托管工作区在 route、workspace ticket 签发和每一条 `workspace.*` RPC 都必须实时校验当前用户仍是有效应用成员，`SUPER_ADMIN` 不旁路成员关系，不能依赖 ticket 签发时缓存的成员状态；签票授权必须在同一次权威读取/判断中返回 `STANDARD/APP_SOURCE` 分类并写入不可伪造的短期 ticket，APP_SOURCE 票后续每条 RPC 都禁止 unmanaged 回退且必须再次识别为 APP_SOURCE，replica 映射消失时不得降级为超级管理员服务器工作区。每条 RPC 还必须重新读取用户 `opencode` 文件路由 affinity，并校验它与 ticket 目标/agent 服务器、Workspace/托管副本服务器和当前 JVM 全部一致，连接后的 binding 迁移必须使旧 socket 立即失败关闭，不能继续调用文件服务。非托管 Workspace 的普通路由、ticket 与 RPC 对所有角色默认拒绝；超级管理员跨用户排查只能使用上一节的专用只读通道。

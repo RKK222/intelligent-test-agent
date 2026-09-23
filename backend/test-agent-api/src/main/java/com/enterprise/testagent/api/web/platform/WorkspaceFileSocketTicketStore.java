@@ -141,6 +141,23 @@ class WorkspaceFileSocketTicketStore {
         return ticket;
     }
 
+    /** 本地公共能力个人副本 ticket 不绑定工作区根，只绑定客户端连接代次与 PUBLIC scope。 */
+    WorkspaceFileSocketTicket issueLocalAgentConfig(
+            String userId,
+            String clientInstanceId,
+            long connectionGeneration,
+            boolean appAdmin,
+            String traceId) {
+        WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
+                ticketFactory.get(), null, null, null, false, false, appAdmin,
+                userId, "agent-config", "PUBLIC", null, false, null, null, null, null,
+                traceId, clock.instant().plus(DEFAULT_TTL), null, null, null, null,
+                false, null, null, RuntimeKind.LOCAL_CLIENT, clientInstanceId,
+                connectionGeneration, null, null);
+        tickets.put(ticket.ticket(), ticket);
+        return ticket;
+    }
+
     /** 非消费式预检；不存在、过期、复用和缺少 Origin 使用同一脱敏错误。 */
     void validate(String ticketValue, String origin) {
         requireUsable(ticketValue == null ? null : tickets.get(ticketValue), origin);

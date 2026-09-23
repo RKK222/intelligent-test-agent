@@ -11,6 +11,7 @@ import com.enterprise.testagent.domain.localclient.LocalClientConnectionStore;
 import com.enterprise.testagent.domain.localclient.LocalClientInstanceId;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceBinding;
 import com.enterprise.testagent.domain.localclient.LocalClientWorkspaceRepository;
+import com.enterprise.testagent.domain.localclient.LocalClientInstanceRepository;
 import com.enterprise.testagent.domain.runtime.RuntimeKind;
 import com.enterprise.testagent.domain.team.TeamScopeMode;
 import com.enterprise.testagent.domain.workspace.WorkspaceId;
@@ -61,6 +62,7 @@ class WorkspaceFileSocketTicketService {
     private SessionCollaborationShareService shareService;
     private LocalClientWorkspaceRepository localWorkspaceRepository;
     private LocalClientConnectionStore localConnectionStore;
+    private LocalClientInstanceRepository localInstanceRepository;
     private BackendJavaRouteResolver backendRouteResolver;
     private SystemAdminTeamApplicationService systemAdminTeams;
     private TeamWorkspaceApplicationService teamWorkspaces;
@@ -147,6 +149,25 @@ class WorkspaceFileSocketTicketService {
                     context.expiresAt(), traceId));
         }
         if (MODE_AGENT_CONFIG.equals(mode)) {
+            LocalPersonalReference localPersonal = localPersonalReference(request.worktreeId());
+            if (localPersonal != null) {
+                if (!SCOPE_PUBLIC.equals(request.scope())) {
+                    throw new PlatformException(ErrorCode.FORBIDDEN, "本地个人公共能力 ticket 只允许 PUBLIC scope");
+                }
+                LocalClientConnectionRoute route = requireCurrentLocalRoute(
+                        new LocalClientInstanceId(localPersonal.clientInstanceId()),
+                        principal.userId(), localPersonal.connectionGeneration());
+                if (localInstanceRepository != null) {
+                    var instance = localInstanceRepository.findById(new LocalClientInstanceId(localPersonal.clientInstanceId()))
+                            .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "本地客户端实例不存在"));
+                    if (!instance.selfUpdateCapabilities().contains("PUBLIC_CAPABILITY_PERSONAL_EDIT_V1")) {
+                        throw new PlatformException(ErrorCode.FORBIDDEN, "当前本地客户端不支持公共能力个人编辑");
+                    }
+                }
+                return response(ticketStore.issueLocalAgentConfig(
+                        principal.userId().value(), localPersonal.clientInstanceId(),
+                        route.connectionGeneration(), appAdmin, traceId));
+            }
             String workspaceId = agentConfigWorkspaceId(request);
             rejectExperienceAgentConfig(principal.userId(), workspaceId);
             return response(ticketStore.issue(
@@ -533,13 +554,16 @@ class WorkspaceFileSocketTicketService {
     void configureLocalClientServices(
             LocalClientWorkspaceRepository localWorkspaceRepository,
             LocalClientConnectionStore localConnectionStore,
-            BackendJavaRouteResolver backendRouteResolver) {
+            BackendJavaRouteResolver backendRouteResolver,
+            LocalClientInstanceRepository localInstanceRepository) {
         this.localWorkspaceRepository = Objects.requireNonNull(
                 localWorkspaceRepository, "localWorkspaceRepository must not be null");
         this.localConnectionStore = Objects.requireNonNull(
                 localConnectionStore, "localConnectionStore must not be null");
         this.backendRouteResolver = Objects.requireNonNull(
                 backendRouteResolver, "backendRouteResolver must not be null");
+        this.localInstanceRepository = Objects.requireNonNull(
+                localInstanceRepository, "localInstanceRepository must not be null");
     }
 
     private SupportAccessAuthorization authorizeLocalWorkspaceRpc(
@@ -567,6 +591,27 @@ class WorkspaceFileSocketTicketService {
         }
         workspaceAccessAuthorizer.requireClassifiedFileAccess(userId, workspaceId, false);
         return null;
+    }
+
+    /** 每条本地个人公共能力 RPC 都重新核对 user、客户端代次和 capability，拒绝迟到旧连接。 */
+    void authorizeLocalAgentConfigRpc(WorkspaceFileSocketTicket ticket) {
+        if (!ticket.localClient() || !MODE_AGENT_CONFIG.equals(ticket.mode())
+                || !SCOPE_PUBLIC.equals(ticket.scope())
+                || ticket.userId() == null || ticket.localClientInstanceId() == null
+                || localConnectionStore == null || backendRouteResolver == null || localInstanceRepository == null) {
+            throw workspaceRpcDenied();
+        }
+        LocalClientInstanceId clientId = new LocalClientInstanceId(ticket.localClientInstanceId());
+        LocalClientConnectionRoute route = localConnectionStore.find(clientId).orElseThrow(this::workspaceRpcDenied);
+        if (!route.userId().value().equals(ticket.userId())
+                || route.connectionGeneration() != ticket.connectionGeneration()
+                || !backendRouteResolver.isCurrent(route.backendProcessId())) {
+            throw workspaceRpcDenied();
+        }
+        var instance = localInstanceRepository.findById(clientId).orElseThrow(this::workspaceRpcDenied);
+        if (!instance.selfUpdateCapabilities().contains("PUBLIC_CAPABILITY_PERSONAL_EDIT_V1")) {
+            throw workspaceRpcDenied();
+        }
     }
 
     private LocalClientWorkspaceBinding localBinding(WorkspaceFileSocketDtos.TicketRequest request) {
@@ -641,6 +686,24 @@ class WorkspaceFileSocketTicketService {
             return request.mode().trim();
         }
         return request.workspaceId() == null || request.workspaceId().isBlank() ? MODE_DIRECTORY_PICKER : MODE_WORKSPACE;
+    }
+
+    private LocalPersonalReference localPersonalReference(String worktreeId) {
+        if (worktreeId == null || !worktreeId.startsWith("LOCAL_CLIENT_PERSONAL:")) return null;
+        String[] parts = worktreeId.split(":", -1);
+        if (parts.length != 3 || parts[1].isBlank()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "本地客户端个人配置路由无效");
+        }
+        try {
+            long generation = Long.parseLong(parts[2]);
+            if (generation < 1) throw new NumberFormatException();
+            return new LocalPersonalReference(parts[1], generation);
+        } catch (NumberFormatException exception) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "本地客户端连接代次无效");
+        }
+    }
+
+    private record LocalPersonalReference(String clientInstanceId, long connectionGeneration) {
     }
 
     private String requiredWorkspaceId(WorkspaceFileSocketDtos.TicketRequest request) {

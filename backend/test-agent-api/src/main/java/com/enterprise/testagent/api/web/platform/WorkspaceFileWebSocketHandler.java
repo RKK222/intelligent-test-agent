@@ -569,6 +569,15 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         if (localClientFileGateway == null) {
             throw new PlatformException(ErrorCode.RUNTIME_STATE_UNAVAILABLE, "本地文件隧道未装配");
         }
+        if (MODE_AGENT_CONFIG.equals(ticket.mode()) && SCOPE_PUBLIC.equals(ticket.scope())) {
+            ticketService.authorizeLocalAgentConfigRpc(ticket);
+            if (!LOCAL_AGENT_CONFIG_OPERATIONS.contains(op)) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "本地个人公共能力不允许该文件操作", Map.of("op", op));
+            }
+            return localClientFileGateway.invoke(
+                    ticket.localClientInstanceId(), ticket.connectionGeneration(), null, null,
+                    op, params, traceId);
+        }
         if (MODE_DIRECTORY_PICKER.equals(ticket.mode())) {
             if (!Set.of("directory.list").contains(op)) {
                 throw new PlatformException(ErrorCode.FORBIDDEN, "本地目录选择 ticket 不允许该操作");
@@ -698,6 +707,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             "workspace.status",
             "workspace.delete",
             "workspace.mkdir");
+
+    private static final Set<String> LOCAL_AGENT_CONFIG_OPERATIONS = Set.of(
+            "agent-config.status", "agent-config.list", "agent-config.read", "agent-config.read.chunk",
+            "agent-config.write", "agent-config.upload.begin", "agent-config.upload.chunk",
+            "agent-config.upload.complete", "agent-config.upload.abort", "agent-config.rename",
+            "agent-config.copy", "agent-config.move", "agent-config.delete", "agent-config.restore");
 
     private void requireLocalWorkspaceWriteIfNeeded(
             WorkspaceFileSocketTicket ticket,

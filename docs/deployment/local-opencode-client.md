@@ -49,6 +49,15 @@ unzip -tq deploy/internal/dist/local-opencode-client/TestAgent-Local-Client-Win1
 
 ## 1. 外网 Mac：记录构建输入并生成签名交付包
 
+### 公共能力个人副本验收
+
+新 release 必须声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1`，并使用与客户端同 release 的签名
+`public-capabilities.tar.gz`。真实客户端验收至少覆盖：普通 USER 登录后进入 `LOCAL_CLIENT`，首次保存
+`agents/**`、`skills/**`、`tools/**` 自动生成个人副本；重启客户端后草稿仍在；Agent/Skill 保存只 dispose，Tool
+保存受管重启；路径穿越、符号链接、manifest、依赖文件和 `node_modules` 被拒绝；“恢复签名公共版本”确认后清除
+个人副本。旧客户端未声明该 capability 时网页应提示升级/重连并保持只读。所有 Tool 依赖必须来自签名包离线闭包，不能在
+企业现场执行 npm 或访问公网 registry。
+
 **机器：外网 Mac（允许联网）**。以下命令在 /Users/huang/workspace/intelligent-test-agent-gitee 执行。构建使用当前工作树；git status --short 用于留存输入，不要求为空，但不得有未解决冲突，也不得清理、stash 或切换其他人的并行改动。
 
 ~~~bash

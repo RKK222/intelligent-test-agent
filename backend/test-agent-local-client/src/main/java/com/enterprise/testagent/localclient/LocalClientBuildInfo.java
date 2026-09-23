@@ -18,6 +18,8 @@ public record LocalClientBuildInfo(
     public static final String SELF_UPDATE_CAPABILITY = "SELF_UPDATE_V1";
     public static final String OBSERVABILITY_CAPABILITY = "OPENCODE_OBSERVABILITY_V1";
     public static final String PUBLIC_CAPABILITY_SYNC = "PUBLIC_CAPABILITY_SYNC_V1";
+    /** 本地公共能力个人副本编辑协议；旧客户端不声明时服务端必须保持只读。 */
+    public static final String PUBLIC_CAPABILITY_PERSONAL_EDIT = "PUBLIC_CAPABILITY_PERSONAL_EDIT_V1";
     public static final String MANAGED_MODEL_CONFIG = "MANAGED_MODEL_CONFIG_V1";
     public static final String MANAGED_RTK_CONFIG = "MANAGED_RTK_CONFIG_V1";
     public static final String WORKSPACE_GIT_ACCESS = "WORKSPACE_GIT_ACCESS_V1";
@@ -52,6 +54,7 @@ public record LocalClientBuildInfo(
                     List.of(
                             OBSERVABILITY_CAPABILITY,
                             PUBLIC_CAPABILITY_SYNC,
+                            PUBLIC_CAPABILITY_PERSONAL_EDIT,
                             MANAGED_MODEL_CONFIG,
                             MANAGED_RTK_CONFIG,
                             WORKSPACE_GIT_ACCESS,
@@ -66,6 +69,7 @@ public record LocalClientBuildInfo(
                         SELF_UPDATE_CAPABILITY,
                         OBSERVABILITY_CAPABILITY,
                         PUBLIC_CAPABILITY_SYNC,
+                        PUBLIC_CAPABILITY_PERSONAL_EDIT,
                         MANAGED_MODEL_CONFIG,
                         MANAGED_RTK_CONFIG,
                         WORKSPACE_GIT_ACCESS,

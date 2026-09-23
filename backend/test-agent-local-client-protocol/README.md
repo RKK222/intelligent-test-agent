@@ -31,6 +31,11 @@ Client key、统一认证号或上游模型密钥。
 声明 `MANAGED_RTK_CONFIG_V1` 的客户端会在 `REGISTERED.managedRuntimeConfig` 接收全局 RTK 开关；当前只包含
 `rtkEnabled`，默认关闭。旧客户端不会收到该字段，客户端只有在下一次受管启动或重启时才应用开关。
 
+声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 的客户端还接受浏览器经平台文件 WebSocket 转发的 `agent-config.*` 个人副本操作。
+服务端 ticket 固定 `scope=PUBLIC`、`runtimeKind=LOCAL_CLIENT`、`clientInstanceId` 和 `connectionGeneration`，客户端只把
+`agents/**`、`skills/**`、`tools/**` 映射到不可变签名基线的个人副本；manifest、根级依赖、`node_modules`、符号链接和特殊文件
+始终拒绝。`agent-config.restore` 不带 path 时清除整份个人副本，恢复签名基线；每条 RPC 都重新校验 capability、用户归属和代次。
+
 客户端桌面主动注册工作区使用 `WORKSPACE_REGISTER {name,rootPath}`，后台只采用已认证连接中的 userId、
 clientInstanceId 和 generation，不接受载荷伪造身份；平台完成客户端真实根校验和事务持久化后返回同 requestId 的
 `WORKSPACE_REGISTERED {workspaceId,name,rootPath}`。业务失败用同 requestId 的 `ERROR` 收敛单次请求，不关闭连接。

@@ -6091,15 +6091,13 @@ test("application recent version without default personal workspace stays empty"
   expect(fileRequests).toEqual([]);
 });
 
-test("model picker stays hidden for ordinary users even after three Ctrl presses", async ({ page }) => {
+test("model picker unlocks for ordinary users after three Ctrl presses", async ({ page }) => {
   await mockBackendApi(page, { ...runnableWorkspaceSetup(), authRoles: ["USER"] });
 
   await gotoWorkbench(page);
   await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
   await toggleModelPickerShortcut(page);
-  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
-  await toggleModelPickerShortcut(page);
-  await expect(page.getByRole("button", { name: "切换模型" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "切换模型" })).toBeVisible();
 });
 
 test("model picker toggles after each three Ctrl presses for super admins", async ({ page }) => {
