@@ -18036,3 +18036,27 @@
 ### Result
 
 - #38 保持失败且旧服务未替换；当前真实对话与截图验收仍未完成，不能宣称端到端通过。
+
+## 2026-09-23 - 避免 worker 构建上下文 COPY 触发 BuildKit snapshot 损坏
+
+### Why
+
+- Jenkins #40 在后端、前端构建完成后，首次 BuildKit 构建和 `--no-cache` 重试仍于 manager
+  `COPY opencode-manager/go.mod opencode-manager/go.sum ./` 触发同一 snapshot 丢失错误；legacy builder
+  启动后约 12 分钟无新增日志，用户已授权取消陈旧构建。
+
+### What
+
+- `deploy/internal/opencode-worker.Dockerfile` 改为用 BuildKit `RUN --mount=type=bind` 只读读取
+  `opencode-manager` 构建上下文，在同一层完成 `go mod download` 和 manager 编译，移除两个触发
+  snapshot 提交的 `COPY` 层；产物仍写入 `/out`，不改变最终 worker 运行镜像内容。
+
+### How
+
+- 通过 Jenkins #40 状态页取消构建，确认终态为“已终止 / Aborted by user”；未修改测试机运行容器或直接替换
+  远端制品。变更将在下一个 Jenkins immutable worker 构建中验证。
+
+### Result
+
+- #40 未发布，旧服务保持不变；需继续执行 Jenkins 构建、worker smoke、运行态健康检查及收起右栏后的真实
+  对话与截图验收。

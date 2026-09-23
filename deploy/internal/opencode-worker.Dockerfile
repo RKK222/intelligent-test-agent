@@ -12,11 +12,11 @@ ENV GOARCH=amd64
 
 WORKDIR /workspace/opencode-manager
 
-COPY opencode-manager/go.mod opencode-manager/go.sum ./
-RUN go mod download
-
-COPY opencode-manager/ ./
-RUN printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
+# 直接以 BuildKit bind mount 读取构建上下文，避免共享测试机损坏的 snapshot 元数据
+# 在 COPY 层提交时失败；编译产物仍写入本阶段的 /out，不把源码带入运行镜像。
+RUN --mount=type=bind,source=opencode-manager,target=/workspace/opencode-manager,readonly \
+    go mod download \
+    && printf '%s' "${MANAGER_BUILD_VERSION}" | grep -Eq '^V[0-9]{8}\.[0-9]{6}$' \
     && go build -trimpath \
       -ldflags="-s -w -X github.com/enterprise/test-agent/opencode-manager/internal/control.buildVersion=${MANAGER_BUILD_VERSION}" \
       -o /out/opencode-manager ./cmd/opencode-manager
