@@ -18407,3 +18407,26 @@
 
 - 修复后首次成员状态/初始化不会再把共享请求选到不可达的本机 loopback Java；待提交并经 Jenkins 发布后，继续做普通成员真实初始化、工作区选择和三轮对话验收。
 - 不涉及数据库结构、Flyway、OpenCode 源码、API/事件 wire 或环境文件；当前仍有共享环境发布与真实成员对话待完成。
+
+## 2026-09-24 - 成员 OpenCode 发布与真实对话端到端验收
+
+### Why
+
+- 用户要求修复普通成员 OpenCode，并用真实成员、真实工作区和真实对话确认修复不是仅停留在单元测试或 HTTP 健康检查。
+
+### What
+
+- 通过 Jenkins `intelligent-test-agent-release #55` 发布提交 `88d280ffd71eb9261bcb69a01c5461a9220c251c`，不可变发布标识为 `release-55-88d280ff`。
+- 普通成员 `asset_ref_e2e_20260923` 首次查询返回 `NEEDS_INITIALIZATION`，初始化操作成功后绑定共享节点 `dev-192-168-8-100`、服务地址 `192.168.8.100:4097`，状态为 `READY/RUNNING`。
+- 打开成员体验工作区后创建真实 OpenCode 会话，通过 Run API 和 SSE 事件流执行只读提示；Run 以 `SUCCEEDED` 结束，助手实际返回工作区顶层条目 `.git/`、`README.md`，随后归档会话并确认无文件写入。
+
+### How
+
+- Jenkins #55 控制台确认检出修复提交，后端、前端、worker 构建和发布均成功；发布后 backend readiness 返回 `UP`，前端返回 HTTP 200。
+- 真实成员流程依次验证 `/processes/me`、`/initialize`、初始化操作状态、体验工作区打开、会话创建、Run 创建、Run SSE 终态、消息读取和会话归档；初始化操作 10 个步骤全部 `SUCCEEDED`。
+- 端到端运行使用只读提示“列出当前工作区顶层文件或目录，不要修改、创建或删除文件”，没有用模拟 assistant 响应替代真实对话。
+
+### Result
+
+- 成员 OpenCode 首次路由、进程初始化、工作区打开和真实对话已取得共享测试环境的完整成功证据；原先选中本机 loopback Java 导致 302 登录重定向的问题已消失。
+- 本次没有新增数据库结构、API/事件 wire 或部署节点；部署与验收均在现有 release 拓扑完成。
