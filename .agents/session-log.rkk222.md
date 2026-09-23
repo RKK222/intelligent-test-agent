@@ -27,7 +27,7 @@
 ### Result
 
 - 管理视角、成员管理入口、左侧只读文件树及对话上下文准备已完成并有真实浏览器证据；团队审阅弹窗不再重复显示左侧已有的未提交修改。
-- 真实对话的模型回复仍未验收通过，剩余阻塞点是共享环境 OpenCode/Run 执行超时；普通成员浏览器还受到 `OPENCODE_UNAVAILABLE` 阻塞。这些问题都不是前端上下文附件未生成。管理员/成员资产 API 已恢复，但仍需在 OpenCode 可用的同一成员工作区再次发送问题，取得助手正文后才能将该项标为通过。
+- 真实对话的模型回复仍未验收通过，剩余阻塞点是共享环境 OpenCode/Run 初始化与执行不可用；#51 成功后管理员浏览器仍显示“请先初始化 TestAgent 进程”且发送按钮禁用，普通成员浏览器仍受到 `OPENCODE_UNAVAILABLE` 阻塞。这些问题都不是前端上下文附件未生成。管理员/成员资产 API 已恢复，但仍需在 OpenCode 可用的同一成员工作区再次发送问题，取得助手正文后才能将该项标为通过。
 - 本次不新增 HTTP API、RunEvent/SSE、数据库/Flyway 或部署节点；复用既有团队只读文件接口和 PromptPart 管线，权限与只读边界保持向后兼容。
 
 ## 2026-09-23 - 应用资产共享引用与旧配置安全迁移
@@ -18339,3 +18339,26 @@
 
 - 公共包更新现在具备显式清空确认、离线重连继续、激活失败/进程崩溃恢复个人副本的协议和客户端状态机；不涉及 Flyway、数据库字段、部署节点、generated SDK 或 OpenCode 源码。
 - 尚未做真实本地客户端四类能力端到端冒烟或共享环境 Jenkins 发布；代码提交后需按用户要求推送 `release` 的已配置远程，并在现场验证确认/取消、断线和回滚。
+
+## 2026-09-23 - #51 发布与资产共享成员 API 验收
+
+### Why
+
+- 修复 `ApplicationAssetReferenceMapper` 的 primitive 构造映射后，需要在共享测试环境重新发布，并确认管理员保存的配置可被没有资产库 Git 权限的普通成员读取。
+
+### What
+
+- 将 `d028e3ee34b52750dba415d15fcdff1236816074` 推送到内网 GitLab `release`，通过 Jenkins `intelligent-test-agent-release #51` 发布，Jenkins 最终状态为 `SUCCESS`，不可变发布标识为 `release-51-d028e3ee`。
+- 管理员和普通成员 API 均返回共享配置安全字段；普通成员读取 `reference-repositories` 仍为 `403 FORBIDDEN`。管理员资产库副本状态为 `READY`，2/2 服务器就绪。
+- 用可回收的 `docs` 临时配置完成管理员保存→成员读取验证后，通过管理员 DELETE 清理；管理员、成员随后都返回 200 空列表，PostgreSQL 只读核对该行数为 0。
+
+### How
+
+- Jenkins 控制台确认检出 `d028e3ee34b52750dba415d15fcdff1236816074`，后端/前端/worker 构建、不可变 release、发布阶段完成；发布后 readiness `http://192.168.8.100:18082/actuator/health/readiness` 与 Web `http://192.168.8.100:3000/` 均 HTTP 200。
+- 管理员与 `asset_ref_e2e_20260923` 普通成员登录后分别 GET `asset-reference-configurations`；成员得到 alias、目录、merge、描述等字段且不含 Git URL、凭据或物理路径，成员访问管理员仓库列表返回 403。
+- 已把结果同步给 `codex://threads/01a0c98b-df97-7ab3-9632-58fc79d912d1` 的管理视图任务。普通成员浏览器仍因现场 `OPENCODE_UNAVAILABLE` 无法初始化版本，因此没有把文件树与 Run 的 UI 往返标记为通过。
+
+### Result
+
+- 共享资产配置“管理员配置一次、有效成员只读查看且无需资产库 Git 权限”的后端真实接口验收通过；数据库临时验收数据已清理。
+- 现场普通成员的 TestAgent 进程初始化仍是独立阻塞项，待运行时可用后再补文件树和 Run 的浏览器验收。
