@@ -759,3 +759,19 @@
 
 - 报文生成请求继续可通过兼容动作路由，但生成的是带请求报文的完整接口自动化脚本，不另写报文文件；真实接口/数据库执行约束不变。
 - 不涉及 HTTP API、事件、数据库、性能或安全边界改动；兼容层保留旧动作名，消费者若依赖已删除的独立报文文件/字段需迁移到 `generatedFiles` 中的脚本路径。未做真实平台执行或浏览器端到端验收。
+
+## 2026-09-24 - 合并新提交后恢复接口报文兼容动作路由
+
+### Why
+- `bbb98c399` 增加请求结构校验和同步 Skill 时，把已删除的 `generate-test-messages` 引用、独立报文文件和旧结果字段带回了公共执行链；需要保留新校验能力并恢复 `afc2aa4bb` 的统一脚本产物约定。
+
+### What
+- 仅调整入口/接口执行 Agent、公共执行 Skill 与输出路径，使 `GENERATE_MESSAGE` 继续作为兼容动作进入 `generate-api-automation-markdown`，产出包含请求报文的接口自动化脚本；移除被覆盖恢复的旧 Skill 调用、独立报文文件和 `executionMessageFiles` 引用。
+- 保留新提交的 `reqParamStruct` 严格白名单、确定性模板校验、临时目录清理及新 `sync-integrated-api-request-structure`；同步公共配置 README 的实际 22 个 Skill 及归属。
+
+### How
+- 比较 `afc2aa4bb..bbb98c399` 的公共配置差异，回顾各提交者近期 session log，逐项检查旧引用与新约束；只恢复被覆盖的路由语义，不整体回退新提交。
+- 运行 `generate-api-automation-markdown`、`sync-integrated-api-request-structure`、`resolve-api-automation-references` 三组 Python unittest（12、22、31 项均通过），再校验旧目录/旧引用、Skill 数量与 `git diff --check`；提交后另生成仅包含本次新增修改文件的 ZIP，删除文件另列目录。
+
+### Result
+- 兼容入口统一生成脚本，不再定义独立报文产物；无 HTTP API、事件、数据库、性能或安全接口变化，不新增部署节点。用户若依赖旧报文文件/字段，仍需迁移到 `generatedFiles` 的脚本路径；尚未做真实平台端到端验收或企业公共配置发布。

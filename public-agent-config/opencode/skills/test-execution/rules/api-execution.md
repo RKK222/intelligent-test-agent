@@ -5,15 +5,15 @@
 测试执行入口根据用户意图生成 `requestedActions`，只包含实际要求的动作：
 
 - `GENERATE_SCRIPT`：加载 `generate-api-automation-markdown` 生成接口自动化脚本；
-- `GENERATE_MESSAGE`：加载 `generate-test-messages` 生成接口自动化报文；
+- `GENERATE_MESSAGE`：兼容动作，与 `GENERATE_SCRIPT` 一样加载 `generate-api-automation-markdown`，生成包含请求报文的接口自动化脚本；
 - `EXECUTE_API`：由 `test-execution-api` 调用平台接口工具真实执行；
 - `VERIFY_DB`：由 `test-execution-api` 使用平台数据库工具铺底、校验或清理。
 
-用户只要求脚本或报文时，不得自动追加真实执行。用户要求执行案例时至少加入 `EXECUTE_API`；只有案例含数据库前置/断言或用户明确要求数据库校验时才加入 `VERIFY_DB`。生成脚本和报文也只在用户要求时加入。
+用户只要求脚本或请求报文时，不得自动追加真实执行。用户要求执行案例时至少加入 `EXECUTE_API`；只有案例含数据库前置/断言或用户明确要求数据库校验时才加入 `VERIFY_DB`。生成动作也只在用户要求时加入；两种动作共用完整脚本产物，不重复生成独立报文。
 
 ## 接口 ID/英文名参考分支
 
-当 `GENERATE_SCRIPT` 请求可从用户原话明确提取 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 时，`test-execution-api` 必须在其它生成步骤之前加载 `resolve-api-automation-references` 并首先调用 TCDS。两个字段均不存在时必须直接沿用存量逻辑：不加载该 Skill、不调用 TCDS/一体化平台、不询问用户，并将参考状态视为 `NOT_APPLICABLE`。
+当 `GENERATE_SCRIPT` 或兼容动作 `GENERATE_MESSAGE` 请求可从用户原话明确提取 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 时，`test-execution-api` 必须在其它生成步骤之前加载 `resolve-api-automation-references` 并首先调用 TCDS。两个字段均不存在时必须直接沿用存量逻辑：不加载该 Skill、不调用 TCDS/一体化平台、不询问用户，并将参考状态视为 `NOT_APPLICABLE`。
 
 以下约束不可降级：
 
