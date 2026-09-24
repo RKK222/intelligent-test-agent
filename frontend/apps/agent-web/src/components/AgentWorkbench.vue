@@ -13346,7 +13346,6 @@ async function handleLogout() {
         :right-panel-open="false"
         :chat-open="rightPanelOpen"
         @open-chat="rightPanelOpen = true"
-        @open-user-management="openSystemMenuPage('users')"
       />
       <main v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-editor-main">
         <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">

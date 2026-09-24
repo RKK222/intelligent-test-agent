@@ -108,14 +108,19 @@ describe("team management controller", () => {
     );
   });
 
-  it("starts each super-admin entry on the read-only platform scope", async () => {
+  it("starts each super-admin entry on their own team and keeps the read-only platform scope available", async () => {
     const api = createApi();
     const controller = createTeamManagementController(api);
     await controller.enter(true);
-    expect(controller.snapshot().scopeMode).toBe("GLOBAL");
+    expect(controller.snapshot().scopeMode).toBe("MY_TEAM");
+    expect(canMaintainTeamMembers(controller.snapshot())).toBe(true);
+    expect(api.listSystemAdminTeamMembers).toHaveBeenCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "", 1, 200
+    );
+
+    await controller.selectScope("GLOBAL");
     expect(canMaintainTeamMembers(controller.snapshot())).toBe(false);
-    expect(TEAM_MEMBER_SCOPE_HINT).toContain("请选择具体系统管理员团队");
-    expect(api.listSystemAdminTeamMembers).not.toHaveBeenCalled();
+    expect(TEAM_MEMBER_SCOPE_HINT).toContain("我的团队");
 
     await controller.selectScope("SYSTEM_ADMIN_TEAM", "owner-1");
     expect(canMaintainTeamMembers(controller.snapshot())).toBe(true);
@@ -131,7 +136,9 @@ describe("team management controller", () => {
     const api = createApi();
     const controller = createTeamManagementController(api);
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
 
+    api.listSystemAdminTeamMembers.mockClear();
     await controller.openMemberDialog();
     expect(controller.snapshot().teamPickerDialogOpen).toBe(true);
     expect(controller.snapshot().memberDialogOpen).toBe(false);
@@ -154,6 +161,7 @@ describe("team management controller", () => {
     const api = createApi();
     const controller = createTeamManagementController(api);
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
     await vi.waitFor(() => expect(controller.snapshot().ownersLoaded).toBe(true));
     api.listSystemAdmins
       .mockRejectedValueOnce(new Error("系统管理员团队暂时不可用"))
@@ -169,6 +177,34 @@ describe("team management controller", () => {
     expect(controller.snapshot().ownersLoaded).toBe(true);
     expect(controller.snapshot().owners).toHaveLength(1);
     expect(controller.snapshot().ownersError).toBe("");
+  });
+
+  it("lets a super-admin add the first member to their own team without another system-admin owner", async () => {
+    const api = createApi();
+    api.listSystemAdmins.mockResolvedValue({ items: [], total: 0, page: 1, size: 200 });
+    api.listSystemAdminTeamMembers.mockResolvedValue({ items: [], total: 0, page: 1, size: 20 });
+    const controller = createTeamManagementController(api);
+    await controller.enter(true);
+
+    await controller.openMemberDialog();
+    expect(controller.snapshot().memberDialogOpen).toBe(true);
+    expect(controller.snapshot().teamPickerDialogOpen).toBe(false);
+    expect(api.listSystemAdminTeamCandidates).toHaveBeenCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "", 1, 50
+    );
+
+    controller.chooseCandidate("candidate-1");
+    await controller.addMember();
+    expect(api.addSystemAdminTeamMember).toHaveBeenCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "candidate-1"
+    );
+
+    controller.closeMemberDialog();
+    await controller.selectScope("GLOBAL");
+    await controller.openMemberDialog();
+    await controller.selectOwnMemberManagement();
+    expect(controller.snapshot().scopeMode).toBe("MY_TEAM");
+    expect(controller.snapshot().memberDialogOpen).toBe(true);
   });
 
   it("ignores a late application response after the scope changes", async () => {
@@ -361,6 +397,7 @@ describe("team management controller", () => {
       .mockResolvedValue([contribution("member-1", "pw-1"), contribution("member-2", "pw-2")]);
     const controller = createTeamManagementController(api);
     await controller.enter(true, { appId: "app-1", templateId: "ws-app-1", versionId: "ver-1" });
+    await controller.selectScope("GLOBAL");
 
     expect(controller.snapshot().selectedUserId).toBe("member-1");
     expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1"]);

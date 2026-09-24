@@ -122,7 +122,7 @@ export type TeamManagementState = {
   reviewDialogOpen: boolean;
   /** 组员维护对话框；全平台只读范围不会直接打开它。 */
   memberDialogOpen: boolean;
-  /** 超级管理员在全平台只读范围点击成员管理后，先选择具体团队。 */
+  /** 超级管理员在全平台只读范围点击成员管理后，选择本人或其他系统管理员团队。 */
   teamPickerDialogOpen: boolean;
   memberKeyword: string;
   members: TeamUser[];
@@ -168,6 +168,7 @@ export type TeamManagementController = {
   openMemberDialog(): Promise<void>;
   closeMemberDialog(): void;
   closeTeamPickerDialog(): void;
+  selectOwnMemberManagement(): Promise<void>;
   selectMemberManagementOwner(ownerUserId: string): Promise<void>;
   retryOwners(): Promise<void>;
   chooseCandidate(userId: string): void;
@@ -926,7 +927,8 @@ export function createTeamManagementController(
       state = emptyState();
       state.active = true;
       state.scopeLocked = !superAdmin;
-      state.scopeMode = superAdmin ? "GLOBAL" : "MY_TEAM";
+      // 超级管理员继承系统管理员能力，默认进入本人团队才能直接维护首位成员。
+      state.scopeMode = "MY_TEAM";
       state.selectedAppId = seed.appId ?? "";
       state.selectedTemplateId = seed.templateId ?? "";
       state.selectedVersionId = seed.versionId ?? "";
@@ -934,7 +936,7 @@ export function createTeamManagementController(
       const scopeTicket = scopeEpoch;
       const catalogTicket = catalogEpoch;
       if (superAdmin) void ensureOwners(scopeTicket);
-      if (!superAdmin) await loadReviewRoster(scopeTicket);
+      await loadReviewRoster(scopeTicket);
       await loadApplications(scopeTicket, catalogTicket);
     },
     exit() {
@@ -1426,6 +1428,14 @@ export function createTeamManagementController(
       state.teamPickerDialogOpen = false;
       publish();
     },
+    async selectOwnMemberManagement() {
+      if (!state.active || !state.teamPickerDialogOpen) return;
+      state.teamPickerDialogOpen = false;
+      publish();
+      await this.selectScope("MY_TEAM");
+      if (!state.active || state.scopeMode !== "MY_TEAM") return;
+      await this.openMemberDialog();
+    },
     async selectMemberManagementOwner(ownerUserId: string) {
       if (!ownerUserId || !state.active) return;
       state.teamPickerDialogOpen = false;
@@ -1587,7 +1597,7 @@ export function canMaintainTeamMembers(state: Pick<TeamManagementState, "scopeMo
   return state.scopeMode !== "GLOBAL" && (state.scopeMode !== "SYSTEM_ADMIN_TEAM" || Boolean(state.ownerUserId));
 }
 
-export const TEAM_MEMBER_SCOPE_HINT = "请选择具体系统管理员团队后管理成员";
+export const TEAM_MEMBER_SCOPE_HINT = "全平台只读不能维护成员，请切换到“我的团队”或具体系统管理员团队";
 
 export function teamScopeLabel(state: Pick<TeamManagementState, "scopeMode" | "ownerUserId" | "owners">) {
   if (state.scopeMode === "GLOBAL") return "全平台只读";

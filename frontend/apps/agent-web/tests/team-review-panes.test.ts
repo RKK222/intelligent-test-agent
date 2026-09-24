@@ -108,6 +108,7 @@ describe("team review panes", () => {
   it("explains why platform-wide scope cannot change members and keeps the file tree read-only", async () => {
     const controller = createTeamManagementController(api());
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
     const provide = { [teamManagementKey as symbol]: controller };
     const review = mount(TeamReviewPane, { global: { provide } });
     const files = mount(TeamReviewFilePane, { global: { provide } });
@@ -130,6 +131,7 @@ describe("team review panes", () => {
   it("keeps a floating review launcher when the right panel is collapsed", async () => {
     const controller = createTeamManagementController(api());
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
     const provide = { [teamManagementKey as symbol]: controller };
     const review = mount(TeamReviewPane, {
       props: { rightPanelOpen: false },
@@ -142,11 +144,9 @@ describe("team review panes", () => {
     expect(manageMembers).not.toBeNull();
     manageMembers?.click();
     await review.vm.$nextTick();
-    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).not.toBeNull();
-    const manageOwners = document.body.querySelector<HTMLButtonElement>(".team-owner-empty button");
-    expect(manageOwners?.textContent).toContain("前往用户管理");
-    manageOwners?.click();
-    expect(review.emitted("open-user-management")).toHaveLength(1);
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).not.toBeNull();
+    expect(document.body.querySelector("[data-testid='team-own-management']")?.textContent).toContain("我的团队");
+    expect(document.body.textContent).toContain("暂无其他系统管理员团队");
     controller.closeTeamPickerDialog();
     launcher?.click();
     await review.vm.$nextTick();
@@ -202,12 +202,13 @@ describe("team review panes", () => {
     });
     const controller = createTeamManagementController(backend);
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
     const provide = { [teamManagementKey as symbol]: controller };
     const review = mount(TeamReviewPane, { global: { provide } });
 
     await review.get("button").trigger("click");
-    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).not.toBeNull();
-    const owner = document.body.querySelector<HTMLButtonElement>(".team-owner-option");
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).not.toBeNull();
+    const owner = document.body.querySelector<HTMLButtonElement>(".team-owner-option:not([data-testid='team-own-management'])");
     owner?.click();
     await review.vm.$nextTick();
     await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
@@ -224,6 +225,35 @@ describe("team review panes", () => {
     review.unmount();
   });
 
+  it("lets a super-admin add a first member from their own team when no other owner exists", async () => {
+    const backend = api();
+    backend.listSystemAdminTeamCandidates.mockResolvedValue({
+      items: [{ userId: "candidate-1", username: "待添加成员", unifiedAuthId: "candidate-auth", department: "质量部" }],
+      total: 1,
+      page: 1,
+      size: 50
+    });
+    const controller = createTeamManagementController(backend);
+    await controller.enter(true);
+    const review = mount(TeamReviewPane, { global: { provide: { [teamManagementKey as symbol]: controller } } });
+
+    expect((review.get("select[aria-label='团队范围']").element as HTMLSelectElement).value).toBe("MY_TEAM");
+    await review.get("button").trigger("click");
+    await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).toBeNull();
+
+    const candidate = document.body.querySelector<HTMLSelectElement>("select[aria-label='选择要添加的用户']");
+    expect(candidate?.querySelector("option[value='candidate-1']")).not.toBeNull();
+    candidate!.value = "candidate-1";
+    candidate!.dispatchEvent(new Event("change", { bubbles: true }));
+    await review.vm.$nextTick();
+    document.body.querySelector<HTMLButtonElement>(".team-member-add button")?.click();
+    await vi.waitFor(() => expect(backend.addSystemAdminTeamMember).toHaveBeenCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "candidate-1"
+    ));
+    review.unmount();
+  });
+
   it("closes the team picker and member dialog with Escape even when focus stays on the trigger", async () => {
     const backend = api();
     backend.listSystemAdmins.mockResolvedValue({
@@ -234,18 +264,19 @@ describe("team review panes", () => {
     });
     const controller = createTeamManagementController(backend);
     await controller.enter(true);
+    await controller.selectScope("GLOBAL");
     const provide = { [teamManagementKey as symbol]: controller };
     const review = mount(TeamReviewPane, { attachTo: document.body, global: { provide } });
 
     const trigger = review.get("button");
     trigger.element.focus();
     await trigger.trigger("click");
-    const picker = document.body.querySelector<HTMLElement>("[role='dialog'][aria-label='选择系统管理员团队']");
+    const picker = document.body.querySelector<HTMLElement>("[role='dialog'][aria-label='选择要管理的团队']");
     expect(picker).not.toBeNull();
     expect(document.activeElement).toBe(trigger.element);
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await review.vm.$nextTick();
-    expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).toBeNull();
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).toBeNull();
 
     await controller.selectMemberManagementOwner("owner-1");
     const members = document.body.querySelector<HTMLElement>("[role='dialog'][aria-label='成员管理']");

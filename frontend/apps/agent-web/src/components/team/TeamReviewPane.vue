@@ -32,7 +32,6 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "open-chat"): void;
-  (e: "open-user-management"): void;
 }>();
 
 const { controller, state } = useTeamManagementView();
@@ -89,6 +88,7 @@ function membershipText(userId: string) {
 function onScopeChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value;
   if (value === "GLOBAL") void controller.selectScope("GLOBAL");
+  else if (value === "MY_TEAM") void controller.selectScope("MY_TEAM");
   else void controller.selectScope("SYSTEM_ADMIN_TEAM", value);
 }
 
@@ -176,9 +176,10 @@ const launcherStyle = computed(() => ({
                 <div class="team-review-select-wrapper">
                   <select
                     aria-label="团队范围"
-                    :value="state.scopeMode === 'GLOBAL' ? 'GLOBAL' : state.ownerUserId"
+                    :value="state.scopeMode === 'SYSTEM_ADMIN_TEAM' ? state.ownerUserId : state.scopeMode"
                     @change="onScopeChange"
                   >
+                    <option value="MY_TEAM">我的团队</option>
                     <option value="GLOBAL">全平台只读</option>
                     <option v-for="owner in state.owners" :key="owner.userId" :value="owner.userId">
                       {{ owner.username }}
@@ -425,23 +426,31 @@ const launcherStyle = computed(() => ({
 
     <Teleport to="body">
       <div v-if="state.teamPickerDialogOpen" class="team-dialog-backdrop" @click.self="controller.closeTeamPickerDialog()">
-        <section class="team-dialog team-dialog--compact" role="dialog" aria-modal="true" aria-label="选择系统管理员团队" @keydown="handleDialogKeydown($event, 'team-picker')">
+        <section class="team-dialog team-dialog--compact" role="dialog" aria-modal="true" aria-label="选择要管理的团队" @keydown="handleDialogKeydown($event, 'team-picker')">
           <header class="team-dialog-header">
             <div>
               <span class="team-review-kicker">成员管理</span>
-              <h2>选择系统管理员团队</h2>
+              <h2>选择要管理的团队</h2>
             </div>
             <button type="button" class="team-dialog-close-btn" aria-label="关闭团队选择" autofocus @click="controller.closeTeamPickerDialog()">
               <X :size="16" />
             </button>
           </header>
-          <p class="team-dialog-description">全平台只读只能查看审阅内容。请选择一个系统管理员团队后再维护成员。</p>
+          <p class="team-dialog-description">全平台只读只能查看审阅内容。可管理我的团队，或选择其他系统管理员团队。</p>
           <p v-if="state.ownersLoading" class="team-review-empty" role="status">正在读取可管理的系统管理员团队…</p>
           <p v-if="state.ownersError" class="team-review-error" role="alert">
             <span>{{ state.ownersError }}</span>
             <button type="button" @click="controller.retryOwners()">重试</button>
           </p>
           <div class="team-owner-list">
+            <button type="button" class="team-owner-option" data-testid="team-own-management" @click="controller.selectOwnMemberManagement()">
+              <span class="team-review-person-avatar" aria-hidden="true">我</span>
+              <span class="team-owner-info">
+                <strong>我的团队</strong>
+                <small>维护我负责的成员</small>
+              </span>
+              <ChevronRight class="team-owner-chevron" :size="16" aria-hidden="true" />
+            </button>
             <button v-for="owner in state.owners" :key="owner.userId" type="button" class="team-owner-option" @click="controller.selectMemberManagementOwner(owner.userId)">
               <span class="team-review-person-avatar" aria-hidden="true">{{ memberInitials(owner.username) }}</span>
               <span class="team-owner-info">
@@ -450,10 +459,7 @@ const launcherStyle = computed(() => ({
               </span>
               <ChevronRight class="team-owner-chevron" :size="16" aria-hidden="true" />
             </button>
-            <div v-if="!state.ownersLoading && !state.ownersError && !state.owners.length" class="team-owner-empty">
-              <p class="team-review-empty">暂无系统管理员团队负责人。先在用户管理中设置系统管理员，再返回添加团队成员。</p>
-              <button type="button" class="team-btn-secondary" @click="emit('open-user-management')">前往用户管理</button>
-            </div>
+            <p v-if="!state.ownersLoading && !state.ownersError && !state.owners.length" class="team-review-empty">暂无其他系统管理员团队；可直接在“我的团队”添加成员。</p>
           </div>
         </section>
       </div>
