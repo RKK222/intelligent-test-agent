@@ -2,7 +2,7 @@
 
 应用工作区目录和 `I...-需求项/S...-子条目` 命名规则见测试设计公共 Skill 的 `test-design/rules/workspace-layout.md`。
 
-测试执行产生的接口自动化脚本、接口自动化报文和可落盘执行证据必须与测试设计产物分区存放。
+测试执行产生的接口自动化脚本（包含请求报文）和可落盘执行证据必须与测试设计产物分区存放。
 
 ## 解析优先级
 
@@ -15,8 +15,7 @@
 
 ## 执行产物命名
 
-- 接口自动化脚本：`<案例名称>-接口自动化脚本.md`；
-- 接口自动化报文：`<案例名称>-接口自动化报文.md`；
+- 接口自动化脚本（包含请求报文）：`<案例名称>-接口自动化脚本.md`；
 - 可落盘执行证据：`<案例名称>-执行结果.md`。
 
 案例名称已经表达业务动作和验证点，执行阶段直接复用，不重新拼接内部编号、objectId、UUID 或阶段状态。
@@ -24,6 +23,6 @@
 ## 交接要求
 
 - `test-execution-agent` 必须在 Task prompt 中传递解析后的 `outputTarget`、`workspaceContext`；无合法需求项/子条目上下文时返回 `INCOMPLETE`；
-- `test-execution-api`、`generate-api-automation-markdown` 和 `generate-test-messages` 必须沿用该目标；
-- 所有生成或更新文件都必须在结果的 `resolvedOutputTarget`、`generatedFiles` 或 `executionMessageFiles` 中列明；
+- `test-execution-api`、`generate-api-automation-markdown` 必须沿用该目标；
+- 所有生成或更新文件都必须在结果的 `resolvedOutputTarget`、`generatedFiles` 中列明；
 - 无法写入目标时明确返回 `INCOMPLETE`，不得静默改写到其他目录。

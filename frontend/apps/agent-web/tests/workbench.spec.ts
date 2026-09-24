@@ -3359,7 +3359,6 @@ test("workbench home opens the embedded user manual", async ({ page }) => {
     "test-design-scenario/",
     "api-execute-case/",
     "generate-api-automation-markdown/",
-    "generate-test-messages/",
     "validate-automation-script-format/"
   ]) {
     const row = manualFrame.getByRole("treeitem", { name: new RegExp(`^${skillDirectory}`) });

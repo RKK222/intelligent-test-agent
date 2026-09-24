@@ -2,7 +2,7 @@
 
 - 当前项目内源文件目录：`public-agent-config/`
 - 首次导入来源：原公共配置包 `feature_config@6bb05a0f585ebe12cf06c72fe58224676a5ec02`
-- 内容：9 个 Agent、22 个 Skill、12 个 Tool 文件
+- 内容：9 个 Agent、21 个 Skill、12 个 Tool 文件
 
 ## 仓库与发布边界
 
@@ -44,7 +44,7 @@ deploy/internal/package-public-agent-config.sh
 | `test-design-orchestrator` | `test-design` |
 | `test-design-generation` | `test-design-api`、`test-design-augment`、`test-design-direct`、`test-design-equivalence`、`test-design-orthogonal`、`test-design-path`、`test-design-scenario`、`chaos-case-generate`、`secure-case-recommend` |
 | `test-execution-agent` | `test-execution` |
-| `test-execution-api` | `resolve-api-automation-references`、`legacy-interface-function-asset-to-md`、`generate-api-automation-markdown`、`generate-test-messages`、`validate-automation-script-format` |
+| `test-execution-api` | `resolve-api-automation-references`、`legacy-interface-function-asset-to-md`、`generate-api-automation-markdown`、`validate-automation-script-format` |
 
 以下是直接调用的独立 Skill，不需要伪造 `agent-id`：`bdsp-job-result-query`、`bdsp-job-scheduler`、`concise-output`、`secure-scan`、`skill-creator`、`skill-optimizer`。
 

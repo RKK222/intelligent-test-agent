@@ -566,18 +566,6 @@ directoryMapping:
                         name: "SKILL.md"
                         scope: "testing"
                   -
-                    id: "test-message-skill"
-                    name: "generate-test-messages/"
-                    scope: "testing"
-                    note: "Test Message Generation（测试报文生成）"
-                    physical: "公共 Git"
-                    implementation: "implemented"
-                    children:
-                      -
-                        id: "test-message-skill-file"
-                        name: "SKILL.md"
-                        scope: "testing"
-                  -
                     id: "automation-format-skill"
                     name: "validate-automation-script-format/"
                     scope: "testing"

@@ -84,7 +84,6 @@ test-design-orchestrator
 | `resolve-api-automation-references` | API Reference Resolution | 接口参考解析 |
 | `legacy-interface-function-asset-to-md` | Legacy Asset Conversion | 存量资产转换 |
 | `generate-api-automation-markdown` | API Automation Script | 接口自动化脚本 |
-| `generate-test-messages` | Test Message Generation | 测试报文生成 |
 | `validate-automation-script-format` | Automation Format Check | 自动化格式检查 |
 | `chaos-case-generate` | Chaos Case Generate | 混沌案例生成 |
 | `secure-case-recommend` | Secure Case Recommend | 安全案例推荐 |

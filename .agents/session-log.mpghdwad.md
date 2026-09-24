@@ -681,3 +681,81 @@
 - 超级管理员排查页面可直接复制会话关联的 Workspace ID，并能跨分页按工作区名称或 ID 定位目标。
 - `q` 为可选增量参数，不传时保持原分页行为；查询仍限定在目标用户归因范围内，继续复用既有 grant、审计和只读安全边界。
 - 不涉及 RunEvent/SSE、数据库结构、Flyway、部署拓扑、环境配置、generated SDK 或 OpenCode 源码；模糊查询在分页前执行，未新增索引。
+## 2026-09-23 - 工作空间与 Agent 文件夹增加清空并保留目录选项
+
+### Why
+- 单个文件夹的原删除确认只能递归删除整个目录，用户需要删除其全部文件及子文件夹，同时保留选中的目录本身。
+
+### What
+- 共用删除弹窗增加默认不勾选的“清空文件夹（保留当前文件夹）”，工作空间与公共/应用 Agent 树分别沿既有文件 WebSocket route/ticket/RPC 和授权链路传递 `keepDirectory=true`。
+- 文件服务验证目标是非根目录且为目录，清空前扫描内部 `.git`（含大小写变体），遍历期间继续拒绝新增 `.git`；不跟随符号链接，只删除目标目录下的内容。前端保留目标目录节点、清理后代缓存及失效标签，并刷新 Git Diff。
+- 同步文件树、Agent Web、工作空间模块 README/PACKAGE 与 `docs/api/http-api.md`、`docs/api/event-stream.md`，增补前后端行为及参数映射测试。
+
+### How
+- 前端定向 Vitest 2 个文件 71 项通过；`@test-agent/file-explorer`、`@test-agent/agent-web` typecheck 通过。
+- 后端定向 Maven reactor 测试：`WorkspaceFileServiceTest` 新增 2 项与 `WorkspaceFileWebSocketHandlerTest` 40 项通过，`BUILD SUCCESS`；`git diff --check` 通过。
+- 此前运行完整 `WorkspaceFileServiceTest` 出现 10 项既有 Windows 环境限制（符号链接权限、`SecureWorkspaceMover` winError=87），本次新增测试均未在失败列表，未修改无关环境或移动实现。提交前回顾全部 `.agents/session-log*.md` 近期条目，保留根目录原有两个 OCR 数据文件不暂存。
+
+### Result
+- 单个文件夹可选择清空并保留目录；不勾选及旧 RPC 请求继续原递归删除语义，多选删除不变。
+- 不新增部署节点、HTTP API 路径、RunEvent/SSE、数据库/Flyway 或环境配置；新增可选 RPC 字段向后兼容，既有权限、路径和 `.git` 防护沿用并补强清空预检。大目录清空为逐项文件操作，遇并发修改或 I/O 失败可能部分完成，未宣称事务回滚。
+
+## 2026-09-23 - 修复清空文件夹可能误删当前目录
+
+### Why
+- 用户复查发现勾选“清空文件夹”后目标目录仍被删除。上一条日志把 `delete + keepDirectory=true` 认定为向后兼容是错误的：旧服务端会忽略未知字段并执行递归删除；旧本地客户端也忽略该字段。尚未获取用户现场版本组合，不能确认现场的唯一原因。
+
+### What
+- 工作空间及公共/应用 Agent 清空改为独立 `workspace.clear-directory` / `agent-config.clear-directory` 文件 WebSocket 操作；服务端复用既有授权、目录校验和保留目录的文件服务。旧 `delete` 行为与已发布前端兼容分支保留，但新前端不再用可选标记表达清空。
+- 本地客户端新增独立清空操作；服务端拒绝本地工作区旧格式 `workspace.delete + keepDirectory=true`，防止旧本地客户端忽略字段误删目录。旧服务端、旧本地客户端不识别新操作时必须报错，不做删除降级。
+- 补充前端操作名、后端映射与未知操作、本地目录存续测试，更新 HTTP API、文件 WebSocket 事件契约和相关模块 README。
+
+### How
+- `corepack pnpm exec vitest run packages/backend-api/tests/backend-api.test.ts packages/file-explorer/tests/DirectoryRows.test.ts apps/agent-web/tests/agent-config-panel.test.ts`：3 文件 200 项通过；修改后重跑 backend-api：128 项通过。backend-api、agent-web typecheck 通过。
+- `mvn -pl test-agent-api -am '-Dtest=WorkspaceFileServiceTest#serviceClearsDirectoryButKeepsTheSelectedFolder+serviceRejectsClearingFileRootAndNestedGitWithoutPartialDeletion,WorkspaceFileWebSocketHandlerTest' '-Dsurefire.failIfNoSpecifiedTests=false' test`：工作区服务 2 项、handler 42 项通过。
+- 本地客户端新的隔离定向用例通过，编译通过；完整 `LocalClientFileRpcHandlerTest` 的 3 个既有测试在 Windows 因 POSIX 文件权限与根目录文件系统身份限制失败，非本次逻辑回归。`git diff --check` 通过，提交前回顾各 `.agents/session-log*.md` 近期记录，两个未跟踪 OCR 数据文件不暂存。
+
+### Result
+- 清空操作只在支持保留目录语义的后端/本地客户端上执行；混合版本优先报错而不是把清空变成递归删除。目标环境尚未部署验证，已删除的历史目录不能由本修复自动恢复；发布需同步更新前后端，本地工作区还需更新本地客户端。
+- 不新增部署节点或 HTTP 路径，不涉及 RunEvent SSE、数据库/Flyway、性能模型或环境配置；文件 WebSocket RPC 契约新增操作名，权限不放宽。大目录清空仍可能在 I/O 异常或并发修改时部分完成。
+
+## 2026-09-23 - 清空文件夹 WebSocket 操作报不支持的本地运行版本排查
+
+### Why
+- 用户在已提交独立清空 RPC 后仍收到 `VALIDATION_ERROR: 不支持的文件 WebSocket 操作`；不能回退为旧 `delete + keepDirectory`，否则旧后端会递归删除当前目录。
+
+### What
+- 确认当前 `release` 源码已包含 `workspace.clear-directory` 与 `agent-config.clear-directory`，但本地 8080 Java 进程运行的应用 JAR 构建于 9 月 17 日；同一工作空间的文件与 Agent 配置 route 日志均指向本机 8080，且 `runtimeKind=SERVER_PROCESS`。
+- 按正在运行的 `local` profile 与已有 `.env.local` 重新构建并重启本机后端/前端，未改环境配置；Windows 脚本重编 opencode-manager 因 Go 代理依赖下载超时而跳过启动，随后使用现有二进制与原本的 manager 环境参数恢复其进程。保留了手动启动的 opencode serve。
+
+### How
+- 后端 `mvn clean package -Dmaven.test.skip=true` 构建成功；检查可运行 JAR 内嵌的 `test-agent-api` class 确含两种新操作，`/actuator/health` 状态 UP、前端 HTTP 200、manager 进程存活。
+- 定向运行 `WorkspaceFileServiceTest` 清空测试 2 项和 `WorkspaceFileWebSocketHandlerTest` 42 项，全部通过；未对用户真实目录执行破坏性端到端测试。`git diff --check` 通过。
+- 提交前回顾各 `.agents/session-log*.md` 近期记录，保留两个既有未跟踪 OCR 数据文件，未纳入暂存。
+
+### Result
+- 本机处理文件 WebSocket 请求的 Java 已升级到含新 RPC 的 JAR；请刷新页面后重试，仍需由用户实际操作验证 UI。远端环境及本地客户端安装包未在本次更新或验证。
+- 未修改业务代码、稳定 API/事件文档、数据库、配置或部署拓扑；旧服务遇新操作继续失败关闭以保护目录。Windows 脚本当前先停服务再构建，且 Go 依赖不可达时不会自动恢复 manager，后续使用该脚本需注意。
+
+## 2026-09-24 - 移除独立接口测试报文 Skill 并统一脚本生成入口
+
+### Why
+
+- 公共执行链仍把 `GENERATE_MESSAGE` 分流到单独的报文生成 Skill，和现有接口自动化 Markdown 模板生成流程重复；用户明确要求保留旧动作入口，但改由现有脚本生成 Skill 承接。
+
+### What
+
+- 删除独立报文生成 Skill 目录与公共清单、执行 Agent/Skill、输出路径、用户手册目录映射和工作台测试中的引用；公共 Skill 数量由 22 调整为 21。
+- `GENERATE_MESSAGE` 作为兼容动作与 `GENERATE_SCRIPT` 共用接口身份参考解析、`generate-api-automation-markdown` 渲染和格式校验，正式产物统一为包含请求报文的 `<案例名称>-接口自动化脚本.md`，不再定义独立报文文件或结果字段。
+
+### How
+
+- 核对 `release` 分支，本次不新增部署节点；检索全仓旧 Skill 名称、目录映射 ID 和旧结果字段，确认无活动引用。
+- 原提交被回退后，在当前 release 分支重新应用 472b17816；session log 冲突保留现有记录与本任务记录，不覆盖无关的 components.d.ts。
+- 运行接口自动化 Markdown renderer/verifier 的 8 个单元测试、目录映射 YAML/ID 校验、用户手册 VitePress 构建和 `git diff --check`，均通过。公共 Skill 校验器对生成 Skill 通过；对既有 `test-execution` 提示 `metadata.source` 非 `test-agent`，该 frontmatter 未因本次删除而更改。
+- 提交前回顾所有提交者的近期 session log，仅纳入本次相关文件；保留工作区其它未提交产物及未跟踪 OCR 数据。
+
+### Result
+
+- 报文生成请求继续可通过兼容动作路由，但生成的是带请求报文的完整接口自动化脚本，不另写报文文件；真实接口/数据库执行约束不变。
+- 不涉及 HTTP API、事件、数据库、性能或安全边界改动；兼容层保留旧动作名，消费者若依赖已删除的独立报文文件/字段需迁移到 `generatedFiles` 中的脚本路径。未做真实平台执行或浏览器端到端验收。

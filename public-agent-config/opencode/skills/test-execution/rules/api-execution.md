@@ -5,7 +5,7 @@
 测试执行入口根据用户意图生成 `requestedActions`，只包含实际要求的动作：
 
 - `GENERATE_SCRIPT`：加载 `generate-api-automation-markdown` 生成接口自动化脚本；
-- `GENERATE_MESSAGE`：加载 `generate-test-messages` 生成接口自动化报文；
+- `GENERATE_MESSAGE`：兼容动作，与 `GENERATE_SCRIPT` 一样加载 `generate-api-automation-markdown`，生成包含请求报文的接口自动化脚本。
 - `EXECUTE_API`：由 `test-execution-api` 调用平台接口工具真实执行；
 - `VERIFY_DB`：由 `test-execution-api` 使用平台数据库工具铺底、校验或清理。
 
