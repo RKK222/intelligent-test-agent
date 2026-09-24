@@ -207,6 +207,25 @@ describe("team management controller", () => {
     expect(controller.snapshot().memberDialogOpen).toBe(true);
   });
 
+  it("uses one keyword for current members and addable users", async () => {
+    const api = createApi();
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    await controller.openMemberDialog();
+    controller.chooseCandidate("candidate-1");
+
+    await controller.searchMembers("成员甲");
+
+    expect(controller.snapshot().memberKeyword).toBe("成员甲");
+    expect(controller.snapshot().candidateUserId).toBe("");
+    expect(api.listSystemAdminTeamMembers).toHaveBeenLastCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "成员甲", 1, 20
+    );
+    expect(api.listSystemAdminTeamCandidates).toHaveBeenLastCalledWith(
+      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "成员甲", 1, 50
+    );
+  });
+
   it("ignores a late application response after the scope changes", async () => {
     const first = deferred<unknown[]>();
     const second = deferred<unknown[]>();

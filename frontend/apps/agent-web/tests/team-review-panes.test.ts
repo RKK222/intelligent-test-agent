@@ -128,41 +128,43 @@ describe("team review panes", () => {
     files.unmount();
   });
 
-  it("keeps a floating review launcher when the right panel is collapsed", async () => {
-    const controller = createTeamManagementController(api());
+  it("opens only a member picker from the floating username and returns to the selected workspace", async () => {
+    const backend = api();
+    backend.listSystemAdminTeamMembers.mockResolvedValue({
+      items: [
+        { userId: "member-1", username: "成员甲", unifiedAuthId: "one", department: "质量部" },
+        { userId: "member-2", username: "成员乙", unifiedAuthId: "two", department: "研发部" }
+      ], total: 2, page: 1, size: 200
+    });
+    const controller = createTeamManagementController(backend);
     await controller.enter(true);
-    await controller.selectScope("GLOBAL");
     const provide = { [teamManagementKey as symbol]: controller };
     const review = mount(TeamReviewPane, {
       props: { rightPanelOpen: false },
       global: { provide }
     });
 
-    const launcher = document.body.querySelector<HTMLButtonElement>("[aria-label='打开团队审阅']");
+    const launcher = document.body.querySelector<HTMLButtonElement>("[aria-label='选择审阅成员']");
     expect(launcher).not.toBeNull();
-    const manageMembers = document.body.querySelector<HTMLButtonElement>("[aria-label='管理团队成员']");
-    expect(manageMembers).not.toBeNull();
-    manageMembers?.click();
-    await review.vm.$nextTick();
-    expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).not.toBeNull();
-    expect(document.body.querySelector("[data-testid='team-own-management']")?.textContent).toContain("我的团队");
-    expect(document.body.textContent).toContain("暂无其他系统管理员团队");
-    controller.closeTeamPickerDialog();
+    expect(document.body.querySelector("[aria-label='打开AI对话']")).toBeNull();
+    expect(document.body.querySelector("[aria-label='管理团队成员']")).toBeNull();
     launcher?.click();
     await review.vm.$nextTick();
-    const dialog = document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']");
+    const dialog = document.body.querySelector("[role='dialog'][aria-label='选择成员']");
     expect(dialog).not.toBeNull();
-    expect(dialog?.textContent).not.toContain("未提交修改");
+    expect(document.activeElement).toBe(dialog?.querySelector("input[aria-label='搜索审阅成员']"));
+    expect(dialog?.textContent).toContain("成员乙");
+    expect(dialog?.textContent).not.toContain("个人提交");
+    expect(dialog?.textContent).not.toContain("整组导出");
+    dialog?.querySelectorAll<HTMLButtonElement>("[role='option']")[1]?.click();
+    await vi.waitFor(() => expect(controller.snapshot().selectedUserId).toBe("member-2"));
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择成员']")).toBeNull();
+    expect(launcher?.textContent).toContain("成员乙");
 
-    const close = document.body.querySelector<HTMLButtonElement>("[aria-label='关闭审阅对话框']");
-    close?.click();
-    await review.vm.$nextTick();
-    expect(document.body.querySelector("[role='dialog'][aria-label='团队审阅对话框']")).toBeNull();
-    expect(document.body.querySelector("[aria-label='打开团队审阅']")).not.toBeNull();
     review.unmount();
   });
 
-  it("emits open-chat from the floating review launcher and shifts position when chat opens", async () => {
+  it("keeps the member launcher beside the chat column without a conversation button", async () => {
     const controller = createTeamManagementController(api());
     await controller.enter(true);
     const provide = { [teamManagementKey as symbol]: controller };
@@ -175,11 +177,7 @@ describe("team review panes", () => {
     expect(launcherGroup).not.toBeNull();
     expect(launcherGroup?.style.right).toBe("10px");
 
-    const chatBtn = document.body.querySelector<HTMLButtonElement>("[aria-label='打开AI对话']");
-    expect(chatBtn).not.toBeNull();
-    chatBtn?.click();
-    await review.vm.$nextTick();
-    expect(review.emitted("open-chat")).toHaveLength(1);
+    expect(document.body.querySelector("[aria-label='打开AI对话']")).toBeNull();
 
     await review.setProps({ chatOpen: true });
     expect(launcherGroup?.style.right).toBe("460px");
@@ -213,11 +211,14 @@ describe("team review panes", () => {
     await review.vm.$nextTick();
     await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
     expect(backend.listSystemAdminTeamMembers).toHaveBeenCalled();
-    const candidate = document.body.querySelector<HTMLSelectElement>("select[aria-label='选择要添加的用户']");
-    expect(candidate?.querySelector("option[value='candidate-1']")).not.toBeNull();
-    candidate!.value = "candidate-1";
-    candidate!.dispatchEvent(new Event("change", { bubbles: true }));
+    const search = document.body.querySelector<HTMLInputElement>("input[aria-label='搜索或选择团队成员']");
+    expect(search).not.toBeNull();
+    search?.focus();
     await review.vm.$nextTick();
+    expect(document.body.querySelectorAll("[role='dialog'][aria-label='成员管理'] input")).toHaveLength(1);
+    document.body.querySelector<HTMLButtonElement>("#team-member-candidates [role='option']")?.click();
+    await review.vm.$nextTick();
+    expect(document.body.querySelector(".team-member-add button")?.textContent).toContain("待添加成员");
     document.body.querySelector<HTMLButtonElement>(".team-member-add button")?.click();
     await vi.waitFor(() => expect(backend.addSystemAdminTeamMember).toHaveBeenCalledWith(
       { scopeMode: "SYSTEM_ADMIN_TEAM", ownerUserId: "owner-1" }, "candidate-1"
@@ -242,10 +243,10 @@ describe("team review panes", () => {
     await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
     expect(document.body.querySelector("[role='dialog'][aria-label='选择要管理的团队']")).toBeNull();
 
-    const candidate = document.body.querySelector<HTMLSelectElement>("select[aria-label='选择要添加的用户']");
-    expect(candidate?.querySelector("option[value='candidate-1']")).not.toBeNull();
-    candidate!.value = "candidate-1";
-    candidate!.dispatchEvent(new Event("change", { bubbles: true }));
+    const search = document.body.querySelector<HTMLInputElement>("input[aria-label='搜索或选择团队成员']");
+    search?.focus();
+    await review.vm.$nextTick();
+    document.body.querySelector<HTMLButtonElement>("#team-member-candidates [role='option']")?.click();
     await review.vm.$nextTick();
     document.body.querySelector<HTMLButtonElement>(".team-member-add button")?.click();
     await vi.waitFor(() => expect(backend.addSystemAdminTeamMember).toHaveBeenCalledWith(

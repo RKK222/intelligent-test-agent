@@ -13358,7 +13358,6 @@ async function handleLogout() {
         v-if="workbenchPerspective === 'TEAM_MANAGEMENT'"
         :right-panel-open="false"
         :chat-open="rightPanelOpen"
-        @open-chat="rightPanelOpen = true"
       />
       <main v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-editor-main">
         <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">

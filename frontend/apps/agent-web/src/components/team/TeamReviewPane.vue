@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
-  MessageSquare,
   ChevronRight,
   X,
   RotateCcw,
@@ -30,12 +29,18 @@ const props = withDefaults(defineProps<{
   chatOpen: false
 });
 
-const emit = defineEmits<{
-  (e: "open-chat"): void;
-}>();
-
 const { controller, state } = useTeamManagementView();
+const memberSearchOpen = ref(false);
+const reviewMemberQuery = ref("");
+const reviewSearchInput = ref<HTMLInputElement | null>(null);
 const canMaintain = computed(() => canMaintainTeamMembers(state.value));
+const selectedCandidate = computed(() => state.value.candidates.find((item) => item.userId === state.value.candidateUserId));
+const visibleReviewMembers = computed(() => {
+  const keyword = reviewMemberQuery.value.trim().toLocaleLowerCase();
+  return keyword
+    ? state.value.reviewRoster.filter((item) => `${item.username} ${item.unifiedAuthId} ${item.department}`.toLocaleLowerCase().includes(keyword))
+    : state.value.reviewRoster;
+});
 const personalCommits = computed(() =>
   state.value.personalCommits.filter((item) => item.contributionType !== "SYNC_MERGE"));
 const publishedCommits = computed(() =>
@@ -93,7 +98,19 @@ function onScopeChange(event: Event) {
 }
 
 function onMemberKeyword(event: Event) {
+  memberSearchOpen.value = true;
   void controller.searchMembers((event.target as HTMLInputElement).value);
+}
+
+function selectReviewMember(userId: string) {
+  // 只将成员选择用于切换只读工作区；列表立即收起，不再打开提交概览。
+  controller.closeReviewDialog();
+  void controller.selectMember(userId);
+}
+
+function onMemberSearchFocusOut(event: FocusEvent) {
+  const container = event.currentTarget as HTMLElement;
+  if (!container.contains(event.relatedTarget as Node | null)) memberSearchOpen.value = false;
 }
 
 function commitKind(item: TeamCommit): "PERSONAL" | "PUBLISHED" {
@@ -106,11 +123,27 @@ function memberInitials(username: string) {
 }
 
 function openMemberManagement() {
+  controller.closeReviewDialog();
+  memberSearchOpen.value = false;
   void controller.openMemberDialog();
+}
+
+function closeMemberManagement() {
+  memberSearchOpen.value = false;
+  controller.closeMemberDialog();
 }
 
 function closeReviewDialog() {
   controller.closeReviewDialog();
+}
+
+function toggleMemberPicker() {
+  if (state.value.reviewDialogOpen) closeReviewDialog();
+  else {
+    reviewMemberQuery.value = "";
+    controller.openReviewDialog();
+    void nextTick(() => reviewSearchInput.value?.focus());
+  }
 }
 
 function handleDialogKeydown(event: KeyboardEvent, dialog: "review" | "team-picker" | "members") {
@@ -118,7 +151,7 @@ function handleDialogKeydown(event: KeyboardEvent, dialog: "review" | "team-pick
   event.stopPropagation();
   if (dialog === "review") closeReviewDialog();
   else if (dialog === "team-picker") controller.closeTeamPickerDialog();
-  else controller.closeMemberDialog();
+  else closeMemberManagement();
 }
 
 /**
@@ -132,8 +165,20 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   else if (!props.rightPanelOpen && state.value.reviewDialogOpen) handleDialogKeydown(event, "review");
 }
 
-onMounted(() => window.addEventListener("keydown", handleGlobalKeydown));
-onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
+function handleOutsidePointerDown(event: PointerEvent) {
+  if (!state.value.reviewDialogOpen || props.rightPanelOpen) return;
+  if (!(event.target instanceof Node) || document.querySelector(".team-review-launcher-group")?.contains(event.target)) return;
+  closeReviewDialog();
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", handleGlobalKeydown);
+  document.addEventListener("pointerdown", handleOutsidePointerDown);
+});
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleGlobalKeydown);
+  document.removeEventListener("pointerdown", handleOutsidePointerDown);
+});
 
 async function download() {
   const url = await controller.downloadExport();
@@ -147,10 +192,10 @@ const launcherStyle = computed(() => ({
 
 <template>
   <div class="team-review-host">
-    <!-- 右栏展开时直接嵌入工作台，收起后把同一份内容传送到页面中央。 -->
+    <!-- 右栏嵌入时保留完整审阅；工作台浮条只负责切换成员，不再弹出提交概览。 -->
     <Teleport to="body" :disabled="props.rightPanelOpen">
       <div
-        v-if="props.rightPanelOpen || state.reviewDialogOpen"
+        v-if="props.rightPanelOpen"
         :class="props.rightPanelOpen ? 'team-review-panel-host' : 'team-review-modal-backdrop'"
         @click.self="!props.rightPanelOpen && closeReviewDialog()"
       >
@@ -382,44 +427,50 @@ const launcherStyle = computed(() => ({
       </div>
     </Teleport>
 
-    <!-- 浮动审阅胶囊：支持显示当前审阅人员，收缩状态下支持一键展开 AI 对话 -->
+    <!-- 浮动胶囊直接切换只读成员工作区；AI 对话由原工作台右栏承载。 -->
     <Teleport to="body">
       <div
         v-if="!props.rightPanelOpen && state.active"
         class="team-review-launcher-group"
         :style="launcherStyle"
       >
+        <section v-if="state.reviewDialogOpen" class="team-review-member-popover" role="dialog" aria-label="选择成员">
+          <div class="team-review-member-popover-header">
+            <strong>选择成员</strong>
+            <button type="button" aria-label="关闭成员选择" @click="closeReviewDialog"><X :size="15" /></button>
+          </div>
+          <div class="team-input-with-icon team-review-member-filter">
+            <Search class="team-input-icon" :size="14" />
+            <input ref="reviewSearchInput" v-model="reviewMemberQuery" aria-label="搜索审阅成员" placeholder="搜索成员姓名或账号">
+          </div>
+          <p v-if="state.catalogLoading && !state.reviewRoster.length" class="team-review-empty">正在读取成员…</p>
+          <div v-else class="team-review-member-options" role="listbox" aria-label="成员列表">
+            <button
+              v-for="item in visibleReviewMembers"
+              :key="item.userId"
+              type="button"
+              role="option"
+              :aria-selected="item.userId === state.selectedUserId"
+              class="team-review-member-option"
+              @click="selectReviewMember(item.userId)"
+            >
+              <span class="team-review-person-avatar" aria-hidden="true">{{ memberInitials(item.username) }}</span>
+              <span class="team-review-member-option-copy"><strong>{{ item.username }}</strong><small>{{ item.unifiedAuthId }}</small></span>
+              <span v-if="item.userId === state.selectedUserId" class="team-review-member-current">当前</span>
+            </button>
+            <p v-if="!visibleReviewMembers.length" class="team-review-empty">{{ reviewMemberQuery.trim() ? "没有匹配的成员。" : "当前团队暂无成员，请点顶部“添加团队成员”。" }}</p>
+          </div>
+        </section>
         <button
           type="button"
           class="team-review-launcher"
-          aria-label="打开团队审阅"
-          title="点击打开团队审阅"
-          @click="controller.openReviewDialog()"
+          aria-label="选择审阅成员"
+          title="选择成员工作区"
+          :aria-expanded="state.reviewDialogOpen"
+          @click="toggleMemberPicker"
         >
           <span class="team-review-launcher-dot" aria-hidden="true" />
-          <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "团队审阅") : "团队审阅" }}</span>
-        </button>
-        <div class="team-review-launcher-divider" aria-hidden="true" />
-        <button
-          type="button"
-          class="team-review-launcher-chat-btn"
-          aria-label="管理团队成员"
-          title="管理团队成员"
-          @click="openMemberManagement"
-        >
-          <Users :size="13" />
-          <span>成员</span>
-        </button>
-        <div class="team-review-launcher-divider" aria-hidden="true" />
-        <button
-          type="button"
-          class="team-review-launcher-chat-btn"
-          aria-label="打开AI对话"
-          title="展开智能体对话"
-          @click="emit('open-chat')"
-        >
-          <MessageSquare :size="13" />
-          <span>对话</span>
+          <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "选择成员") : "选择成员" }}</span>
         </button>
       </div>
     </Teleport>
@@ -464,46 +515,52 @@ const launcherStyle = computed(() => ({
         </section>
       </div>
 
-      <div v-if="state.memberDialogOpen" class="team-dialog-backdrop" @click.self="controller.closeMemberDialog()">
+      <div v-if="state.memberDialogOpen" class="team-dialog-backdrop" @click.self="closeMemberManagement">
         <section class="team-dialog team-dialog--members" role="dialog" aria-modal="true" aria-label="成员管理" @keydown="handleDialogKeydown($event, 'members')">
           <header class="team-dialog-header">
             <div>
               <span class="team-review-kicker">{{ scopeDescription }}</span>
               <h2>添加团队成员</h2>
             </div>
-            <button type="button" class="team-dialog-close-btn" aria-label="关闭成员管理" autofocus @click="controller.closeMemberDialog()">
+            <button type="button" class="team-dialog-close-btn" aria-label="关闭成员管理" autofocus @click="closeMemberManagement">
               <X :size="16" />
             </button>
           </header>
           <p v-if="!canMaintain" class="team-review-hint">{{ TEAM_MEMBER_SCOPE_HINT }}</p>
           <template v-else>
-            <form class="team-member-search" @submit.prevent>
-              <div class="team-input-with-icon">
-                <Search class="team-input-icon" :size="14" />
-                <input
-                  aria-label="搜索组员"
-                  placeholder="搜索姓名、统一认证号或部门"
-                  :value="state.memberKeyword"
-                  @input="onMemberKeyword"
-                >
-              </div>
-            </form>
             <div class="team-member-add">
-              <input
-                aria-label="搜索要添加的用户"
-                placeholder="搜索要添加的用户"
-                @input="controller.searchCandidates(($event.target as HTMLInputElement).value)"
-              >
-              <select
-                aria-label="选择要添加的用户"
-                :value="state.candidateUserId"
-                @change="controller.chooseCandidate(($event.target as HTMLSelectElement).value)"
-              >
-                <option value="">选择用户</option>
-                <option v-for="candidate in state.candidates" :key="candidate.userId" :value="candidate.userId">
-                  {{ candidate.username }} · {{ candidate.unifiedAuthId }}
-                </option>
-              </select>
+              <div class="team-member-combobox" @focusout="onMemberSearchFocusOut">
+                <div class="team-input-with-icon">
+                  <Search class="team-input-icon" :size="14" />
+                  <input
+                    id="team-member-search"
+                    aria-label="搜索或选择团队成员"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-controls="team-member-candidates"
+                    :aria-expanded="memberSearchOpen"
+                    placeholder="搜索成员，或选择要添加的用户"
+                    :value="state.memberKeyword"
+                    @focus="memberSearchOpen = true"
+                    @input="onMemberKeyword"
+                  >
+                </div>
+                <div v-if="memberSearchOpen" id="team-member-candidates" class="team-member-candidates" role="listbox" aria-label="可添加的用户">
+                  <p class="team-member-candidates-title">可添加的用户</p>
+                  <button
+                    v-for="candidate in state.candidates"
+                    :key="candidate.userId"
+                    type="button"
+                    role="option"
+                    :aria-selected="candidate.userId === state.candidateUserId"
+                    @click="controller.chooseCandidate(candidate.userId); memberSearchOpen = false"
+                  >
+                    <strong>{{ candidate.username }}</strong>
+                    <small>{{ candidate.unifiedAuthId }} · {{ candidate.department || "未填写部门" }}</small>
+                  </button>
+                  <p v-if="!state.memberLoading && !state.candidates.length" class="team-review-empty">没有可添加的用户。</p>
+                </div>
+              </div>
               <button
                 type="button"
                 class="team-btn-primary"
@@ -511,7 +568,7 @@ const launcherStyle = computed(() => ({
                 @click="controller.addMember()"
               >
                 <Plus :size="14" />
-                <span>添加团队成员</span>
+                <span>{{ selectedCandidate ? `添加 ${selectedCandidate.username}` : "添加团队成员" }}</span>
               </button>
             </div>
             <div class="team-member-list">
@@ -1123,6 +1180,72 @@ const launcherStyle = computed(() => ({
   box-shadow: 0 14px 30px -5px rgba(15, 23, 42, 0.2), 0 6px 10px -2px rgba(15, 23, 42, 0.08);
 }
 
+.team-review-member-popover {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(440px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.17);
+  transform: translateY(-50%);
+}
+
+.team-review-member-popover-header,
+.team-review-member-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.team-review-member-popover-header strong { font-size: 14px; }
+.team-review-member-popover-header button {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.team-review-member-filter input { width: 100%; }
+.team-review-member-options { min-height: 0; overflow-y: auto; }
+.team-review-member-option {
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.team-review-member-option:hover,
+.team-review-member-option[aria-selected="true"] { background: #fff1f2; }
+.team-review-member-option-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.team-review-member-option-copy strong,
+.team-review-member-option-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-review-member-option-copy strong { color: #172033; font-size: 13px; }
+.team-review-member-option-copy small,
+.team-review-member-current { color: #64748b; font-size: 11px; }
+
+@media (max-width: 800px) {
+  .team-review-member-popover {
+    position: fixed;
+    top: 50%;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
 .team-review-launcher {
   display: inline-flex;
   align-items: center;
@@ -1156,33 +1279,6 @@ const launcherStyle = computed(() => ({
   border-radius: 50%;
   background: #e11d48;
   box-shadow: 0 0 0 2px rgba(225, 29, 72, 0.2);
-}
-
-.team-review-launcher-divider {
-  width: 1px;
-  height: 18px;
-  background: #e2e8f0;
-  margin: 0 3px;
-}
-
-.team-review-launcher-chat-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 11px;
-  border: none !important;
-  border-radius: 9999px !important;
-  background: #f1f5f9 !important;
-  color: #334155;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.team-review-launcher-chat-btn:hover {
-  background: #e2e8f0 !important;
-  color: #0f172a;
 }
 
 /* 对话框 / 弹窗通用体系 */
@@ -1241,7 +1337,6 @@ const launcherStyle = computed(() => ({
 }
 
 .team-owner-list,
-.team-member-search,
 .team-member-add,
 .team-member-list {
   display: flex;
@@ -1321,15 +1416,43 @@ const launcherStyle = computed(() => ({
 .team-member-add {
   display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
 }
 
-.team-member-add input,
-.team-member-add select {
+.team-member-combobox {
+  position: relative;
   flex: 1;
   min-width: 0;
 }
+.team-member-combobox input { width: 100%; }
+.team-member-candidates {
+  margin-top: 5px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid #dbe4ef;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.13);
+}
+.team-member-candidates-title { margin: 4px 8px; color: #64748b; font-size: 11px; }
+.team-member-candidates button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.team-member-candidates button:hover,
+.team-member-candidates button[aria-selected="true"] { background: #fff1f2; }
+.team-member-candidates button strong { color: #172033; font-size: 12px; }
+.team-member-candidates button small { color: #64748b; font-size: 11px; }
 
 .team-btn-primary {
   display: inline-flex;

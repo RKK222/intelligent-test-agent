@@ -173,7 +173,6 @@ export type TeamManagementController = {
   retryOwners(): Promise<void>;
   chooseCandidate(userId: string): void;
   searchMembers(keyword: string): Promise<void>;
-  searchCandidates(keyword: string): Promise<void>;
   setMemberPage(page: number): Promise<void>;
   addMember(): Promise<void>;
   removeMember(userId: string): Promise<void>;
@@ -736,7 +735,8 @@ export function createTeamManagementController(
     try {
       const [memberResult, candidatePage] = await Promise.all([
         api.listSystemAdminTeamMembers(scopeParams(), state.memberKeyword, state.memberPage, state.memberPageSize),
-        api.listSystemAdminTeamCandidates(scopeParams(), "", 1, 50)
+        // 同一个检索词同时驱动现有成员与可添加用户，避免两套搜索状态互相覆盖。
+        api.listSystemAdminTeamCandidates(scopeParams(), state.memberKeyword, 1, 50)
       ]);
       if (ticket !== memberEpoch || scopeKey() !== capturedScope || !state.active) return;
       state.members = memberResult.items;
@@ -1459,27 +1459,9 @@ export function createTeamManagementController(
     async searchMembers(keyword: string) {
       memberEpoch += 1;
       state.memberKeyword = keyword;
+      state.candidateUserId = "";
       state.memberPage = 1;
       await loadMembers(memberEpoch, scopeKey());
-    },
-    async searchCandidates(keyword: string) {
-      if (!canMaintainMembers()) return;
-      const ticket = memberEpoch;
-      const capturedScope = scopeKey();
-      state.memberLoading = true;
-      publish();
-      try {
-        const page = await api.listSystemAdminTeamCandidates(scopeParams(), keyword, 1, 50);
-        if (ticket !== memberEpoch || scopeKey() !== capturedScope) return;
-        state.candidates = page.items;
-        state.memberLoading = false;
-        publish();
-      } catch (error) {
-        if (ticket !== memberEpoch) return;
-        state.memberLoading = false;
-        showError(error);
-        publish();
-      }
     },
     async setMemberPage(page: number) {
       memberEpoch += 1;
