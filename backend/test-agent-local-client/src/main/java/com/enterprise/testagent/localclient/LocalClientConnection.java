@@ -6,6 +6,7 @@ import com.enterprise.testagent.localclient.protocol.LocalClientFrameCodec;
 import com.enterprise.testagent.localclient.protocol.LocalClientFrameType;
 import com.enterprise.testagent.localclient.protocol.LocalClientPayloads;
 import com.enterprise.testagent.localclient.protocol.LocalClientProtocol;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.io.ByteArrayOutputStream;
@@ -77,6 +78,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     private final ExecutorService inboundExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("local-client-inbound-", 0).factory());
     private final ExecutorService operationExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final LocalClientFileOperationExecutor fileOperationExecutor = new LocalClientFileOperationExecutor();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("local-client-heartbeat-", 0).factory());
     private final Map<String, Future<?>> operations = new ConcurrentHashMap<>();
@@ -605,9 +607,13 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
     }
 
     private void handleFile(LocalClientFrame frame) {
-        LocalClientPayloads.FileRequest request = codec.payload(frame, LocalClientPayloads.FileRequest.class);
+        JsonNode result = fileOperationExecutor.execute(() -> {
+            LocalClientPayloads.FileRequest request = codec.payload(frame, LocalClientPayloads.FileRequest.class);
+            return fileRpcHandler.handle(request);
+        });
+        // 响应在有界调用成功返回后发送，避免超时后底层 native 调用迟到又发出重复 FILE_RESPONSE。
         sendResponse(frame, LocalClientFrameType.FILE_RESPONSE,
-                new LocalClientPayloads.FileResponse(true, fileRpcHandler.handle(request)));
+                new LocalClientPayloads.FileResponse(true, result));
     }
 
     private void handleHttp(LocalClientFrame frame) {
@@ -1256,6 +1262,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
         disconnected();
         inboundExecutor.close();
         operationExecutor.close();
+        fileOperationExecutor.close();
         scheduler.close();
         LOGGER.info("local_client_connection_close_completed");
     }

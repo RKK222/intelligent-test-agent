@@ -18453,3 +18453,32 @@
 
 - 共享服务器部署、普通用户模型切换、本机客户端更新/认证/健康和工作区注册均有真实证据；个人公共能力完整 CRUD、保存/生效、热加载/工具重启、更新确认清空与失败回滚本轮未能完成真实 UI 验收，阻塞证据已保留，未借助伪造响应替代。
 - 未修改 OpenCode 源码、`.env*`、数据库结构或部署拓扑；本条只记录运行态验收结果。
+
+## 2026-09-24 - 隔离本地文件 RPC 的卡死调用
+
+### Why
+
+- 本机客户端文件树请求曾卡在 `WorkspaceFileService.listDirectory -> Files.list -> UnixNativeDispatcher.opendir0`，
+  导致浏览器 WebSocket 超时后重试，随后本地 OpenCode HTTP 请求也变得不稳定。根因是 macOS 文件系统/TCC/文件提供程序
+  的 native 目录调用可能长期不返回，而客户端把文件 RPC 放在通用虚拟线程操作池中且没有调用边界。
+
+### What
+
+- 新增 `LocalClientFileOperationExecutor`：文件 RPC 使用最多 4 个 daemon 平台线程、单次 15 秒调用超时，
+  与生命周期和 OpenCode HTTP 操作隔离；超时后取消等待但只有底层任务真正结束才释放并发槽位，避免重试累积阻塞线程。
+- `LocalClientConnection` 的 `FILE_REQUEST` 统一经过该执行器，关闭客户端时同步停止执行器；补充超时、槽位耗尽回归测试和本地客户端 README 说明。
+
+### How
+
+- `JAVA_HOME=/Users/kaka/Library/Java/JavaVirtualMachines/openjdk-25.0.1/Contents/Home mvn -f backend/pom.xml -pl test-agent-local-client -am -Dcheckstyle.skip=true test`：
+  123 项客户端测试通过，1 项既有跳过；新增执行器测试 2/2 通过。
+- shaded JAR 打包成功并安装到 `/Users/kaka/Applications/TestAgent Local Client Updated.app`；客户端重启后 generation=11、
+  `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 注册成功，受管 OpenCode 1.18.4 在 4106 健康。
+- 真实工作台展开“本机个人公共能力”后显示 `agents/skills/tools`，文件 RPC 以 1–37ms 完成；最终客户端健康探针返回
+  `{"healthy":true,"version":"1.18.4"}`。
+
+### Result
+
+- 文件系统 native 调用即使再次卡住，也只占用有界文件线程并在工作台 WebSocket 30 秒超时前返回可重试错误，不会再拖垮
+  生命周期、HTTP 或心跳路径；现有文件路径校验、协议和 OpenCode 源码边界不变。
+- 本次不涉及 HTTP/事件/数据库/Flyway、部署拓扑、环境配置或 generated SDK；远端服务器无需重新部署，当前验证使用现有共享环境。

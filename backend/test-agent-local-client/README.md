@@ -83,6 +83,8 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
 - 客户端同时声明 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 后，登录用户的 `LOCAL_CLIENT` 工作区可在网页查看和编辑本机个人公共能力副本；签名基线始终只读，首次写入自动复制到 `public-capabilities/personal`，只允许 `agents/**`、`skills/**`、`tools/**`，不接受 manifest、依赖文件、`node_modules`、符号链接或越界路径。该副本和状态文件随客户端重启保留，不进入服务器公共 Git。
 - 公共能力包更新若检测到个人副本，未显式确认清空会以 `PERSONAL_CHANGES_CONFIRMATION_REQUIRED` 失败并保留草稿；用户确认后先备份个人副本，只有新包健康激活成功才删除，失败回滚时恢复备份。确认标记随既有更新 attempt 持久化，不新增数据库字段；旧客户端未声明个人编辑能力时不接收新确认语义的安装命令。
 - 个人文件操作复用 `agent-config.*` 文件 WebSocket ticket/RPC；运行中的 Agent/Skill 保存沿用 dispose，Tool 保存由受管 OpenCode 重启生效。断线、换代或旧客户端缺少 capability 时 fail-closed；托盘和网页都不输出物理路径、文件正文或 Tool 代码。
+- 本地文件 RPC 使用独立的有界 daemon 平台线程池（最多 4 个并行调用，单次 15 秒超时），不与生命周期和 OpenCode HTTP 共用执行器。
+  macOS TCC、文件提供程序或网络盘导致的 native 目录调用卡住时，客户端会在工作台 WebSocket 超时前返回可重试错误，并保留连接和 OpenCode 进程可用。
 - 网页可执行“恢复签名公共版本”清除本机个人副本；恢复前需要确认，恢复后由工作台统一执行运行态收敛。Tool 仍以当前操作系统用户权限执行，能力包依赖只使用签名制品中已锁定的离线闭包。
 
 - `LocalClientPublicCapabilityStore` 把完整包安全解压到不可变 `public-capabilities/revisions/{digest}`，校验
@@ -151,6 +153,7 @@ mvn -pl test-agent-local-client -am -DskipTests package
 `OpencodeProcessSupervisorTest` 覆盖托管进程强制离线依赖解析，`LocalBrowserSettingsTest`/`LocalBrowserRelayTest` 覆盖受控发现、
 配置持久化、Chromium 版本解析和 loopback token，`bun test ./tools/test-local-browser-native-transport.ts` 覆盖 Bun 原生 CDP
 transport 的 JSON 收发与同端口约束，`LocalGitAccessCheckerTest` 覆盖成功、认证拒绝和网络未知的保守分类。
+`LocalClientFileOperationExecutorTest` 覆盖文件 native 调用超时和并发槽位耗尽时的快速结算，防止文件系统卡住拖垮本地客户端通用操作池。
 
 ## 依赖边界
 
