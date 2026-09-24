@@ -18568,3 +18568,26 @@
 
 - 待本提交经 Jenkins 发布后再做真实文件打开、资产库共享引用和管理视角对话验收；本条不把构建通过等同于运行态验收。
 - 不新增 HTTP API、RunEvent/SSE、数据库、Flyway 或部署节点；文件读写仍走平台 WebSocket RPC，未扩大权限。
+
+## 2026-09-24 - Jenkins #61 部署后真实浏览器联合验收
+
+### Why
+
+- 用户要求在部署后复测应用资产库共享、本机个人公共能力，以及管理视角成员入口和能够读取左侧成员工作区的真实 AI 对话；验收必须保存可核对的截图。
+
+### What
+
+- Jenkins #61 将 `c20faa8eab9deee820ca9fb8bed82f250a16ba84` 发布为 `release-61-c20faa8e`，流水线 SUCCESS；共享环境 backend readiness 为 UP，Web 返回 200。
+- 管理视角切换后右侧对话自动展开，顶部“添加团队成员”可打开成员管理。选中成员 `888888888` 的左侧文件 `application-worktree-publish.md`，在用户授权后改用已配置的 `Ling 3.0 Flash Fin Free` 并发送只读问题；Run 为 SUCCEEDED，回答与左侧文件的标题及发布过程一致，附带“成员工作区只读快照”。未实际添加成员，避免在未指定对象时扩大授权。
+- 本机个人公共能力目录显示本机实际路径，真实点击 Agent `stock-case-recommendation.md` 和 Skill `test-design/SKILL.md` 后，中栏均加载正文。本机客户端后续出现短暂 WebSocket 断连/重连及文件 ticket 路由失效，Tool 文件、保存和公共包更新失败回滚未取得稳定真机证据。
+- F-COSS `appdocs` 资产库在管理员页显示 READY（2/2 服务器）；按用户授权临时向全体成员只读共享 `docs`，普通成员鉴权读取接口返回 alias `docs-appdocs`、directoryPath `docs`、`merge=true`，管理员资产仓库接口对该成员保持 403。该账号进入 F-COSS 版本时被缺少 Git SSH key 阻断，故成员文件树及 Run 未能完成。验收后删除临时共享，成员再次读取配置为 0；旧个人引用的两条迁移冲突未改动。
+
+### How
+
+- 使用真实 Chrome 管理员/普通成员页面与一次真实 Ling 对话验收，并保存 `output/e2e-20260924-*.jpg` 五张截图；资产共享清理后以成员鉴权只读接口复查。
+- 复核全部 `.agents/session-log*.md` 近期记录和当前 Git 工作树；本次只提交验收记录及截图，不改业务代码、测试或部署产物。
+
+### Result
+
+- 管理入口、对话自动展开、成员工作区只读对话、本机 Agent/Skill 文件打开与成员可读共享配置通过真实 E2E；成员版本内文件树/Run 与个人公共能力写入、热更新和失败回滚仍未验收通过，不能把接口或构建通过等同于完整 E2E。
+- 临时资产共享已清理；本次不涉及 HTTP API、RunEvent、数据库结构、Flyway、性能、安全权限边界或兼容协议改动，未改 `.env*`、generated SDK 或 OpenCode 源码。
