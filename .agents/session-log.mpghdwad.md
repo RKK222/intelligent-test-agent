@@ -775,3 +775,25 @@
 
 ### Result
 - 兼容入口统一生成脚本，不再定义独立报文产物；无 HTTP API、事件、数据库、性能或安全接口变化，不新增部署节点。用户若依赖旧报文文件/字段，仍需迁移到 `generatedFiles` 的脚本路径；尚未做真实平台端到端验收或企业公共配置发布。
+
+## 2026-09-24 - 接口自动化参考脚本按五条分批查询
+
+### Why
+
+- 用户要求修改“生成接口自动化脚本，接口 seasid xxxx”触发的接口自动化参考流程：一体化平台查询从排序后前 10 条改为每批前 5 条；当前批明确返回“未查询到接口”且无可用数据时才继续下一批，任一批返回至少一条案例脚本即可供参考生成。
+
+### What
+
+- 更新 `test-execution-api`、`test-execution` 的接口参考规则及 `resolve-api-automation-references` Skill 契约、排序说明和评估场景。
+- `rank_reference_scripts.py` 新增批大小 5、`integratedScriptBatches` 和 `integratedTop5` 输出；排序去重后的平台脚本按稳定顺序切分为 `[5, 5, ...]` 批次。
+- 新增 11 条脚本切分为 5/5/1 的单元测试，并同步公共配置 README；未修改 OpenCode 上游源码、HTTP API、事件、数据库或环境配置。
+
+### How
+
+- 在 `release` 分支完成最小范围修改；提交前回顾全部 `.agents/session-log*.md` 的近期条目，未覆盖其他提交者的日志或工作区改动。
+- 通过 `python -m unittest discover -s public-agent-config/opencode/skills/resolve-api-automation-references/tests -p "test_*.py" -v`（32 项）、`evals.json` JSON 解析、`py_compile`、`git diff --check`，并在排除测试生成的 `__pycache__` 临时副本上通过 Skill 结构校验。
+
+### Result
+
+- 一体化平台参考查询行为已明确为顺序五条批次查询：有可解析数据即停止，不再要求 5 条全部返回；全部批次无可用数据时才返回 `PARTIAL/INCOMPLETE`。
+- 未做真实 TCDS/一体化平台端到端调用；真实平台返回字段与“未查询到接口”文案仍依赖现有契约。无新增部署节点，无 API/事件/数据库/Flyway/安全边界变化。

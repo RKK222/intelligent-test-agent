@@ -16,6 +16,8 @@ from typing import Any, Iterable
 
 DATE_PATTERN = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
 VERSION_PATTERN = re.compile(r"^(20\d{2})年(1[0-2]|[1-9])月$")
+INTEGRATED_BATCH_SIZE = 5
+
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+|[\u3400-\u9fff]+", re.IGNORECASE)
 
 
@@ -241,13 +243,20 @@ def classify(payload: Any, design_texts: list[str], identifiers: list[str], work
     if deduplicated:
         required_reference_kinds.append("INTEGRATED")
 
+    integrated_script_batches = [
+        [item["scriptId"] for item in deduplicated[start : start + INTEGRATED_BATCH_SIZE]]
+        for start in range(0, len(deduplicated), INTEGRATED_BATCH_SIZE)
+    ]
+
     return {
         "nitScriptCount": len(nit_scripts),
         "nitScriptIds": [item["scriptId"] for item in nit_scripts],
         "invalidScriptIds": invalid,
         "tcGroups": tc_groups,
         "integratedScripts": deduplicated,
-        "integratedTop10": [item["scriptId"] for item in deduplicated[:10]],
+        "integratedBatchSize": INTEGRATED_BATCH_SIZE,
+        "integratedTop5": integrated_script_batches[0] if integrated_script_batches else [],
+        "integratedScriptBatches": integrated_script_batches,
         "requiredReferenceKinds": required_reference_kinds,
         "derivedVersion": derive_version(workspace_values),
     }
