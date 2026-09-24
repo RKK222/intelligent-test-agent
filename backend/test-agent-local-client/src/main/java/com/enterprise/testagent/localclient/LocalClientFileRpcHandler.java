@@ -51,7 +51,9 @@ final class LocalClientFileRpcHandler {
         Object result = switch (request.operation()) {
             case "agent-config.status" -> Map.of(
                     "supported", publicCapabilityStore != null,
-                    "personalized", publicCapabilityStore != null && publicCapabilityStore.hasPersonalChanges());
+                    "personalized", publicCapabilityStore != null && publicCapabilityStore.hasPersonalChanges(),
+                    "personalDirectory", publicCapabilityStore == null
+                            ? "" : publicCapabilityStore.personalDirectoryPath().toString());
             case "agent-config.list" -> fileService.listDirectory(agentRoot(), agentPath(params, true));
             case "agent-config.read" -> fileService.readContent(agentRoot(), agentPath(params, false));
             case "agent-config.read.chunk" -> fileService.readContentChunk(

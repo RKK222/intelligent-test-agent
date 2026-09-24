@@ -135,6 +135,26 @@ class LocalClientFileRpcHandlerTest {
         handler.abortAll();
     }
 
+    @Test
+    void shouldExposePersonalDirectoryInStatusWithoutCreatingDraft() throws Exception {
+        Path stateDirectory = temporaryDirectory.resolve("state");
+        LocalClientStateStore stateStore = new LocalClientStateStore(stateDirectory);
+        LocalWorkspaceRegistry registry = new LocalWorkspaceRegistry(stateStore);
+        LocalWorkspaceRegistry.Registration registration = registry.register(
+                "wrk_local", Files.createDirectory(temporaryDirectory.resolve("workspace")).toString());
+        ObjectMapper mapper = objectMapper();
+        LocalClientPublicCapabilityStore store = new LocalClientPublicCapabilityStore(stateDirectory);
+        LocalClientFileRpcHandler handler = new LocalClientFileRpcHandler(
+                registry, mapper, new LocalGitAccessChecker(), store);
+
+        var status = handler.handle(request(mapper, registration, "agent-config.status", mapper.createObjectNode()));
+        assertThat(status.path("supported").asBoolean()).isTrue();
+        assertThat(status.path("personalized").asBoolean()).isFalse();
+        assertThat(status.path("personalDirectory").asText())
+                .isEqualTo(stateDirectory.resolve("public-capabilities/personal").toAbsolutePath().toString());
+        assertThat(stateDirectory.resolve("public-capabilities/personal")).doesNotExist();
+    }
+
     private static LocalClientPayloads.FileRequest request(
             ObjectMapper objectMapper,
             LocalWorkspaceRegistry.Registration registration,

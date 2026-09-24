@@ -14,6 +14,7 @@ vi.mock("../src/components/notify", () => notifyMock);
 
 const apiClientMock = vi.hoisted(() => ({
   getPublicAgentConfigStatus: vi.fn(),
+  getLocalPersonalPublicAgentStatus: vi.fn(),
   getWorkspaceAgentConfigStatus: vi.fn(),
   listPublicAgentFiles: vi.fn(),
   listWorkspaceAgentFiles: vi.fn(),
@@ -98,6 +99,11 @@ describe("AgentConfigPanel", () => {
     workbench.tabs = [];
     workbench.activePath = undefined;
     apiClientMock.getPublicAgentConfigStatus.mockResolvedValue(publicStatus());
+    apiClientMock.getLocalPersonalPublicAgentStatus.mockResolvedValue({
+      supported: true,
+      personalized: false,
+      personalDirectory: "/Users/tester/Library/Application Support/TestAgent/local-opencode-client/state/public-capabilities/personal"
+    });
     apiClientMock.getWorkspaceAgentConfigStatus.mockResolvedValue(publicStatus("WORKSPACE"));
     apiClientMock.listPublicAgentFiles.mockResolvedValue([]);
     apiClientMock.listWorkspaceAgentFiles.mockResolvedValue([]);
@@ -1336,10 +1342,15 @@ describe("AgentConfigPanel", () => {
     });
 
     expect(await view.findByText("本机个人副本")).toBeTruthy();
-    expect(view.getByText("Tool 代码会以当前操作系统用户权限在本机执行。")).toBeTruthy();
+    expect(await view.findByText("/Users/tester/Library/Application Support/TestAgent/local-opencode-client/state/public-capabilities/personal")).toBeTruthy();
+    expect(view.queryByText("Tool 代码会以当前操作系统用户权限在本机执行。")).toBeNull();
     expect(view.queryByText("应用级")).toBeNull();
     expect(view.queryByText("创建公共 worktree")).toBeNull();
     expect(apiClientMock.getPublicAgentConfigStatus).not.toHaveBeenCalled();
+    expect(apiClientMock.getLocalPersonalPublicAgentStatus).toHaveBeenCalledWith(
+      "LOCAL_CLIENT_PERSONAL:lci_personal:8",
+      "linux-1"
+    );
     expect(apiClientMock.listWorkspaceAgentFiles).not.toHaveBeenCalled();
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
       "",
@@ -1352,6 +1363,21 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.restorePublicAgentConfig).toHaveBeenCalledWith(
       "LOCAL_CLIENT_PERSONAL:lci_personal:8",
       "linux-1"
+    ));
+  });
+
+  it("keeps the local tree usable when an older client cannot report its personal path", async () => {
+    apiClientMock.getLocalPersonalPublicAgentStatus.mockResolvedValue({ supported: true, personalized: false });
+    const { view } = renderPanel(undefined, {
+      canWrite: true,
+      localClientInstanceId: "lci_personal",
+      localClientConnectionGeneration: 8,
+      localClientOnline: true
+    });
+
+    expect(await view.findByText("路径暂不可用，请更新客户端")).toBeTruthy();
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith(
+      "", "LOCAL_CLIENT_PERSONAL:lci_personal:8", "linux-1"
     ));
   });
 

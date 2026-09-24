@@ -104,3 +104,5 @@ corepack pnpm test -- backend-api
 `requestLocalClientPublicCapabilityUpdate(clientInstanceId, expectedBundleDigest, confirmedDiscardPersonalChanges?)` 调用当前用户实例的公共能力确认接口；
 digest 必须来自刚读取的 `LocalClientInstance.publicCapabilities.pendingDigest`，组件不能自造目标版本或下载地址。
 存在本机个人公共能力修改时，只有用户明确确认清空后才传入第三个参数 `true`；取消或缺少确认时服务端不覆盖个人副本。
+
+`getLocalPersonalPublicAgentStatus(worktreeId, linuxServerId)` 复用已鉴权 `agent-config` 文件 WebSocket 的 `agent-config.status` RPC，读取客户端个人副本绝对目录；仅在本人 `LOCAL_CLIENT` 公共作用域使用。旧客户端无 `personalDirectory` 字段时页面显示升级提示，不依据浏览器平台推测物理路径。

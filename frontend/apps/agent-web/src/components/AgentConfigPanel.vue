@@ -110,6 +110,7 @@ const localPersonalMode = computed(() => Boolean(
 ));
 
 const status = ref<{ PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus }>({});
+const localPersonalDirectory = ref("");
 const entriesByScope = ref<Record<Scope, Record<string, FileTreeEntry[]>>>({ PUBLIC: {}, WORKSPACE: {} });
 const rootExpanded = ref<Set<Scope>>(new Set(["PUBLIC"]));
 const expandedByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
@@ -185,6 +186,14 @@ watch(
     dragSourcePathsByScope.value = { ...dragSourcePathsByScope.value, WORKSPACE: [] };
     if (agentClipboard.value?.scope === "WORKSPACE") agentClipboard.value = null;
     invalidateDirectoryCache("WORKSPACE", true);
+    void refreshAll(false);
+  }
+);
+
+watch(
+  [() => props.localClientInstanceId, () => props.localClientConnectionGeneration, () => props.localClientOnline],
+  () => {
+    localPersonalDirectory.value = "";
     void refreshAll(false);
   }
 );
@@ -271,11 +280,30 @@ async function refreshAll(notifySkippedFile = true) {
 async function refreshStatus(token: number) {
   const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {};
   if (localClientSelected.value) {
+    localPersonalDirectory.value = "";
+    if (localPersonalMode.value) {
+      try {
+        const result = await withTimeout(
+          api.getLocalPersonalPublicAgentStatus(
+            worktreeId("PUBLIC")!,
+            props.routeLinuxServerId
+          ),
+          "读取本机个人副本路径超时"
+        );
+        if (token !== refreshAllToken) return;
+        if (result.supported && result.personalDirectory) {
+          localPersonalDirectory.value = result.personalDirectory;
+        }
+      } catch {
+        // 路径展示失败不能阻止原有文件树读取；旧客户端只显示升级提示，不猜测物理目录。
+      }
+    }
     next.PUBLIC = {
       scope: "PUBLIC",
       enabled: localPersonalMode.value,
       writable: localPersonalMode.value && props.canWrite,
-      agentDirectory: localPersonalMode.value ? "本机个人公共能力" : "本地客户端未连接"
+      agentDirectory: localPersonalDirectory.value || (localPersonalMode.value
+        ? "本机个人公共能力" : "本地客户端未连接")
     };
     if (token === refreshAllToken) status.value = next;
     return;
@@ -1385,7 +1413,7 @@ const publicSource = computed(() => {
       name: "本机个人副本",
       serverName: "本地客户端",
       serverId: "",
-      path: "本机个人公共能力"
+      path: localPersonalDirectory.value
     };
   }
   const repository = activePublicRepository.value;
@@ -1416,7 +1444,7 @@ const publicSource = computed(() => {
 const publicRootBadge = computed(() => {
   const source = publicSource.value;
   if (!source.serverName && !source.name) return "";
-  if (source.mode === "local") return "本机个人副本";
+  if (source.mode === "local") return "";
   return source.mode === "worktree"
     ? ["worktree", source.name, source.serverName || source.serverId].filter(Boolean).join(" · ")
     : ["直接", source.serverName || source.serverId].filter(Boolean).join(" · ");
@@ -2237,10 +2265,13 @@ defineExpose({
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
-        <div v-if="localClientSelected" class="agent-local-notice" role="status">
+        <div v-if="localPersonalMode" class="agent-local-path" role="status">
+          <span>本机个人副本</span>
+          <code :title="localPersonalDirectory">{{ localPersonalDirectory || '路径暂不可用，请更新客户端' }}</code>
+        </div>
+        <div v-else-if="localClientSelected" class="agent-local-notice" role="status">
           <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
-          <span v-if="localPersonalMode">Tool 代码会以当前操作系统用户权限在本机执行。</span>
-          <span v-else>本地客户端当前离线或版本过旧，请重连或升级后再编辑本机个人公共能力。</span>
+          <span>本地客户端当前离线或版本过旧，请重连或升级后再编辑本机个人公共能力。</span>
         </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <div v-else-if="publicRootUnavailableMessage" class="agent-empty-state" role="status">
@@ -2834,6 +2865,20 @@ defineExpose({
   color: #9a3412;
   font-size: 10px;
   line-height: 1.45;
+}
+
+.agent-local-path {
+  display: grid;
+  gap: 2px;
+  margin: 4px 8px 6px 22px;
+  padding: 3px 8px;
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: 11px;
+}
+.agent-local-path code {
+  overflow-wrap: anywhere;
+  color: var(--ta-tree-text, #24292f);
+  user-select: text;
 }
 
 .agent-empty-state {

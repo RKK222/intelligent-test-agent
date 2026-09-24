@@ -4440,6 +4440,8 @@ capability，每条 RPC 重新校验这些事实。个人目录首次写入时�
 热加载，Tool 保存由受管客户端重启；运行中保存由工作台记为待生效并在空闲时处理。旧客户端或离线客户端不降级到服务器
 公共 Git，统一返回升级/重连提示。公共 Git、worktree、提交、推送和发布接口不属于该模式。
 
+既有文件 WebSocket `agent-config.status` 响应在本地个人公共 scope 增补可选 `personalDirectory` 字符串，由客户端从自身状态目录解析的绝对路径；`supported/personalized` 维持原义。读取仍受 route/ticket 与逐条 RPC 的本人实例、在线代次和 capability 校验，且只供本人工作台显示，不写入日志、错误或持久化前端状态。旧客户端缺字段时页面提示升级而不猜测路径；状态读取不创建个人草稿。
+
 ## 本地工作区受保护 Agent/Skill API
 
 `GET /api/internal/platform/opencode-runtime/agents?workspaceId={localWorkspaceId}` 在已认证且目标为

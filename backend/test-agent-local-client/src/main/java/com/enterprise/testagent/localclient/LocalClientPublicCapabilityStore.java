@@ -51,6 +51,11 @@ final class LocalClientPublicCapabilityStore {
         this.state = readState();
     }
 
+    /** 仅供已鉴权的本人文件状态 RPC 展示个人副本位置，不触发副本创建。 */
+    Path personalDirectoryPath() {
+        return personalDirectory;
+    }
+
     synchronized void initializeBaseline(LocalClientConfiguration configuration, LocalClientBuildInfo buildInfo) {
         if (state.activeDigest() != null) {
             return;

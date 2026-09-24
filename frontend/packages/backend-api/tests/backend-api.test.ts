@@ -4520,6 +4520,11 @@ describe("backend-api", () => {
       webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
     });
 
+    await expect(client.getLocalPersonalPublicAgentStatus("agw_1234567890abcdef", "linux-2")).resolves.toEqual({
+      supported: true,
+      personalized: false,
+      personalDirectory: "/home/tester/.local/state/testagent/local-opencode-client/public-capabilities/personal"
+    });
     await expect(client.listPublicAgentFiles("opencode/agents", "agw_1234567890abcdef", "linux-2")).resolves.toEqual([
       {
         path: "opencode/agents/review.md",
@@ -4578,10 +4583,14 @@ describe("backend-api", () => {
     });
     expect(sockets[0]?.url).toBe("ws://10.8.0.13:8080/api/internal/platform/workspace-management/file/ws?ticket=wft_agentconfig");
     expect(sockets[0]?.sentMessages[0]).toMatchObject({
+      op: "agent-config.status",
+      params: { scope: "PUBLIC", worktreeId: "agw_1234567890abcdef" }
+    });
+    expect(sockets[0]?.sentMessages[1]).toMatchObject({
       op: "agent-config.list",
       params: { scope: "PUBLIC", path: "opencode/agents", worktreeId: "agw_1234567890abcdef" }
     });
-    expect(sockets[0]?.sentMessages[1]).toMatchObject({
+    expect(sockets[0]?.sentMessages[2]).toMatchObject({
       op: "agent-config.rename",
       params: {
         scope: "PUBLIC",
@@ -4590,7 +4599,7 @@ describe("backend-api", () => {
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages[2]).toMatchObject({
+    expect(sockets[0]?.sentMessages[3]).toMatchObject({
       op: "agent-config.copy",
       params: {
         scope: "PUBLIC",
@@ -4599,7 +4608,7 @@ describe("backend-api", () => {
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages[3]).toMatchObject({
+    expect(sockets[0]?.sentMessages[4]).toMatchObject({
       op: "agent-config.move",
       params: {
         scope: "PUBLIC",
@@ -4608,7 +4617,7 @@ describe("backend-api", () => {
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages[4]).toMatchObject({
+    expect(sockets[0]?.sentMessages[5]).toMatchObject({
       op: "agent-config.upload.begin",
       params: {
         scope: "PUBLIC",
@@ -4617,12 +4626,12 @@ describe("backend-api", () => {
         worktreeId: "agw_1234567890abcdef"
       }
     });
-    expect(sockets[0]?.sentMessages.slice(5, 8).map((message) => message.op)).toEqual([
+    expect(sockets[0]?.sentMessages.slice(6, 9).map((message) => message.op)).toEqual([
       "agent-config.upload.chunk",
       "agent-config.upload.chunk",
       "agent-config.upload.complete"
     ]);
-    expect(sockets[0]?.sentMessages[8]).toMatchObject({
+    expect(sockets[0]?.sentMessages[9]).toMatchObject({
       op: "agent-config.delete",
       params: {
         scope: "PUBLIC",
@@ -5400,6 +5409,12 @@ class FakeWorkspaceWebSocket {
                     lastModifiedAt: "2026-06-26T09:00:00Z"
                   }
                 ]
+              : message.op === "agent-config.status"
+                ? {
+                    supported: true,
+                    personalized: false,
+                    personalDirectory: "/home/tester/.local/state/testagent/local-opencode-client/public-capabilities/personal"
+                  }
               : message.op === "agent-config.list"
                 ? [
                     {

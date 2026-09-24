@@ -2118,6 +2118,14 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         method: "POST",
         body: JSON.stringify({ worktreeId, linuxServerId })
       }),
+    /** 个人路径只从本机客户端的已鉴权文件 RPC 获取；旧客户端缺字段时由页面显示升级提示。 */
+    getLocalPersonalPublicAgentStatus: (worktreeId: string, linuxServerId?: string | null) =>
+      agentConfigFileRpc<{ supported: boolean; personalized: boolean; personalDirectory?: string }>(
+        "PUBLIC",
+        "agent-config.status",
+        {},
+        { worktreeId, linuxServerId }
+      ),
     listPublicAgentFiles: async (path = "", worktreeId?: string | null, linuxServerId?: string | null) => {
       const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(
         "PUBLIC",

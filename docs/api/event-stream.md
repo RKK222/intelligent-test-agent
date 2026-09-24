@@ -1150,6 +1150,8 @@ relay token、Cookie、profile 或页面数据发送到平台。旧服务端可�
 仅在新签名版本激活后删除；健康检查或 Tool 重启失败时回滚签名版本并恢复该备份。旧客户端若未声明
 `PUBLIC_CAPABILITY_PERSONAL_EDIT_V1` 不会接收带新确认语义的安装命令，保持只读。
 
+本人公共副本目录展示只扩展既有 `agent-config.status` 文件 WebSocket RPC 的响应字段 `personalDirectory`，不新增反向隧道帧、RunEvent 或 SSE 类型；旧客户端缺字段时工作台提示升级。
+
 客户端进程若在 `PENDING/DOWNLOADING` 中退出，重启后通过 `PUBLIC_CAPABILITY_VERSION` 把旧命令收敛为
 `FAILED/CLIENT_RESTARTED_DURING_UPDATE`，平台可重新生成命令；若在原子切换后的 `APPLYING` 中退出，重启后必须先启动并
 验证当前能力目录，成功才补报 `SUCCEEDED`，失败则回切上一摘要并补报 `ROLLED_BACK`。平台以实例上报的 active/pending
