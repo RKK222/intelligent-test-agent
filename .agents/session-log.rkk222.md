@@ -18430,3 +18430,26 @@
 
 - 成员 OpenCode 首次路由、进程初始化、工作区打开和真实对话已取得共享测试环境的完整成功证据；原先选中本机 loopback Java 导致 302 登录重定向的问题已消失。
 - 本次没有新增数据库结构、API/事件 wire 或部署节点；部署与验收均在现有 release 拓扑完成。
+
+## 2026-09-24 - 共享环境部署与本机客户端更新验收
+
+### Why
+
+- 用户要求把本对话改动部署到 `192.168.8.100`，更新本机客户端并用真实浏览器完成验证。
+
+### What
+
+- Jenkins `intelligent-test-agent-release #55` 成功发布 `88d280ffd71eb9261bcb69a01c5461a9220c251c`，标识为 `release-55-88d280ff`；远端 backend/frontend/readiness 与客户端 WebSocket 连接均可用。
+- 在用户确认后轮换 Client key；创建用户拥有的 `TestAgent Local Client Updated.app`，安装当前 shaded JAR（SHA256 `74d5a2ededeab90a854a0b99ac630a96f63721a4bfcd6a68c0ff2476609e348a`）和观测插件，指向共享环境。
+- 本机客户端完成认证并在线，OpenCode 1.18.4 受管运行于 `4106`，重启后 generation=5、能力声明同步成功，健康接口返回 `{"healthy":true,"version":"1.18.4"}`；已注册本地仓库工作区 `wrk_189912db3a1b4b8b9b0686c018c18b0f`。
+- 真实普通用户三击 Ctrl 后显示模型入口并切换到 `Ling-3.0-tiny Free`，重新打开仍保留选择。
+
+### How
+
+- 通过 Jenkins 控制台、远端 readiness/HTTP 探针、客户端日志、OpenCode health curl 和 CUA 浏览器完成验证；未打印或提交 Client key。
+- 个人公共能力入口可见，但本机工作区/公共能力文件树请求多次超时。`jcmd` 线程转储显示本地客户端线程卡在 `WorkspaceFileService.listDirectory` 的 `Files.list`，随后部分本地 OpenCode HTTP 请求也出现 `IllegalStateException`/中断；重启后健康可恢复，但文件树仍未稳定返回。
+
+### Result
+
+- 共享服务器部署、普通用户模型切换、本机客户端更新/认证/健康和工作区注册均有真实证据；个人公共能力完整 CRUD、保存/生效、热加载/工具重启、更新确认清空与失败回滚本轮未能完成真实 UI 验收，阻塞证据已保留，未借助伪造响应替代。
+- 未修改 OpenCode 源码、`.env*`、数据库结构或部署拓扑；本条只记录运行态验收结果。
