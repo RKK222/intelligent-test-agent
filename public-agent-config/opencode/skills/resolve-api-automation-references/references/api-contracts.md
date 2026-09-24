@@ -21,7 +21,7 @@
 ```text
 uri=http://tcds-prod.sdc.icbc/caseInterface/getyScriptIdByInterface
 method=POST
-headers={"toolId":"66f36bfa5c1c6105572b0118880261d6","Content-Type":"application/json","Accept":"application/json"}
+headers={"toolId":"66f36bfa5c1c6105572b0118880261d6","Content-Type":"application/json"}
 body=<上面请求体的 JSON 字符串>
 ```
 
@@ -74,8 +74,8 @@ body=<上面请求体的 JSON 字符串>
 - `dataPrepareList`：SQL 或表格准备/恢复；
 - `assertGroupList`：返回值和数据库断言；
 - `dataMockList`：Mock；
-- `reqParamStruct`：默认规范请求结构。数组中唯一的第一层节点作为结构根节点保留在内部上下文，但生成实际报文时不输出该节点名称，直接使用其 `children` 作为报文第一层字段。普通案例必须完整保留全部结构字段且不能增加字段；已评审案例明确测试缺少字段时，只允许省略该案例指定的精确路径；明确测试新增字段时，在完整结构基础上只允许加入该案例指定的精确路径；两种例外可同时生效。
+- `reqParamStruct`：最终请求报文唯一字段和嵌套结构白名单。数组中唯一的第一层节点作为结构根节点保留在内部上下文，但生成实际报文时不输出该节点名称，直接使用其 `children` 作为报文第一层字段。普通案例必须完整保留全部结构字段且不能增加字段；只有已评审案例明确测试缺少字段时，才允许省略该案例指定的精确路径。案例描述或任何参考中的“新增/多传/未定义字段”均不能突破该白名单。
 
-若多个返回项的 `reqParamStruct` 不一致，使用输入排序中第一个非空结构作为当前生成批次的规范结构；后续参考值默认只能映射到该结构已有字段。只有已评审案例明确要求新增字段时，才能按案例预先提取的 `expectedAdditionalPaths` 追加，不能因后续参考本身多出字段而扩大允许列表。响应若携带脚本标识则按标识关联；未携带时按请求 `scriptIds` 与返回顺序关联。
+若多个返回项的 `reqParamStruct` 不一致，使用输入排序中第一个非空结构作为当前生成批次的规范结构；后续参考值只能映射到该结构已有字段，不能因案例描述、后续参考或存量资产本身多出字段而扩大白名单。响应若携带脚本标识则按标识关联；未携带时按请求 `scriptIds` 与返回顺序关联。
 
 请求的每个 `scriptId` 都必须关联到一个返回case并完成解析。若响应case少于请求项、脚本标识无法关联、返回顺序不足以完成一一对应，或某个响应项整体不可解析，则该次一体化平台参考链路不完整；同时存在 TC 参考时必须返回 `PARTIAL/INCOMPLETE`，不能只使用已成功解析的 TC 或部分平台结果生成脚本。

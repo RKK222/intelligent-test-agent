@@ -116,6 +116,72 @@ class TemplateRendererTest(unittest.TestCase):
         self.assertEqual(list(output_target.iterdir()), [output])
         self.assert_no_intermediate_artifacts(output_target)
 
+    def test_renderer_rejects_field_outside_req_param_struct(self):
+        values = sample_values()
+        values["requestPayload"] = '{"ACCOUNT":"123","EMPTY":"","LEGACY_ONLY":"x"}'
+        values["canonicalReqParamStruct"] = [
+            {
+                "name": "ApiRequest",
+                "children": [
+                    {"name": "ACCOUNT", "children": []},
+                    {"name": "EMPTY", "children": []},
+                ],
+            }
+        ]
+        with self.assertRaisesRegex(ValueError, "unexpectedAdditionalPaths"):
+            renderer.render_document(values, SKILL_ROOT / "templates")
+
+    def test_renderer_allows_only_case_declared_missing_field(self):
+        values = sample_values()
+        values["requestPayload"] = '{"ACCOUNT":"123"}'
+        values["canonicalReqParamStruct"] = [
+            {
+                "name": "ApiRequest",
+                "children": [
+                    {"name": "ACCOUNT", "children": []},
+                    {"name": "EMPTY", "children": []},
+                ],
+            }
+        ]
+        values["expectedMissingPaths"] = ["ApiRequest.EMPTY"]
+        content = renderer.render_document(values, SKILL_ROOT / "templates")
+        self.assertIn('{"ACCOUNT":"123"}', content)
+
+    def test_renderer_rejects_legacy_additional_field_allowlist(self):
+        values = sample_values()
+        values["canonicalReqParamStruct"] = [
+            {"name": "ApiRequest", "children": [{"name": "ACCOUNT", "children": []}]}
+        ]
+        values["expectedAdditionalPaths"] = ["LEGACY_ONLY"]
+        with self.assertRaisesRegex(ValueError, "不再允许 expectedAdditionalPaths"):
+            renderer.render_document(values, SKILL_ROOT / "templates")
+
+    def test_verifier_rejects_extra_field_in_persisted_markdown(self):
+        directory, output_target, values = self.create_run()
+        self.addCleanup(directory.cleanup)
+        values["canonicalReqParamStruct"] = [
+            {
+                "name": "ApiRequest",
+                "children": [
+                    {"name": "ACCOUNT", "children": []},
+                    {"name": "EMPTY", "children": []},
+                ],
+            }
+        ]
+        output = output_target / "成功案例-接口自动化脚本.md"
+        manifest = renderer.render_to_output(values, output, output_target)
+        tampered = output.read_text(encoding="utf-8").replace(
+            '"EMPTY": ""', '"EMPTY": "",\n  "LEGACY_ONLY": "x"'
+        )
+        output.write_text(tampered, encoding="utf-8")
+        manifest["outputSha256"] = renderer.sha256_file(output)
+
+        result = verifier.validate(values, output, output_target, manifest)
+
+        self.assertFalse(result.passed)
+        self.assertIn("rendered_output_mismatch", result.issues)
+        self.assertIn("rendered_request_payload_invalid", result.issues)
+
     def test_command_line_renderer_and_verifier_use_stdin_stdout(self):
         directory, output_target, values = self.create_run()
         self.addCleanup(directory.cleanup)

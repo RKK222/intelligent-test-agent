@@ -70,8 +70,13 @@ def validate(
             result.issues.append(issue)
 
     expected_output = renderer.render_document(values, template_root).encode("utf-8")
-    if renderer.read_bytes(resolved_output) != expected_output:
+    actual_output = renderer.read_bytes(resolved_output)
+    if actual_output != expected_output:
         result.issues.append("rendered_output_mismatch")
+    try:
+        renderer.validate_rendered_request_payload(actual_output.decode("utf-8"), values)
+    except (UnicodeDecodeError, ValueError):
+        result.issues.append("rendered_request_payload_invalid")
     result.issues = list(dict.fromkeys(result.issues))
     return result
 

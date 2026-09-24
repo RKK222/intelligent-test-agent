@@ -19,6 +19,18 @@
       ]
     },
     {
+      "name": "未提供接口身份沿用存量逻辑",
+      "prompt": "生成当前已评审接口案例的自动化脚本，案例文件位于当前子条目 041-测试设计；用户未提供接口编号、接口 ID 或接口英文名。",
+      "expectations": [
+        "interfaceIdentity.seasId 和 interfaceIdentity.seasName 均为空或未识别时跳过 resolve-api-automation-references",
+        "不调用 TCDS 或一体化平台参考接口",
+        "不返回 TCDS_FAILED_CONFIRMATION_REQUIRED",
+        "不询问用户是否无参考继续",
+        "直接沿用原有存量脚本生成逻辑",
+        "referenceResolutionStatus 为 NOT_APPLICABLE 或不进入参考解析分支"
+      ]
+    },
+    {
       "name": "上传 TC 优先与长度复核",
       "prompt": "生成 aaaaaaa 接口全部案例的自动化脚本，已上传同一 TC 的 Java/XLS，其中一个案例要求字段 userName 长度为 65。",
       "expectations": [
@@ -103,14 +115,14 @@
       ]
     },
     {
-      "name": "案例明确新增字段时只允许增加目标字段",
+      "name": "案例要求多传字段仍禁止超出规范结构",
       "prompt": "生成 101011111 接口自动化脚本，reqParamStruct 包含 ACCOUNT、MOBILE 和 EMPTY；当前已评审案例明确要求多传字段 EXT_FIELD，并要求不传 MOBILE。",
       "expectations": [
-        "生成前只从案例原文提取 expectedAdditionalPaths=EXT_FIELD 和 expectedMissingPaths=MOBILE，不从 TC、平台参考或生成结果反向补录",
-        "最终报文以完整 reqParamStruct 为基准，按案例要求加入 EXT_FIELD 并省略 MOBILE，其它结构字段保持不变",
-        "EXT_FIELD 即使案例要求空值也显式输出为空字符串，不能因为为空省略",
-        "二次校验拒绝 EXT_FIELD 未出现、MOBILE 仍存在、加入未声明字段、缺少其它字段或把已有结构字段声明为新增字段",
-        "数组元素内新增字段必须出现在每个实际元素中，缺字段和新增字段可在同一案例同时生效"
+        "只允许根据案例原文提取 expectedMissingPaths=MOBILE，不生成任何新增字段允许列表",
+        "最终报文以 reqParamStruct 为唯一字段白名单，省略 MOBILE，但仍包含 ACCOUNT 和 EMPTY，EMPTY 为空时保留空字符串",
+        "EXT_FIELD 不在 reqParamStruct 中，即使案例、TC Excel/Java 或平台存量报文包含也不得输出",
+        "二次校验必须拒绝 EXT_FIELD、其它额外字段、MOBILE 仍存在、其它未声明缺失字段、null 或错误嵌套",
+        "正式 Markdown 渲染后重新读取实际请求报文并复验，不能只校验生成前草稿"
       ]
     },
     {

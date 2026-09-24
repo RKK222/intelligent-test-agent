@@ -1,0 +1,4 @@
+interface:
+  display_name: "一体化平台报文结构同步"
+  short_description: "按接口英文名查询 reqParamStruct 并同步 042 请求报文"
+  default_prompt: "请按一体化平台返回的 reqParamStruct 安全同步指定接口的 042 请求报文结构。"

@@ -276,7 +276,7 @@ class PayloadValidatorTest(unittest.TestCase):
         self.assertEqual(output["allowedMissingPaths"], ["B"])
         self.assertEqual(output["unexpectedMissingPaths"], [])
 
-    def test_allows_only_case_declared_additional_field(self):
+    def test_rejects_additional_field_even_with_legacy_allowlist(self):
         document = {
             "payload": {"A": "kept", "EXTRA": ""},
             "reqParamStruct": [
@@ -285,107 +285,11 @@ class PayloadValidatorTest(unittest.TestCase):
             "expectedAdditionalPaths": ["ROOT.EXTRA"],
         }
         result = validator.validate(document, [])
-        self.assertTrue(result.passed)
+        self.assertFalse(result.passed)
         self.assertEqual(result.extra_paths, ["EXTRA"])
-        self.assertEqual(result.allowed_additional_paths, ["EXTRA"])
-        self.assertEqual(result.unexpected_additional_paths, [])
+        self.assertEqual(result.unexpected_additional_paths, ["EXTRA"])
 
-    def test_rejects_null_for_declared_additional_field(self):
-        document = {
-            "payload": {"A": "kept", "EXTRA": None},
-            "reqParamStruct": [
-                {"name": "ROOT", "children": [{"name": "A", "children": []}]}
-            ],
-            "expectedAdditionalPaths": ["EXTRA"],
-        }
-        result = validator.validate(document, [])
-        self.assertFalse(result.passed)
-        self.assertEqual(result.allowed_additional_paths, ["EXTRA"])
-        self.assertEqual(result.null_paths, ["EXTRA"])
-
-    def test_rejects_declared_additional_field_when_payload_omits_it(self):
-        document = {
-            "payload": {"A": "kept"},
-            "reqParamStruct": [
-                {"name": "ROOT", "children": [{"name": "A", "children": []}]}
-            ],
-            "expectedAdditionalPaths": ["EXTRA"],
-        }
-        result = validator.validate(document, [])
-        self.assertFalse(result.passed)
-        self.assertEqual(result.expected_additional_but_missing_paths, ["EXTRA"])
-
-    def test_rejects_undeclared_extra_alongside_declared_additional_field(self):
-        document = {
-            "payload": {"A": "kept", "EXTRA": "allowed", "SURPRISE": "not-allowed"},
-            "reqParamStruct": [
-                {"name": "ROOT", "children": [{"name": "A", "children": []}]}
-            ],
-            "expectedAdditionalPaths": ["EXTRA"],
-        }
-        result = validator.validate(document, [])
-        self.assertFalse(result.passed)
-        self.assertEqual(result.allowed_additional_paths, ["EXTRA"])
-        self.assertEqual(result.unexpected_additional_paths, ["SURPRISE"])
-
-    def test_rejects_schema_field_declared_as_additional(self):
-        document = {
-            "payload": {"A": "kept"},
-            "reqParamStruct": [
-                {"name": "ROOT", "children": [{"name": "A", "children": []}]}
-            ],
-            "expectedAdditionalPaths": ["ROOT.A"],
-        }
-        result = validator.validate(document, [])
-        self.assertFalse(result.passed)
-        self.assertEqual(result.invalid_expected_additional_paths, ["A"])
-
-    def test_rejects_additional_child_under_non_schema_parent(self):
-        document = {
-            "payload": {"A": "kept", "NEW": {"CHILD": "case-value"}},
-            "reqParamStruct": [
-                {"name": "ROOT", "children": [{"name": "A", "children": []}]}
-            ],
-            "expectedAdditionalPaths": ["NEW.CHILD"],
-        }
-        result = validator.validate(document, [])
-        self.assertFalse(result.passed)
-        self.assertEqual(result.invalid_expected_additional_paths, ["NEW.CHILD"])
-        self.assertEqual(result.unexpected_additional_paths, ["NEW"])
-
-    def test_requires_additional_field_in_every_array_item(self):
-        struct = [
-            {
-                "name": "ROOT",
-                "children": [
-                    {
-                        "name": "ITEMS",
-                        "children": [{"name": "VALUE", "children": []}],
-                    }
-                ],
-            }
-        ]
-        result = validator.validate(
-            {
-                "payload": {
-                    "ITEMS": [
-                        {"VALUE": "one", "EXTRA": "present"},
-                        {"VALUE": "two"},
-                    ]
-                },
-                "reqParamStruct": struct,
-                "expectedAdditionalPaths": ["ITEMS.EXTRA"],
-            },
-            [],
-        )
-        self.assertFalse(result.passed)
-        self.assertEqual(result.allowed_additional_paths, ["ITEMS[0].EXTRA"])
-        self.assertEqual(
-            result.expected_additional_but_missing_paths,
-            ["ITEMS[1].EXTRA"],
-        )
-
-    def test_missing_and_additional_exceptions_can_apply_together(self):
+    def test_missing_exception_never_allows_additional_field(self):
         document = {
             "payload": {"A": "kept", "EXTRA": "case-value"},
             "reqParamStruct": [
@@ -398,14 +302,13 @@ class PayloadValidatorTest(unittest.TestCase):
                 }
             ],
             "expectedMissingPaths": ["ROOT.B"],
-            "expectedAdditionalPaths": ["ROOT.EXTRA"],
         }
         result = validator.validate(document, [])
-        self.assertTrue(result.passed)
+        self.assertFalse(result.passed)
         self.assertEqual(result.allowed_missing_paths, ["B"])
-        self.assertEqual(result.allowed_additional_paths, ["EXTRA"])
+        self.assertEqual(result.unexpected_additional_paths, ["EXTRA"])
 
-    def test_command_line_accepts_only_declared_additional_field(self):
+    def test_command_line_no_longer_accepts_additional_field_allowlist(self):
         document = {
             "payload": {"A": "kept", "EXTRA": "case-value"},
             "reqParamStruct": [
@@ -432,11 +335,8 @@ class PayloadValidatorTest(unittest.TestCase):
             text=True,
             encoding="utf-8",
         )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        output = json.loads(completed.stdout)
-        self.assertTrue(output["passed"])
-        self.assertEqual(output["allowedAdditionalPaths"], ["EXTRA"])
-        self.assertEqual(output["unexpectedAdditionalPaths"], [])
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("unrecognized arguments", completed.stderr)
 
     def test_rejects_nested_container_where_schema_declares_leaf(self):
         document = {

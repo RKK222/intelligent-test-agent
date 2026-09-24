@@ -1,0 +1,43 @@
+{
+  "skill": "sync-integrated-api-request-structure",
+  "version": "1.0.0",
+  "cases": [
+    {
+      "name": "增强流程后同步明确接口",
+      "prompt": "增强接口自动化脚本已经生成，请按一体化平台 Moegglobalpaysubmit 接口调整当前需求子条目 042 下的报文结构。",
+      "expected": [
+        "加载本 Skill",
+        "从工作空间路径解析 appName/version",
+        "查询 reqParamStruct",
+        "唯一定位目标并在校验通过后写回"
+      ]
+    },
+    {
+      "name": "缺少接口英文名时失败关闭",
+      "prompt": "请按一体化平台调整当前 042 报文结构。",
+      "expectedStageStatus": "INCOMPLETE",
+      "mustNot": ["猜测接口英文名", "修改文件"]
+    },
+    {
+      "name": "同名接口命中多个文件时失败关闭",
+      "prompt": "042 下两个 Markdown 都标注接口英文名 DemoApi，请按一体化平台 DemoApi 调整报文。",
+      "expectedStageStatus": "INCOMPLETE",
+      "mustNot": ["选择第一个文件", "批量修改"]
+    },
+    {
+      "name": "路径解析",
+      "workspacePath": "personalworktree:20260818/team/F-BASE/workspace/04-测试/REQ/042-测试执行",
+      "expected": {"appName": "F-BASE", "version": "2026年8月"}
+    },
+    {
+      "name": "保留确定性渲染链",
+      "prompt": "生成流程仍持有 values、renderer 和 manifest，请同步 DemoApi 报文。",
+      "expected": [
+        "规范化 values.requestPayload",
+        "重新运行 renderer 和 verifier",
+        "不直接编辑正式 Markdown",
+        "不复用旧 manifest"
+      ]
+    }
+  ]
+}

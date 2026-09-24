@@ -6,7 +6,7 @@ metadata:
   display-name: Automation Format Check
   display-name-zh: 自动化格式检查
   agent-id: test-execution-api
-  version: 2.3.0
+  version: 2.3.1
   source: test-agent
   emoji: ✅
 ---
@@ -28,12 +28,13 @@ metadata:
 
 1. 文件中不包含“待确认”“需确认”“未确认”或常见中英文占位标记；
 2. `referenceContext.canonicalReqParamStruct` 非空时，已执行 `resolve-api-automation-references/scripts/validate_generated_payload.py` 且结果通过；
-3. `reqParamStruct` 唯一第一层结构根节点名称不得出现在最终报文中，报文第一层必须直接对应其 `children`。普通案例请求结构没有任何缺失、多余或 `null` 字段，空字符串字段保留为 `""`；明确缺字段案例只允许且要求省略 `expectedMissingPaths` 中由案例原文预先映射的精确字段；明确新增字段案例只允许且要求加入 `expectedAdditionalPaths` 中由案例原文预先映射的精确字段。两类例外可同时生效，除此之外结构仍必须完全一致；允许列表不得根据参考或生成结果反向补录；
-4. 长度类案例包含显式长度复核结果，实际值长度符合案例要求；
-5. 输出案例集合与输入已评审案例一一对应。
-6. 已执行 `resolve-api-automation-references/scripts/validate_data_preparations.py` 且结果通过；不存在数据准备时两个列表均为空。所有 SQL/table 准备和恢复均完整、顺序一致，不含截断、省略或摘要。
-7. TC 与一体化平台同时存在时，已执行 `validate_reference_contributions.py` 且结果通过；请求、数据准备和断言中凡来源有内容均有具体贡献或冲突处理证据，不能完全放弃任一来源。
-8. 所有校验输入和结果均保存在调用方上下文并通过 stdin/stdout 传递，不生成校验 JSON 或清理登记文件。调用方结束前已使用执行前基线、正式 `generatedFiles` 和可选的 sibling `.tmp/api-automation-<runId>` 运行 `validate_temp_cleanup.py`，确认 042 内不存在 `.reference-work`、`.tmp`、`clean-up.json`、`cleanup.json`，本次 run 已删除且 `residualPaths/unexpectedOutputEntries` 均为空。
+3. `reqParamStruct` 是最终请求报文唯一字段和嵌套结构白名单；其唯一第一层结构根节点名称不得出现在最终报文中，报文第一层必须直接对应其 `children`。普通案例请求结构没有任何缺失、多余或 `null` 字段，空字符串字段保留为 `""`；明确缺字段案例只允许且要求省略 `expectedMissingPaths` 中由案例原文预先映射的精确字段，其它结构仍须完整。不存在新增字段例外；无论额外字段来自案例描述、TC Excel/Java、平台存量案例还是其它参考，均必须拒绝；
+4. 结构校验必须针对重新读取的正式 Markdown 中实际请求报文执行，不能只校验渲染前草稿或 values；该报文必须与 renderer 校验过的 `requestPayload` 一致，并通过同一 `canonicalReqParamStruct`/`expectedMissingPaths` 校验；
+5. 长度类案例包含显式长度复核结果，实际值长度符合案例要求；
+6. 输出案例集合与输入已评审案例一一对应。
+7. 已执行 `resolve-api-automation-references/scripts/validate_data_preparations.py` 且结果通过；不存在数据准备时两个列表均为空。所有 SQL/table 准备和恢复均完整、顺序一致，不含截断、省略或摘要。
+8. TC 与一体化平台同时存在时，已执行 `validate_reference_contributions.py` 且结果通过；请求、数据准备和断言中凡来源有内容均有具体贡献或冲突处理证据，不能完全放弃任一来源。
+9. 所有校验输入和结果均保存在调用方上下文并通过 stdin/stdout 传递，不生成校验 JSON 或清理登记文件。调用方结束前已使用执行前基线、正式 `generatedFiles` 和可选的 sibling `.tmp/api-automation-<runId>` 运行 `validate_temp_cleanup.py`，确认 042 内不存在 `.reference-work`、`.tmp`、`clean-up.json`、`cleanup.json`，本次 run 已删除且 `residualPaths/unexpectedOutputEntries` 均为空。
 
 ## 输出
 

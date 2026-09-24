@@ -6,7 +6,7 @@ metadata:
   display-name: API Automation Reference Resolution
   display-name-zh: 接口自动化参考解析
   agent-id: test-execution-api
-  version: 2.1.0
+  version: 2.1.1
   source: test-agent
   emoji: 🔎
 ---
@@ -17,7 +17,7 @@ metadata:
 
 ## 使用条件
 
-仅当 Task prompt 的 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 非空且 `requestedActions` 包含 `GENERATE_SCRIPT` 时使用。两者均为空时立即返回 `NOT_APPLICABLE`，让调用方走原有生成逻辑。
+仅当 Task prompt 的 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 非空且 `requestedActions` 包含 `GENERATE_SCRIPT` 时使用。两者均为空、缺失或未识别时必须立即返回 `referenceResolutionStatus=NOT_APPLICABLE`，不得调用任何 TCDS/一体化平台接口、不得返回失败确认状态，让调用方走原有存量生成逻辑；调用方不得因该状态询问用户。
 
 执行前读取：
 
@@ -47,7 +47,7 @@ metadata:
 7. 对排序后的一体化平台脚本最多取前 10 个，按 `references/api-contracts.md` 一次性调用一体化平台接口。版本和应用名按该文档从上下文解析，不从包名猜测。
 8. **双来源完整性门禁。** NIT 列表同时存在 TC 和一体化平台脚本时，两条链路都必须执行并成功形成参考：完成一个完整 TC Java/Excel 组的解析，同时完成排序后前 10 个平台脚本的一次查询及返回解析。找到 TC 后不得跳过平台调用，平台已有案例也不得跳过 TC 文件查找和解析。
 9. 分别盘点 TC 与一体化平台在请求报文、数据准备/恢复和断言三个维度中的实际内容，形成 `sourceContent`。每个维度须保存项目数量和可追踪的内部内容标识；只有完整解析后确认该来源在该维度确实没有内容，才能标记为空，不能为了通过后续门禁删除或隐藏来源内容。
-10. 形成保存在 Agent 上下文中的 `referenceContext`：TCDS 状态、可用及已解析的参考类型、选中的 TC 解析事实、平台案例、完整数据准备/恢复动作、Mock、断言、规范请求结构 `reqParamStruct`、来源优先级、`sourceContent` 和警告。保留原始结构用于追踪，但明确标记唯一第一层节点为不进入实际报文的结构根节点，生成字段从其 `children` 开始。默认全部结构字段必须存在且不得增加字段；已评审案例明确测试“缺少/不传某字段”时，为该案例记录精确的 `expectedMissingPaths`；明确测试“新增/多传/未定义字段”时，记录精确的 `expectedAdditionalPaths`。两类列表可在同一案例同时存在，但都必须在生成前从案例原文提取，不能根据生成结果、TC/平台参考中的结构差异、空值或 `null` 反向推断。参考里偶然多出的字段默认仍禁止加入；只有案例明确要求的新增路径才可加入。SQL/table 无论大小都不得截断或简化。
+10. 形成保存在 Agent 上下文中的 `referenceContext`：TCDS 状态、可用及已解析的参考类型、选中的 TC 解析事实、平台案例、完整数据准备/恢复动作、Mock、断言、规范请求结构 `reqParamStruct`、来源优先级、`sourceContent` 和警告。保留原始结构用于追踪，但明确标记唯一第一层节点为不进入实际报文的结构根节点，生成字段从其 `children` 开始。`reqParamStruct` 是最终报文唯一字段和嵌套结构白名单，默认全部结构字段必须存在且不得增加字段；已评审案例明确测试“缺少/不传某字段”时，为该案例记录从案例原文预先提取的精确 `expectedMissingPaths`。不存在新增字段允许列表；案例描述、TC Excel/Java、平台存量案例或其它参考中不属于 `reqParamStruct` 的字段一律不得进入最终报文，也不能根据生成结果、参考差异、空值或 `null` 反向放宽结构。SQL/table 无论大小都不得截断或简化。
 11. 返回前关闭本 Skill 打开的全部文件、Excel 读取器和子进程，并只向调用方报告 `temporaryFilesCreated=true/false`，不得生成或返回临时文件清单。若因第三方工具创建了 sibling `.tmp/api-automation-<runId>` 内容，清理责任固定属于 `test-execution-api`：它必须在覆盖整个工作流的 `finally` 中只删除本次 run，并在本次创建的 `.tmp` 根清空时删除该根，再运行 `scripts/validate_temp_cleanup.py`。入口 Agent还会独立复验。本 Skill 不得把临时目录当交付物，也不得触碰其它并发 run。
 
 ## 读取与委派边界
@@ -58,7 +58,7 @@ metadata:
 - 工具或路径失败时直接记录失败证据并按规则处理，不能转换为用户权限确认，也不能通过再派发 Agent 规避；
 - 只读授权不允许修改用户上传文件或自动化库，正式写入范围仍限 `042-测试执行`。
 
-TCDS 失败且无上传参考时要求用户决定是否无参考继续，这是需求规定的业务确认，不属于权限申请；除此之外，不得因执行本 Skill 的任何工具动作暂停等待授权。
+只有已识别接口身份并实际发起 TCDS 后，TCDS 失败且无上传参考时才要求用户决定是否无参考继续，这是需求规定的业务确认，不属于权限申请；未识别接口身份时不得提出该问题。除此之外，不得因执行本 Skill 的任何工具动作暂停等待授权。
 
 ## 双来源完成条件
 
@@ -73,7 +73,7 @@ TCDS 失败且无上传参考时要求用户决定是否无参考继续，这是
 
 - TCDS HTTP 失败、非 JSON、`code != 0` 或响应结构无法解析均算失败。
 - 存在用户上传的 TC Java/Excel 时，记录 `PARTIAL` 并继续使用上传参考。
-- 没有用户上传 TC 文件且 `allowWithoutReference != true` 时，立即返回 `TCDS_FAILED_CONFIRMATION_REQUIRED`，不得生成正式文件。
+- 只有已识别接口身份且本 Skill 的第一项外部动作已经实际发起 TCDS 调用时，没有用户上传 TC 文件且 `allowWithoutReference != true` 才能返回 `TCDS_FAILED_CONFIRMATION_REQUIRED`，不得生成正式文件；未识别接口身份的请求不适用此规则。
 - 用户已明确同意且 `allowWithoutReference=true` 时，记录 `WITHOUT_REFERENCE_CONFIRMED` 并继续；仍不得输出“待确认”“需确认”占位语。
 
 ## 返回
@@ -101,7 +101,6 @@ integratedParsedCount
 sourceContent
 canonicalReqParamStruct
 caseExpectedMissingPaths
-caseExpectedAdditionalPaths
 referenceCases
 referenceDataPreparations
 referenceMocks
