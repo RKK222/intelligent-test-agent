@@ -62,6 +62,8 @@ packages/shared-types
 
 `agent-web` 每次加载 Vite 配置时按北京时间生成 `VyyyyMMdd.HHmmss` 构建版本，并以只读编译常量固化到 bundle；设置弹窗左侧导航底部展示该版本。普通刷新或静态服务重启不会改变版本，只有重新构建前端产物才会变化。
 
+本机客户端工作区的公共 Agent/Skill/Tool 以本人个人副本为编辑目标；配置树与中栏文件标签共用客户端实例、连接代次和目标服务器路由。重连或切换工作区后的旧文件请求不能打开或覆盖当前标签，验收需实际点击目录中的文件并确认正文出现在编辑器。
+
 工作台编辑器中，`041-测试设计` 路径下文件的“缓存并跳转”入口按 TCDS `getCacheByKey` 的优先级解析当前编辑器内存正文：优先读取“案例名称/测试步骤/测试数据/预期结果”四列表格，其次读取包含测试标题、前置条件等字段的八列表格，最后按 `## 测试案例 N` 分段文本提取案例，并把接口返回验证与数据库验证合并为预期结果。每次打开弹窗都通过 `backend-api` 实时调用平台任务类型入口，由 Java 访问 TCDS `getTaskTypes` 并只返回 `data.subItemTypes` 的 `name/value`；加载中禁止选择和确认，失败保留弹窗并提供重试，不降级到本地快照。弹窗默认勾选全部案例，支持通过勾选行批量赋值；确认时只要求已勾选案例至少选择一个案例类型，未勾选案例不校验也不提交。提交时每个已勾选 Markdown 案例保留一个 `caseList` 对象，所选 `value` 对应的实时完整 `name` 原样作为 TCDS 任务类型，多个名称以英文逗号连接，例如 `准入测试任务/功能测试任务` 生成 `准入测试任务,功能测试任务`。确认后通过 `backend-api` 调用平台 TCDS 案例维护入口，后端再次实时查询任务类型并按完整名称校验，再通过统一部署地址和共享请求构造器携带固定 `toolId` 提交；设计方法固定为“文本理解生成法”，统一认证号取当前登录认证主体。案例维护成功后，前端参考 `042-测试执行` 的既有流程，把同一份当前编辑器正文交给缓存接口，取得最终 `jumpUrl` 后直接打开目标标签页，不创建 `about:blank` 占位页；`createGraphCase` 或缓存失败时显示错误且不创建新标签页。`042-测试执行` 原缓存跳转行为不变。部署后由 Java 所在内网访问 TCDS，浏览器不直连内网 HTTP 地址。
 
 `/workflow-chat` 是与 OpenCode/LobeHub 对话隔离的长程任务入口。只有构建期 `VITE_TEST_AGENT_WORKFLOW_ENABLED=true` 且用户为超级管理员时才展示活动栏按钮并允许深链接；缺失或其它值一律关闭。当前 release 企业包注入 `false`。启用后的新建空对话直接展示仓库/分支/模式/智能体输入卡，不要求先调用意图模型换取表单。`packages/workflow-api-client` 直接访问同源 Python `/workflow-api/v1/**` 并使用带 Authorization/`Last-Event-ID` 的 fetch SSE；`packages/workflow-chat` 提供 TDesign Chat、结构化输入、进度、取消、报告版本和局部重分析。两包不依赖 `backend-api`、`event-stream-client` 或现有 `agent-chat` 状态。

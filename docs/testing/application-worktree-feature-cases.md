@@ -54,6 +54,8 @@ root 执行 `test -r` 成功只证明 root 可读，需用 `ps` 核实目标进�
 手动搬文件或刷新浏览器均不能作为该流程已经完成的证据。恢复验收同时记录新 location、目录可见和真实工具成功；
 本地客户端的公共能力包激活规则见 [客户端 README](../../backend/test-agent-local-client/README.md#公共能力包)。
 
+本机公共能力真实验收还需点击 `agents/`、`skills/` 或 `tools/` 下的文件，确认中间编辑器打开对应只读/可写标签；重连客户端或切换工作区后再次打开同名文件，必须使用新的客户端连接代次和服务器路由，旧读取响应不得回写当前标签。
+
 ### 将角色类 Skill 转为独立 Agent
 
 原生 Agent 落在当前应用工作区的 `.opencode/agents/<name>.md`，名称由文件名确定，YAML frontmatter 使用 Agent schema；需要直接选择和 `@` 调用时使用 `mode: all`、`hidden: false`。将原 Skill 的角色、规则和流程写入 Markdown 正文，不保留“必须先加载同名 Skill”的依赖，也无需向 JSONC 添加注册项。Skill 专用的 `compatibility/metadata` 不直接搬入 Agent frontmatter。

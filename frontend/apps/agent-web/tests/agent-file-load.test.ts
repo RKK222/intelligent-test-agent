@@ -2,12 +2,27 @@ import { describe, expect, it } from "vitest";
 import {
   agentConfigMutationReloadTarget,
   agentFileInfo,
+  agentPublicFileRouteIsCurrent,
   agentTabPath,
+  localPersonalAgentWorktreeId,
   requiresManagedRestartForAgentConfigFile,
   shouldReloadPersonalRuntimeCatalog
 } from "../src/components/agentFileLoad";
 
 describe("Agent 文件标签路由", () => {
+  it("本机公共个人副本只接受当前客户端连接代次与目标服务器", () => {
+    const current = {
+      worktreeId: localPersonalAgentWorktreeId("client-a", 3),
+      linuxServerId: "server-a"
+    };
+    expect(current.worktreeId).toBe("LOCAL_CLIENT_PERSONAL:client-a:3");
+    expect(localPersonalAgentWorktreeId("client-a", 0)).toBeUndefined();
+    expect(agentPublicFileRouteIsCurrent(current, current)).toBe(true);
+    expect(agentPublicFileRouteIsCurrent({ ...current, worktreeId: localPersonalAgentWorktreeId("client-a", 2) }, current)).toBe(false);
+    expect(agentPublicFileRouteIsCurrent({ ...current, worktreeId: localPersonalAgentWorktreeId("client-b", 3) }, current)).toBe(false);
+    expect(agentPublicFileRouteIsCurrent({ ...current, linuxServerId: "server-b" }, current)).toBe(false);
+  });
+
   it("按 workspace、worktree 和 server 隔离标签身份并可还原原始路由", () => {
     const featureTabPath = agentTabPath(
       "WORKSPACE",

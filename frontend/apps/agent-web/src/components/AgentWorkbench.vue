@@ -205,8 +205,10 @@ import {
 import {
   agentConfigMutationReloadTarget,
   agentFileInfo,
+  agentPublicFileRouteIsCurrent,
   agentTabPath,
   isAgentFilePath,
+  localPersonalAgentWorktreeId,
   requiresManagedRestartForAgentConfigFile,
   shouldReloadPersonalRuntimeCatalog,
   type AgentConfigMutation,
@@ -9011,17 +9013,28 @@ async function handleDownloadEntry(entry: FileTreeEntry) {
   }
 }
 
-function normalizedAgentRouteValue(value?: string | null): string {
-  return value ?? "";
-}
-
 function agentFileLoadContextIsCurrent(request: AgentFileLoadRequest): boolean {
   if (request.scope === "PUBLIC") {
+    if (selectedWorkspaceKind.value === "LOCAL_CLIENT") {
+      const endpoint = selectedLocalEndpoint.value;
+      const localWorktreeId = localPersonalAgentWorktreeId(
+        selectedWorkspace.value?.localClientInstanceId,
+        endpoint?.connectionGeneration
+      );
+      // 本机个人副本也必须匹配实例、连接代次和目标服务器，不能沿用上个公共 worktree。
+      return Boolean(localWorktreeId && endpoint)
+        && agentPublicFileRouteIsCurrent(request, {
+          worktreeId: localWorktreeId,
+          linuxServerId: endpoint?.linuxServerId ?? routeLinuxServerId.value
+        });
+    }
     const currentWorktreeId = workbench.publicWorktree?.worktreeId;
     const currentLinuxServerId = workbench.publicWorktree?.linuxServerId
       ?? workbench.publicConfigLinuxServerId;
-    return normalizedAgentRouteValue(request.worktreeId) === normalizedAgentRouteValue(currentWorktreeId)
-      && normalizedAgentRouteValue(request.linuxServerId) === normalizedAgentRouteValue(currentLinuxServerId);
+    return agentPublicFileRouteIsCurrent(request, {
+      worktreeId: currentWorktreeId,
+      linuxServerId: currentLinuxServerId
+    });
   }
   return Boolean(request.workspaceId)
     && request.workspaceId === selectedAgentConfigWorkspaceId.value

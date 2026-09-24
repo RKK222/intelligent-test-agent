@@ -14,6 +14,23 @@ export type AgentFileLoadRequest = {
   replaceExistingDirty?: boolean;
 };
 
+/** 本机个人公共能力用连接代次隔离文件标签，重连后不得复用旧连接的读写目标。 */
+export function localPersonalAgentWorktreeId(instanceId?: string | null, connectionGeneration?: number | null): string | undefined {
+  const id = instanceId?.trim();
+  return id && connectionGeneration && connectionGeneration > 0
+    ? `LOCAL_CLIENT_PERSONAL:${id}:${connectionGeneration}`
+    : undefined;
+}
+
+/** 公共文件读取必须匹配当前物理路由，防止切换工作区或客户端重连后的迟到响应。 */
+export function agentPublicFileRouteIsCurrent(
+  request: Pick<AgentFileLoadRequest, "worktreeId" | "linuxServerId">,
+  current: { worktreeId?: string | null; linuxServerId?: string | null }
+): boolean {
+  return (request.worktreeId ?? "") === (current.worktreeId ?? "")
+    && (request.linuxServerId ?? "") === (current.linuxServerId ?? "");
+}
+
 export type AgentFileTabInfo = {
   scope: "PUBLIC" | "WORKSPACE";
   path: string;

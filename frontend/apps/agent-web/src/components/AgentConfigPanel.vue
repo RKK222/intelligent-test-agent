@@ -34,6 +34,7 @@ import { formatAgentConfigError } from "./agentConfigErrors";
 import {
   agentFileInfo,
   isAgentFilePath,
+  localPersonalAgentWorktreeId,
   type AgentQuickCommitRequest,
   type AgentFileLoadRequest,
   type PublicWorktreeMountRequest
@@ -414,7 +415,7 @@ async function ensureCurrentUserPublicWorktree(
 
 function worktreeId(scope: Scope) {
   if (scope === "PUBLIC" && localPersonalMode.value) {
-    return `LOCAL_CLIENT_PERSONAL:${props.localClientInstanceId}:${props.localClientConnectionGeneration}`;
+    return localPersonalAgentWorktreeId(props.localClientInstanceId, props.localClientConnectionGeneration);
   }
   // 应用级配置直接使用当前版本个人 workspace 的 Git 根，不再挂载独立 Agent worktree。
   return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : undefined;
@@ -426,20 +427,23 @@ function emitFilesMutated(
   mutation: Omit<AgentConfigMutation, "scope" | "workspaceId" | "worktreeId" | "linuxServerId">
 ) {
   if (scope === "PUBLIC") {
-    emit("files-mutated", {
-      scope,
+    const payload: AgentConfigMutation = {
+      scope: "PUBLIC",
       ...mutation,
       worktreeId: worktreeId(scope),
-      linuxServerId: publicWorktree.value?.linuxServerId
-        ?? (localPersonalMode.value ? props.routeLinuxServerId : undefined)
-    });
+      linuxServerId: localPersonalMode.value
+        ? props.routeLinuxServerId ?? undefined
+        : publicWorktree.value?.linuxServerId ?? undefined
+    };
+    emit("files-mutated", payload);
     return;
   }
-  emit("files-mutated", {
-    scope,
+  const payload: AgentConfigMutation = {
+    scope: "WORKSPACE",
     ...mutation,
     workspaceId: props.workspaceId
-  });
+  };
+  emit("files-mutated", payload);
 }
 
 function activeAgentFileFromLocalSelection() {
@@ -463,9 +467,9 @@ function isCurrentAgentFileContext(file: {
     return false;
   }
   if (file.scope === "PUBLIC") {
-    const currentLinuxServerId = publicWorktree.value?.linuxServerId
-      ?? (localPersonalMode.value ? props.routeLinuxServerId : publicConfigLinuxServerId.value)
-      ?? "";
+    const currentLinuxServerId = (localPersonalMode.value
+      ? props.routeLinuxServerId
+      : publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value) ?? "";
     return (file.linuxServerId ?? "") === currentLinuxServerId;
   }
   return Boolean(file.workspaceId) && file.workspaceId === props.workspaceId;
