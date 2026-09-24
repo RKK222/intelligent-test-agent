@@ -143,6 +143,10 @@ describe("team review panes", () => {
     manageMembers?.click();
     await review.vm.$nextTick();
     expect(document.body.querySelector("[role='dialog'][aria-label='选择系统管理员团队']")).not.toBeNull();
+    const manageOwners = document.body.querySelector<HTMLButtonElement>(".team-owner-empty button");
+    expect(manageOwners?.textContent).toContain("前往用户管理");
+    manageOwners?.click();
+    expect(review.emitted("open-user-management")).toHaveLength(1);
     controller.closeTeamPickerDialog();
     launcher?.click();
     await review.vm.$nextTick();
@@ -190,6 +194,12 @@ describe("team review panes", () => {
       page: 1,
       size: 200
     });
+    backend.listSystemAdminTeamCandidates.mockResolvedValue({
+      items: [{ userId: "candidate-1", username: "待添加成员", unifiedAuthId: "candidate-auth", department: "质量部" }],
+      total: 1,
+      page: 1,
+      size: 50
+    });
     const controller = createTeamManagementController(backend);
     await controller.enter(true);
     const provide = { [teamManagementKey as symbol]: controller };
@@ -202,6 +212,15 @@ describe("team review panes", () => {
     await review.vm.$nextTick();
     await vi.waitFor(() => expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull());
     expect(backend.listSystemAdminTeamMembers).toHaveBeenCalled();
+    const candidate = document.body.querySelector<HTMLSelectElement>("select[aria-label='选择要添加的用户']");
+    expect(candidate?.querySelector("option[value='candidate-1']")).not.toBeNull();
+    candidate!.value = "candidate-1";
+    candidate!.dispatchEvent(new Event("change", { bubbles: true }));
+    await review.vm.$nextTick();
+    document.body.querySelector<HTMLButtonElement>(".team-member-add button")?.click();
+    await vi.waitFor(() => expect(backend.addSystemAdminTeamMember).toHaveBeenCalledWith(
+      { scopeMode: "SYSTEM_ADMIN_TEAM", ownerUserId: "owner-1" }, "candidate-1"
+    ));
     review.unmount();
   });
 

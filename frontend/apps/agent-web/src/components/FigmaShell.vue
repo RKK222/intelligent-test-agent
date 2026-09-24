@@ -235,6 +235,7 @@ const emit = defineEmits<{
   (e: "load-more-notifications"): void;
   (e: "open-notification", notification: UserNotification): void;
   (e: "switch-workbench-perspective"): void;
+  (e: "open-team-members"): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -2680,6 +2681,16 @@ function submitJoinApp() {
 
       <div class="figma-header-right">
         <button
+          v-if="contextReview"
+          type="button"
+          class="figma-header-team-add"
+          data-testid="team-add-member"
+          @click.stop="emit('open-team-members')"
+        >
+          <Plus :size="14" aria-hidden="true" />
+          <span>添加团队成员</span>
+        </button>
+        <button
           v-if="!fixedWorkspace"
           type="button"
           :class="['figma-header-help', 'figma-header-experience', workspaceKind === 'EXPERIENCE' && 'is-open']"
@@ -3545,6 +3556,29 @@ function submitJoinApp() {
   gap: 8px;
   transform: translateY(calc(var(--ta-shell-gap, 8px) / 2));
   z-index: 3;
+}
+
+.figma-header-team-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ta-shell-accent-strong, #991b1b);
+  border-radius: 8px;
+  background: var(--ta-shell-accent-strong, #991b1b);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.figma-header-team-add:hover,
+.figma-header-team-add:focus-visible {
+  background: var(--ta-shell-accent, #c8161d);
+  outline: 2px solid var(--ta-shell-accent-soft, #fdf2f2);
+  outline-offset: 2px;
 }
 
 .figma-header-help {

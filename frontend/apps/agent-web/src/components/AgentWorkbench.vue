@@ -512,7 +512,8 @@ function enterTeamManagement() {
     teamReturnRoute.value = null;
   }
   savedRightPanelOpen.value = rightPanelOpen.value;
-  rightPanelOpen.value = false;
+  // 管理视角进入时直接展示可读取当前成员工作区上下文的对话栏，退出后仍恢复原布局。
+  rightPanelOpen.value = true;
   workbenchPerspective.value = "TEAM_MANAGEMENT";
   void teamController.enter(isSuperAdmin.value, {
     appId: selectedAppId.value ?? undefined,
@@ -13112,6 +13113,7 @@ async function handleLogout() {
     @load-more-notifications="loadMoreUserNotifications"
     @open-notification="handleOpenNotification"
     @switch-workbench-perspective="toggleTeamManagement"
+    @open-team-members="teamController.openMemberDialog()"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">
@@ -13344,6 +13346,7 @@ async function handleLogout() {
         :right-panel-open="false"
         :chat-open="rightPanelOpen"
         @open-chat="rightPanelOpen = true"
+        @open-user-management="openSystemMenuPage('users')"
       />
       <main v-show="workbenchPerspective !== 'TEAM_MANAGEMENT'" class="managed-editor-main">
         <section v-show="workspacePageMode" class="workspace-page-host" aria-label="功能页多标签工作区">

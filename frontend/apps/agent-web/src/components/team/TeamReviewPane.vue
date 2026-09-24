@@ -32,6 +32,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "open-chat"): void;
+  (e: "open-user-management"): void;
 }>();
 
 const { controller, state } = useTeamManagementView();
@@ -449,7 +450,10 @@ const launcherStyle = computed(() => ({
               </span>
               <ChevronRight class="team-owner-chevron" :size="16" aria-hidden="true" />
             </button>
-            <p v-if="!state.ownersLoading && !state.ownersError && !state.owners.length" class="team-review-empty">暂无可管理的系统管理员团队。</p>
+            <div v-if="!state.ownersLoading && !state.ownersError && !state.owners.length" class="team-owner-empty">
+              <p class="team-review-empty">暂无系统管理员团队负责人。先在用户管理中设置系统管理员，再返回添加团队成员。</p>
+              <button type="button" class="team-btn-secondary" @click="emit('open-user-management')">前往用户管理</button>
+            </div>
           </div>
         </section>
       </div>
@@ -459,7 +463,7 @@ const launcherStyle = computed(() => ({
           <header class="team-dialog-header">
             <div>
               <span class="team-review-kicker">{{ scopeDescription }}</span>
-              <h2>成员管理</h2>
+              <h2>添加团队成员</h2>
             </div>
             <button type="button" class="team-dialog-close-btn" aria-label="关闭成员管理" autofocus @click="controller.closeMemberDialog()">
               <X :size="16" />
@@ -501,7 +505,7 @@ const launcherStyle = computed(() => ({
                 @click="controller.addMember()"
               >
                 <Plus :size="14" />
-                <span>添加组员</span>
+                <span>添加团队成员</span>
               </button>
             </div>
             <div class="team-member-list">
