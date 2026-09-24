@@ -2,7 +2,7 @@
 
 - 当前项目内源文件目录：`public-agent-config/`
 - 首次导入来源：原公共配置包 `feature_config@6bb05a0f585ebe12cf06c72fe58224676a5ec02`
-- 内容：9 个 Agent、21 个 Skill、12 个 Tool 文件
+- 内容：9 个 Agent、22 个 Skill、12 个 Tool 文件
 
 ## 仓库与发布边界
 
@@ -36,6 +36,7 @@ deploy/internal/package-public-agent-config.sh
 6. `test-execution-ui` 增加 `hidden: true`，与“只允许内部编排”的约定一致。
 7. 保留输入包已经验证可执行的 BDSP 调度/查询逻辑、原有地址、请求模板和授权捕获程序；数据库连接配置与加密密钥仍不复制进项目基线。
 8. TCDS、案例资产查询、一体化数据库/RPC 代理和安全扫描保留输入包的原始默认地址；既有 URL 校验、错误处理和受控环境覆盖逻辑保持不变。
+9. 接口自动化参考解析改为按排序结果每批最多 5 条查询一体化平台；仅在当前批返回“未查询到接口”且无可用数据时继续下一批，任一批返回至少一条案例脚本即可供生成参考。
 
 ## Agent 与 Skill 归属
 
@@ -44,7 +45,7 @@ deploy/internal/package-public-agent-config.sh
 | `test-design-orchestrator` | `test-design` |
 | `test-design-generation` | `test-design-api`、`test-design-augment`、`test-design-direct`、`test-design-equivalence`、`test-design-orthogonal`、`test-design-path`、`test-design-scenario`、`chaos-case-generate`、`secure-case-recommend` |
 | `test-execution-agent` | `test-execution` |
-| `test-execution-api` | `resolve-api-automation-references`、`legacy-interface-function-asset-to-md`、`generate-api-automation-markdown`、`validate-automation-script-format` |
+| `test-execution-api` | `resolve-api-automation-references`、`legacy-interface-function-asset-to-md`、`generate-api-automation-markdown`、`sync-integrated-api-request-structure`、`validate-automation-script-format` |
 
 以下是直接调用的独立 Skill，不需要伪造 `agent-id`：`bdsp-job-result-query`、`bdsp-job-scheduler`、`concise-output`、`secure-scan`、`skill-creator`、`skill-optimizer`。
 

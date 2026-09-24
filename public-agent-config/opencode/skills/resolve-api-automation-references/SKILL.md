@@ -6,7 +6,7 @@ metadata:
   display-name: API Automation Reference Resolution
   display-name-zh: 接口自动化参考解析
   agent-id: test-execution-api
-  version: 2.1.1
+  version: 2.2.0
   source: test-agent
   emoji: 🔎
 ---
@@ -44,8 +44,8 @@ metadata:
 4. 对排序后的 TC 组逐个查找，默认只选一个完整组。每个候选先尝试第一段映射出的直接逻辑路径；直接路径没有同时找到 `xxxTC.java` 和至少一个 `xxxTC_*.xls` 时，必须使用计划中的 `**/xxxTC.java`、`**/xxxTC_*.xls` 从每个逻辑引用根递归盘点全部后代目录和匹配文件，深度不限。进入递归兜底后，即使中途已经发现完整文件对，也要先搜索完全部自动化逻辑引用，再从完整盘点结果中配对和选择；不得在首个子目录、首个匹配或只找到一种文件时停止。完整盘点后当前候选仍不完整，才继续下一候选或下一 TC 组。
 5. 只读自动化库必须使用当前工作区 `.opencode/opencode.jsonc` 中平台写入且 `testagent-reference-kind=automation` 的每个逻辑引用。直接使用 Read/Glob/Grep 读取，无需询问读取权限。Java/XLS 按 TC 主名配对并优先同一逻辑父目录；Java 明确引用 XLS 时优先遵循该关系。必须记录 `recursiveSearchCompleted`、`searchedReferenceAliases` 和 `matchedLogicalPaths`，只有全部引用完成递归搜索后才能报告未找到。禁止扫描服务器物理根、读取或拼接 `OPENCODE_REFERENCES_DIR` 实际值、写入引用目录、执行 Git、修改 JSONC 或新增后端文件代理。
 6. 发现 TC 文件后按 `references/tc-parsing.md` 解析。必须先完整提取全部 Excel，并重点还原其中的请求报文、数据准备/恢复和断言，再用 Java 确认消费方式、字段映射、覆盖顺序和生命周期；不得因为 Java 未内联某项配置而忽略 Excel。只复用 `legacy-interface-function-asset-to-md` 的 Java/Excel/SQL/Mock/断言识别与 Excel 提取能力，禁止使用它的输出目录、模板、资产 Markdown、转换报告和增量标记。
-7. 对排序后的一体化平台脚本最多取前 10 个，按 `references/api-contracts.md` 一次性调用一体化平台接口。版本和应用名按该文档从上下文解析，不从包名猜测。
-8. **双来源完整性门禁。** NIT 列表同时存在 TC 和一体化平台脚本时，两条链路都必须执行并成功形成参考：完成一个完整 TC Java/Excel 组的解析，同时完成排序后前 10 个平台脚本的一次查询及返回解析。找到 TC 后不得跳过平台调用，平台已有案例也不得跳过 TC 文件查找和解析。
+7. 按 `scripts/rank_reference_scripts.py` 输出的 `integratedScriptBatches` 顺序处理一体化平台脚本，每批最多 5 个，按 `references/api-contracts.md` 调用一体化平台接口。当前批返回至少一条可解析业务信息时立即停止；只有响应明确包含“未查询到接口”且当前批没有可用数据时，才继续查询下一批，直到有可解析数据或批次耗尽。版本和应用名按该文档从上下文解析，不从包名猜测。
+8. **双来源完整性门禁。** NIT 列表同时存在 TC 和一体化平台脚本时，两条链路都必须执行并成功形成参考：完成一个完整 TC Java/Excel 组的解析，同时按排序批次查询一体化平台，直到某批返回至少一条可解析案例脚本。平台返回案例数量可以少于请求批次的 5 条，1 条可解析案例即可作为生成参考；只有所有批次都返回“未查询到接口”或没有可用数据时才判定平台参考未完成。找到 TC 后不得跳过平台调用，平台已有案例也不得跳过 TC 文件查找和解析。
 9. 分别盘点 TC 与一体化平台在请求报文、数据准备/恢复和断言三个维度中的实际内容，形成 `sourceContent`。每个维度须保存项目数量和可追踪的内部内容标识；只有完整解析后确认该来源在该维度确实没有内容，才能标记为空，不能为了通过后续门禁删除或隐藏来源内容。
 10. 形成保存在 Agent 上下文中的 `referenceContext`：TCDS 状态、可用及已解析的参考类型、选中的 TC 解析事实、平台案例、完整数据准备/恢复动作、Mock、断言、规范请求结构 `reqParamStruct`、来源优先级、`sourceContent` 和警告。保留原始结构用于追踪，但明确标记唯一第一层节点为不进入实际报文的结构根节点，生成字段从其 `children` 开始。`reqParamStruct` 是最终报文唯一字段和嵌套结构白名单，默认全部结构字段必须存在且不得增加字段；已评审案例明确测试“缺少/不传某字段”时，为该案例记录从案例原文预先提取的精确 `expectedMissingPaths`。不存在新增字段允许列表；案例描述、TC Excel/Java、平台存量案例或其它参考中不属于 `reqParamStruct` 的字段一律不得进入最终报文，也不能根据生成结果、参考差异、空值或 `null` 反向放宽结构。SQL/table 无论大小都不得截断或简化。
 11. 返回前关闭本 Skill 打开的全部文件、Excel 读取器和子进程，并只向调用方报告 `temporaryFilesCreated=true/false`，不得生成或返回临时文件清单。若因第三方工具创建了 sibling `.tmp/api-automation-<runId>` 内容，清理责任固定属于 `test-execution-api`：它必须在覆盖整个工作流的 `finally` 中只删除本次 run，并在本次创建的 `.tmp` 根清空时删除该根，再运行 `scripts/validate_temp_cleanup.py`。入口 Agent还会独立复验。本 Skill 不得把临时目录当交付物，也不得触碰其它并发 run。
@@ -64,8 +64,8 @@ metadata:
 
 - 过滤后的 NIT 只存在一种脚本类型时，只要求完成该类型的解析；
 - 同时存在两种类型时，`requiredReferenceKinds=["TC","INTEGRATED"]`，必须同时满足 `tcReferenceParsed=true` 和 `integratedReferenceParsed=true`；
-- `integratedReferenceParsed=true` 仅在排序后前 10 个预期脚本均已关联到平台返回项，且每个返回项中的案例、报文、数据准备、Mock、断言和 `reqParamStruct` 已按实际存在内容完成解析后成立；返回数量或成功关联数量少于请求脚本数量时视为未完成；
-- TC 候选全部找不到完整 Java + XLS、Excel 提取失败、平台调用失败、平台响应无法解析、请求脚本未全部关联或平台返回没有可用接口脚本信息时，返回 `referenceResolutionStatus=PARTIAL`、`stageStatus=INCOMPLETE`，禁止进入正式脚本生成；
+- `integratedReferenceParsed=true` 仅在按 `integratedScriptBatches` 顺序查询后，某一批返回至少一条可关联且可解析的案例脚本，并且该返回项中的案例、报文、数据准备、Mock、断言和 `reqParamStruct` 已按实际存在内容完成解析后成立；不要求当前批 5 个脚本全部返回；
+- TC 候选全部找不到完整 Java + XLS、Excel 提取失败、平台调用失败、平台响应无法解析、所有平台批次均返回“未查询到接口”或没有可用案例脚本时，返回 `referenceResolutionStatus=PARTIAL`、`stageStatus=INCOMPLETE`，禁止进入正式脚本生成；
 - 不得通过把失败类型从 `requiredReferenceKinds` 删除、只保留已成功类型或改写为 `NO_MATCH` 来绕过门禁；
 - 只有两种必需参考都已进入 `referenceContext` 后，才能返回 `RESOLVED` 并调用生成 Skill。
 

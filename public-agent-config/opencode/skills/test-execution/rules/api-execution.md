@@ -5,15 +5,15 @@
 测试执行入口根据用户意图生成 `requestedActions`，只包含实际要求的动作：
 
 - `GENERATE_SCRIPT`：加载 `generate-api-automation-markdown` 生成接口自动化脚本；
-- `GENERATE_MESSAGE`：加载 `generate-test-messages` 生成接口自动化报文；
+- `GENERATE_MESSAGE`：兼容动作，与 `GENERATE_SCRIPT` 一样加载 `generate-api-automation-markdown`，生成包含请求报文的接口自动化脚本；
 - `EXECUTE_API`：由 `test-execution-api` 调用平台接口工具真实执行；
 - `VERIFY_DB`：由 `test-execution-api` 使用平台数据库工具铺底、校验或清理。
 
-用户只要求脚本或报文时，不得自动追加真实执行。用户要求执行案例时至少加入 `EXECUTE_API`；只有案例含数据库前置/断言或用户明确要求数据库校验时才加入 `VERIFY_DB`。生成脚本和报文也只在用户要求时加入。
+用户只要求脚本或请求报文时，不得自动追加真实执行。用户要求执行案例时至少加入 `EXECUTE_API`；只有案例含数据库前置/断言或用户明确要求数据库校验时才加入 `VERIFY_DB`。生成动作也只在用户要求时加入；两种动作共用完整脚本产物，不重复生成独立报文。
 
 ## 接口 ID/英文名参考分支
 
-当 `GENERATE_SCRIPT` 请求可从用户原话明确提取 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 时，`test-execution-api` 必须在其它生成步骤之前加载 `resolve-api-automation-references` 并首先调用 TCDS。两个字段均不存在时必须直接沿用存量逻辑：不加载该 Skill、不调用 TCDS/一体化平台、不询问用户，并将参考状态视为 `NOT_APPLICABLE`。
+当 `GENERATE_SCRIPT` 或兼容动作 `GENERATE_MESSAGE` 请求可从用户原话明确提取 `interfaceIdentity.seasId` 或 `interfaceIdentity.seasName` 时，`test-execution-api` 必须在其它生成步骤之前加载 `resolve-api-automation-references` 并首先调用 TCDS。两个字段均不存在时必须直接沿用存量逻辑：不加载该 Skill、不调用 TCDS/一体化平台、不询问用户，并将参考状态视为 `NOT_APPLICABLE`。
 
 以下约束不可降级：
 
@@ -24,7 +24,7 @@
 5. 参考解析结果只用于请求、数据准备、Mock 和断言生成，不改变已评审案例范围和预期意图；
 6. 该分支只允许写入当前需求项/子条目的 `04-测试/042-测试执行/`。目录外显式路径不得使用。
 7. 解析 TC 文件对时必须优先完整提取 Excel 中的报文、数据准备/恢复和断言，再用 Java 确认映射、覆盖顺序和执行路径；不得把 Excel 仅作为字段值附件。
-8. NIT 同时存在 TC 和一体化平台脚本时必须执行并完成两类参考解析；不能以优先级、相关性或已有单类成功结果为由跳过另一类。任一类未完成时整体参考阶段为 `INCOMPLETE`，不得生成正式脚本。
+8. NIT 同时存在 TC 和一体化平台脚本时必须执行并完成两类参考解析；一体化平台脚本按排序结果每批最多 5 条查询，只有返回“未查询到接口”且没有可用数据时才继续下一批，任一批返回至少一条可解析案例脚本即可作为参考，不要求批次内 5 条全部返回。不能以优先级、相关性或已有单类成功结果为由跳过另一类。任一类未完成时整体参考阶段为 `INCOMPLETE`，不得生成正式脚本。
 9. 数据准备/恢复不得随意简化。全部适用 SQL/table 必须按执行顺序完整生成并二次比对；SQL 长度、行数和复杂度不能成为跳过、截断、概括或改写理由。
 10. TC 与一体化平台同时存在时，请求报文、数据准备/恢复和断言必须分别参考两边。非冲突项合并，重复项记录双来源，冲突项按优先级显式处理；不得让任一来源在三个维度被完全放弃，并必须通过来源贡献校验。
 11. `test-execution-api` 必须直接完成工作流，禁止再次派发 Task/General/Explore。本工作流所需的读取、写入规定产物目录、外部目录、命令、网络、Skill 和平台 Tool 权限均直接使用，不得申请或等待批准；失败按工具、接口或路径错误返回，不转为权限询问。TCDS 失败后的无参考继续确认属于业务决策，不属于权限申请。

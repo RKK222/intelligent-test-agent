@@ -45,7 +45,7 @@ class ReferenceRankerTest(unittest.TestCase):
         }
         result = ranker.classify(payload, ["完全无关的设计"], ["999"], ["/work/20260101/app"])
         self.assertEqual([item["tcName"] for item in result["tcGroups"]], ["FirstTC", "SecondTC"])
-        self.assertEqual(result["integratedTop10"], ["com.demo.Api##invoke_1.0##成功案例"])
+        self.assertEqual(result["integratedTop5"], ["com.demo.Api##invoke_1.0##成功案例"])
         self.assertEqual(result["requiredReferenceKinds"], ["TC", "INTEGRATED"])
         self.assertEqual(result["derivedVersion"], "2026年1月")
 
@@ -58,7 +58,22 @@ class ReferenceRankerTest(unittest.TestCase):
             ],
         }
         result = ranker.classify(payload, ["账号字段长度超限"], ["Api"], [])
-        self.assertEqual(result["integratedTop10"][0], "com.demo.Api##invoke##账号长度超限失败")
+        self.assertEqual(result["integratedTop5"][0], "com.demo.Api##invoke##账号长度超限失败")
+
+    def test_integrated_scripts_are_partitioned_into_ordered_batches_of_five(self):
+        payload = {
+            "code": 0,
+            "data": [
+                {"scriptType": "NIT", "scriptId": f"com.demo.Api##invoke##案例{i}"}
+                for i in range(11)
+            ],
+        }
+        result = ranker.classify(payload, ["完全无关的设计"], ["Api"], [])
+
+        self.assertEqual(result["integratedBatchSize"], 5)
+        self.assertEqual([len(batch) for batch in result["integratedScriptBatches"]], [5, 5, 1])
+        self.assertEqual(result["integratedTop5"], result["integratedScriptBatches"][0])
+        self.assertEqual(result["integratedScriptBatches"][1][0], "com.demo.Api##invoke##案例5")
 
     def test_tc_file_uses_last_tc_segment_as_file_name(self):
         candidate = ranker.tc_file_candidates("com.demo.FirstTC.archive.SecondTC.trailing")
