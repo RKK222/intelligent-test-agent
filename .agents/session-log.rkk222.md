@@ -18637,3 +18637,28 @@
 
 - 共享 100 环境已部署并完成上述真实 UI 验收；`superadmin01` 所选版本不存在名为 `default` 的个人工作空间，页面显示预期只读空态，因此本轮未验证文件内容读取。
 - 企业完整包未完成，等待受控输入目录与企业数据库历史后再按全组件包和迁移门禁构建；不能把 9 月旧包称为最新包。本次无代码、API、事件、数据库、性能、安全或兼容协议变更，仅记录发布与交付状态。
+
+## 2026-09-25 - 使用本机受控 env 重建企业完整包并完成离线验收
+
+### Why
+
+- 用户说明可使用本机已有企业 env，并要求基于当前 `release` 代码打出最新企业包、先测试验证再交付；不能把缺失旧路径的受控输入目录继续当成绝对阻塞。
+
+### What
+
+- 以 `deploy/internal/.env` 为基础，合并本机已有的企业客户端受控输入和 `.secure/public-capabilities-81605f245d1512e1ab0dd73812391f6da7d008b5.tar.gz`；私钥仅用于签发过程，不进入任何发布 ZIP。
+- 发现并规避 Codex 桌面环境导出的 `CODEX_VERSION` 覆盖项目锁定值的问题，构建命令显式固定 worker 的 `0.145.0`；未修改 `.env` 文件。
+- 生成独立输出目录 `/Users/kaka/Desktop/mimoagent/0709/test-agent-enterprise-build.bjAFjN`：当前后端/前端、签名本地客户端 `20260925212500`、linux/amd64 worker、程序归档和内层 `test-agent-internal-release.zip`；worker/客户端均为 `included`，toolbox 为已部署指纹 `reuse`，LobeHub/Memory 为 `disabled`。
+- 用历史外层包中的三台节点归档作为敏感配置输入，仅在临时副本中做本轮公钥与非密钥配置规范化，原始归档 SHA 均保持不变；生成固定名外层包 `test-agent-two-backend-complete.zip` 与 `.sha256`。
+
+### How
+
+- 签名公私钥 DER 指纹匹配，公共能力包 manifest 的 `sourceCommit` 匹配；本地客户端分发验签/四制品摘要校验通过。
+- `FlywayMigrationNamingTest` 16/16、真实 PostgreSQL `DatabaseMigrationCompatibilityCustomizerPostgresqlIntegrationTest` 31/31、真实 MySQL `XxlJobMysqlMigrationTest` 7/7 全部通过；未使用 `repair`、`outOfOrder` 或修改 history 表。
+- worker 镜像构建及 `verify-codex-whitebox-worker-image.sh` 通过：Codex/RTK/许可证摘要、Python 3.13.14、MCP routing/protocol smoke、缺配置失败关闭和企业 host-check fixture 均通过；Apple Silicon Docker 的 native amd64 namespace E2E 按脚本规则跳过，仍需目标 Linux 节点执行 host check。
+- 外层 ZIP SHA 校验、`unzip -tq`、内嵌内层 ZIP 与本次内层 SHA 一致性均通过；外层仅含公钥配置，不含签名私钥。
+
+### Result
+
+- 最新企业完整包已生成，可交付路径为：`/Users/kaka/Desktop/mimoagent/0709/test-agent-enterprise-build.bjAFjN/complete-bundle/test-agent-two-backend-complete.zip`；外层 SHA-256 为 `02e848590e818fd0b18052785e842966a4b8e7c284edbb59c476e6aec1574a94`，内层 SHA-256 为 `ad0652ee54ce4b53261e40c9475580f8f20a9f63c360d452829e9b2343876af7`。
+- 本机可复现的构建、迁移和归档门禁已完成；企业目标 PostgreSQL/XXL MySQL 的完整脱敏 `flyway_schema_history` 尚未由现场提供，因此本包不能宣称已通过企业现场历史准入或已部署。目标 Linux worker 仍须按现场内核执行 native namespace E2E。
