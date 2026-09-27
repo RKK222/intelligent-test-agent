@@ -277,7 +277,7 @@ CMC 参数依赖：
 | TC-37 失败与预算 | 一名来源离线、旧节点不支持元数据 RPC；目录 1001 项 | 明确 incomplete/unavailable 或超限，不把部分/截断结果标成完整；无法确认来源时拒绝正文 |
 | TC-38 大于 24 文件真实问答 | 真实 Git fixture 至少 30 文件；用户询问第 30 文件正文；继续搜索 40 子目录 | Tool list/search/read 取到第 30 文件；搜索续扫 remainingDirectories；不是预载快照，保留实际 Tool 调用及 Run 终态证据 |
 | TC-39 Scope 与 Run 撤权 | 换操作者、登录 marker 失效、成员移除、服务器/版本映射变化、终态 Run、复用到其它 Run | 每条协调/来源 RPC 失败关闭；来源节点顶层 FORBIDDEN/UNAUTHENTICATED 错误码不误解析为空目录 |
-| TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；读取 .envrc/SSH 私钥/符号链接 | 拒绝操作和敏感文件；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文 |
+| TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；枚举 .opencode/node_modules、读取 opencode.jsonc/.envrc/.npmrc/.netrc/SSH 私钥/符号链接 | 目录树排除受管配置和依赖；直读/直列受保护路径返回 FORBIDDEN；拒绝写操作和敏感文件；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文；旧配置管理 RPC 授权不变 |
 | TC-41 迟到响应和连接 | 并发展开、切应用/成员后旧 ticket/目录/分片迟到；刷新/退出视角 | 同 scope 单飞连接；旧连接关闭、迟到结果不能覆盖新视图，聚合 ID 不当物理 Workspace |
 | TC-42 配套发布与真实模型 | 后端经 Jenkins 发布100，公共 Tool 经个人 worktree 审阅发布，受管重启验收进程 | UI、所有来源节点、公共 Tool 和专用凭据版本配套；账号 binding 不迁 Mac；真实模型读取来源并引用文件路径与作者 |
 
@@ -302,6 +302,12 @@ corepack pnpm build
 - 按固定 `.env.test`/`test` profile 启动实际后端、manager、前端；readiness UP，3000 HTTP 200。真实账号页面确认默认全部成员、唯一成员维护入口、成员选择后关闭和范围切换；无可用 default 时明确空态，来源离线时明确“不完整”。截图保存在 `output/playwright/team-review-20260927/`。
 - 实际平台 scope/ticket 均 HTTP 200，真实浏览器文件 WebSocket 的 workspace.write 返回 FORBIDDEN；无效专用 Tool 凭据返回 401 UNAUTHENTICATED。未创建该测试写入文件，未修改账号模型、团队成员、数据库业务数据或工作区服务器归属；短 scope 在 Redis 按 TTL 自动过期。
 - **尚未通过 TC-38/TC-42 的真实模型验收**：本轮未发布100后端和公共 Tool，未受管重启远端验收进程。共享账号仍绑定100；当前本人团队在 wrtest/20260709 没有 default，本地-测试/20260618 的 default 来源服务器离线。不能把单元/隔离测试、空态截图或上轮有限快照对话当作新 Tool 的真实验收。
+
+### 2026-09-27 共享环境配套发布与安全补验
+
+- Jenkins #65 于 15:12:20 完成 `8b027dd74669c85ca838b365f36b01c681572ecd` 的发布，标签 `release-65-8b027dd7`；后端 readiness、Web、XXL readiness 均 HTTP 200，执行器 9999 TCP 可达。公共 Tool 已通过个人 worktree 发布到 public master `f5b52bda86867dc48157e01595e21ae56526a8a1`，100 rollout 完成；验收管理员通过公共启动/重启链路重新启动，binding 保持100。Mac 的一个个人 worktree 冲突未修改，不影响100同步。
+- 实际读取确认：`wrtest/20260709` 的本人 default 工作区在100存在，新增来源文件 RPC 返回目录及 Git 元数据。旧“本地-测试/20260618”的本人工作区只有登记，物理根目录不可用，未擅自初始化或更改服务器归属。免费 `opencode/ling-3.0-flash-free` 已在真实模型目录出现。
+- 递归元数据验收发现扫描进入 `.opencode` 配置和依赖目录；在发送模型问题前补上目录枚举与正文读取的统一保护规则，并用原有真实 Git 30 文件测试覆盖嵌套配置、依赖、`.npmrc/.netrc` 的排除和拒绝。这次修复需要另一次 Jenkins 发布后再完成真实模型验收；此处不将 #65 视为最终验收通过。
 
 # 3. 案例审核结果
 

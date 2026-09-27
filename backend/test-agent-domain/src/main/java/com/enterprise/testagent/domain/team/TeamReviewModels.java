@@ -24,7 +24,7 @@ public final class TeamReviewModels {
     public record Entry(String path, String name, boolean directory, long size,
                         Candidate selected, boolean latestUncertain, List<Candidate> alternatives) { }
 
-    public static final String EXCLUDED_POLICY = "审阅范围不含 .git、.env*、私钥/证书凭据、符号链接和非普通文件；二进制或非 UTF-8 正文不可预览";
+    public static final String EXCLUDED_POLICY = "审阅范围不含 .git、.opencode 受管配置及依赖、opencode.json/jsonc、.env*、.npmrc/.netrc、私钥/证书凭据、符号链接和非普通文件；二进制或非 UTF-8 正文不可预览";
     public record Listing(List<Entry> entries, List<String> unavailableMembers, boolean complete, String excludedPolicy) {
         public Listing(List<Entry> entries, List<String> unavailableMembers, boolean complete) {
             this(entries, unavailableMembers, complete, EXCLUDED_POLICY);

@@ -124,6 +124,7 @@ public class TeamWorkspaceApplicationService {
             boolean global, UserId owner, String personalWorkspaceId, String path) {
         LocalWorkspace context = localWorkspace(global, owner, personalWorkspaceId);
         String directory = TeamReviewApplicationService.relativePath(path, true);
+        if (reviewProtected(directory)) throw new PlatformException(ErrorCode.FORBIDDEN, "审阅不能读取敏感凭据或受管配置");
         List<FileTreeEntryResponse> entries;
         try {
             entries = reviewFiles.listDirectory(context.workspaceRoot().toString(), directory, 1001);
@@ -189,7 +190,9 @@ public class TeamWorkspaceApplicationService {
     private boolean reviewProtected(String path) {
         String lower = path.toLowerCase(java.util.Locale.ROOT);
         for (String part : lower.split("/")) {
-            if (part.equals(".git") || part.startsWith(".env") || part.equals(".ssh")
+            // 受管配置可能带 Provider 凭据；整个目录连同依赖均不进入模型审阅索引。
+            if (part.equals(".git") || part.equals(".opencode") || part.startsWith(".env") || part.equals(".ssh")
+                    || java.util.Set.of(".npmrc", ".netrc", "opencode.json", "opencode.jsonc").contains(part)
                     || java.util.Set.of("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519").contains(part)
                     || part.matches(".*\\.(pem|key|p12|pfx|keystore)")) return true;
         }

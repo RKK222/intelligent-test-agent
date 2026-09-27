@@ -5,6 +5,28 @@
 
 ## Entries
 
+## 2026-09-27 - 共享环境发布聚合审阅并补齐配置凭据排除边界
+
+### Why
+
+- 用户批准经 Jenkins 部署100、平台公共 Tool 发布及本人受管进程重启后做真实问答。实际验收发现聚合目录递归扫描会进入 `.opencode` 配置及依赖；在模型读取前需补齐统一排除边界，防止 Provider 凭据进入回答。
+
+### What
+
+- 复用 `TeamWorkspaceApplicationService.reviewProtected`，在新审阅 scope 的目录枚举和正文读取入口统一排除 `.opencode`、`opencode.json/jsonc`、`.npmrc/.netrc`，保留已有环境/私钥/链接保护；不改变旧 `TEAM_READ_ONLY` 或配置管理 RPC。
+- 同步领域与工作区模块 README、设计、HTTP/事件边界、安全、TC-40 与共享环境验收记录；扩展真实 Git 30 文件用例覆盖嵌套受管配置/依赖及直读、直列拒绝。无 API 形状、RunEvent、SQL/Flyway、环境或部署节点变化。
+
+### How
+
+- `8b027dd74` 已通过 Jenkins #65 于 15:12:20 发布为 `release-65-8b027dd7`，readiness/Web/XXL 均200，9999 TCP可达。公共 Tool 通过个人 worktree 提交/发布，public master `f5b52bda86867dc48157e01595e21ae56526a8a1`；100 rollout完成，本人受管重启成功、绑定仍是100，工具数22。
+- `wrtest/20260709` 本人工作区实际存在，平台来源文件 RPC 正常，免费 Ling 已在真实模型目录。旧“本地-测试”只有登记，100物理根不可用；未迁移绑定或初始化根。元数据扫描进入依赖目录后停止模型验收并修复安全边界。
+- 修复后重跑后端8个定向类103项全部通过；提交前复核各提交者近期日志、保留公共配置兼容动作和五条批次规则及企业打包成果，不纳入临时脚本/截图/构建产物。
+
+### Result
+
+- 配套首次发布成功，但配置排除修复尚需再次经 Jenkins 发布，真实原生 Tool 问答尚未完成；不得把 #65 或 mock execute 当作最终通过。当前 MY_TEAM 同版本没有在线 default，多成员 UI 验收仍需真实成员工作区。
+- 公共 rollout 中 Mac 一个个人 worktree 为 MERGE_CONFLICT，未覆盖或修复用户改动；100共享副本和目标已同步完成。本轮不打企业包。
+
 ## 2026-09-27 - 实现管理视角最新文件聚合与按需只读审阅 Tool
 
 ### Why

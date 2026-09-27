@@ -4686,7 +4686,7 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 
 同一平台文件 WebSocket 增加单用途 `team-review` mode：`team.review.list` 参数 `{path?}`，`team.review.search` 参数 `{path?,query?,remainingDirectories?}`，`team.review.read` 参数 `{path,contentVersion,offset?}`。list/search 返回 `entries,unavailableMembers,complete,excludedPolicy`，search 另返回 `remainingDirectories`。Entry 含 `selected:{source,file}`、`latestUncertain` 和冲突 `alternatives`；Source 只有成员/工作区/服务器逻辑 ID，File 含 SHA-256 版本、真实 Git 作者与时间或明确的 FILE_TIME/UNKNOWN、删除标记。read 返回 `{source,file,chunk}`，chunk 沿用 UTF-8 分片契约。不同来源无法确认最新、来源缺失、版本变化均拒绝正文，不默取第一人。
 
-协调与来源每条 RPC 复核当前登录、角色、团队关系、版本/服务器映射；Tool 另复核活跃 Run。跨 Java 控制面复用公共路由与转发器，来源目录/正文复用 `workspace.review.list/read` 文件 RPC 和既有低敏团队访问审计；来源 RPC 必须携带匹配的 reviewScopeId。范围 2 小时过期、不缓存正文；每范围最多 200 工作区、来源并发 4、单层最多 1000 项、搜索每页 32 目录/深度 20，预算未完成必须明确返回/报错。`.git`、敏感凭据、符号链接、非普通文件排除；通用 workspace 操作、写入、Git、终端等在 scope 通道返回 FORBIDDEN。详见 [设计](../architecture/team-review-latest-files.md)。
+协调与来源每条 RPC 复核当前登录、角色、团队关系、版本/服务器映射；Tool 另复核活跃 Run。跨 Java 控制面复用公共路由与转发器，来源目录/正文复用 `workspace.review.list/read` 文件 RPC 和既有低敏团队访问审计；来源 RPC 必须携带匹配的 reviewScopeId。范围 2 小时过期、不缓存正文；每范围最多 200 工作区、来源并发 4、单层最多 1000 项、搜索每页 32 目录/深度 20，预算未完成必须明确返回/报错。`.git`、`.opencode` 受管配置/依赖、`opencode.json/jsonc`、`.env*`、`.npmrc/.netrc`、密钥/证书、符号链接、非普通文件排除；通用 workspace 操作、写入、Git、终端等在 scope 通道返回 FORBIDDEN。此排除仅作用于新审阅 scope，不改变下述旧团队文件 RPC。详见 [设计](../architecture/team-review-latest-files.md)。
 
 - `POST /personal-workspaces/{id}/file-ws-route` 返回权威 Java 的 `WorkspaceFileRouteResponse`。
 - `POST /personal-workspaces/{id}/file-ws-tickets` 接收 `{linuxServerId}`，签发一次性 `TEAM_READ_ONLY` ticket；浏览器随后连接既有平台文件 WebSocket。

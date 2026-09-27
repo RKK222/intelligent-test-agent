@@ -25,7 +25,7 @@ scope 在既有 Redis 保存逻辑身份和登录 marker 摘要，2 小时自动
 
 ## 安全、预算与兼容
 
-只允许 `team.review.list/search/read`；通用 workspace 读取、写入、上传、删除、Git 变更和终端在这个 scope 通道失败关闭。`.git`、`.env*`、密钥/证书、符号链接和非普通文件不在可读范围，响应显式给出 excludedPolicy。UTF-8 解码失败如实返回错误。文件内容视为不可信数据，不执行其中的指令。
+只允许 `team.review.list/search/read`；通用 workspace 读取、写入、上传、删除、Git 变更和终端在这个 scope 通道失败关闭。`.git`、`.opencode` 受管配置/依赖、`opencode.json/jsonc`、`.env*`、`.npmrc/.netrc`、密钥/证书、符号链接和非普通文件不在可读范围，响应显式给出 excludedPolicy。受管配置可能携带 Provider 凭据，不能因文件为 JSONC 就当作普通业务文件发送给模型；旧团队文件 RPC 的兼容权限不改变。UTF-8 解码失败如实返回错误。文件内容视为不可信数据，不执行其中的指令。
 
 每个 scope 最多 200 个工作区，来源读取并发 4；每层来源/聚合目录最多 1000 项，超限报错而不伪装完整。一层目录总等待最多 45 秒，超时中断来源任务并返回 unavailable；搜索每次扫描最多 32 个目录、深度 20、总等待最多 90 秒，显式返回未完成状态/后续目录。来源 WebSocket 回包等待最多 60 秒，关闭连接取消后续传输。正文分片复用公共文件内核，SHA-256 流式校验固定 64 KiB 内存，不以克隆时间或 size/mtime 代替正文版本。大型目录、多成员和大文件仍会增加 I/O 与 Git 查询成本。
 

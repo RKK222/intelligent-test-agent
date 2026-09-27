@@ -1,6 +1,6 @@
 # test-agent-domain
 
-team/TeamReviewModels 与 TeamReviewScopeStore 描述短效审阅范围、来源、文件版本与 Redis 存储端口，不包含正文、物理路径或配置凭据。Git 作者和工作区所有者、Git 提交时间和文件时间明确区分。
+team/TeamReviewModels 与 TeamReviewScopeStore 描述短效审阅范围、来源、文件版本与 Redis 存储端口，不包含正文、物理路径或配置凭据。Git 作者和工作区所有者、Git 提交时间和文件时间明确区分。`excludedPolicy` 明示聚合审阅不包含 `.opencode` 受管配置及依赖、OpenCode 配置文件、环境文件和凭据；该说明不改变旧配置管理通道的授权。
 
 ## 工程定位
 

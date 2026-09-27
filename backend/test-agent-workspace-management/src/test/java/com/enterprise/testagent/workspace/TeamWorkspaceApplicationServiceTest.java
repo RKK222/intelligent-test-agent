@@ -113,6 +113,12 @@ class TeamWorkspaceApplicationServiceTest {
         Files.writeString(repo.resolve("spec/.env"), "private");
         Files.writeString(repo.resolve("spec/.envrc"), "private");
         Files.writeString(repo.resolve("spec/id_ed25519"), "private");
+        Files.createDirectories(repo.resolve("spec/.opencode/node_modules"));
+        Files.writeString(repo.resolve("spec/.opencode/opencode.jsonc"), "{\"provider\":\"fixture-only\"}");
+        Files.writeString(repo.resolve("spec/.opencode/node_modules/README.md"), "不应进入审阅索引的依赖");
+        Files.writeString(repo.resolve("spec/opencode.jsonc"), "{}");
+        Files.writeString(repo.resolve("spec/.npmrc"), "fixture-only");
+        Files.writeString(repo.resolve("spec/.netrc"), "fixture-only");
         Files.createSymbolicLink(repo.resolve("spec/external"), tempDir);
         var queries = mock(TeamWorkspaceQueryRepository.class);
         var identities = mock(ScmGitIdentityResolver.class);
@@ -124,9 +130,12 @@ class TeamWorkspaceApplicationServiceTest {
                 .thenReturn(List.of(new WorkspaceVersionView(version(repo, member, git.headCommit(repo)), TeamMembershipState.CURRENT)));
         when(identities.resolve(member)).thenReturn(author);
         var service = new TeamWorkspaceApplicationService(queries, ManagedWorkspacePathResolver.legacyOnly(), new WorkspaceServerIdentity("server-a"), git, identities);
-        for (String protectedFile : List.of("spec/.env", "spec/.envrc", "spec/id_ed25519"))
+        for (String protectedFile : List.of("spec/.env", "spec/.envrc", "spec/id_ed25519", "spec/.npmrc", "spec/.netrc",
+                "spec/opencode.jsonc", "spec/.opencode/opencode.jsonc", "spec/.opencode/node_modules/README.md"))
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.reviewRead(false, owner,
                     personal.personalWorkspaceId().value(), protectedFile, "ignored", 0)).hasMessageContaining("敏感凭据");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.reviewList(false, owner,
+                personal.personalWorkspaceId().value(), "spec/.opencode")).hasMessageContaining("受管配置");
         var listing = service.reviewList(false, owner, personal.personalWorkspaceId().value(), "spec");
         assertThat(listing).hasSize(30).allSatisfy(file -> {
             assertThat(file.author()).isEqualTo("真正修改人");
