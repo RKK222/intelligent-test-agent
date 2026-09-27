@@ -87,6 +87,9 @@ const props = withDefaults(defineProps<FileExplorerProps & {
   fileTreeError?: string | null;
   /** 管理视角复用同一文件树，只保留浏览、搜索和刷新。 */
   readonlyReview?: boolean;
+  /** 仅用于只读树展示，不作为真实工作区 ID 或文件 ticket 坐标。 */
+  reviewContextId?: string;
+  reviewWarning?: string;
   /** 没有可打开工作区时的说明；管理视角用来提示缺少 default 个人工作空间。 */
   emptyWorkspaceMessage?: string;
   /** 源码快照模式只关闭 Git/Agent 发布能力，普通文件 WebSocket 写入继续开放。 */
@@ -477,7 +480,7 @@ defineExpose({
         <Search class="h-4 w-4 figma-fe-tab-icon--search" :stroke-width="1.5" />
       </button>
       <button
-        v-if="showChangesTab"
+        v-if="showChangesTab && !readonlyReview"
         type="button"
         :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
         title="变更"
@@ -546,7 +549,7 @@ defineExpose({
             >
               <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span class="figma-fe-section-title" :title="workspaceName">工作空间</span>
+              <span class="figma-fe-section-title" :title="workspaceName">{{ readonlyReview ? workspaceName : "工作空间" }}</span>
               <el-tooltip
                 v-if="personalWorkspaceBranch && !readonlyReview"
                 :content="`当前 worktree: ${personalWorkspaceBranch}`"
@@ -642,13 +645,14 @@ defineExpose({
               <span class="figma-fe-error-text">{{ fileTreeError }}</span>
               <button type="button" class="figma-fe-error-retry" @click="emit('refresh')">重试</button>
             </div>
-            <div v-else-if="!workspaceId" class="figma-fe-empty-workspace">
+            <p v-if="readonlyReview && reviewWarning" class="figma-fe-error-banner" role="status">{{ reviewWarning }}</p>
+            <div v-if="!fileTreeError && !workspaceId && !reviewContextId" class="figma-fe-empty-workspace">
               {{ emptyWorkspaceMessage || "当前应用尚未切换到可用工作区。" }}
             </div>
             <FileExplorer
-              v-else
+              v-else-if="!fileTreeError"
               ref="fileExplorerRef"
-              :key="workspaceId"
+              :key="reviewContextId || workspaceId"
               :workspace-name="workspaceName"
               :entries-by-directory="entriesByDirectory"
               :expanded-directories="expandedDirectories"

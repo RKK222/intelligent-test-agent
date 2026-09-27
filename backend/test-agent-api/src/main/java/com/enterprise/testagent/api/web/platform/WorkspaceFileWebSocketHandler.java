@@ -1,4 +1,5 @@
 package com.enterprise.testagent.api.web.platform;
+import com.enterprise.testagent.domain.user.UserId;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,6 +74,15 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     private LocalClientWorkspaceFileGateway localClientFileGateway;
     private RequirementImportApplicationService requirementImportService;
     private ApplicationAutomationReferenceWorkspaceReconciliationService automationReferenceReconciliationService;
+    private TeamReviewProtocolService teamReviewProtocol;
+    private com.enterprise.testagent.workspace.TeamWorkspaceApplicationService teamReviewWorkspaces;
+
+    /** 聚合与来源文件 RPC 均扩展公共文件通道，不另建 HTTP 文件代理。 */
+    @Autowired
+    void setTeamReviewServices(TeamReviewProtocolService protocol,
+            com.enterprise.testagent.workspace.TeamWorkspaceApplicationService workspaces) {
+        this.teamReviewProtocol = protocol; this.teamReviewWorkspaces = workspaces;
+    }
 
     /** 需求导入为可选 setter 注入，保持既有 handler 单元测试构造器兼容。 */
     @Autowired
@@ -268,10 +278,15 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             id = text(root, "id");
             op = requiredText(root, "op");
             JsonNode params = root.path("params");
+            if ("team-review".equals(ticket.mode())) {
+                if (teamReviewProtocol == null) throw new PlatformException(ErrorCode.FORBIDDEN, "审阅服务不可用");
+                return success(id, teamReviewProtocol.rpc(ticket, op, params, traceId), traceId);
+            }
             boolean experienceWorkspaceRpc = false;
             if (MODE_WORKSPACE.equals(ticket.mode()) && op.startsWith("workspace.")) {
                 if (ticket.supportReadOnly()) {
-                    requireSupportReadOperation(op);
+                    if (!ticket.teamReadOnly() || !Set.of("workspace.review.list", "workspace.review.read").contains(op))
+                        requireSupportReadOperation(op);
                 }
                 auditedWorkspaceId = workspaceId(ticket, params);
                 if (teamReadOnly) {
@@ -293,6 +308,23 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 return success(id, data, traceId);
             }
             Object data = switch (op) {
+                case "workspace.review.list" -> {
+                    if (!teamReadOnly || teamReviewWorkspaces == null) throw new PlatformException(ErrorCode.FORBIDDEN, "仅团队只读连接可查询来源元数据");
+                    if (teamReviewProtocol == null) throw new PlatformException(ErrorCode.FORBIDDEN, "审阅授权程序不可用");
+                    teamReviewProtocol.authorizeSourceRpc(ticket, params.path("reviewScopeId").asText());
+                    yield teamReviewWorkspaces.reviewList("GLOBAL".equals(ticket.supportGrantId().substring(5)),
+                            ticket.supportGrantTokenDigest() == null ? null : new UserId(ticket.supportGrantTokenDigest()),
+                            ticket.supportActorSessionDigest(), text(params, "path"));
+                }
+                case "workspace.review.read" -> {
+                    if (!teamReadOnly || teamReviewWorkspaces == null) throw new PlatformException(ErrorCode.FORBIDDEN, "仅团队只读连接可读取来源版本");
+                    if (teamReviewProtocol == null) throw new PlatformException(ErrorCode.FORBIDDEN, "审阅授权程序不可用");
+                    teamReviewProtocol.authorizeSourceRpc(ticket, params.path("reviewScopeId").asText());
+                    yield teamReviewWorkspaces.reviewRead("GLOBAL".equals(ticket.supportGrantId().substring(5)),
+                            ticket.supportGrantTokenDigest() == null ? null : new UserId(ticket.supportGrantTokenDigest()),
+                            ticket.supportActorSessionDigest(), requiredText(params, "path"), requiredText(params, "contentVersion"),
+                            requiredNonNegativeLong(params, "offset"));
+                }
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
                 case "workspace.search" -> workspaceService.searchFiles(workspaceId(ticket, params), text(params, "query"));
                 case "workspace.read" -> workspaceService.readFile(workspaceId(ticket, params), requiredText(params, "path"));

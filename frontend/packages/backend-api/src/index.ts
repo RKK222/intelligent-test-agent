@@ -1,3 +1,4 @@
+import type { TeamReviewContext, TeamReviewListing, TeamReviewReadResult } from "@test-agent/shared-types";
 import type {
   AgentInfo,
   AgentConfigCommitPayload,
@@ -1037,6 +1038,38 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
     } finally {
       if (teamFileConnections.get(key) === connection) teamFileConnections.delete(key);
     }
+  }
+
+  const reviewSockets = new Map<string, WorkspaceFileSocketClient>();
+  const reviewConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
+  let reviewSocketEpoch = 0;
+
+  /** 聚合树没有实体 Workspace；以短效范围申请平台文件 ticket，保持切换代次失效。 */
+  async function reviewFileRpc<T>(scopeId: string, op: string, params: Record<string, unknown>): Promise<T> {
+    const epoch = reviewSocketEpoch;
+    let socket = reviewSockets.get(scopeId);
+    if (!socket?.open) {
+      let connection = reviewConnections.get(scopeId);
+      if (!connection) {
+        connection = (async () => {
+          const route = await request<{ baseUrl: string; webSocketUrl: string }>(
+            `${workspaceManagementBase}/team/review-file-ticket`, { method: "POST", body: JSON.stringify({ scopeId }) }
+          );
+          if (epoch !== reviewSocketEpoch) throw new WorkspaceFileTransportError("审阅范围已切换");
+          const client = new WorkspaceFileSocketClient(toWebSocketUrl(route.baseUrl, route.webSocketUrl), webSocketFactory, () => {
+            if (reviewSockets.get(scopeId) === client) reviewSockets.delete(scopeId);
+          });
+          await client.ready();
+          if (epoch !== reviewSocketEpoch) { client.close(); throw new WorkspaceFileTransportError("审阅范围已切换"); }
+          reviewSockets.set(scopeId, client);
+          return client;
+        })();
+        reviewConnections.set(scopeId, connection);
+      }
+      try { socket = await connection; }
+      finally { if (reviewConnections.get(scopeId) === connection) reviewConnections.delete(scopeId); }
+    }
+    return socket.request<T>(op, params, 125000);
   }
 
   async function teamWorkspaceFileRpc<T>(
@@ -3578,6 +3611,22 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
         scopeMode: scope.scopeMode ?? "MY_TEAM", ownerUserId: scope.ownerUserId, kind, path
       })}`
     ),
+    createTeamReviewContext: (scope: TeamScopeParams, versionId: string, selectedUserId?: string) => request<TeamReviewContext>(
+      `${workspaceManagementBase}/team/review-scopes`, {
+        method: "POST", body: JSON.stringify({ ...scope, versionId, selectedUserId: selectedUserId || undefined })
+      }
+    ),
+    listTeamReviewFiles: (scopeId: string, path = "") => reviewFileRpc<TeamReviewListing>(scopeId, "team.review.list", { path }),
+    searchTeamReviewFiles: (scopeId: string, query: string, remainingDirectories?: string[]) =>
+      reviewFileRpc<TeamReviewListing>(scopeId, "team.review.search", { path: "", query, remainingDirectories }),
+    readTeamReviewFileChunk: (scopeId: string, path: string, contentVersion: string, offset = 0) =>
+      reviewFileRpc<TeamReviewReadResult>(scopeId, "team.review.read", { path, contentVersion, offset }),
+    closeTeamReviewFileConnections: () => {
+      reviewSocketEpoch += 1;
+      reviewSockets.forEach((socket) => socket.close());
+      reviewSockets.clear();
+      reviewConnections.clear();
+    },
     listTeamWorkspaceFiles: async (
       scope: TeamScopeParams,
       personalWorkspaceId: string,

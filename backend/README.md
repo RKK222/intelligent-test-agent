@@ -1,5 +1,7 @@
 # test-agent Backend
 
+本次管理视角最新文件聚合复用 workspace-management、平台文件 WebSocket、既有 Redis 与公共启动程序，不新增部署节点或数据库 migration。UI 与公共 team-review Tool 共用权威来源/版本规则，见 `docs/architecture/team-review-latest-files.md`。
+
 ## 工程定位
 
 基于 Maven multi-module 的单后端服务工程。只有 `test-agent-app` 负责产出可运行 Spring Boot 包，其余 `test-agent-*` 模块都是内部 library jar。

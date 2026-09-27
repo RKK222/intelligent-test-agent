@@ -72,6 +72,35 @@ function teamFetcher() {
 }
 
 describe("team file connections", () => {
+  it("shares one aggregate socket and sends no physical workspace coordinate", async () => {
+    const sockets: FakeSocket[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ success: true,
+      data: { baseUrl: "http://owner-java", webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=one" }
+    }), { headers: { "content-type": "application/json" } }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher,
+      webSocketFactory: url => { const socket = new FakeSocket(url); sockets.push(socket); return socket; } });
+    await Promise.all([client.listTeamReviewFiles("scope", "spec"), client.readTeamReviewFileChunk("scope", "spec/a.md", "sha256:one", 5)]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.sent.map(message => message.op)).toEqual(["team.review.list", "team.review.read"]);
+    expect(sockets[0]?.sent[1]?.params).toEqual({ path: "spec/a.md", contentVersion: "sha256:one", offset: 5 });
+    client.closeTeamReviewFileConnections();
+    expect(sockets[0]?.closeCalls).toBe(1);
+  });
+
+  it("rejects late aggregate connection after member switch", async () => {
+    const sockets: FakeSocket[] = [];
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ success: true,
+      data: { baseUrl: "http://owner-java", webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=one" }
+    }), { headers: { "content-type": "application/json" } }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher,
+      webSocketFactory: url => { const socket = new FakeSocket(url, false); sockets.push(socket); return socket; } });
+    const pending = client.listTeamReviewFiles("scope", "spec");
+    await vi.waitFor(() => expect(sockets).toHaveLength(1));
+    client.closeTeamReviewFileConnections(); sockets[0]?.onopen?.({});
+    await expect(pending).rejects.toThrow("审阅范围已切换");
+    expect(sockets[0]?.sent).toEqual([]);
+  });
   it("reads a preview chunk over TEAM_READ_ONLY and closes that connection on request", async () => {
     const sockets: FakeSocket[] = [];
     const factory = ((url: string) => {

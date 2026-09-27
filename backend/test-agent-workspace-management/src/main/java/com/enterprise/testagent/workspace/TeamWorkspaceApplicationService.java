@@ -41,6 +41,11 @@ public class TeamWorkspaceApplicationService {
     private final WorkspaceServerIdentity serverIdentity;
     private final GitWorkspaceService git;
     private final ScmGitIdentityResolver scmGitIdentityResolver;
+    private WorkspaceFileService reviewFiles = new WorkspaceFileService();
+
+    /** 审阅元数据继续使用公共安全文件内核，兼容原有直接构造测试。 */
+    @Autowired
+    void setReviewFiles(WorkspaceFileService reviewFiles) { this.reviewFiles = reviewFiles; }
 
     @Autowired
     public TeamWorkspaceApplicationService(
@@ -112,6 +117,83 @@ public class TeamWorkspaceApplicationService {
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND, "团队范围内的个人工作区不存在",
                         Map.of("personalWorkspaceId", personalWorkspaceId)));
+    }
+
+    /** 一层来源目录；Git 时间与未提交文件时间明确分离，不读取符号链接或敏感凭据。 */
+    public List<com.enterprise.testagent.domain.team.TeamReviewModels.File> reviewList(
+            boolean global, UserId owner, String personalWorkspaceId, String path) {
+        LocalWorkspace context = localWorkspace(global, owner, personalWorkspaceId);
+        String directory = TeamReviewApplicationService.relativePath(path, true);
+        List<FileTreeEntryResponse> entries;
+        try {
+            entries = reviewFiles.listDirectory(context.workspaceRoot().toString(), directory, 1001);
+        } catch (PlatformException exception) {
+            if (!directory.isBlank() && exception.errorCode() == ErrorCode.NOT_FOUND) return List.of();
+            throw exception;
+        }
+        if (entries.size() > 1000) throw new PlatformException(ErrorCode.VALIDATION_ERROR,
+                "审阅目录超过 1000 项，请缩小目录范围；结果未截断为完整目录");
+        var statuses = git.parseStatusPorcelain(git.statusPorcelainReadOnly(context.repoRoot()));
+        java.util.Set<String> dirty = statuses.stream().map(item -> displayPath(context, item.path()))
+                .collect(java.util.stream.Collectors.toSet());
+        List<com.enterprise.testagent.domain.team.TeamReviewModels.File> result = new java.util.ArrayList<>();
+        for (FileTreeEntryResponse entry : entries) {
+            String file = entry.path().replace('\\', '/');
+            if (reviewProtected(file)) continue;
+            if (entry.directory()) {
+                result.add(new com.enterprise.testagent.domain.team.TeamReviewModels.File(file, entry.name(), true,
+                        0, null, "directory", null, null, "UNKNOWN", "DIRECTORY", false));
+                continue;
+            }
+            var history = dirty.contains(file) ? List.<GitCommitSummary>of()
+                    : git.listCommitHistory(context.repoRoot(), null, null, 0, 1, true, gitPath(context, file));
+            GitCommitSummary change = history.isEmpty() ? null : history.getFirst();
+            result.add(new com.enterprise.testagent.domain.team.TeamReviewModels.File(file, entry.name(), false,
+                    entry.size(), entry.lastModifiedAt(), reviewVersion(context, file, entry.size(), entry.lastModifiedAt()),
+                    change == null ? null : change.authorName(), change == null ? null : change.committedAt(),
+                    change == null ? "FILE_TIME" : "GIT_COMMIT", dirty.contains(file) ? "UNCOMMITTED" : "COMMITTED", false));
+        }
+        // 缺少文件不是全局删除；只保留 Git 明确记录的本来源删除候选。
+        for (var status : statuses) {
+            String file = displayPath(context, status.path());
+            int slash = file.lastIndexOf('/');
+            String parent = slash < 0 ? "" : file.substring(0, slash);
+            if (parent.equals(directory) && status.rawStatus().contains("D") && visibleEntry(context, status.path())
+                    && !reviewProtected(file) && result.stream().noneMatch(item -> item.path().equals(file))) {
+                result.add(new com.enterprise.testagent.domain.team.TeamReviewModels.File(file,
+                        slash < 0 ? file : file.substring(slash + 1), false, 0, null,
+                        "deleted", null, null, "UNKNOWN", "UNCOMMITTED", true));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    /** 读取前重新计算版本；分片仍由公共文件内核执行大小/mtime/UTF-8 边界校验。 */
+    public FilePreviewChunkResponse reviewRead(boolean global, UserId owner, String personalWorkspaceId,
+            String path, String expectedVersion, long offset) {
+        LocalWorkspace context = localWorkspace(global, owner, personalWorkspaceId);
+        String file = TeamReviewApplicationService.relativePath(path, false);
+        if (reviewProtected(file)) throw new PlatformException(ErrorCode.FORBIDDEN, "审阅不能读取敏感凭据");
+        var first = reviewFiles.readBinaryChunk(context.workspaceRoot().toString(), file, 0, null, null);
+        String current = reviewVersion(context, file, first.size(), java.time.Instant.ofEpochMilli(first.lastModifiedMillis()));
+        if (!java.util.Objects.equals(current, expectedVersion))
+            throw new PlatformException(ErrorCode.CONFLICT, "来源文件已变化，请刷新审阅目录");
+        return reviewFiles.readContentChunk(context.workspaceRoot().toString(), file, offset,
+                first.size(), first.lastModifiedMillis());
+    }
+
+    private String reviewVersion(LocalWorkspace context, String file, long size, java.time.Instant time) {
+        return reviewFiles.contentVersion(context.workspaceRoot().toString(), file, size, time.toEpochMilli());
+    }
+
+    private boolean reviewProtected(String path) {
+        String lower = path.toLowerCase(java.util.Locale.ROOT);
+        for (String part : lower.split("/")) {
+            if (part.equals(".git") || part.startsWith(".env") || part.equals(".ssh")
+                    || java.util.Set.of("id_rsa", "id_dsa", "id_ecdsa", "id_ed25519").contains(part)
+                    || part.matches(".*\\.(pem|key|p12|pfx|keystore)")) return true;
+        }
+        return false;
     }
 
     public TeamWorkspaceResponses.GitStatusResponse status(

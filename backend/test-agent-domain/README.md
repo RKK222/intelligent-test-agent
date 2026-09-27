@@ -1,5 +1,7 @@
 # test-agent-domain
 
+team/TeamReviewModels 与 TeamReviewScopeStore 描述短效审阅范围、来源、文件版本与 Redis 存储端口，不包含正文、物理路径或配置凭据。Git 作者和工作区所有者、Git 提交时间和文件时间明确区分。
+
 ## 工程定位
 
 纯领域模型模块，表达测试智能体平台的核心业务概念和状态规则。

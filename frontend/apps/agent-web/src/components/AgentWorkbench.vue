@@ -13683,6 +13683,10 @@ async function handleLogout() {
 
     <template #chat>
       <div class="managed-chat-panel">
+        <div v-if="teamPerspectiveActive" class="team-chat-scope" role="status">
+          <span>只读范围：当前应用 · {{ teamView.selectedUserId ? (teamView.reviewRoster.find(item => item.userId === teamView.selectedUserId)?.username || '当前成员') : '全部成员最新文件' }}</span>
+          <small>按需读取文件；不一次加载全部正文</small>
+        </div>
         <FigmaChatPanel
           :panel-visible="rightPanelOpen"
           :messages="chatMessagesForPanel"
@@ -14140,6 +14144,8 @@ async function handleLogout() {
   min-height: 0;
   flex: 1 1 auto;
 }
+.team-chat-scope { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-bottom: 1px solid var(--ta-shell-border, #e5e7eb); font-size: 12px; }
+.team-chat-scope small { color: var(--ta-shell-muted, #6b7280); }
 
 .managed-editor-main {
   display: flex;

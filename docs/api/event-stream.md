@@ -1170,3 +1170,7 @@ Agent 配置权限补充：公共 Git 的管理、暂存、提交和发布仍仅
 ## 系统管理员团队代码视图事件边界
 
 团队名单、版本贡献、Git、只读文件和整组导出不新增 RunEvent/SSE 类型。应用、工作空间和版本列表新增的可选 `targetUserId` 以及响应字段 `membershipState` 只存在于 HTTP，不产生新的事件类型。导出进度由前端轮询团队 HTTP API；跨 Java shard 使用内部一次性二进制 WebSocket，它不是 RunEvent、用户通知或公开事件流。角色降级和成员移除通过每次 HTTP/文件 RPC 实时复核生效，不依赖广播事件最终一致性。
+
+## 管理审阅聚合文件通道
+
+本次不新增 RunEvent/SSE 类型。`team-review` 目录/搜索/版本校验分片读取复用平台文件 WebSocket 的 `{id,op,params}` 请求，成功返回 `{id,type:"result",data,traceId}`，失败返回顶层 `{id,type:"error",code,message,details,traceId}`；HTTP 只建立范围与 ticket，不代理正文。原生 `team-review` Tool 的开始、结果、失败和回答仍由现有 tool/message RunEvent 投影，不能把前端切换成员发布为新 Run 或把有限快照伪装成工具读取。每轮 scope 不随页面切换改变，终态 Run 的后续 Tool 文件 RPC 拒绝；完整范围、游标及失败状态见 [设计](../architecture/team-review-latest-files.md) 与 HTTP API 的团队文件章节。

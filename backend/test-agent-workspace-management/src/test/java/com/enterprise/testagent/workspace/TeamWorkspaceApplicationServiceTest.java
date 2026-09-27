@@ -100,6 +100,55 @@ class TeamWorkspaceApplicationServiceTest {
         git.commitStaged(repo, message, null, identity);
     }
 
+    @Test
+    void reviewReadsBeyond24FilesAndDetectsSameSizeSameTimeChanges() throws Exception {
+        Path repo = tempDir.resolve("review-repo");
+        GitWorkspaceService git = new GitWorkspaceService();
+        var author = GitCommitIdentity.forPlatformUser("真正修改人", "AUTHOR001");
+        git.initializeLocalRepository(repo, "README.md", "base\n", author);
+        Files.createDirectories(repo.resolve("spec"));
+        for (int i = 1; i <= 30; i++) Files.writeString(repo.resolve("spec/file-" + i + ".md"), "正文-" + i);
+        git.stageFiles(repo, List.of("spec"), null);
+        git.commitStaged(repo, "30 个文件", null, author);
+        Files.writeString(repo.resolve("spec/.env"), "private");
+        Files.writeString(repo.resolve("spec/.envrc"), "private");
+        Files.writeString(repo.resolve("spec/id_ed25519"), "private");
+        Files.createSymbolicLink(repo.resolve("spec/external"), tempDir);
+        var queries = mock(TeamWorkspaceQueryRepository.class);
+        var identities = mock(ScmGitIdentityResolver.class);
+        var owner = new UserId("owner");
+        var member = new UserId("member");
+        var personal = personal(repo, member, git.headCommit(repo));
+        when(queries.findPersonalWorkspace(false, owner, personal.personalWorkspaceId())).thenReturn(Optional.of(new PersonalWorkspaceView(personal, "server-a")));
+        when(queries.findWorkspaceVersions(false, owner, personal.applicationWorkspaceId().value(), null))
+                .thenReturn(List.of(new WorkspaceVersionView(version(repo, member, git.headCommit(repo)), TeamMembershipState.CURRENT)));
+        when(identities.resolve(member)).thenReturn(author);
+        var service = new TeamWorkspaceApplicationService(queries, ManagedWorkspacePathResolver.legacyOnly(), new WorkspaceServerIdentity("server-a"), git, identities);
+        for (String protectedFile : List.of("spec/.env", "spec/.envrc", "spec/id_ed25519"))
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.reviewRead(false, owner,
+                    personal.personalWorkspaceId().value(), protectedFile, "ignored", 0)).hasMessageContaining("敏感凭据");
+        var listing = service.reviewList(false, owner, personal.personalWorkspaceId().value(), "spec");
+        assertThat(listing).hasSize(30).allSatisfy(file -> {
+            assertThat(file.author()).isEqualTo("真正修改人");
+            assertThat(file.timeType()).isEqualTo("GIT_COMMIT");
+        });
+        var chosen = listing.stream().filter(file -> file.path().equals("spec/file-30.md")).findFirst().orElseThrow();
+        assertThat(service.reviewRead(false, owner, personal.personalWorkspaceId().value(), chosen.path(), chosen.contentVersion(), 0).content()).isEqualTo("正文-30");
+        Path target = repo.resolve(chosen.path());
+        var time = Files.getLastModifiedTime(target);
+        Files.writeString(target, "正文-99");
+        Files.setLastModifiedTime(target, time);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.reviewRead(false, owner, personal.personalWorkspaceId().value(), chosen.path(), chosen.contentVersion(), 0))
+                .hasMessageContaining("已变化");
+        var dirty = service.reviewList(false, owner, personal.personalWorkspaceId().value(), "spec").stream().filter(file -> file.path().equals(chosen.path())).findFirst().orElseThrow();
+        assertThat(dirty.author()).isNull();
+        assertThat(dirty.timeType()).isEqualTo("FILE_TIME");
+        Files.delete(target);
+        assertThat(service.reviewList(false, owner, personal.personalWorkspaceId().value(), "spec")).anySatisfy(file -> {
+            assertThat(file.path()).isEqualTo(chosen.path()); assertThat(file.deleted()).isTrue();
+        });
+    }
+
     private PersonalWorkspace personal(Path repo, UserId member, String base) {
         Instant now = Instant.parse("2026-09-21T08:00:00Z");
         return new PersonalWorkspace(

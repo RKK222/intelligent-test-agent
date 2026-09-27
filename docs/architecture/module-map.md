@@ -2,6 +2,8 @@
 
 本文件是“按功能找模块/包”的速查表，合并原前端架构、前后端契约和总体方案的模块职责。依赖边界与禁止关系见 `docs/architecture/dependency-rules.md`；HTTP/SSE 契约见 `docs/api/`。
 
+管理视角全部成员最新文件仍归属现有 workspace-management（聚合/来源规则）、workspace-filesystem（安全分片/SHA）、api（scope/ticket/文件 WebSocket 适配）、domain/persistence（逻辑范围/Redis TTL）、opencode-runtime（专用 Tool 凭据注入）与前端 team/file-explorer；不新增部署节点或并行文件代理。公共 `team-review` Tool 基线归 `public-agent-config/opencode/tools/`。详见 `docs/architecture/team-review-latest-files.md`。
+
 ## 总体架构
 
 ```text

@@ -93,6 +93,57 @@ class WorkspaceFileWebSocketHandlerTest {
     private static final Instant NOW = Instant.parse("2026-06-28T00:00:00Z");
 
     @Test
+    void reviewTicketUsesOnlyScopedProtocolAndDoesNotReadOrdinaryWorkspace() {
+        var tickets = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        var workspace = Mockito.mock(WorkspaceApplicationService.class);
+        var protocol = Mockito.mock(TeamReviewProtocolService.class);
+        var ticket = new WorkspaceFileSocketTicket("wft_review", null, "linux-1", null, false, false,
+                "usr_system_admin", "team-review", "scope", null, TRACE_ID, NOW.plusSeconds(60));
+        when(tickets.consume("wft_review", "http://localhost:3000")).thenReturn(ticket);
+        when(protocol.rpc(Mockito.eq(ticket), Mockito.eq("team.review.list"), Mockito.any(), Mockito.eq(TRACE_ID)))
+                .thenReturn(Map.of("entries", List.of(), "complete", true));
+        when(protocol.rpc(Mockito.eq(ticket), Mockito.eq("workspace.read"), Mockito.any(), Mockito.eq(TRACE_ID)))
+                .thenThrow(new PlatformException(ErrorCode.FORBIDDEN, "审阅通道仅允许目录和只读分片读取"));
+        var handler = new WorkspaceFileWebSocketHandler(tickets, workspace, Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class), new ObjectMapper(), "http://localhost:3000");
+        handler.setTeamReviewServices(protocol, Mockito.mock(com.enterprise.testagent.workspace.TeamWorkspaceApplicationService.class));
+        var session = FakeWebSocketSession.allowed("/api/internal/platform/workspace-management/file/ws?ticket=wft_review", List.of(
+                "{\"id\":\"review\",\"op\":\"team.review.list\",\"params\":{\"path\":\"spec\"}}",
+                "{\"id\":\"write\",\"op\":\"workspace.read\",\"params\":{\"path\":\"spec/a.md\"}}"));
+        handler.handle(session).block();
+        assertThat(session.sentText()).hasSize(2);
+        assertThat(session.sentText().getFirst()).contains("\"type\":\"result\"", "\"complete\":true");
+        assertThat(session.sentText().getLast()).contains("\"type\":\"error\"", "\"code\":\"FORBIDDEN\"");
+        Mockito.verifyNoInteractions(workspace);
+    }
+
+    @Test
+    void reviewSourceReauthorizesScopeBeforeFilesystemAndAuditsResult() {
+        var tickets = Mockito.mock(WorkspaceFileSocketTicketService.class);
+        var workspace = Mockito.mock(WorkspaceApplicationService.class);
+        var protocol = Mockito.mock(TeamReviewProtocolService.class);
+        var sources = Mockito.mock(com.enterprise.testagent.workspace.TeamWorkspaceApplicationService.class);
+        var ticket = teamWorkspaceTicket();
+        var workspaceId = new WorkspaceId(ticket.workspaceId());
+        var authorized = Mockito.mock(com.enterprise.testagent.system.management.team.SystemAdminTeamApplicationService.AuthorizedTarget.class);
+        when(tickets.consume("wft_team", "http://localhost:3000")).thenReturn(ticket);
+        when(tickets.authorizeTeamWorkspaceRpc(ticket, workspaceId)).thenReturn(authorized);
+        when(sources.reviewList(false, new UserId("usr_system_admin"), "pw_member_1", "spec")).thenReturn(List.of());
+        var handler = new WorkspaceFileWebSocketHandler(tickets, workspace, Mockito.mock(WorkspaceDirectoryService.class),
+                Mockito.mock(AgentConfigApplicationService.class), new ObjectMapper(), "http://localhost:3000");
+        handler.setTeamReviewServices(protocol, sources);
+        var session = FakeWebSocketSession.allowed("/api/internal/platform/workspace-management/file/ws?ticket=wft_team", List.of(
+                "{\"id\":\"review\",\"op\":\"workspace.review.list\",\"params\":{\"workspaceId\":\"wrk_1234567890abcdef\",\"reviewScopeId\":\"scope\",\"path\":\"spec\"}}"));
+        handler.handle(session).block();
+        assertThat(session.sentText()).singleElement().satisfies(reply -> assertThat(reply).contains("\"type\":\"result\""));
+        var order = Mockito.inOrder(protocol, sources, tickets);
+        order.verify(protocol).authorizeSourceRpc(ticket, "scope");
+        order.verify(sources).reviewList(false, new UserId("usr_system_admin"), "pw_member_1", "spec");
+        order.verify(tickets).recordTeamRpc(ticket, authorized, "workspace.review.list", workspaceId, "spec", "SUCCESS", null, TRACE_ID);
+        Mockito.verifyNoInteractions(workspace);
+    }
+
+    @Test
     void wildcardOriginAllowsValidBrowserOrigin() {
         WorkspaceFileSocketTicketService ticketService = Mockito.mock(WorkspaceFileSocketTicketService.class);
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);

@@ -1,5 +1,7 @@
 # test-agent-workspace-management
 
+TeamReviewApplicationService 是最新文件聚合与 Tool 的共同业务入口，按授权版本/default 工作区归并完整目录、按 SHA-256 去重、按可靠 Git 时间选最新；未知/未提交/同时间冲突要求选择成员。TeamWorkspaceApplicationService 在权威来源节点提取 Git 作者/时间、明确标注 FILE_TIME 和删除候选，并通过公共文件内核校验版本。
+
 ## 系统管理员团队代码视图
 
 `TeamWorkspaceApplicationService` 按授权范围列出应用、工作空间模板、版本、当前/历史人员及同版本多个个人 worktree；Git 状态区分 staged、unstaged、untracked，个人提交限定 `baseCommit..HEAD`，merge 标为 `SYNC_MERGE`，已发布提交还必须位于个人基线可达的版本目标范围，并同时匹配既有 SCM 校准姓名和统一认证号邮箱。祖先关系无法确认时失败关闭并返回“无法归属”。

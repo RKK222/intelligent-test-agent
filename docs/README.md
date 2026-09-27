@@ -11,6 +11,7 @@
 - `docs/architecture/dependency-rules.md`：分层依赖与访问边界。
 - `docs/standards/opencode.md`：OpenCode 只读源码快照、平台适配和 generated SDK 边界。
 - `docs/architecture/local-opencode-client.md`：本地 OpenCode 反向隧道、fencing、文件安全和运行目标冻结。
+- `docs/architecture/team-review-latest-files.md`：管理视角全部成员最新文件聚合、来源核验、只读 AI Tool 与发布验收边界。
 
 ## 技术栈与编码规范
 

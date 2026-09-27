@@ -39,6 +39,7 @@ import { Input, cn } from "@test-agent/ui-kit";
 import { fileNameIncludesKeyword, filterLoadedFiles } from "./filterLoadedFiles";
 import { getVsCodeFileIconClass } from "./fileIcons";
 import { highlightKeyword } from "./highlightKeyword";
+import { formatTeamReviewMetadata } from "./reviewMetadata";
 import DirectoryRows from "./DirectoryRows.vue";
 import type { WorkspaceClipboardEntry, WorkspaceSelectionEntry } from "./DirectoryRows.vue";
 import FileIcon from "./FileIcon.vue";
@@ -101,10 +102,12 @@ const localSearchResults = computed<FileSearchResult[]>(() =>
 // 显示用的搜索关键字：优先使用 prop，否则使用本地 keyword
 const displayKeyword = computed(() => props.searchKeyword ?? keyword.value);
 
-// 服务端路径搜索仍供其它业务复用；文件搜索面板在展示前最终收口为文件名匹配。
+// 普通文件搜索收口为文件名；审阅聚合结果保留后端相对路径命中，避免丢掉 spec 下的结果。
 const displaySearchResults = computed(() =>
   (props.searchResults ?? localSearchResults.value)
-    .filter((entry) => fileNameIncludesKeyword(entry.name, displayKeyword.value))
+    .filter((entry) => entry.review
+      ? entry.path.toLocaleLowerCase().includes(displayKeyword.value.toLocaleLowerCase())
+      : fileNameIncludesKeyword(entry.name, displayKeyword.value))
 );
 
 // 处理搜索输入：同时更新本地 keyword 并 emit 事件
@@ -454,7 +457,7 @@ defineExpose({ openRootActions });
           v-for="entry in displaySearchResults"
           :key="entry.path"
           type="button"
-          :class="cn('ta-file-tree-row')"
+          :class="cn('ta-file-tree-row', entry.review && 'has-review-metadata')"
           :style="{ paddingLeft: '6px' }"
           :title="entry.path"
           @click="emit('openFile', entry.path)"
@@ -467,6 +470,7 @@ defineExpose({ openRootActions });
               <mark v-if="segment.match" class="ta-file-tree-mark">{{ segment.text }}</mark>
               <span v-else>{{ segment.text }}</span>
             </template>
+            <small v-if="entry.review" class="ta-file-review-metadata">{{ formatTeamReviewMetadata(entry.review) }}</small>
           </span>
         </button>
       </div>
@@ -493,6 +497,8 @@ defineExpose({ openRootActions });
 </template>
 
 <style scoped>
+.ta-file-tree-row.has-review-metadata { height: 44px; }
+.ta-file-review-metadata { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ta-shell-muted, #6b7280); font-size: 11px; line-height: 17px; }
 .ta-file-tree-scroll.is-root-drop-target {
   outline: 1px solid var(--ta-accent, #2563eb);
   outline-offset: -1px;

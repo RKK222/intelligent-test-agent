@@ -10,6 +10,7 @@ vi.mock("../src/components/FigmaFileExplorer.vue", () => ({
       canWrite: Boolean,
       workspaceKind: String,
       changedFiles: Array,
+      entriesByDirectory: Object,
       emptyWorkspaceMessage: String,
       fileTreeError: String
     },
@@ -24,6 +25,20 @@ import {
   createTeamManagementController,
   teamManagementKey
 } from "../src/components/team/team-management-controller";
+
+
+function reviewEntry(path: string) {
+  return { path, name: path.split("/").at(-1)!, directory: false, size: 20,
+    selected: { source: { userId: "member-1", username: "成员甲", personalWorkspaceId: "pw-1", workspaceId: "ws-pw-1", linuxServerId: "server-1" },
+      file: { path, name: path.split("/").at(-1)!, directory: false, size: 20, contentVersion: "sha256:test", author: "实际作者",
+        changedAt: "2026-09-21T08:00:00Z", timeType: "GIT_COMMIT" as const, changeType: "COMMITTED", deleted: false } },
+    latestUncertain: false, alternatives: [] };
+}
+function reviewRead(content: string, eof = true) {
+  const { source, file } = reviewEntry("src/a.ts").selected;
+  return { source, file, chunk: { path: file.path, content, offset: 0, nextOffset: content.length, size: eof ? content.length : 20,
+    eof, warningThresholdBytes: 8, lastModifiedMillis: 10 } };
+}
 
 function api() {
   return {
@@ -45,6 +60,13 @@ function api() {
     readTeamWorkspaceFile: vi.fn(),
     readTeamWorkspaceFilePreviewChunk: vi.fn(),
     closeTeamWorkspaceFileConnections: vi.fn(),
+    createTeamReviewContext: vi.fn().mockImplementation(async (_scope, versionId, selectedUserId) => ({
+      id: "trv_test", versionId, selectedUserId, sources: [], expiresAt: "2099-01-01T00:00:00Z"
+    })),
+    listTeamReviewFiles: vi.fn().mockResolvedValue({ entries: ["src/a.ts", "a.ts", "logs/large.log"].map(reviewEntry), unavailableMembers: [], complete: true }),
+    searchTeamReviewFiles: vi.fn().mockResolvedValue({ entries: [], unavailableMembers: [], complete: true }),
+    readTeamReviewFileChunk: vi.fn().mockResolvedValue(reviewRead("hello")),
+    closeTeamReviewFileConnections: vi.fn(),
     createTeamExport: vi.fn(),
     getTeamExport: vi.fn(),
     cancelTeamExport: vi.fn(),
@@ -53,7 +75,7 @@ function api() {
 }
 
 describe("team review panes", () => {
-  it("shows the selected member's uncommitted changes in the left pane", async () => {
+  it("shows the selected member's latest files instead of a changes overview", async () => {
     const backend = api();
     backend.listSystemAdminTeamMembers.mockResolvedValue({ items: [{ userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", status: "ACTIVE", roles: ["USER"] }], total: 1, page: 1, size: 200 });
     backend.listTeamApplications.mockResolvedValue([{ appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }]);
@@ -66,18 +88,19 @@ describe("team review panes", () => {
     backend.getTeamWorkspaceGitStatus.mockResolvedValue({ files: [{ path: "src/a.ts", rawStatus: " M", status: "modified", staged: false, patch: "@@ -1 +1 @@", additions: 1, deletions: 1 }], stagedCount: 0, unstagedCount: 1, untrackedCount: 0 });
     const controller = createTeamManagementController(backend);
     await controller.enter(false);
-    await vi.waitFor(() => expect(controller.snapshot().gitStatus?.files).toHaveLength(1));
+    await controller.selectMember("member-1");
+    expect(controller.snapshot().entriesByDirectory[""]).toHaveLength(3);
     const files = mount(TeamReviewFilePane, { global: { provide: { [teamManagementKey as symbol]: controller } } });
-    expect(files.getComponent({ name: "FigmaFileExplorer" }).props("changedFiles")).toEqual([
-      { path: "src/a.ts", patch: "@@ -1 +1 @@", status: "modified", additions: 1, deletions: 1 }
-    ]);
-    files.getComponent({ name: "FigmaFileExplorer" }).vm.$emit("openDiff", "src/a.ts");
-    await files.vm.$nextTick();
-    expect(controller.snapshot().tabs.some((tab) => tab.kind === "diff" && tab.path === "src/a.ts")).toBe(true);
+    expect(files.getComponent({ name: "FigmaFileExplorer" }).props("changedFiles")).toEqual([]);
+    expect(files.getComponent({ name: "FigmaFileExplorer" }).props("entriesByDirectory")[""][0].review.selected.file.author).toBe("实际作者");
+    expect(backend.getTeamWorkspaceGitStatus).not.toHaveBeenCalled();
+    expect(backend.listTeamWorkspaceCommits).not.toHaveBeenCalled();
+    await controller.openEntry("src/a.ts", false);
+    expect(controller.snapshot().tabs.some((tab) => tab.kind === "file" && tab.path === "src/a.ts")).toBe(true);
     files.unmount();
   });
 
-  it("builds a bounded read-only chat snapshot from the selected member workspace", async () => {
+  it("binds a fresh read-only scope without preloading or truncating file bodies", async () => {
     const backend = api();
     backend.listSystemAdminTeamMembers.mockResolvedValue({ items: [{ userId: "member-1", username: "成员甲", unifiedAuthId: "member-auth", department: "质量部", status: "ACTIVE", roles: ["USER"] }], total: 1, page: 1, size: 200 });
     backend.listTeamApplications.mockResolvedValue([{ appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }]);
@@ -94,15 +117,16 @@ describe("team review panes", () => {
     backend.readTeamWorkspaceFile.mockResolvedValue({ path: "src/app.ts", content: "export const answer = 42;", encoding: "utf-8", readonly: true });
     const controller = createTeamManagementController(backend);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     const part = await controller.prepareChatContext();
     expect(part?.type).toBe("file");
-    expect((part as { name: string }).name).toContain("成员甲");
-    expect((part as { content: string }).content).toContain("src/app.ts");
-    expect((part as { content: string }).content).toContain("answer = 42");
-    expect((part as { content: string }).content).not.toContain(".env");
-    expect(backend.readTeamWorkspaceFile).toHaveBeenCalledWith(
-      { scopeMode: "MY_TEAM", ownerUserId: undefined }, "personal-1", "runtime-1", "src/app.ts"
-    );
+    expect((part as { content: string }).content).toContain("team-review");
+    expect((part as { content: string }).content).toContain("trv_test");
+    expect((part as { content: string }).content).toContain("成员甲");
+    expect((part as { content: string }).content).not.toContain("answer = 42");
+    expect(backend.readTeamWorkspaceFile).not.toHaveBeenCalled();
+    expect(backend.readTeamReviewFileChunk).not.toHaveBeenCalled();
+
   });
 
   it("explains why platform-wide scope cannot change members and keeps the file tree read-only", async () => {
@@ -156,7 +180,7 @@ describe("team review panes", () => {
     expect(dialog?.textContent).toContain("成员乙");
     expect(dialog?.textContent).not.toContain("个人提交");
     expect(dialog?.textContent).not.toContain("整组导出");
-    dialog?.querySelectorAll<HTMLButtonElement>("[role='option']")[1]?.click();
+    dialog?.querySelectorAll<HTMLButtonElement>("[role='option']")[2]?.click();
     await vi.waitFor(() => expect(controller.snapshot().selectedUserId).toBe("member-2"));
     expect(document.body.querySelector("[role='dialog'][aria-label='选择成员']")).toBeNull();
     expect(launcher?.textContent).toContain("成员乙");

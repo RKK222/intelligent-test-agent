@@ -10,3 +10,4 @@ export { getVsCodeFileIconClass, getMaterialFileIconName } from "./fileIcons";
 export { filterLoadedFiles } from "./filterLoadedFiles";
 export { highlightKeyword } from "./highlightKeyword";
 export type { WorkspaceSelectionEntry, WorkspaceClipboardEntry } from "./DirectoryRows.vue";
+export { formatTeamReviewMetadata } from "./reviewMetadata";

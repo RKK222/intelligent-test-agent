@@ -21,11 +21,10 @@ const runtimeWorkspaceId = computed(() => {
   return contribution?.personalWorkspaces.find((item) => item.personalWorkspaceId === personalWorkspaceId)?.workspaceId ?? "";
 });
 const workspaceName = computed(() =>
-  state.value.templates.find((item) => item.workspaceId === state.value.selectedTemplateId)?.workspaceName
-  || "工作空间");
+  state.value.selectedUserId ? "成员工作空间" : "全部成员 · 最新文件");
 const treeError = computed(() => state.value.catalogError || state.value.treeError || null);
 const emptyMessage = computed(() =>
-  state.value.missingDefaultWorkspace ? "这个版本还没有名为 default 的个人工作空间。" : "");
+  state.value.missingDefaultWorkspace ? "当前范围在这个版本还没有名为 default 的成员工作空间。" : state.value.catalogLoading ? "正在读取当前应用的成员工作空间…" : "");
 
 function refresh() {
   if (state.value.catalogError) void controller.retryCatalog();
@@ -39,6 +38,8 @@ function refresh() {
     readonly-review
     workspace-kind="MANAGED"
     :workspace-id="runtimeWorkspaceId"
+    :review-context-id="state.reviewContext?.id"
+    :review-warning="state.reviewWarning"
     :workspace-name="workspaceName"
     :entries-by-directory="state.entriesByDirectory"
     :expanded-directories="expandedDirectories"

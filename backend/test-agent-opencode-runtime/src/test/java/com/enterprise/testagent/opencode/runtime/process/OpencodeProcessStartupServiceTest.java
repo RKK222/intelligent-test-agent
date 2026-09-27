@@ -614,6 +614,8 @@ class OpencodeProcessStartupServiceTest {
         Mockito.when(tokenService.issue(USER_ID)).thenReturn("signed-workspace-token");
         CodeKnowledgeToolTokenService codeKnowledgeTokenService = Mockito.mock(CodeKnowledgeToolTokenService.class);
         Mockito.when(codeKnowledgeTokenService.issue(USER_ID)).thenReturn("signed-code-knowledge-token");
+        TeamReviewToolTokenService reviewTokenService = Mockito.mock(TeamReviewToolTokenService.class);
+        Mockito.when(reviewTokenService.issue(USER_ID)).thenReturn("signed-review-token");
         OpencodeObservabilityTokenService observabilityTokenService =
                 Mockito.mock(OpencodeObservabilityTokenService.class);
         OpencodeObservabilityGenerationRepository generationRepository =
@@ -636,6 +638,7 @@ class OpencodeProcessStartupServiceTest {
                 null);
         service.setWorkspaceGitToolTokenService(tokenService);
         service.setCodeKnowledgeToolTokenService(codeKnowledgeTokenService);
+        service.setTeamReviewToolTokenService(reviewTokenService);
         service.setObservabilityTokenService(observabilityTokenService);
         service.setObservabilityGenerationRepository(generationRepository);
 
@@ -646,6 +649,7 @@ class OpencodeProcessStartupServiceTest {
                         .containsEntry("TEST_AGENT_PLATFORM_BASE_URL", "http://127.0.0.1:8080")
                         .containsEntry("TEST_AGENT_WORKSPACE_GIT_TOOL_TOKEN", "signed-workspace-token")
                         .containsEntry("TEST_AGENT_CODE_KNOWLEDGE_TOOL_TOKEN", "signed-code-knowledge-token")
+                        .containsEntry("TEST_AGENT_TEAM_REVIEW_TOOL_TOKEN", "signed-review-token")
                         .containsEntry("TEST_AGENT_OBSERVABILITY_BASE_URL", "http://127.0.0.1:8080")
                         .containsEntry("TEST_AGENT_OBSERVABILITY_TOKEN", "signed-observability-token")
                         .containsEntry("TEST_AGENT_OBSERVABILITY_RUNTIME_KIND", "SERVER_PROCESS")

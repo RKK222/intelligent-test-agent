@@ -121,6 +121,8 @@ public class ApiTokenWebFilter implements WebFilter {
                 || path.equals(WORKSPACE_GIT_TOOL_PATH)
                 || path.equals(CODE_KNOWLEDGE_TOOL_PATH)
                 || path.equals(CODE_SOURCE_TOOL_PATH)
+                || path.equals(com.enterprise.testagent.opencode.runtime.process.TeamReviewToolTokenService.TICKET_PATH)
+                || path.equals("/api/internal/platform/workspace-management/team/review-internal/ticket")
                 || path.equals(OPENCODE_OBSERVABILITY_EVENTS_PATH)
                 || path.startsWith(OPENCODE_OBSERVABILITY_TRACE_CHUNKS_PATH)
                 || path.equals(UI_TEST_TOOL_CONFIG_PATH)

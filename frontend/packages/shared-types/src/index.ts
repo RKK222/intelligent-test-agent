@@ -538,7 +538,30 @@ export type FileTreeEntry = {
   type: "file" | "directory";
   size?: number;
   modifiedAt?: string;
+  /** 管理视图的只读来源元数据，不构造物理路径或写入 locator。 */
+  review?: TeamReviewEntry;
 };
+
+export type TeamReviewSource = {
+  userId: string; username: string; personalWorkspaceId: string; workspaceId: string; linuxServerId: string;
+};
+export type TeamReviewFile = {
+  path: string; name: string; directory: boolean; size: number; fileTime?: string | null;
+  contentVersion: string; author?: string | null; changedAt?: string | null;
+  timeType: "GIT_COMMIT" | "FILE_TIME" | "UNKNOWN"; changeType: string; deleted: boolean;
+};
+export type TeamReviewCandidate = { source: TeamReviewSource; file: TeamReviewFile };
+export type TeamReviewEntry = {
+  path: string; name: string; directory: boolean; size: number;
+  selected: TeamReviewCandidate; latestUncertain: boolean; alternatives: TeamReviewCandidate[];
+};
+export type TeamReviewContext = {
+  id: string; versionId: string; selectedUserId?: string | null; sources: TeamReviewSource[]; expiresAt: string;
+};
+export type TeamReviewListing = {
+  entries: TeamReviewEntry[]; unavailableMembers: string[]; complete: boolean; remainingDirectories?: string[]; excludedPolicy?: string;
+};
+export type TeamReviewReadResult = { source: TeamReviewSource; file: TeamReviewFile; chunk: FilePreviewChunk };
 
 export type WorkspaceViewLocator = {
   kind: "COMPOSITE" | "WORKSPACE" | "REFERENCE" | "AUTOMATION_ROOT" | "AUTOMATION_REFERENCE";
@@ -585,6 +608,8 @@ export type WorkspaceViewFileContent = FileContent & {
 };
 
 export type FileSearchResult = {
+  /** 管理聚合搜索沿用文件树的权威来源与版本。 */
+  review?: TeamReviewEntry;
   path: string;
   name: string;
   directory: string;

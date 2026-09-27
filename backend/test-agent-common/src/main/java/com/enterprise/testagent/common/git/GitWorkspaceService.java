@@ -422,7 +422,7 @@ public class GitWorkspaceService {
             revision = requireCommitObjectId(baseExclusive) + ".." + end;
         }
         ArrayList<String> command = new ArrayList<>(List.of(
-                "git", "--no-optional-locks", "-c", "log.showSignature=false",
+                "git", "--no-optional-locks", "--literal-pathspecs", "-c", "log.showSignature=false",
                 "-C", repoRoot.toString(), "log", "--date-order", "--skip=" + offset,
                 "--max-count=" + limit,
                 "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%ct%x1f%s%x1e"));

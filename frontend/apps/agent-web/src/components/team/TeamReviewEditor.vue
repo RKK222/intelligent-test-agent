@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { CodeEditor } from "@test-agent/editor";
+import { formatTeamReviewMetadata } from "@test-agent/file-explorer";
 import { DiffViewer } from "@test-agent/diff-viewer";
 import type { RunDiffFile } from "@test-agent/shared-types";
 import { formatPreviewBytes } from "../fileProgressivePreview";
@@ -36,7 +37,7 @@ const diffFiles = computed<RunDiffFile[]>(() => {
       </div>
     </div>
     <div v-if="!activeTab" class="team-editor-empty">
-      <p>选择左侧文件或变更；切换成员请点击右侧浮条中的用户名。</p>
+      <p>选择左侧最新文件；切换成员请点击右侧浮条中的用户名。</p>
     </div>
     <div v-else-if="activeTab.loadState === 'error'" class="team-editor-body">
       <p class="team-editor-error" role="alert">{{ activeTab.errorMessage || "内容无法读取" }}</p>
@@ -52,6 +53,14 @@ const diffFiles = computed<RunDiffFile[]>(() => {
       />
     </div>
     <div v-else class="team-editor-body">
+      <div v-if="activeTab.review" class="team-editor-preview" role="status">
+        <span>{{ formatTeamReviewMetadata(activeTab.review) }}</span>
+        <span v-if="!activeTab.review.latestUncertain">· 来源 {{ activeTab.review.selected.source.username }} · 只读</span>
+        <template v-else>
+          <button v-for="candidate in activeTab.review.alternatives" :key="candidate.source.personalWorkspaceId"
+            type="button" @click="controller.selectMember(candidate.source.userId)">查看 {{ candidate.source.username }}</button>
+        </template>
+      </div>
       <div v-if="activeTab.progressive" class="team-editor-preview" role="status">
         <span>已加载 {{ formatPreviewBytes(activeTab.progressive.loadedBytes) }} / {{ formatPreviewBytes(activeTab.progressive.size) }}。继续加载可能占用较多内存。</span>
         <span v-if="activeTab.errorMessage">{{ activeTab.errorMessage }}</span>
@@ -75,6 +84,7 @@ const diffFiles = computed<RunDiffFile[]>(() => {
       </div>
       <p v-if="activeTab.loadState === 'loading'" class="team-editor-status">正在读取文件…</p>
       <CodeEditor
+        v-if="!activeTab.review?.latestUncertain && !activeTab.review?.selected.file.deleted"
         :path="activeTab.path"
         :content="activeTab.content"
         readonly

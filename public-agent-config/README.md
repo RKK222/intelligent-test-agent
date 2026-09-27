@@ -1,8 +1,10 @@
 # TestAgent 公共 Agent 能力包
 
+新增只读 team-review Tool：读取本轮 scope 的目录/搜索/版本校验分片，不预装 24 文件快照。专用凭据由平台公共启动程序注入；先发布配套后端，再通过公共配置个人 worktree 审阅/提交/发布该 Tool，并受管重启目标进程。TestAgent 仓库提交不等于公共配置已经发布。`node tools/test-team-review-tool.mjs` 执行真实 Tool execute 的隔离网络契约测试，但不替代真实模型验收。
+
 - 当前项目内源文件目录：`public-agent-config/`
 - 首次导入来源：原公共配置包 `feature_config@6bb05a0f585ebe12cf06c72fe58224676a5ec02`
-- 内容：9 个 Agent、22 个 Skill、12 个 Tool 文件
+- 内容：9 个 Agent、22 个 Skill、13 个 Tool 及其支撑文件
 
 ## 仓库与发布边界
 

@@ -1,5 +1,7 @@
 # 包说明：@test-agent/backend-api/src
 
+团队最新文件审阅复用短 scope/ticket 与平台文件 WebSocket，支持 list/search/版本校验分片 read；同 scope 单飞连接，切换/刷新关闭并作废迟到连接。HTTP 不返回文件目录或正文，聚合 ID 不作为物理 Workspace。
+
 ## 职责
 
 封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象；agent 相关能力默认使用 `opencode`，可通过 `agentId` 切换 URL 前缀。构建时显式设置空的 `VITE_TEST_AGENT_API_BASE_URL` 表示同源相对访问，不能回退到 `127.0.0.1`。

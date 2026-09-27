@@ -57,6 +57,20 @@ function commit(id: string, type: TeamCommit["contributionType"] = "PERSONAL_COM
   };
 }
 
+
+function reviewEntry(path: string) {
+  return { path, name: path.split("/").at(-1)!, directory: false, size: 20,
+    selected: { source: { userId: "member-1", username: "成员甲", personalWorkspaceId: "pw-1", workspaceId: "ws-pw-1", linuxServerId: "server-1" },
+      file: { path, name: path.split("/").at(-1)!, directory: false, size: 20, contentVersion: "sha256:test", author: "实际作者",
+        changedAt: "2026-09-21T08:00:00Z", timeType: "GIT_COMMIT" as const, changeType: "COMMITTED", deleted: false } },
+    latestUncertain: false, alternatives: [] };
+}
+function reviewRead(content: string, eof = true) {
+  const { source, file } = reviewEntry("src/a.ts").selected;
+  return { source, file, chunk: { path: file.path, content, offset: 0, nextOffset: content.length, size: eof ? content.length : 20,
+    eof, warningThresholdBytes: 8, lastModifiedMillis: 10 } };
+}
+
 function createApi() {
   return {
     listSystemAdmins: vi.fn().mockResolvedValue({ items: [user("owner-1", "系统管理员甲")], total: 1, page: 1, size: 200 }),
@@ -77,6 +91,13 @@ function createApi() {
     readTeamWorkspaceFile: vi.fn().mockResolvedValue({ path: "a.ts", content: "hello", encoding: "utf-8", readonly: true }),
     readTeamWorkspaceFilePreviewChunk: vi.fn(),
     closeTeamWorkspaceFileConnections: vi.fn(),
+    createTeamReviewContext: vi.fn().mockImplementation(async (_scope, versionId, selectedUserId) => ({
+      id: "trv_test", versionId, selectedUserId, sources: [], expiresAt: "2099-01-01T00:00:00Z"
+    })),
+    listTeamReviewFiles: vi.fn().mockResolvedValue({ entries: ["src/a.ts", "a.ts", "logs/large.log"].map(reviewEntry), unavailableMembers: [], complete: true }),
+    searchTeamReviewFiles: vi.fn().mockResolvedValue({ entries: [], unavailableMembers: [], complete: true }),
+    readTeamReviewFileChunk: vi.fn().mockResolvedValue(reviewRead("hello")),
+    closeTeamReviewFileConnections: vi.fn(),
     createTeamExport: vi.fn(),
     getTeamExport: vi.fn(),
     cancelTeamExport: vi.fn(),
@@ -85,10 +106,54 @@ function createApi() {
 }
 
 describe("team management controller", () => {
+  it("defaults to all members and uses the same source/version for the editor and on-demand chat", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([{ appId: "app", appName: "应用", enabled: true }]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([{ workspaceId: "template", appId: "app", workspaceName: "spec", enabled: true }]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([{ versionId: "version", applicationWorkspaceId: "template", appId: "app", version: "latest" }]);
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1"), contribution("member-2", "pw-2")]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    expect(controller.snapshot().selectedUserId).toBe("");
+    expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("");
+    expect(api.createTeamReviewContext).toHaveBeenCalledWith({ scopeMode: "MY_TEAM", ownerUserId: undefined }, "version", undefined);
+    expect(controller.snapshot().entriesByDirectory[""]?.[0]?.review?.selected.file.author).toBe("实际作者");
+    await controller.openEntry("src/a.ts", false);
+    expect(api.readTeamReviewFileChunk).toHaveBeenCalledWith("trv_test", "src/a.ts", "sha256:test");
+    const part = await controller.prepareChatContext();
+    expect((part as { content: string }).content).toContain("全部成员最新文件");
+    expect((part as { content: string }).content).not.toContain("hello");
+    expect(api.readTeamWorkspaceFile).not.toHaveBeenCalled();
+    await controller.selectMember("member-2");
+    expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("pw-2");
+    await controller.selectMember("");
+    expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("");
+  });
+
+  it("does not open an uncertain candidate or allow a scope prepared before a member switch", async () => {
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue([{ appId: "app", appName: "应用", enabled: true }]);
+    api.listTeamWorkspaceTemplates.mockResolvedValue([{ workspaceId: "template", appId: "app", workspaceName: "spec", enabled: true }]);
+    api.listTeamWorkspaceVersions.mockResolvedValue([{ versionId: "version", applicationWorkspaceId: "template", appId: "app", version: "latest" }]);
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
+    api.listTeamReviewFiles.mockResolvedValue({ entries: [{ ...reviewEntry("src/a.ts"), latestUncertain: true }], unavailableMembers: [], complete: true });
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    await controller.openEntry("src/a.ts", false);
+    expect(api.readTeamReviewFileChunk).not.toHaveBeenCalled();
+    const pendingScope = deferred<{ id: string; versionId: string; sources: []; expiresAt: string }>();
+    api.createTeamReviewContext.mockReturnValueOnce(pendingScope.promise);
+    const preparing = controller.prepareChatContext();
+    const rejection = expect(preparing).rejects.toThrow("审阅范围已切换");
+    await controller.selectMember("member-1");
+    pendingScope.resolve({ id: "late", versionId: "version", sources: [], expiresAt: "2099-01-01T00:00:00Z" });
+    await rejection;
+  });
   it("keeps a system administrator on their own team and allows member changes", async () => {
     const api = createApi();
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
 
     expect(controller.snapshot().scopeMode).toBe("MY_TEAM");
     expect(controller.snapshot().scopeLocked).toBe(true);
@@ -127,7 +192,7 @@ describe("team management controller", () => {
     expect(api.listTeamApplications).toHaveBeenLastCalledWith({
       scopeMode: "SYSTEM_ADMIN_TEAM",
       ownerUserId: "owner-1",
-      targetUserId: "member-1"
+      targetUserId: undefined
     });
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith();
   });
@@ -211,6 +276,7 @@ describe("team management controller", () => {
     const api = createApi();
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     await controller.openMemberDialog();
     controller.chooseCandidate("candidate-1");
 
@@ -247,7 +313,7 @@ describe("team management controller", () => {
   });
 
   it("drops a file body that arrives after the worktree changes and closes the old connection", async () => {
-    const read = deferred<{ path: string; content: string; encoding: string; readonly: boolean }>();
+    const read = deferred<ReturnType<typeof reviewRead>>();
     const api = createApi();
     api.listTeamApplications.mockResolvedValue([
       { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 2, historicalMemberCount: 0 }
@@ -265,13 +331,14 @@ describe("team management controller", () => {
     api.listTeamWorkspaceFiles.mockResolvedValue([
       { path: "src/a.ts", name: "a.ts", type: "file" }
     ]);
-    api.readTeamWorkspaceFile.mockReturnValue(read.promise);
+    api.readTeamReviewFileChunk.mockReturnValue(read.promise);
     const controller = createTeamManagementController(api, { searchDelayMs: 0 });
     await controller.enter(false);
+    await controller.selectMember("member-1");
     const opening = controller.openEntry("src/a.ts", false);
-    await vi.waitFor(() => expect(api.readTeamWorkspaceFile).toHaveBeenCalled());
+    await vi.waitFor(() => expect(api.readTeamReviewFileChunk).toHaveBeenCalled());
     await controller.selectMember("member-2");
-    read.resolve({ path: "src/a.ts", content: "stale", encoding: "utf-8", readonly: true });
+    read.resolve(reviewRead("stale"));
     await opening;
     expect(controller.snapshot().tabs.some((tab) => tab.content === "stale")).toBe(false);
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith("pw-1");
@@ -290,7 +357,7 @@ describe("team management controller", () => {
       { versionId: "ver-1", applicationWorkspaceId: "ws-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
     ]);
     api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
-    api.readTeamWorkspaceFile.mockRejectedValue(new BackendApiError(403, {
+    api.readTeamReviewFileChunk.mockRejectedValue(new BackendApiError(403, {
       success: false,
       code: "FORBIDDEN",
       message: "已不在该团队",
@@ -299,13 +366,14 @@ describe("team management controller", () => {
     }));
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     await controller.openEntry("src/a.ts", false);
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith();
     expect(controller.snapshot().tabs).toEqual([]);
     expect(controller.snapshot().errorMessage).toContain("已不在该团队");
   });
 
-  it("opens an uncommitted change as a read-only diff without a save path", async () => {
+  it("opens latest member files read-only without requesting a hidden changes overview", async () => {
     const api = createApi();
     api.listTeamApplications.mockResolvedValue([
       { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
@@ -325,10 +393,14 @@ describe("team management controller", () => {
     });
     const controller = createTeamManagementController(api);
     await controller.enter(false);
-    controller.openChange("src/a.ts");
+    await controller.selectMember("member-1");
+    api.listTeamReviewFiles.mockResolvedValue({ entries: [reviewEntry("src/a.ts")], complete: true, unavailableMembers: [] });
+    await controller.reloadTree();
+    await controller.openEntry("src/a.ts", false);
     const tab = controller.snapshot().tabs[0];
-    expect(tab?.kind).toBe("diff");
-    expect(tab?.patch).toContain("+b");
+    expect(tab?.kind).toBe("file");
+    expect(api.getTeamWorkspaceGitStatus).not.toHaveBeenCalled();
+    expect(api.listTeamWorkspaceCommits).not.toHaveBeenCalled();
     controller.exit();
     expect(api.closeTeamWorkspaceFileConnections).toHaveBeenCalledWith();
     expect(controller.snapshot().active).toBe(false);
@@ -347,36 +419,16 @@ describe("team management controller", () => {
       { versionId: "ver-1", applicationWorkspaceId: "ws-1", appId: "app-1", version: "v1", branch: "release", status: "READY", updatedAt: "2026-09-21T08:00:00Z" }
     ]);
     api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
-    api.readTeamWorkspaceFile.mockRejectedValue(new BackendApiError(413, {
-      success: false,
-      code: "PAYLOAD_TOO_LARGE",
-      message: "文件超过整读上限",
-      traceId: "trace-large",
-      details: { reason: "PREVIEW_TOO_LARGE", size: 20, maxPreviewBytes: 8 }
-    }));
-    api.readTeamWorkspaceFilePreviewChunk.mockResolvedValue({
-      path: "logs/large.log",
-      content: "chunk",
-      offset: 0,
-      nextOffset: 5,
-      size: 20,
-      eof: false,
-      warningThresholdBytes: 8,
-      lastModifiedMillis: 10
-    });
+
+    api.readTeamReviewFileChunk.mockResolvedValue(reviewRead("chunk", false));
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     await controller.openEntry("logs/large.log", false);
     const tab = controller.snapshot().tabs[0];
     expect(tab?.content).toBe("chunk");
     expect(tab?.progressive?.nextOffset).toBe(5);
-    expect(api.readTeamWorkspaceFilePreviewChunk).toHaveBeenCalledWith(
-      { scopeMode: "MY_TEAM", ownerUserId: undefined },
-      "pw-1",
-      "ws-pw-1",
-      "logs/large.log",
-      { offset: 0 }
-    );
+    expect(api.readTeamReviewFileChunk).toHaveBeenCalledWith("trv_test", "logs/large.log", "sha256:test");
   });
 
   it("selects an enabled workspace when the first template is disabled", async () => {
@@ -394,6 +446,7 @@ describe("team management controller", () => {
     api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     expect(controller.snapshot().selectedTemplateId).toBe("ws-on");
     expect(controller.snapshot().selectedVersionId).toBe("ver-ws-on");
   });
@@ -416,10 +469,11 @@ describe("team management controller", () => {
       .mockResolvedValue([contribution("member-1", "pw-1"), contribution("member-2", "pw-2")]);
     const controller = createTeamManagementController(api);
     await controller.enter(true, { appId: "app-1", templateId: "ws-app-1", versionId: "ver-1" });
+    await controller.selectMember("member-1");
     await controller.selectScope("GLOBAL");
 
     expect(controller.snapshot().selectedUserId).toBe("member-1");
-    expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1"]);
+    expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1", "member-2"]);
     await controller.selectApplication("app-2");
     expect(controller.snapshot().selectedUserId).toBe("member-1");
     expect(controller.snapshot().reviewRoster.map((item) => item.userId)).toEqual(["member-1", "member-2"]);
@@ -452,6 +506,8 @@ describe("team management controller", () => {
     ]);
     const controller = createTeamManagementController(api);
     await controller.enter(false, { appId: "app-2", templateId: "ws-app-2", versionId: "ver-1" });
+    expect(controller.snapshot().selectedUserId).toBe("");
+    await controller.selectMember("member-1");
 
     expect(controller.snapshot().selectedAppId).toBe("app-2");
     expect(controller.snapshot().selectedUserId).toBe("member-1");
@@ -485,6 +541,7 @@ describe("team management controller", () => {
     }]);
     const controller = createTeamManagementController(api);
     await controller.enter(false);
+    await controller.selectMember("member-1");
     expect(controller.snapshot().missingDefaultWorkspace).toBe(true);
     expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("");
     expect(api.listTeamWorkspaceFiles).not.toHaveBeenCalled();
@@ -509,29 +566,15 @@ describe("team management controller", () => {
     ]);
     api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1")]);
     await controller.retryCatalog();
+    await controller.selectMember("member-1");
     expect(controller.snapshot().catalogError).toBe("");
     expect(controller.snapshot().selectedAppId).toBe("app-1");
 
-    api.readTeamWorkspaceFile.mockRejectedValue(new BackendApiError(413, {
-      success: false,
-      code: "PAYLOAD_TOO_LARGE",
-      message: "文件超过整读上限",
-      traceId: "trace-large",
-      details: { reason: "PREVIEW_TOO_LARGE", size: 20, maxPreviewBytes: 8 }
-    }));
-    api.readTeamWorkspaceFilePreviewChunk.mockRejectedValueOnce(new Error("分段失败"));
+
+    api.readTeamReviewFileChunk.mockRejectedValueOnce(new Error("分段失败"));
     await controller.openEntry("logs/large.log", false);
     expect(controller.snapshot().tabs[0]?.loadState).toBe("error");
-    api.readTeamWorkspaceFilePreviewChunk.mockResolvedValue({
-      path: "logs/large.log",
-      content: "chunk",
-      offset: 0,
-      nextOffset: 5,
-      size: 20,
-      eof: false,
-      warningThresholdBytes: 8,
-      lastModifiedMillis: 10
-    });
+    api.readTeamReviewFileChunk.mockResolvedValue(reviewRead("chunk", false));
     await controller.retryTab(controller.snapshot().tabs[0]!.id);
     expect(controller.snapshot().tabs[0]?.content).toBe("chunk");
 
@@ -548,7 +591,7 @@ describe("team management controller", () => {
     expect(controller.snapshot().tabs.at(-1)?.patch).toContain("+ok");
   });
 
-  it("records a terminal stats failure when the personal workspace cannot be read", async () => {
+  it("does not let hidden legacy statistics failure block the latest files", async () => {
     const api = createApi();
     api.listTeamApplications.mockResolvedValue([
       { appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 1, historicalMemberCount: 0 }
@@ -563,10 +606,11 @@ describe("team management controller", () => {
     api.getTeamWorkspaceGitStatus.mockRejectedValue(new Error("个人工作区目录不可用"));
     const controller = createTeamManagementController(api);
     await controller.enter(false);
-    expect(controller.snapshot().treeError).toContain("个人工作区目录不可用");
+    await controller.selectMember("member-1");
+    expect(controller.snapshot().treeError).toBe("");
+    expect(controller.snapshot().reviewContext).not.toBeNull();
     expect(controller.snapshot().detailLoading).toBe(false);
-    await vi.waitFor(() => {
-      expect(controller.snapshot().contributionStats["member-1"]?.unavailable).toBe(true);
-    });
+    expect(api.getTeamWorkspaceGitStatus).not.toHaveBeenCalled();
+    expect(api.listTeamWorkspaceCommits).not.toHaveBeenCalled();
   });
 });

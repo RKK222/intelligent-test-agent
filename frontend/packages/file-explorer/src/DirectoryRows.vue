@@ -51,6 +51,7 @@ export type WorkspaceSelectionEntry = {
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { formatTeamReviewMetadata } from "./reviewMetadata";
 import { Download, Plane, Plus, Trash2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
 import FileEntryCreateDialog from "./FileEntryCreateDialog.vue";
@@ -568,6 +569,7 @@ function submitRename() {
         :class="cn(
           'ta-file-tree-row',
           'tree-node',
+          entry.review && entry.type === 'file' && 'has-review-metadata',
           (isWorkspaceViewEntry(entry) ? activePath === nodeId(entry) : activePath === entry.path) && 'is-active',
           isSelected(entry) && 'is-selected',
           dragOverDirectory === nodeId(entry) && 'is-drop-target',
@@ -611,7 +613,10 @@ function submitRename() {
           <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="entry" />
         </template>
-        <span v-if="renamingPath !== workspaceEntryPath(entry)" class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <span v-if="renamingPath !== workspaceEntryPath(entry)" class="min-w-0 flex-1 truncate">
+          <span>{{ entry.name }}</span>
+          <small v-if="entry.review && entry.type === 'file'" class="ta-file-review-metadata" :title="formatTeamReviewMetadata(entry.review)">{{ formatTeamReviewMetadata(entry.review) }}</small>
+        </span>
         <input
           v-else
           ref="renameInput"
@@ -816,6 +821,8 @@ function submitRename() {
 </template>
 
 <style scoped>
+.ta-file-tree-row.has-review-metadata { height: 44px; }
+.ta-file-review-metadata { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--ta-shell-muted, #6b7280); font-size: 11px; line-height: 17px; }
 .ta-file-tree-row.is-draggable {
   cursor: grab;
 }

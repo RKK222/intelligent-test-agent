@@ -5,6 +5,30 @@
 
 ## Entries
 
+## 2026-09-27 - 实现管理视角最新文件聚合与按需只读审阅 Tool
+
+### Why
+
+- 用户确认管理视角进入后看当前应用/版本 spec 等目录的所有最新文件，各文件显示修改人和时间，选择成员后收窄到个人工作区；原型必须贴合现有三栏，并解释/实现对话按需读取所有授权文件，而非有限快照。本轮要求实施该方案。
+
+### What
+
+- 在现有 release 分支默认“全部成员”，保留原文件树/编辑器/对话和用户名浮条；树/搜索行新增实际 Git 作者/时间，未提交文件明确只是来源成员与文件时间。同内容 SHA 去重，不同内容无法可靠判新时标“最新待核验”，选择具体成员后才可读；本来源删除和来源离线显式标记。
+- workspace-management 承担聚合/版本选择，workspace-filesystem 复用安全内核并增加流式 SHA-256；api 使用原平台文件 WebSocket scope/ticket/RPC，跨 Java 只由公共路由和转发器签发控制面 ticket。Redis 保存两小时逻辑 scope，正文/物理路径/凭据不入 scope；每条协调和来源 RPC 实时复核登录 marker、团队/角色、版本/服务器事实。
+- 公共 team-review Tool 基线按 list/search/read 分片取文件，独立 audience 凭据由公共启动程序注入，原生 Session 绑定本人活跃 Run，scope 原子绑定一轮 Run。UI 每问题附短 scope，不再预装 24 文件/80k 字符；屏蔽 scope 通道通用 workspace/Git/终端写入口和敏感文件。不改 OpenCode 上游、generated SDK 或 env。
+- 修正来源 WebSocket 顶层错误解析，鉴权失败不误当空目录；目录并发4且总等待45秒，搜索有界续扫/90秒预算，超时中断来源并返回不完整。关闭不再显示的提交统计自动请求，避免旧统计失败覆盖文件树。同步设计、模块索引、工程/包 README/PACKAGE、API、事件边界、安全和测试案例。
+
+### How
+
+- 后端8个定向测试类103项通过，Git/文件内核78项通过，包含真实Git30文件、实际作者、同大小/恢复mtime仍识别SHA变化、撤权、碰撞、预算取消、来源审计和只读通道；前端11文件109项、全workspace typecheck和production build通过。Tool实际execute的隔离网络契约3项及Bun原生WebSocket Origin本地握手通过；这些不等于真实模型调用。
+- 使用JDK25与固定`.env.test`/test启动26模块打包后的最新backend、manager、frontend，readiness UP、3000 HTTP200。真实Chrome登录既有验收账号，进入默认全部成员，选择gjq后列表关闭并更新范围；保存实际截图到`output/playwright/team-review-20260927/`。实际scope/ticket HTTP200，真实WebSocket workspace.write返回FORBIDDEN，无效专用凭据401；未写测试文件或改变团队/账号/工作区业务数据。
+- 回顾全部提交者`.agents/session-log*.md`近期记录，保留公共配置并行的接口脚本/五条批次规则和既有企业打包成果。本次只纳入相关实现/文档/测试与本人日志，不纳入浏览器临时快照、运行日志或构建制品；AI文档校验与git diff --check通过。
+
+### Result
+
+- 代码实现及上述本地检查已通过，不新增部署节点、业务表、SQL/Flyway或RunEvent类型；新增scope控制API与单用途文件RPC、可选review DTO兼容字段和专用Tool凭据。旧团队HTTP接口保留；新UI、各来源后端、公共Tool和受管用户进程必须配套发布。大型多成员目录仍有Git/SHA I/O成本，预算超限不能视为完整。
+- **真实模型端到端尚未完成，本轮未部署100或发布公共Tool**。已发起部署/公共发布/受管重启的用户确认，尚未收到答复；不得直接覆盖共享配置。验收账号仍绑定dev-192-168-8-100，未迁到Mac；MY_TEAM在wrtest/20260709没有default，本地-测试/20260618的superadmin01 default属于离线的huangzhenrendeMacBook-Air.local，因此当前真实页面只能证实空态/来源不可用，而不能证实多成员文件正文和模型读取。后续需经Jenkins发布已提交release、公共配置个人worktree审阅发布、受管重启，并准备同服且可访问的成员工作区进行真正Tool对话。
+
 ## 2026-09-23 - 团队审阅收起面板与成员工作区对话真实验收
 
 ### Why

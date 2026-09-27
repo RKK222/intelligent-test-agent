@@ -1,5 +1,7 @@
 # frontend
 
+管理视角默认展示当前应用/版本下全部授权成员的最新文件，复用原三栏布局、文件树和只读编辑器。文件行显示实际 Git 修改人/时间，无法可靠判定最新内容时要求选择成员。AI 对话仅携带短审阅范围，公共 `team-review` Tool 按需只读目录、搜索和正文分片；设计与发布验收边界见 `docs/architecture/team-review-latest-files.md`。
+
 ## 工程定位
 
 完全自研测试智能体 Web IDE 前端。生产工作台的外围 shell 使用纯白、浅雾蓝与工行红配色：36px 顶部外层和三栏之间的 8px 间隔复用现有弹框常见的浅雾蓝画布，活动栏融入画布；左侧文件区、中间编辑区和右侧 Agent 区作为带 8px 圆角、发丝边框和轻阴影的纯白悬浮面板，三栏顶部、工作区/Agent 目录加载态以及中间无文件预览态也保持纯白。外围导航与选中态消费隔离的 `--ta-shell-*` token。Logo 直接使用已确认的初版耳机/拱形品牌图形 PNG，保留原图轮廓和比例，图形使用低饱和暗红实色 #7f1e2b，中文品牌字标使用黑色，英文副标题使用深红以呼应图形。中间编辑器与右侧 Agent 对话的内部样式继续消费原有变量，不跟随 shell 变色。`frontend/interaction-visual-demo` 只作为交互与视觉参考资料，不纳入 `pnpm-workspace.yaml` 构建；其中 `cloud-workbench.html` 保留当前布局并对照“云白工行红 / 纯雪白 / 鼠尾草灰”三套外层配色。顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。

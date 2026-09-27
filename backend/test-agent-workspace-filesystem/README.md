@@ -1,5 +1,7 @@
 # test-agent-workspace-filesystem
 
+审阅正文版本通过 contentVersion 流式 SHA-256 校验，固定 64 KiB 内存，前后验证大小、mtime 和文件身份；路径复用真实根/符号链接边界。目录只列普通文件和目录，兼容专门的 Agent 符号链接名称入口。
+
 本模块是服务端和本地 OpenCode 客户端共同使用的文件系统安全内核。它从
 `test-agent-workspace-management` 原样抽取以下能力：真实根路径锚定、相对路径约束、符号链接逃逸防护、
 原子不覆盖移动、分片上传下载、UTF-8 渐进预览、搜索和删除。

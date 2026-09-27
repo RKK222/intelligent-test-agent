@@ -4675,12 +4675,27 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 
 ### 团队只读文件 WebSocket
 
+#### 最新文件聚合控制面
+
+| POST 路径 | 请求 / 鉴权 | 响应 |
+| --- | --- | --- |
+| `/api/internal/platform/workspace-management/team/review-scopes` | 平台 Bearer Token；`{scopeMode,ownerUserId?,versionId,selectedUserId?}`，省略成员表示全部授权成员 | `{id,versionId,selectedUserId,sources,expiresAt}`，不含登录摘要或物理路径 |
+| `/api/internal/platform/workspace-management/team/review-file-ticket` | 平台 Bearer Token；`{scopeId}` | `{baseUrl,webSocketUrl,expiresAt,origin}`，一次性平台文件 ticket |
+| `/api/internal/agent/opencode/team-review-tool/ticket` | 独立 `team-review-read` audience 凭据；`{scopeId,sessionId}` | 同上；原生 Session 必须绑定本人当前活跃 Run，scope 原子绑定一个 Run |
+| `/api/internal/platform/workspace-management/team/review-internal/ticket` | 既有 XXL 内部控制 Token；`{scopeId,personalWorkspaceId}` | 权威来源 Java 的一次性只读文件 ticket；不返回目录或正文 |
+
+同一平台文件 WebSocket 增加单用途 `team-review` mode：`team.review.list` 参数 `{path?}`，`team.review.search` 参数 `{path?,query?,remainingDirectories?}`，`team.review.read` 参数 `{path,contentVersion,offset?}`。list/search 返回 `entries,unavailableMembers,complete,excludedPolicy`，search 另返回 `remainingDirectories`。Entry 含 `selected:{source,file}`、`latestUncertain` 和冲突 `alternatives`；Source 只有成员/工作区/服务器逻辑 ID，File 含 SHA-256 版本、真实 Git 作者与时间或明确的 FILE_TIME/UNKNOWN、删除标记。read 返回 `{source,file,chunk}`，chunk 沿用 UTF-8 分片契约。不同来源无法确认最新、来源缺失、版本变化均拒绝正文，不默取第一人。
+
+协调与来源每条 RPC 复核当前登录、角色、团队关系、版本/服务器映射；Tool 另复核活跃 Run。跨 Java 控制面复用公共路由与转发器，来源目录/正文复用 `workspace.review.list/read` 文件 RPC 和既有低敏团队访问审计；来源 RPC 必须携带匹配的 reviewScopeId。范围 2 小时过期、不缓存正文；每范围最多 200 工作区、来源并发 4、单层最多 1000 项、搜索每页 32 目录/深度 20，预算未完成必须明确返回/报错。`.git`、敏感凭据、符号链接、非普通文件排除；通用 workspace 操作、写入、Git、终端等在 scope 通道返回 FORBIDDEN。详见 [设计](../architecture/team-review-latest-files.md)。
+
 - `POST /personal-workspaces/{id}/file-ws-route` 返回权威 Java 的 `WorkspaceFileRouteResponse`。
 - `POST /personal-workspaces/{id}/file-ws-tickets` 接收 `{linuxServerId}`，签发一次性 `TEAM_READ_ONLY` ticket；浏览器随后连接既有平台文件 WebSocket。
 - 每条 `workspace.list/search/read/read.chunk` RPC 都重新复核账号、实时角色、团队关系、目标用户、版本/worktree 映射和服务器归属；只读 diff 仍走上述 Git HTTP API。
-- `.opencode` 可读取；`.git`、路径穿越、符号链接和特殊设备文件拒绝。写入、上传、删除、移动、Git 变更、终端、配置修改、直接挂接为可写会话工作区和普通工作区下载均返回 `FORBIDDEN`。管理视角对话只能在发送前复用这些 RPC 读取有限大小的只读文本快照，快照进入管理员自己的 Run，不改变工作区或工具权限。
+- `.opencode` 可读取；`.git`、路径穿越、符号链接和特殊设备文件拒绝。写入、上传、删除、移动、Git 变更、终端、配置修改、直接挂接为可写会话工作区和普通工作区下载均返回 `FORBIDDEN`。旧个人工作区 RPC 保持兼容；新版管理对话使用上述独立审阅 scope 和只读 Tool，不再预装有限文件快照。
 
 ### 整组导出
+
+新版管理视角默认只显示最新文件聚合与成员选择；导出 API 作为既有兼容能力保留，不在默认审阅界面重复展示。
 
 | 方法与相对路径 | 用途 |
 |---|---|

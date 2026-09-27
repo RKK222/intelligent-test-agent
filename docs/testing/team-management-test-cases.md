@@ -98,7 +98,7 @@ flowchart TD
 | TC-19 大文件分段预览 | 首次整读返回 413；读取分段；继续加载一段；触发失败后重试 | `size=20`, `maxPreviewBytes=8` | 展示首段和进度；继续加载追加内容；失败保留已读内容并可重试 |
 | TC-20 迟到响应隔离 | 打开成员 A 文件后切换成员 B；让 A 的文件响应最后到达 | `A=pw-1`, `B=pw-2` | A 内容不出现在 B 的标签页；关闭 `pw-1` 连接；当前工作区为 `pw-2` |
 | TC-21 401/403 实时撤权 | 文件读取中返回 401 或 403 | `traceId=trace-revoked` | 关闭所有团队文件连接、清空只读缓存、展示统一错误；不得继续读迟到帧 |
-| TC-22 管理视角只读对话 | 选中成员后发送“概括当前工作区” | `TEAM_READ_ONLY`、文本文件超过上下文预算 | 发送前按当前范围逐次读取受限文本快照；Run 仍使用管理员工作区；消息明确只读快照边界；不调用成员工作区写操作；撤权或读取失败时不发送 |
+| TC-22 管理视角只读对话 | 默认全部成员或选中成员后发送“概括当前工作区” | `team.review`、至少 30 个文件 | 每轮独立 scope；原生 Tool 实际按需 list/search/read，含第 25 个之后文件；引用来源和版本；明确失败/过滤/未完成；Run 仍属于管理员；通道写操作拒绝 |
 | TC-22 精简成员浮层 | 返回个人、已发布和 `SYNC_MERGE` 提交 | `commitType=PERSONAL_COMMIT/PUBLISHED_COMMIT/SYNC_MERGE` | 浮层仅展示成员选择，提交分组与整组导出不再呈现；左侧“变更”仍能查看未提交修改 |
 | TC-23 整组导出取消 | 选择版本发起导出；轮询到 RUNNING；点击取消 | `exportId=export-1` | 状态变为 CANCELLED；停止轮询；不产生下载跳转 |
 | TC-24 离开管理视角清理 | 管理视角打开文件和成员弹窗；点击活动栏工具箱/控制台 | `perspective=TEAM_MANAGEMENT` | 退出管理视角，关闭文件连接和弹窗，清空管理缓存，目标页面正常打开 |
@@ -262,6 +262,46 @@ CMC 参数依赖：
 | TC-29 三服务 readiness | 请求 backend 18082、XXL 18083、前端代理 XXL 3000 readiness；请求首页 HEAD | `192.168.8.100` | 三个 readiness `UP`，首页 HTTP 200，不能只凭构建成功判定上线 |
 | TC-30 真实管理视角截图 | 用授权超级管理员登录 3000；进入管理视角；点击用户名选择另一成员，再打开成员管理 | `888888888`、真实版本上下文 | 截图能确认浮条没有“对话”、精简成员列表切换工作区、成员管理只有一个搜索输入；右侧原对话栏仍可用 |
 | TC-31 无其他团队现场 | 测试库没有其他系统管理员团队时打开成员管理 | `items=[]` | 顶栏可直接打开本人团队成员弹窗；切换全平台只读后仍可从选择弹窗返回本人团队，不执行未指定的真实成员写操作 |
+
+## 2.4 全部成员最新文件与按需 Tool 验收
+
+设计依据：`docs/architecture/team-review-latest-files.md`。以下通过条件不是“仅构建成功”或 mock 对话。
+
+| 案例名称 | 测试步骤/数据 | 预期结果与证据 |
+| -------- | -------- | -------- |
+| TC-32 默认聚合及成员切换 | 进入管理视角，保持当前应用/模板/版本；打开用户名列表，选择成员，再返回全部成员 | 默认“全部成员”、对话展开、原三栏保留；选择后弹窗关闭，文件树和编辑器切换；只有顶栏成员维护入口 |
+| TC-33 完整目录及实际作者 | 同一版本的两名成员分别提交 `spec/a.md`、`spec/b.md`；文件树展开 spec | 显示所有文件而非仅改动列表；每个文件显示 Git 实际作者/提交时间，不以工作区所有者或克隆 mtime 冒充 |
+| TC-34 同内容去重与最新来源 | 相同路径相同 SHA；相同路径不同 SHA、两条可靠且不同 Git 时间 | 相同内容只有一行；不同内容选较晚 Git 提交，UI 与 Tool source/file/contentVersion 一致 |
+| TC-35 待核验来源 | 同路径脏文件、相同 Git 时间但内容不同、文件/目录同名 | 标注“最新待核验”；不自动读第一人的正文；要求选择具体成员后再读 |
+| TC-36 版本和删除 | 第一次目录读取后改文件，含同大小且恢复 mtime；本来源 Git 删除 | 旧 SHA 读取 CONFLICT；删除候选无正文，别的成员缺失文件不视为全局删除 |
+| TC-37 失败与预算 | 一名来源离线、旧节点不支持元数据 RPC；目录 1001 项 | 明确 incomplete/unavailable 或超限，不把部分/截断结果标成完整；无法确认来源时拒绝正文 |
+| TC-38 大于 24 文件真实问答 | 真实 Git fixture 至少 30 文件；用户询问第 30 文件正文；继续搜索 40 子目录 | Tool list/search/read 取到第 30 文件；搜索续扫 remainingDirectories；不是预载快照，保留实际 Tool 调用及 Run 终态证据 |
+| TC-39 Scope 与 Run 撤权 | 换操作者、登录 marker 失效、成员移除、服务器/版本映射变化、终态 Run、复用到其它 Run | 每条协调/来源 RPC 失败关闭；来源节点顶层 FORBIDDEN/UNAUTHENTICATED 错误码不误解析为空目录 |
+| TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；读取 .envrc/SSH 私钥/符号链接 | 拒绝操作和敏感文件；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文 |
+| TC-41 迟到响应和连接 | 并发展开、切应用/成员后旧 ticket/目录/分片迟到；刷新/退出视角 | 同 scope 单飞连接；旧连接关闭、迟到结果不能覆盖新视图，聚合 ID 不当物理 Workspace |
+| TC-42 配套发布与真实模型 | 后端经 Jenkins 发布100，公共 Tool 经个人 worktree 审阅发布，受管重启验收进程 | UI、所有来源节点、公共 Tool 和专用凭据版本配套；账号 binding 不迁 Mac；真实模型读取来源并引用文件路径与作者 |
+
+自动校验入口：
+
+```bash
+# 仓库根目录；需显式选择支持 release 21 的 JDK
+mvn -q -f backend/pom.xml -pl test-agent-api,test-agent-persistence -am -Dtest=TeamReviewApplicationServiceTest,TeamWorkspaceApplicationServiceTest,TeamReviewProtocolServiceTest,RedisTeamReviewScopeStoreTest,WorkspaceGitToolTokenServiceTest,OpencodeProcessStartupServiceTest,ApiTokenWebFilterTest,WorkspaceFileWebSocketHandlerTest -Dsurefire.failIfNoSpecifiedTests=false test
+node tools/test-team-review-tool.mjs
+
+# frontend 目录
+corepack pnpm typecheck
+corepack pnpm exec vitest run apps/agent-web/tests/team-management-controller.test.ts apps/agent-web/tests/team-review-panes.test.ts apps/agent-web/tests/team-perspective-shell.test.ts apps/agent-web/tests/figma-file-explorer.test.ts packages/backend-api/tests/team-file-connections.test.ts packages/file-explorer/tests
+corepack pnpm build
+```
+
+隔离 Tool 网络契约测试执行真实 `execute` 代码，但 fetch/WebSocket 为受控替身，不能代替 TC-38/TC-42 的原生模型调用。真实 Git 文件测试覆盖 30 文件、实际作者和 SHA 检测；浏览器截图中的空团队不能作为多成员文件数据验收证据。
+
+### 2026-09-27 本地实现校验记录
+
+- 后端 8 个定向测试类 103 项通过；公共 Git/文件内核回归 78 项通过。前端 11 文件 109 项、全 workspace 类型检查及生产构建通过；隔离 Tool execute 3 项通过，Bun 原生 WebSocket Origin 本地握手/回包通过。生产构建仍有既有大 chunk/动态导入提示。
+- 按固定 `.env.test`/`test` profile 启动实际后端、manager、前端；readiness UP，3000 HTTP 200。真实账号页面确认默认全部成员、唯一成员维护入口、成员选择后关闭和范围切换；无可用 default 时明确空态，来源离线时明确“不完整”。截图保存在 `output/playwright/team-review-20260927/`。
+- 实际平台 scope/ticket 均 HTTP 200，真实浏览器文件 WebSocket 的 workspace.write 返回 FORBIDDEN；无效专用 Tool 凭据返回 401 UNAUTHENTICATED。未创建该测试写入文件，未修改账号模型、团队成员、数据库业务数据或工作区服务器归属；短 scope 在 Redis 按 TTL 自动过期。
+- **尚未通过 TC-38/TC-42 的真实模型验收**：本轮未发布100后端和公共 Tool，未受管重启远端验收进程。共享账号仍绑定100；当前本人团队在 wrtest/20260709 没有 default，本地-测试/20260618 的 default 来源服务器离线。不能把单元/隔离测试、空态截图或上轮有限快照对话当作新 Tool 的真实验收。
 
 # 3. 案例审核结果
 

@@ -84,6 +84,11 @@ public class OpencodeProcessStartupService {
     private OpencodeProcessStopService stopService;
     private WorkspaceGitToolTokenService workspaceGitToolTokenService;
     private CodeKnowledgeToolTokenService codeKnowledgeToolTokenService;
+    private TeamReviewToolTokenService teamReviewToolTokenService;
+
+    /** 审阅只读工具凭据随公共启动流程注入，无新增人工配置项。 */
+    @Autowired
+    void setTeamReviewToolTokenService(TeamReviewToolTokenService service) { this.teamReviewToolTokenService = service; }
     private OpencodeObservabilityTokenService observabilityTokenService;
     private OpencodeObservabilityGenerationRepository observabilityGenerationRepository;
     private LocalClientLifecycleGateway localClientLifecycleGateway;
@@ -1035,6 +1040,10 @@ public class OpencodeProcessStartupService {
             environment.put(
                     CodeKnowledgeToolTokenService.TOKEN_ENV_NAME,
                     codeKnowledgeToolTokenService.issue(request.userId()));
+        }
+        if (teamReviewToolTokenService != null && internalProxySettings != null) {
+            environment.put(TeamReviewToolTokenService.TOKEN_ENV_NAME, teamReviewToolTokenService.issue(request.userId()));
+            environment.put(WorkspaceGitToolTokenService.BASE_URL_ENV_NAME, internalProxySettings.sameNodeBaseUrl());
         }
         if (observabilityTokenService != null && internalProxySettings != null) {
             environment.put(

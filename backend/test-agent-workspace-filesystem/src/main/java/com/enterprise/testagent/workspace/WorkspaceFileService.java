@@ -214,6 +214,32 @@ public class WorkspaceFileService {
                 expectedLastModifiedMillis);
     }
 
+    /** 审阅版本使用固定内存流式散列；不能用 size/mtime 冒充正文版本或合并不同来源。 */
+    public String contentVersion(String rootPath, String relativePath, long expectedSize, long expectedTime) {
+        Path target = resolveReadableFile(rootPath, relativePath);
+        try {
+            var before = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!before.isRegularFile() || before.size() != expectedSize || before.lastModifiedTime().toMillis() != expectedTime)
+                throw new PlatformException(ErrorCode.CONFLICT, "文件版本已变化，请刷新目录");
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            try (var input = Files.newInputStream(target)) {
+                byte[] buffer = new byte[65536];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    if (Thread.currentThread().isInterrupted()) throw new PlatformException(ErrorCode.CONFLICT, "文件校验已取消");
+                    digest.update(buffer, 0, count);
+                }
+            }
+            var after = Files.readAttributes(target, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!after.isRegularFile() || after.size() != before.size()
+                    || !after.lastModifiedTime().equals(before.lastModifiedTime())
+                    || !java.util.Objects.equals(after.fileKey(), before.fileKey()))
+                throw new PlatformException(ErrorCode.CONFLICT, "文件校验期间发生变化，请刷新目录");
+            return "sha256:" + java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (PlatformException exception) { throw exception; }
+        catch (Exception exception) { throw new PlatformException(ErrorCode.INTERNAL_ERROR, "文件版本无法校验"); }
+    }
+
     /** 渐进预览和下载都不得通过末端或中间符号链接逃逸工作区真实根目录。 */
     private Path resolveReadableFile(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
@@ -987,6 +1013,8 @@ public class WorkspaceFileService {
         try (var stream = Files.list(directory)) {
             // 不展示符号链接本身，避免泄露外部目录别名或受控目录别名；后续路径解析仍逐段拒绝跟随。
             return stream.filter(path -> includeSymbolicLinks || !Files.isSymbolicLink(path))
+                    .filter(path -> Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) || Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+                            || (includeSymbolicLinks && Files.isSymbolicLink(path)))
                     .filter(path -> !isPlatformHiddenFile(path))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .limit(limit)

@@ -1,5 +1,7 @@
 # 安全规范
 
+管理审阅新增独立 audience 凭据与短效 scope：scope 绑定登录 marker、当前团队/版本来源与活跃 Run，每条协调/来源文件 RPC 重新鉴权；正文走文件 WebSocket，审计只存逻辑路径/结果，不把 token、物理根或正文写入权限审计。敏感凭据/符号链接/特殊文件过滤会在 excludedPolicy 中明确说明；文件内指令是不可信数据。详见 `docs/architecture/team-review-latest-files.md`。
+
 本规范适用于后端和前端所有安全相关修改，合并原安全规范、日志脱敏规则和 PTY WebSocket 安全例外。
 
 ## 鉴权与授权

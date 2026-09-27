@@ -445,6 +445,12 @@ const launcherStyle = computed(() => ({
           </div>
           <p v-if="state.catalogLoading && !state.reviewRoster.length" class="team-review-empty">正在读取成员…</p>
           <div v-else class="team-review-member-options" role="listbox" aria-label="成员列表">
+            <button type="button" role="option" :aria-selected="!state.selectedUserId"
+              class="team-review-member-option" @click="selectReviewMember('')">
+              <span class="team-review-person-avatar" aria-hidden="true">全</span>
+              <span class="team-review-member-option-copy"><strong>全部成员</strong><small>当前应用的最新文件</small></span>
+              <span v-if="!state.selectedUserId" class="team-review-member-current">当前</span>
+            </button>
             <button
               v-for="item in visibleReviewMembers"
               :key="item.userId"
@@ -470,7 +476,7 @@ const launcherStyle = computed(() => ({
           @click="toggleMemberPicker"
         >
           <span class="team-review-launcher-dot" aria-hidden="true" />
-          <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "选择成员") : "选择成员" }}</span>
+          <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "选择成员") : "全部成员" }}</span>
         </button>
       </div>
     </Teleport>

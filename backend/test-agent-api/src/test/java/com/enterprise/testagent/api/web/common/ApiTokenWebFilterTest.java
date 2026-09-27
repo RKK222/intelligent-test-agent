@@ -10,6 +10,20 @@ import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
 class ApiTokenWebFilterTest {
+    @Test
+    void reviewControlExemptionIsExactAndDoesNotExtendToChildren() {
+        var filter = new ApiTokenWebFilter("secret-token");
+        for (String path : java.util.List.of("/api/internal/agent/opencode/team-review-tool/ticket",
+                "/api/internal/platform/workspace-management/team/review-internal/ticket")) {
+            var exact = MockServerWebExchange.from(MockServerHttpRequest.post(path));
+            boolean[] called = {false};
+            filter.filter(exact, exchange -> { called[0] = true; return Mono.empty(); }).block();
+            assertThat(called[0]).isTrue();
+            var child = MockServerWebExchange.from(MockServerHttpRequest.post(path + "/extra"));
+            filter.filter(child, exchange -> Mono.empty()).block();
+            assertThat(child.getResponse().getStatusCode().value()).isEqualTo(401);
+        }
+    }
 
     @Test
     void filterExemptsOnlyExactAnonymousLoginPaths() {

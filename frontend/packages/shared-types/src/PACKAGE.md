@@ -1,5 +1,7 @@
 # 包说明：@test-agent/shared-types/src
 
+`TeamReviewContext/Entry/Listing/ReadResult` 表达短效逻辑 scope、最新来源候选、完整性、过滤策略与 UTF-8 分片；FileTreeEntry/FileSearchResult 仅新增可选 review 字段，不新增 RunEvent 或实体 Workspace 类型。
+
 ## 职责
 
 提供前端共享类型和稳定字段定义，包含 Web App 运行态 projection 类型。

@@ -1,5 +1,7 @@
 # @test-agent/file-explorer
 
+管理审阅沿用 DirectoryRows/FileExplorer；仅带 review 元数据的文件/搜索行以 44px 双行展示实际 Git 作者/时间或明确来源/文件时间，普通树仍保持 22px。formatTeamReviewMetadata 供只读编辑器复用，未确认最新不得标成已确认。审阅搜索保留后端相对路径命中，普通搜索仍收口文件名。
+
 ## 工程定位
 
 文件树、已加载文件名搜索和 Changed Files 面板。

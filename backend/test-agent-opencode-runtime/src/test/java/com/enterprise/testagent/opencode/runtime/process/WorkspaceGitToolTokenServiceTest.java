@@ -80,6 +80,20 @@ class WorkspaceGitToolTokenServiceTest {
     }
 
     private Fixture fixture(Clock clock) {
+        return tokenFixture(clock);
+    }
+
+    @Test
+    void reviewCredentialCannotBeReusedForGitOrCodeKnowledge() {
+        Fixture fixture = fixture(Clock.fixed(NOW, ZoneOffset.UTC));
+        var review = new TeamReviewToolTokenService(fixture.service());
+        String token = review.issue(USER_ID);
+        assertThat(review.authenticate("Bearer " + token)).isEqualTo(USER_ID);
+        assertThatThrownBy(() -> fixture.service().authenticate("Bearer " + token)).isInstanceOf(PlatformException.class);
+        assertThatThrownBy(() -> review.authenticate("Bearer " + fixture.service().issue(USER_ID))).isInstanceOf(PlatformException.class);
+    }
+
+    private Fixture tokenFixture(Clock clock) {
         UserRepository userRepository = mock(UserRepository.class);
         UserRoleRepository roleRepository = mock(UserRoleRepository.class);
         DictionaryRepository dictionaryRepository = mock(DictionaryRepository.class);
