@@ -21,10 +21,13 @@
 - `8b027dd74` 已通过 Jenkins #65 于 15:12:20 发布为 `release-65-8b027dd7`，readiness/Web/XXL 均200，9999 TCP可达。公共 Tool 通过个人 worktree 提交/发布，public master `f5b52bda86867dc48157e01595e21ae56526a8a1`；100 rollout完成，本人受管重启成功、绑定仍是100，工具数22。
 - `wrtest/20260709` 本人工作区实际存在，平台来源文件 RPC 正常，免费 Ling 已在真实模型目录。旧“本地-测试”只有登记，100物理根不可用；未迁移绑定或初始化根。元数据扫描进入依赖目录后停止模型验收并修复安全边界。
 - 修复后重跑后端8个定向类103项全部通过；提交前复核各提交者近期日志、保留公共配置兼容动作和五条批次规则及企业打包成果，不纳入临时脚本/截图/构建产物。
+- 安全补验提交 `b9d3a98c4d90dd4a2a60f65b97fdd387801b6f21` 经 Jenkins #66 于15:58:07发布成功，标签 `release-66-b9d3a98c`；流水线完整构建/真实数据库克隆升级/受管健康校验通过。复查readiness/Web200、XXL入口302、9999TCP可达；实际聚合根仅main/test，14业务文件扫描完整，受管目录与配置正文请求FORBIDDEN。
+- 免费 Ling Flash 普通款虽在目录但原生 Run 报 Model not found；在同一 Session 仅指定本轮免费 Ling Fin 模型后真实Run `run_18ca7dd235884680a465cf5dce49e8fa` 于16:10:00成功。4次原生team-review调用list/search/search/read，按SHA读483字节到eof，输入无预装正文；正确回答HelloController的/hello、返回值、Git作者gengxf和提交时间。工作区来源888888888与Git作者是不同身份；未更改默认模型。
+- 浏览器可见收起态进入管理视角自动展开，成员选择/唯一维护入口/合并combobox复验通过，系统历史能恢复真实回答及4次Tool；截图保存于`output/playwright/team-review-20260927-100/`。同步测试记录，并澄清来源RPC拒绝敏感路径与聚合索引NOT_FOUND的不同错误层次。
 
 ### Result
 
-- 配套首次发布成功，但配置排除修复尚需再次经 Jenkins 发布，真实原生 Tool 问答尚未完成；不得把 #65 或 mock execute 当作最终通过。当前 MY_TEAM 同版本没有在线 default，多成员 UI 验收仍需真实成员工作区。
+- #66 配套部署、单来源真实原生Tool问答和受管配置隔离已通过；当前MY_TEAM同版本没有在线default，多成员文件聚合/逐人读取及大于24文件的原生续扫仍未完成共享环境E2E。GLOBAL的既有单来源14文件和本地30文件测试不能冒充上述验证；未创建未获授权的临时成员/工作区或修改绑定元数据。
 - 公共 rollout 中 Mac 一个个人 worktree 为 MERGE_CONFLICT，未覆盖或修复用户改动；100共享副本和目标已同步完成。本轮不打企业包。
 
 ## 2026-09-27 - 实现管理视角最新文件聚合与按需只读审阅 Tool

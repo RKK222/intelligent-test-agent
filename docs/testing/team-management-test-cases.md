@@ -277,7 +277,7 @@ CMC 参数依赖：
 | TC-37 失败与预算 | 一名来源离线、旧节点不支持元数据 RPC；目录 1001 项 | 明确 incomplete/unavailable 或超限，不把部分/截断结果标成完整；无法确认来源时拒绝正文 |
 | TC-38 大于 24 文件真实问答 | 真实 Git fixture 至少 30 文件；用户询问第 30 文件正文；继续搜索 40 子目录 | Tool list/search/read 取到第 30 文件；搜索续扫 remainingDirectories；不是预载快照，保留实际 Tool 调用及 Run 终态证据 |
 | TC-39 Scope 与 Run 撤权 | 换操作者、登录 marker 失效、成员移除、服务器/版本映射变化、终态 Run、复用到其它 Run | 每条协调/来源 RPC 失败关闭；来源节点顶层 FORBIDDEN/UNAUTHENTICATED 错误码不误解析为空目录 |
-| TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；枚举 .opencode/node_modules、读取 opencode.jsonc/.envrc/.npmrc/.netrc/SSH 私钥/符号链接 | 目录树排除受管配置和依赖；直读/直列受保护路径返回 FORBIDDEN；拒绝写操作和敏感文件；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文；旧配置管理 RPC 授权不变 |
+| TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；枚举 .opencode/node_modules、读取 opencode.jsonc/.envrc/.npmrc/.netrc/SSH 私钥/符号链接 | 目录树排除受管配置和依赖；来源 RPC 直读/直列保护路径返回 FORBIDDEN，聚合定位已排除的根目录敏感文件可返回 NOT_FOUND，均无正文；拒绝写操作；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文；旧配置管理 RPC 授权不变 |
 | TC-41 迟到响应和连接 | 并发展开、切应用/成员后旧 ticket/目录/分片迟到；刷新/退出视角 | 同 scope 单飞连接；旧连接关闭、迟到结果不能覆盖新视图，聚合 ID 不当物理 Workspace |
 | TC-42 配套发布与真实模型 | 后端经 Jenkins 发布100，公共 Tool 经个人 worktree 审阅发布，受管重启验收进程 | UI、所有来源节点、公共 Tool 和专用凭据版本配套；账号 binding 不迁 Mac；真实模型读取来源并引用文件路径与作者 |
 
@@ -308,6 +308,15 @@ corepack pnpm build
 - Jenkins #65 于 15:12:20 完成 `8b027dd74669c85ca838b365f36b01c681572ecd` 的发布，标签 `release-65-8b027dd7`；后端 readiness、Web、XXL readiness 均 HTTP 200，执行器 9999 TCP 可达。公共 Tool 已通过个人 worktree 发布到 public master `f5b52bda86867dc48157e01595e21ae56526a8a1`，100 rollout 完成；验收管理员通过公共启动/重启链路重新启动，binding 保持100。Mac 的一个个人 worktree 冲突未修改，不影响100同步。
 - 实际读取确认：`wrtest/20260709` 的本人 default 工作区在100存在，新增来源文件 RPC 返回目录及 Git 元数据。旧“本地-测试/20260618”的本人工作区只有登记，物理根目录不可用，未擅自初始化或更改服务器归属。免费 `opencode/ling-3.0-flash-free` 已在真实模型目录出现。
 - 递归元数据验收发现扫描进入 `.opencode` 配置和依赖目录；在发送模型问题前补上目录枚举与正文读取的统一保护规则，并用原有真实 Git 30 文件测试覆盖嵌套配置、依赖、`.npmrc/.netrc` 的排除和拒绝。这次修复需要另一次 Jenkins 发布后再完成真实模型验收；此处不将 #65 视为最终验收通过。
+
+### 2026-09-27 共享环境最终发布与原生 Tool 实测
+
+- Jenkins #66 于 15:58:07 成功发布安全补验提交 `b9d3a98c4d90dd4a2a60f65b97fdd387801b6f21`，标签 `release-66-b9d3a98c`。流水线完成后端构建、Flyway 历史克隆升级、前端全 workspace 类型检查/生产构建及受管容器健康校验；测试入口 `http://192.168.8.100:3000`。发布后复查 readiness `UP/200`、Web `200`、XXL 入口跳转 `302`、9999 TCP 可达。没有直接替换远端制品、手工迁移或修改环境文件。
+- 实际聚合文件 WebSocket：根目录仅返回 `main/test`，递归取得 14 个业务文件、`complete=true`、无不可用来源；`.opencode`、`.opencode/node_modules` 目录请求及 `.opencode/opencode.jsonc` 正文请求均返回 `FORBIDDEN`，没有读取配置正文。此范围使用超级管理员的既有 `GLOBAL` 授权，只有一个实际可用 default 来源，不作为多成员 GUI 数据证明。
+- 原生问答 Session `ses_607463c3c49a4f918ec689b818b6ea96`，成功 Run `run_18ca7dd235884680a465cf5dce49e8fa`，模型 `opencode/ling-3.0-flash-fin-free`，16:10:00 终态 `SUCCEEDED`。首次使用目录中列出的 `ling-3.0-flash-free` 时实际运行报 Model not found；在同一 Session 改用已获准的免费 Ling Fin 模型重试成功，未修改默认模型/账号配置。
+- 成功 Run 实际有 4 次完成的 `team-review` 调用：`list → search → search(main) → read`，未调用普通 read/bash/写工具。本轮 USER 输入仅问题与短 scope，没有预装 `HelloController.java` 正文；read 携带搜索返回的 SHA，读取 483 字节直到 `eof=true`。回答从真实正文确认 GET `/hello` 返回 `message=Hello, Spring Boot!` 与当前时间；工具元数据中的 Git 作者是 `gengxf`、提交时间 `2026-06-26T02:31:08Z`，来源成员是 `888888888`，两种身份不同，内容版本为 `sha256:4a2f3546ae2609a907105e76145055b089fd9bbec24c0fa0ad93770696dd6509`。
+- Chrome 实测：可见右侧栏收起后进入管理视角会自动展开；默认全部成员；浮条仅用户名/全部成员选择，选中 gjq 后关闭列表并收窄只读范围；顶部唯一成员维护入口及单个搜索/选择 combobox 正常。成功回答可从系统会话列表恢复，工作事件显示 `team-review，4 次`。实际截图位于 `output/playwright/team-review-20260927-100/`：`real-ai-answer-detail-release66.png`、`management-auto-expand-release66.png`、`member-picker-release66.png`、`member-management-unified-release66.png`。
+- **未完成项**：当前 MY_TEAM 两名成员在 `wrtest/20260709` 没有在线 default 工作区，故多成员聚合文件/逐人切换读取以及大于 24 文件的原生模型续扫尚未完成共享环境 E2E。既有真实 Git 30 文件测试与单来源 14 文件实测不可替代这些用例；未创建未获授权的临时账号/工作区或改动现有成员服务器归属。Mac 公共配置 rollout 中的一个个人 worktree 冲突保持原状，100 已同步。
 
 # 3. 案例审核结果
 
