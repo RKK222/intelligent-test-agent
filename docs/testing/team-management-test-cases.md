@@ -335,6 +335,15 @@ corepack pnpm build
 - 后续用户登录 Gitee 后刷新页面，确认登录身份为 `wrui233`；该账号访问 `gengxf11/springboot-demo` 管理页面得到 HTTP 403，仍不具备添加部署公钥所需权限。此处需要切换到该仓库管理员账号，或由管理员添加两把只读公钥；不能将“已登录”视为“已授权”。
 - 等仓库所有者授予两把公钥各自的只读仓库权限后，先再次验证 Git access；再由每个验收账号在 100 上按平台正常流程初始化进程和同版本 `default`，确认 binding 与物理工作区同属 100。最后执行 TC-33～TC-35、TC-41～TC-42 的真实多来源 UI/文件/问答验收并留存截图。不能拿单来源实测或前端单测替代该验收。
 
+### 2026-09-28 多成员隔离数据、#67 发布与真实对话复验
+
+- 用户批准在共享 100 保留专用验收数据后，改用独立 GitLab 仓库 `wrui/codex-e2e-workspace-git-20260813` 的隔离分支 `feature_testagent_20260928`，未改变 Gitee 原仓库。F-COSS 独立测试版本 `20260928` 的 `F-COSS/spec` 下有两名成员各自创建的验收文件；另外提交 `cases/case-01.md`～`case-30.md`，奇数文件的 Git 作者为成员 A、偶数为成员 B，分支头为 `72e6fdf36954fb6fc8d96447cd0ed97995946ebf`。通过平台单组 Git 刷新让 A/B 同版本工作区收敛到该提交；保留这些专用 fixture，不当作临时目录自动清理。两人工作区和管理员进程均位于 `dev-192-168-8-100`。
+- 管理视角短 scope 原先投递成 `text/markdown` 文件 part，真实 Run 报模型不支持该媒体类型。改用既有 `reference → text` 路径的提交 `7f497c1494982373f2b16a683d06606ea0d5e83b` 经 Jenkins #67 `ACTION=DEPLOY` 发布成功，标签 `release-67-7f497c14`；后端、XXL readiness `UP`，Web HTTP 200，执行器 9999 可达。该变更不修改 OpenCode 源码或 API/数据库结构。
+- 发布后真实平台文件 WebSocket 的全部成员 `cases` 目录返回 30 条、`complete=true`、`unavailableMembers=[]`；`case-29.md` 与 `case-30.md` 分别展示 Git 作者 A/B 和提交时间 `2026-09-28T05:07:48Z`。`case-30.md` 使用目录返回的 SHA 读取至 `eof=true`，校验句为“海面上的橙色罗盘指向北方。”；选中成员 A/B 后，scope 各自只包含对应工作区。聚合视图的“Git 修改人”和“读取来源成员”是独立信息；同一分支在 B 工作区可包含作者为 A 的文件，不能将来源 B 错报为作者 B。
+- 真实管理员模型 Session `ses_3e0a57bfe77441e9a17899fe4c284688`、Run `run_3a90b2619cc946008a445463d460010e` 终态 `SUCCEEDED`。输入只含问题和短只读 scope，不预装正文；原生 `team-review` 依次调用 `list(cases) → read(case-29) → read(case-30)`，两次 read 均携带 list 返回的 `contentVersion`，回答准确给出两句校验句、不同 Git 作者、时间和实际来源 B；没有普通 read/bash/写入 Tool。
+- Chrome 页面实测默认聚合文件树展开后可见 30 个文件及逐文件作者/时间；浮条成员选择 A 后弹窗关闭，左侧与只读范围变为 A，预览 `member-a-acceptance.md` 为“蓝色信封属于成员 A”；切换 B 后左侧与范围变为 B，预览 `member-b-acceptance.md` 为“绿色风筝属于成员 B”。页面再发送 B 范围问题，Session `ses_07f88d0576354b75891265d67cefe641`、Run `run_47f5a963d7194c478cc0d505314ffb2d` 终态 `SUCCEEDED`，原生 Tool `list → read` 返回 B 的工作区、SHA 与 `eof=true`，页面回答与正文一致。
+- 本轮证明多成员数据、作者展示、按成员工作区切换、聚合与选中成员的真实对话链路。`TC-35` 的脏文件/同时间异内容“最新待核验”、`TC-36` 改写后旧 SHA 冲突、`TC-39` 撤权、`TC-41` 迟到响应并未以这组现场数据重测，不能宣称全部边界用例通过。隔离验收仓库、两套账号/工作区和测试版本按用户允许保留；原 Gitee F-COSS 工作空间未改。
+
 # 3. 案例审核结果
 
 | 审核项 | 审核结果 | 说明 |
