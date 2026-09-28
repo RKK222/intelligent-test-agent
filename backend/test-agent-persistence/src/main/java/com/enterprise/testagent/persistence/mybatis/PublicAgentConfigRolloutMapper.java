@@ -34,6 +34,19 @@ public interface PublicAgentConfigRolloutMapper {
 
     String findBlockingRolloutId(@Param("userId") String userId);
 
+    boolean hasAwaitingPublicSync(@Param("rolloutId") String rolloutId);
+
+    String lockPublicRolloutForSyncResume(@Param("rolloutId") String rolloutId);
+
+    void authorizePublicSyncDiscard(@Param("rolloutId") String rolloutId,
+            @Param("discard") boolean discard, @Param("now") Instant now);
+
+    int resumePublicServerSyncs(@Param("rolloutId") String rolloutId, @Param("now") Instant now);
+
+    int markServerSyncAwaitingAction(@Param("rolloutId") String rolloutId,
+            @Param("linuxServerId") String linuxServerId, @Param("leaseToken") String leaseToken,
+            @Param("errorMessage") String errorMessage, @Param("now") Instant now);
+
     PublicAgentConfigRolloutPreparationRow findPreparing(
             @Param("linuxServerId") String linuxServerId,
             @Param("scope") String scope);

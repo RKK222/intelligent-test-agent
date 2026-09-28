@@ -154,6 +154,10 @@ class AgentConfigBackendRoutingService {
                 .flatMap(routeResolver::remoteTarget);
     }
 
+    String currentLinuxServerId() {
+        return routeResolver.currentLinuxServerIdValue();
+    }
+
     Optional<String> forwardTargetForRequestedServer(String linuxServerId) {
         return routeResolver.remoteTarget(linuxServerId);
     }

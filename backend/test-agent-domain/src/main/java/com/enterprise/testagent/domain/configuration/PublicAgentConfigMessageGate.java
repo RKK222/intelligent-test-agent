@@ -38,5 +38,11 @@ public interface PublicAgentConfigMessageGate {
         public static MessageGateStatus blocked(String rolloutId) {
             return new MessageGateStatus(false, rolloutId, "公共 Agent/Skill 配置正在同步，旧会话排空后将自动恢复发送");
         }
+
+        /** 普通用户只看到恢复责任，不泄露服务器物理目录或文件内容。 */
+        public static MessageGateStatus awaitingAdministrator(String rolloutId) {
+            return new MessageGateStatus(false, rolloutId,
+                    "公共 Agent/Skill 共享运行副本存在本地变更，等待管理员处理并继续同步；无需个人提交或推送");
+        }
     }
 }

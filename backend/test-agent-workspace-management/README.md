@@ -204,3 +204,7 @@ manifest 同时记录文件级 `contentDigest` 和提交绑定的 `bundleDigest`
 禁止把用户已经修改的 `APP_SOURCE` 目录追认为固定提交原文。清理任务只删除自身 generation 的知识基线及其
 staging/backup，不能删除更新 generation。定向回归由 `AppSourceGitMaterializerTest`、
 `AppSourceCleanupWorkerTest` 和 `CodeSourceQueryServiceTest` 覆盖。
+
+### 共享副本确定性冲突
+
+公共同步 worker 只把带 `repositoryKind=SHARED_RUNTIME` 和丢弃许可标识的 CONFLICT 判为需人工处理，并通过协调器进入 `AWAITING_ACTION`；普通网络/Git 异常保持原重试。管理员可恢复同一固定提交，无需个人所有者推送。`AgentConfigApplicationServiceTest` 覆盖共享冲突不 reset、不自动重试、个人草稿保留；恢复授权仍只用于共享仓库。

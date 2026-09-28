@@ -32,6 +32,7 @@ const loading = ref(false);
 const initializing = ref(false);
 const pulling = ref(false);
 const superseding = ref(false);
+const resumingSync = ref(false);
 const errorMessage = ref("");
 const applicationScopeErrorMessage = ref("");
 const successMessage = ref("");
@@ -56,6 +57,8 @@ const hasSuperAdmin = computed(() => hasSuperAdminCapability(props.currentUser?.
 const isPublicView = computed(() => props.view === "public");
 const canSubmitInitialize = computed(() => !!targetRepository.value && !!selectedBranch.value && !initializing.value && !branchesLoading.value);
 const rolloutActive = computed(() => rollout.value?.status === "PREPARING" || rollout.value?.status === "DRAINING");
+const awaitingSyncAction = computed(() => rollout.value?.status === "DRAINING"
+  && rollout.value.servers.some((server) => server.syncStatus === "AWAITING_ACTION"));
 const applicationRolloutActive = computed(() => applicationRollouts.value.some((item) =>
   item.status === "PREPARING"
   || item.status === "DRAINING"
@@ -69,6 +72,7 @@ const canSubmitSupersede = computed(() =>
   && supersedeReason.value.trim().length > 0
   && supersedeReason.value.trim().length <= 500
   && !superseding.value
+  && !resumingSync.value
   && !supersedeBranchesLoading.value
 );
 const dirtyServers = computed(() => rows.value.filter((row) => row.localChangesPresent || row.status === "CONFLICT"));
@@ -299,8 +303,29 @@ async function submitGlobalPull() {
   }
 }
 
+/** 恢复原发布的固定提交，不触发个人推送或强制停止；丢弃共享修改必须单独确认。 */
+async function resumePublicSync(discardLocalChanges: boolean) {
+  const current = rollout.value;
+  if (!current || !awaitingSyncAction.value || resumingSync.value || superseding.value) return;
+  if (discardLocalChanges && !window.confirm(
+    `将继续发布 ${shortHash(current.commitHash)}，允许恢复本次发布所有尚未同步成功的共享运行副本，并删除其中未跟踪文件。请先备份需要保留的共享修改。个人 worktree 的草稿会保留。是否放弃共享副本变更并继续？`
+  )) return;
+  resumingSync.value = true;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    await api.resumePublicAgentConfigSync({ rolloutId: current.rolloutId, discardLocalChanges });
+    successMessage.value = `已恢复原发布 ${shortHash(current.commitHash)}，等待服务器同步`;
+    await refreshRollout();
+  } catch (error) {
+    errorMessage.value = formatError(error, "继续公共配置同步失败");
+  } finally {
+    resumingSync.value = false;
+  }
+}
+
 async function openSupersedeDialog() {
-  if (rollout.value?.status !== "DRAINING" || superseding.value) {
+  if (rollout.value?.status !== "DRAINING" || superseding.value || resumingSync.value) {
     return;
   }
   supersedeDialogOpen.value = true;
@@ -451,6 +476,7 @@ function rolloutStatusText(status: string) {
 }
 
 function serverProgress(server: PublicAgentConfigRolloutServerStatus) {
+  if (server.syncStatus === "AWAITING_ACTION") return "共享副本有本地变更，等待管理员处理";
   if (server.syncStatus !== "SYNCED") {
     return server.syncStatus;
   }
@@ -591,7 +617,7 @@ function newOperationId() {
       <section v-if="isPublicView && rollout" class="ta-opencode-config-rollout" aria-label="公共 Agent 全局刷新状态">
         <header>
           <div>
-            <strong>{{ rolloutStatusText(rollout.status) }}</strong>
+            <strong>{{ awaitingSyncAction ? "等待处理共享副本变更" : rolloutStatusText(rollout.status) }}</strong>
             <span>{{ rollout.branch }} · {{ shortHash(rollout.commitHash) }}</span>
           </div>
           <div>
@@ -600,7 +626,7 @@ function newOperationId() {
               v-if="rollout.status === 'DRAINING'"
               type="button"
               class="ta-opencode-config-btn is-danger"
-              :disabled="superseding"
+              :disabled="superseding || resumingSync"
               @click="openSupersedeDialog"
             >
               <Loader2 v-if="superseding" class="ta-opencode-config-icon is-spin" />
@@ -609,6 +635,15 @@ function newOperationId() {
             </button>
           </div>
         </header>
+        <div v-if="awaitingSyncAction" class="ta-opencode-config-diagnostic">
+          <p>共享运行副本存在本地变更，自动重试已暂停。管理员处理共享修改后可继续原发布；个人草稿无需提交或推送。</p>
+          <button type="button" class="ta-opencode-config-btn" :disabled="resumingSync || superseding" @click="resumePublicSync(false)">
+            重新检查并继续同步
+          </button>
+          <button type="button" class="ta-opencode-config-btn is-danger" :disabled="resumingSync || superseding" @click="resumePublicSync(true)">
+            放弃共享副本变更并继续
+          </button>
+        </div>
         <div v-if="rollout.failureReason" class="ta-opencode-config-diagnostic">{{ rollout.failureReason }}</div>
         <div v-if="rollout.supersedesRolloutId" class="ta-opencode-config-diagnostic">
           本次纠错替换：{{ rollout.supersedesRolloutId }}

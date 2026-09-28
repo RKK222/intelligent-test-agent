@@ -284,3 +284,7 @@ release 的 `requiresRestart` 只描述相对发布时上一全局能力版本�
 进程启动时获得 `TEST_AGENT_CODE_KNOWLEDGE_TOOL_TOKEN`；该 Token 只被代码知识和源码两个精确内部端点接受，
 不能调用 `workspace-git`、不能替代平台登录 Token，也不能获得写权限。反向使用 Workspace Git audience 同样会被拒绝。
 验证凭据时实时读取用户状态和角色；凭据过期或新增 Tool 发布后，按现有流程重启该用户 OpenCode 进程重新注入。
+
+### 等待管理员处理共享修改
+
+`PublicAgentConfigRolloutService` 将共享冲突按服务器租约暂停，消息门禁显示具体恢复责任；继续同步委托仓储锁定原 PUBLIC/DRAINING 发布，不创建新 rollout、推送或强制停止目标。`PublicAgentConfigRolloutServiceTest` 覆盖门禁提示与过期任务拒绝；网络等暂时性失败仍重试。

@@ -489,6 +489,38 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicWorkerPausesDirtySharedReplicaWithoutRetryingOrDiscardingPersonalDraft() throws Exception {
+        Path shared = root.resolve(".config");
+        Path personal = root.resolve(".configdev/public-other/opencode/skills/draft/SKILL.md");
+        Files.createDirectories(shared.resolve(".git"));
+        Files.createDirectories(shared.resolve("opencode"));
+        Files.createDirectories(personal.getParent());
+        Files.writeString(personal, "未发布草稿");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        AgentConfigApplicationService service = service(Map.of(
+                "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", shared.toString(),
+                "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(), git, new RecordingBroadcastPublisher());
+        PublicAgentConfigRolloutCoordinator coordinator = mock(PublicAgentConfigRolloutCoordinator.class);
+        PublicAgentConfigRolloutSyncRequest request = new PublicAgentConfigRolloutSyncRequest(
+                "acr_dirty", AgentConfigRolloutScope.PUBLIC, null, "main", "commit_fixed", false,
+                ADMIN.value(), "trace_dirty", 0, NOW.plusSeconds(180), "lease_dirty");
+        when(coordinator.claimPendingSync("linux-1")).thenReturn(Optional.of(request));
+        when(coordinator.renewServerSync(request)).thenReturn(true);
+        service.setPublicConfigRolloutCoordinator(coordinator);
+
+        service.retryPendingPublicConfigSync();
+
+        verify(coordinator).markServerSyncAwaitingAction(eq(request), org.mockito.ArgumentMatchers.contains("未提交变更"));
+        verify(coordinator, never()).markServerSyncRetry(any(), any());
+        verify(coordinator, never()).markPublicServerSynced(any(), anyList());
+        assertThat(git.resetCommit).isNull();
+        assertThat(Files.readString(personal)).isEqualTo("未发布草稿");
+    }
+
+    @Test
     void publicUpdatePersistsDiscardConfirmationWithoutChangingRepositoryBeforeWorkersRun() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));

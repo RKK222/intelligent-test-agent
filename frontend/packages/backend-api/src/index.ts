@@ -2072,6 +2072,11 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       request<PublicAgentConfigRolloutStatus | null>(`${agentConfigBase}/public/rollout`),
     getApplicationAgentConfigRollouts: () =>
       request<PublicAgentConfigRolloutStatus[]>(`${agentConfigBase}/application/rollouts`),
+    resumePublicAgentConfigSync: (payload: { rolloutId: string; discardLocalChanges: boolean }) =>
+      request<void>(`${agentConfigBase}/public/rollout/resume-sync`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     supersedePublicAgentConfigRollout: (payload: {
       activeRolloutId: string;
       branch: string;

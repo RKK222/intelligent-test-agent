@@ -378,6 +378,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 | `GET` | `/public/repositories/local` | 目标后端本机状态查询入口，仅供后端到后端代理使用。 |
 | `POST` | `/public/repositories/{linuxServerId}/initialize` | 通过当前后端代理到目标服务器，用当前登录用户唯一 SSH key 初始化或刷新该服务器本地公共配置仓库。 |
 | `POST` | `/public/update` | 读取所选远端分支的目标 commit，建立一次全局 rollout；所有服务器共享运行副本 checkout/reset 到同一 commit，所有有效公共个人 worktree 原生 merge 该 commit。rollout 激活后即返回，不等待服务器同步和进程排空。 |
+| `POST` | `/public/rollout/resume-sync` | `SUPER_ADMIN` 恢复指定 `PUBLIC/DRAINING` 原发布的共享同步；请求 `{rolloutId, discardLocalChanges?: boolean}`，默认保留共享修改，返回 `data=null`。没有待处理服务器或旧发布已被替换时返回 `409 CONFLICT`。 |
 | `POST` | `/public/rollout/supersede` | `SUPER_ADMIN` 用远端修正提交原子替换指定的 `DRAINING` 公共 rollout；旧批次剩余进程在新提交同步完成后按精确身份强制停止，不再等待 `/session/status`。 |
 | `POST` | `/public/update-and-push` | 公共配置"提交并推送"复合操作：先 `fetch` 远端最新提交，再 stage/commit 本地变更，随后 merge `origin/{branch}` 并 push；`discardLocalChanges=true` 时先 `git reset --hard HEAD` 放弃受控仓库中的已跟踪修改。远端提交和 rollout 激活确认后即返回，服务器同步和进程排空在后台继续。 |
 | `POST` | `/file-ws-route` | 查询 Agent 配置文件 WebSocket 应连接的目标后端，body 包含 `scope`、`workspaceId?`、`worktreeId?`、`linuxServerId?`。 |
@@ -408,6 +409,14 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有当前稳定命名的有效公共个人 worktree；日期型或手工命名的历史 worktree 保留磁盘和数据库记录，但不再挂载、登记发布补偿或形成永久 `PENDING`，已存在的相应补偿任务会转为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
 
 所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过处理、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，普通配置对这个用户专属进程调用一次 `POST /global/dispose`；PUBLIC 的 `opencode/tool[s]/**/*.js|ts` 或 APPLICATION 的 `.opencode/tool[s]/**/*.js|ts` 发布则复用 `OpencodeProcessStopService`、`OpencodeProcessStartupService` 和启动后 health 确认受管重启该进程，PUBLIC 额外恢复共享配置指针，APPLICATION 不触碰公共指针。受管重启后必须观察到 manager 新进程代次，并对目标关联过的每个 workspace 请求 `GET /experimental/tool/ids`；只有非空数组才确认 Tool 目录可被新进程导入。新代次未观察到、目录空或非法响应都保留目标，由默认每 5 秒的同一持久化 worker 巡检补偿。单个目标失败只累计本人 `retryCount/lastError`，worker 继续处理同批其他用户；该用户收敛后立即恢复发送，不等待其他用户。manager 已明确确认普通目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在刷新完成前只阻止该用户发送。
+
+公共 `publish` 在 worktree 所属 Java 执行任何 Git 修改前，复用现有路由聚合在线服务器的只读共享仓库状态。发现 dirty 返回 `409 CONFLICT`，远端检查不可用返回 `503 OPENCODE_UNAVAILABLE`；个人已完成提交保留。旧 `update-and-push` 同样检查其它服务器，但允许本机共享修改进入其既有提交流程；其 `discardLocalChanges` 不授权放弃其它服务器修改。预检不能锁住外部文件写入，也不替代持久化成员清单；离线成员恢复及预检后的变化继续由后台租约 worker 检查。
+
+后台共享副本未提交修改属于需人工处理的确定性冲突：服务器同步状态设为 `AWAITING_ACTION`，释放该服务器租约并停止自动领取；网络等暂时性故障仍进入 `RETRY_WAIT`。主发布维持 `DRAINING` 和消息门禁，避免多服务器处于不同提交时提前恢复。门禁说明改为等待管理员处理，不再把共享同步冲突描述为等待旧会话排空。
+
+管理员通过 `POST /public/rollout/resume-sync` 提交当前精确 `rolloutId` 恢复原发布。数据库事务锁定该 `PUBLIC/DRAINING` 主记录，仅把 `AWAITING_ACTION` 服务器改为 `RETRY_WAIT`；目标分支、commit、个人 worktree 和进程目标不变，不调用远端 push，也不派生强制停止。默认 `discardLocalChanges=false`：处理好共享文件后重新检查；仍 dirty 会再次暂停。显式 `true` 将既有 `discard_shared_runtime_changes` 授权置为真，范围为本发布所有尚未同步成功的共享副本（含后续恢复的离线成员），允许恢复共享已跟踪文件及删除未跟踪文件。前端必须单独说明范围并二次确认；个人草稿不在清理范围。原本已获授权的任务不会因后续传 false 而撤销授权。恢复以轮询反映进度，无需 operationId，不生成新发布。
+
+纠错替换旧服务器记录时保留已有 `last_error`；只有原错误为空时写 `ROLLOUT_SUPERSEDED`。旧进程目标仍使用既有替换标志以保持精确强制停止继承语义，历史服务器错误已被旧版本覆盖的记录不能据此修复。
 
 `POST /public/rollout/supersede` 是公共配置纠错入口，请求体如下：
 

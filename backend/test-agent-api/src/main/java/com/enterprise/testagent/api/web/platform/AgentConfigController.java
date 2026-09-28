@@ -185,17 +185,44 @@ public class AgentConfigController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /** 恢复原发布，权限与纠错发布一致；无需个人副本所有者提交，也不停止用户进程。 */
+    @PostMapping("/public/rollout/resume-sync")
+    public ApiResponse<Void> resumePublicSync(
+            @RequestBody AgentConfigDtos.ResumePublicSyncRequest request, ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        service.resumePublicConfigSync(request.rolloutId(), Boolean.TRUE.equals(request.discardLocalChanges()),
+                principal.userId(), RuntimeApiSupport.traceId(exchange));
+        return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
+    }
+
     /**
      * 全局刷新前聚合所有服务器的只读 Git 状态；未确认时不建立 rollout，更不修改任何工作树。
      */
     private void requireSharedRuntimeDiscardConfirmation(
             Boolean discardLocalChanges,
             ServerWebExchange exchange) {
+        requireSharedRuntimeDiscardConfirmation(discardLocalChanges, exchange, false);
+    }
+
+    private void requireSharedRuntimeDiscardConfirmation(
+            Boolean discardLocalChanges, ServerWebExchange exchange, boolean commitsLocalSharedChanges) {
         if (Boolean.TRUE.equals(discardLocalChanges)) {
             return;
         }
         String traceId = RuntimeApiSupport.traceId(exchange);
-        List<String> dirtyServers = routingService.listPublicRepositories(exchange, traceId).stream()
+        List<AgentConfigResponses.PublicRepositoryStatusResponse> repositories =
+                routingService.listPublicRepositories(exchange, traceId);
+        List<String> unavailable = repositories.stream()
+                .filter(row -> "UNAVAILABLE".equals(row.status()))
+                .map(AgentConfigResponses.PublicRepositoryStatusResponse::linuxServerId).toList();
+        if (!unavailable.isEmpty()) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE,
+                    "无法检查公共 Agent 共享运行副本，请待服务器恢复后重试",
+                    Map.of("linuxServerIds", unavailable, "repositoryKind", "SHARED_RUNTIME"));
+        }
+        List<String> dirtyServers = repositories.stream()
+                // 旧提交入口会发布本机共享修改，但不允许顺带丢弃其它服务器上的修改。
+                .filter(row -> !commitsLocalSharedChanges || !row.linuxServerId().equals(routingService.currentLinuxServerId()))
                 .filter(AgentConfigResponses.PublicRepositoryStatusResponse::localChangesPresent)
                 .map(AgentConfigResponses.PublicRepositoryStatusResponse::linuxServerId)
                 .distinct()
@@ -203,7 +230,8 @@ public class AgentConfigController {
         if (!dirtyServers.isEmpty()) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
-                    "公共 Agent 共享运行副本存在本地变更，需要明确确认后才能全局恢复",
+                    "服务器 " + String.join("、", dirtyServers)
+                            + " 的公共 Agent 共享运行副本存在本地变更，请管理员在公共配置管理中处理后再发布；个人提交已保留",
                     Map.of(
                             "linuxServerIds", dirtyServers,
                             "repositoryKind", "SHARED_RUNTIME",
@@ -219,6 +247,7 @@ public class AgentConfigController {
             @RequestBody AgentConfigDtos.UpdatePublicConfigAndPushRequest request,
             ServerWebExchange exchange) {
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        requireSharedRuntimeDiscardConfirmation(false, exchange, true);
         return ok(exchange, service.updatePublicConfigAndPush(
                 request.branch(),
                 request.commitMessage(),
@@ -501,6 +530,8 @@ public class AgentConfigController {
                     request,
                     new TypeReference<ApiResponse<Object>>() {});
         }
+        // 在 worktree 所属 Java 聚合检查，先于个人分支投影、远端 push 和全局门禁。
+        requireSharedRuntimeDiscardConfirmation(false, exchange);
         return ok(exchange, service.publicPublish(
                 request.worktreeId(),
                 request.operationId(),

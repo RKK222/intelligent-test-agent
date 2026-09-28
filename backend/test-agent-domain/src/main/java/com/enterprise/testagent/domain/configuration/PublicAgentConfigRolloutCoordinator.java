@@ -148,6 +148,12 @@ public interface PublicAgentConfigRolloutCoordinator {
 
     void markServerSyncRetry(PublicAgentConfigRolloutSyncRequest request, String errorMessage);
 
+    /** 公共共享副本需要管理员处理时暂停该服务器，个人 worktree 不走此状态。 */
+    void markServerSyncAwaitingAction(PublicAgentConfigRolloutSyncRequest request, String errorMessage);
+
+    /** 管理员恢复原发布的服务器同步，不更换提交、不强制停止用户进程。 */
+    void resumePublicSync(String rolloutId, boolean discardSharedRuntimeChanges);
+
     void decommissionServer(String linuxServerId);
 
 }

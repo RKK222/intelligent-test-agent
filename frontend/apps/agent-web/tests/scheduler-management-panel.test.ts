@@ -676,6 +676,41 @@ describe("scheduler management panel", () => {
     view.queryClient.clear();
   });
 
+  it("resumes the same paused publish without a personal push and confirms shared discard separately", async () => {
+    const backendApi = api({
+      resumePublicAgentConfigSync: vi.fn().mockResolvedValue(undefined),
+      getPublicAgentConfigRollout: vi.fn().mockResolvedValue({
+        rolloutId: "acr_paused", status: "DRAINING", branch: "main", commitHash: "commit_target",
+        failureReason: null, createdAt: "2026-09-28T00:00:00Z", updatedAt: "2026-09-28T00:00:01Z", completedAt: null,
+        servers: [{ linuxServerId: "linux-2", syncStatus: "AWAITING_ACTION", retryCount: 0,
+          targetTotal: 3, targetPending: 3, targetDisposed: 0, targetAbandoned: 0,
+          worktreeTotal: 0, worktreePending: 0, worktreeSynced: 0, lastError: "SKILL.md 有本地修改",
+          syncedAt: null, updatedAt: "2026-09-28T00:00:01Z" }]
+      })
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const view = renderWithApi(OpencodePublicConfigManagementPanel, backendApi);
+    expect(await view.findByText("等待处理共享副本变更")).toBeTruthy();
+    expect(await view.findByText(/个人草稿无需提交或推送/)).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "重新检查并继续同步" }));
+    await waitFor(() => expect(backendApi.resumePublicAgentConfigSync).toHaveBeenCalledWith({
+      rolloutId: "acr_paused", discardLocalChanges: false
+    }));
+    expect(confirm).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.getByRole("button", { name: "放弃共享副本变更并继续" }).hasAttribute("disabled")).toBe(false));
+    await fireEvent.click(view.getByRole("button", { name: "放弃共享副本变更并继续" }));
+    expect(backendApi.resumePublicAgentConfigSync).toHaveBeenCalledTimes(1);
+    confirm.mockReturnValue(true);
+    await fireEvent.click(view.getByRole("button", { name: "放弃共享副本变更并继续" }));
+    await waitFor(() => expect(backendApi.resumePublicAgentConfigSync).toHaveBeenCalledWith({
+      rolloutId: "acr_paused", discardLocalChanges: true
+    }));
+    expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("所有尚未同步成功的共享运行副本"));
+    expect(backendApi.supersedePublicAgentConfigRollout).not.toHaveBeenCalled();
+    expect(backendApi.stopOpencodeRuntimeManagedProcess).not.toHaveBeenCalled();
+    view.queryClient.clear();
+  });
+
   it("pauses public configuration rollout polling while its page tab is inactive and refreshes on return", async () => {
     vi.useFakeTimers();
     const activeRollout = {

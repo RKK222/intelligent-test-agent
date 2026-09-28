@@ -357,3 +357,7 @@ Step 起点、耗时、TTFT、Decode 及 input/output/reasoning/cache-read/cache
 来自服务器归档，不能从客户端、本地路径或 ClickHouse 拼装。
 不完整 Run 同样允许打开：尚未闭合的 Assistant delta 和 Tool 状态会按 message/call 聚合成进行中记录，只有生命周期事件时按类型
 保留最后一条，既能检查当前进度，也不会重新把传输分片堆叠到时间线；“不完整”筛选包含所有 `complete=false` Trace。
+
+## 公共配置共享同步恢复
+
+公共配置管理页把共享副本未提交修改显示为等待管理员处理，提供继续原发布及单独确认后放弃共享修改两种操作；个人草稿无需发布。组件与恢复 API 说明见 `apps/agent-web/README.md`、`packages/backend-api/README.md`。

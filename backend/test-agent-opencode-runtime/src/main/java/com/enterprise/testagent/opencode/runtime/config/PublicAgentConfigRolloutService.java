@@ -678,6 +678,22 @@ public class PublicAgentConfigRolloutService
                 now);
     }
 
+    @Override
+    public void markServerSyncAwaitingAction(PublicAgentConfigRolloutSyncRequest request, String errorMessage) {
+        repository.markServerSyncAwaitingAction(
+                request.rolloutId(), backendInstanceIdentity.linuxServerId(), request.leaseToken(),
+                safeError(errorMessage), Instant.now());
+    }
+
+    @Override
+    public void resumePublicSync(String rolloutId, boolean discardSharedRuntimeChanges) {
+        String expected = requireText(rolloutId, "待继续同步的 rolloutId 不能为空");
+        if (!repository.resumePublicSync(expected, discardSharedRuntimeChanges, Instant.now())) {
+            throw new PlatformException(ErrorCode.CONFLICT,
+                    "公共发布已变化或没有等待处理的服务器，请刷新状态", Map.of("rolloutId", expected));
+        }
+    }
+
     /** 每台新版 Java 定期登记自身为发布成员；历史 linux_servers 行不会被自动导入。 */
     @Scheduled(
             fixedDelayString = "${test-agent.public-agent-config.rollout.membership-refresh-delay-ms:30000}",
@@ -889,7 +905,8 @@ public class PublicAgentConfigRolloutService
                 ? repository.findActiveRolloutId()
                 : repository.findBlockingRolloutId(userId.value());
         return blockingRollout
-                .map(MessageGateStatus::blocked)
+                .map(id -> repository.hasAwaitingPublicSync(id)
+                        ? MessageGateStatus.awaitingAdministrator(id) : MessageGateStatus.blocked(id))
                 .orElseGet(MessageGateStatus::open);
     }
 

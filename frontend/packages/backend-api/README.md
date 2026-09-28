@@ -108,3 +108,7 @@ digest 必须来自刚读取的 `LocalClientInstance.publicCapabilities.pendingD
 存在本机个人公共能力修改时，只有用户明确确认清空后才传入第三个参数 `true`；取消或缺少确认时服务端不覆盖个人副本。
 
 `getLocalPersonalPublicAgentStatus(worktreeId, linuxServerId)` 复用已鉴权 `agent-config` 文件 WebSocket 的 `agent-config.status` RPC，读取客户端个人副本绝对目录；仅在本人 `LOCAL_CLIENT` 公共作用域使用。旧客户端无 `personalDirectory` 字段时页面显示升级提示，不依据浏览器平台推测物理路径。
+
+### 公共同步恢复
+
+`resumePublicAgentConfigSync({ rolloutId, discardLocalChanges })` 调用超管 `POST /public/rollout/resume-sync`，返回 void；调用方须明确传入是否授权恢复共享修改。接口只恢复原任务，进度仍查询 `getPublicAgentConfigRollout`，不生成新 operation 或 SSE。

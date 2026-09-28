@@ -339,3 +339,7 @@ checksum 均不得改写。已经先执行 `V20260821113000__application_automat
 history 均失败关闭。三项 SQL 都位于交付物 `backend/lib/test-agent-persistence-*.jar`，不在瘦
 `test-agent-app.jar` 中；交付前必须在真实 PostgreSQL 空库、已部署主历史和 release 兼容历史上升级，并从
 源码、构建输出、发布 ZIP 和安装后 persistence JAR 核对字节。不得使用 `repair`、`outOfOrder` 或手改 history。
+
+### 共享同步暂停 SQL
+
+`PublicAgentConfigRolloutMapper.xml` 使用既有服务器状态列保存 `AWAITING_ACTION`，租约 CAS 暂停后 worker 不再自动认领；恢复事务按原 PUBLIC/DRAINING 主行锁串行化，仅恢复暂停服务器并按显式授权提升既有 discard 标志。纠错替换保留服务器已有错误，进程目标的替换标志保持不变。无表结构或 Flyway 变更。`MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest` 进一步覆盖不自动领取、全局门禁、旧租约失效、原 commit/默认保留/显式丢弃授权与替换后拒绝恢复及历史错误保留。

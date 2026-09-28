@@ -35,6 +35,12 @@ public interface PublicAgentConfigRolloutRepository {
     /** 所有服务器同步前阻止全部用户；同步后仅阻止仍有未 dispose 旧实例的用户。 */
     Optional<String> findBlockingRolloutId(String userId);
 
+    /** 轻量门禁查询：只判断服务器是否等待人工处理，不聚合进程或个人 worktree。 */
+    boolean hasAwaitingPublicSync(String rolloutId);
+
+    /** 在原 PUBLIC/DRAINING 任务内恢复暂停的服务器；保持目标提交和进程目标不变。 */
+    boolean resumePublicSync(String rolloutId, boolean discardSharedRuntimeChanges, Instant now);
+
     Optional<PublicAgentConfigRolloutPreparation> findPreparing(String linuxServerId, AgentConfigRolloutScope scope);
 
     void createRollout(
@@ -143,6 +149,10 @@ public interface PublicAgentConfigRolloutRepository {
             Instant nextRetryAt,
             String errorMessage,
             Instant now);
+
+    /** 确定性共享副本冲突暂停自动领取，租约 CAS 防止旧 worker 覆盖新状态。 */
+    boolean markServerSyncAwaitingAction(
+            String rolloutId, String linuxServerId, String leaseToken, String errorMessage, Instant now);
 
     void savePendingPublicWorktrees(
             String rolloutId,

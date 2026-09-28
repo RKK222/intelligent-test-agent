@@ -270,3 +270,7 @@ mvn test
 ### 个人工作区搬迁诊断
 
 `test-agent-workspace-management` 在搬迁失败时输出受控阶段、原因、路径指纹、日志专用相对路径/文件名及本次 traceId；详细字段与排查步骤见 `docs/architecture/xxl-job-integration.md` 的“个人工作区搬迁失败诊断”。不改变迁移、租约、重试、文件保护及部署节点。
+
+## 公共发布共享副本冲突恢复
+
+公共发布遇到共享运行副本未提交修改时，复用现有 rollout 暂停服务器同步并等待管理员处理；恢复原 commit 不要求个人草稿推送，也不强停进程。API、状态和兼容边界见 `../docs/api/http-api.md` 与 `../docs/deployment/public-agent-config-edit-visibility.md`。

@@ -7,6 +7,8 @@ import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutTar
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import com.enterprise.testagent.domain.configuration.PublicAgentConfigRolloutSyncRequest;
 import javax.sql.DataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.flywaydb.core.Flyway;
@@ -60,6 +62,35 @@ class MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest {
     void supersedeReplacesActiveGateAndMarksOnlyMatchingOldTargetForForcedStop() {
         insertStuckRollout();
 
+        // 真实 SQL 验证：确定性冲突只暂停共享同步，保留门禁；管理员恢复同一提交且旧租约不能回写。
+        repository.addServer("acr_stuck", "linux-2", NOW);
+        var claim = transaction.execute(status -> repository.claimPendingSync(
+                "linux-2", AgentConfigRolloutScope.PUBLIC, NOW, NOW.plusSeconds(60))).orElseThrow();
+        assertThat(repository.markServerSyncAwaitingAction("acr_stuck", "linux-2", "stale", "错误租约", NOW)).isFalse();
+        assertThat(repository.markServerSyncAwaitingAction(
+                "acr_stuck", "linux-2", claim.leaseToken(), "共享副本 SKILL.md 有未提交修改", NOW)).isTrue();
+        assertThat(repository.hasAwaitingPublicSync("acr_stuck")).isTrue();
+        assertThat(repository.findBlockingRolloutId("usr-stuck")).contains("acr_stuck");
+        assertThat(transaction.<Optional<PublicAgentConfigRolloutSyncRequest>>execute(status -> repository.claimPendingSync(
+                "linux-2", AgentConfigRolloutScope.PUBLIC, NOW.plusSeconds(600), NOW.plusSeconds(660)))).isEmpty();
+        assertThat(transaction.<List<PublicAgentConfigRolloutTarget>>execute(status -> repository.claimTargets("linux-1", NOW, NOW.plusSeconds(60), 10))).isEmpty();
+        assertThat(transaction.<Boolean>execute(status -> repository.resumePublicSync("acr_missing", true, NOW))).isFalse();
+        assertThat(transaction.<Boolean>execute(status -> repository.resumePublicSync("acr_stuck", false, NOW))).isTrue();
+        var resumed = transaction.execute(status -> repository.claimPendingSync(
+                "linux-2", AgentConfigRolloutScope.PUBLIC, NOW, NOW.plusSeconds(60))).orElseThrow();
+        assertThat(resumed.rolloutId()).isEqualTo(claim.rolloutId());
+        assertThat(resumed.commitHash()).isEqualTo("commit_bad");
+        assertThat(resumed.discardSharedRuntimeChanges()).isFalse();
+        assertThat(repository.markServerSynced("acr_stuck", "linux-2", claim.leaseToken(), NOW)).isFalse();
+        assertThat(repository.markServerSyncAwaitingAction(
+                "acr_stuck", "linux-2", resumed.leaseToken(), "共享副本 SKILL.md 有未提交修改", NOW)).isTrue();
+        assertThat(transaction.<Boolean>execute(status -> repository.resumePublicSync("acr_stuck", true, NOW))).isTrue();
+        var authorized = transaction.execute(status -> repository.claimPendingSync(
+                "linux-2", AgentConfigRolloutScope.PUBLIC, NOW, NOW.plusSeconds(60))).orElseThrow();
+        assertThat(authorized.discardSharedRuntimeChanges()).isTrue();
+        assertThat(repository.markServerSyncAwaitingAction(
+                "acr_stuck", "linux-2", authorized.leaseToken(), "保留历史根因", NOW)).isTrue();
+
         boolean replaced = transaction.execute(status -> repository.supersedePublicRollout(
                 "acr_stuck",
                 "acr_fixed",
@@ -75,6 +106,10 @@ class MyBatisPublicAgentConfigRolloutPostgresqlIntegrationTest {
                 NOW));
 
         assertThat(replaced).isTrue();
+        assertThat(transaction.<Boolean>execute(status -> repository.resumePublicSync("acr_stuck", false, NOW))).isFalse();
+        assertThat(repository.findRolloutServerStatuses("acr_stuck"))
+                .filteredOn(server -> "linux-2".equals(server.linuxServerId())).singleElement()
+                .satisfies(server -> assertThat(server.lastError()).isEqualTo("保留历史根因"));
         assertThat(jdbc.sql("""
                         select status, superseded_by_rollout_id, supersede_reason
                         from public_agent_config_rollouts where rollout_id = 'acr_stuck'

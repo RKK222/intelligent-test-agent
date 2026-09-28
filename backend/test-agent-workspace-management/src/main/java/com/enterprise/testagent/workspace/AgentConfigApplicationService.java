@@ -518,6 +518,16 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
         }
     }
 
+    /** 管理员只恢复已确认提交的同步任务；个人草稿与进程排空目标均保持不变。 */
+    public void resumePublicConfigSync(String rolloutId, boolean discardLocalChanges, UserId userId, String traceId) {
+        if (publicConfigRolloutCoordinator == null) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 发布协调器不可用");
+        }
+        publicConfigRolloutCoordinator.resumePublicSync(rolloutId, discardLocalChanges);
+        LOGGER.info("event=agent_config_public_sync_resumed rolloutId={} discardSharedRuntimeChanges={} userId={} traceId={}",
+                rolloutId, discardLocalChanges, userId.value(), traceId);
+    }
+
     /**
      * 用远端修正提交替换一个无法排空的公共发布。
      * 远端 commit 和共享副本风险在事务前确认；旧/新 rollout 的活动态切换由协调器原子完成。
@@ -2076,6 +2086,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler, Pu
                         privateKey);
                 publicConfigRolloutCoordinator.markPublicServerSynced(request, pendingWorktrees);
             } catch (Exception exception) {
+                // 未提交内容需要管理员决定是否保留；自动重试和停止会话都不能消除这个冲突。
+                if (exception instanceof PlatformException platformException
+                        && platformException.errorCode() == ErrorCode.CONFLICT
+                        && "SHARED_RUNTIME".equals(platformException.details().get("repositoryKind"))
+                        && Boolean.TRUE.equals(platformException.details().get("discardLocalChangesAllowed"))) {
+                    publicConfigRolloutCoordinator.markServerSyncAwaitingAction(
+                            request, safeErrorMessage(exception.getMessage()));
+                    LOGGER.warn("event=agent_config_public_replica_sync_awaiting_action rolloutId={} linuxServerId={} traceId={} message={}",
+                            request.rolloutId(), serverIdentity.linuxServerId(), request.traceId(), safeErrorMessage(exception.getMessage()));
+                    return;
+                }
                 publicConfigRolloutCoordinator.markServerSyncRetry(request, safeErrorMessage(exception.getMessage()));
                 LOGGER.warn(
                         "event=agent_config_public_replica_sync_retry rolloutId={} linuxServerId={} retryCount={} message={}",

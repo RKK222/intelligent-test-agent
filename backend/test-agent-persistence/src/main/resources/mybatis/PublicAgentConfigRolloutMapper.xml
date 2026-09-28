@@ -185,6 +185,42 @@
         order by linux_server_id
     </select>
 
+    <select id="hasAwaitingPublicSync" resultType="boolean">
+        select exists (
+            select 1 from public_agent_config_rollout_servers s
+            join public_agent_config_rollouts r on r.rollout_id = s.rollout_id
+            where s.rollout_id = #{rolloutId} and r.config_scope = 'PUBLIC'
+              and r.status = 'DRAINING' and s.status = 'AWAITING_ACTION'
+        )
+    </select>
+
+    <select id="lockPublicRolloutForSyncResume" resultType="java.lang.String">
+        select rollout_id from public_agent_config_rollouts
+        where rollout_id = #{rolloutId} and config_scope = 'PUBLIC'
+          and scope_key is null and status = 'DRAINING'
+        for update
+    </select>
+
+    <update id="authorizePublicSyncDiscard">
+        update public_agent_config_rollouts
+        set discard_shared_runtime_changes = discard_shared_runtime_changes or #{discard}, updated_at = #{now}
+        where rollout_id = #{rolloutId}
+    </update>
+
+    <update id="resumePublicServerSyncs">
+        update public_agent_config_rollout_servers
+        set status = 'RETRY_WAIT', next_retry_at = #{now}, lease_until = null, lease_token = null, updated_at = #{now}
+        where rollout_id = #{rolloutId} and status = 'AWAITING_ACTION'
+    </update>
+
+    <update id="markServerSyncAwaitingAction">
+        update public_agent_config_rollout_servers
+        set status = 'AWAITING_ACTION', lease_until = null, lease_token = null,
+            last_error = #{errorMessage}, updated_at = #{now}
+        where rollout_id = #{rolloutId} and linux_server_id = #{linuxServerId}
+          and status = 'PROCESSING' and lease_token = #{leaseToken}
+    </update>
+
     <select id="findRolloutServerStatuses" resultMap="RolloutServerStatusRowMap">
         select s.linux_server_id, s.status as sync_status, s.retry_count,
                coalesce(t.target_total, 0) as target_total,
@@ -375,7 +411,7 @@
     <update id="abandonSupersededRolloutServers">
         update public_agent_config_rollout_servers
         set status = 'DECOMMISSIONED', lease_until = null, lease_token = null,
-            last_error = 'ROLLOUT_SUPERSEDED', updated_at = #{now}
+            last_error = coalesce(last_error, 'ROLLOUT_SUPERSEDED'), updated_at = #{now}
         where rollout_id = #{activeRolloutId}
           and status not in ('SYNCED', 'DECOMMISSIONED')
     </update>

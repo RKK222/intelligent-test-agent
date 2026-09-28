@@ -1672,7 +1672,7 @@ ClickHouse 使用独立 `ClickHouseSchemaMigrator` 执行 `db/clickhouse/V202608
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260717173000__create_public_agent_config_rollouts.sql` 新增三张生产运行状态表：
 
 - `public_agent_config_rollouts`：保存公共分支、commit、`DRAINING/COMPLETED/FAILED` 状态和 traceId；部分唯一索引保证集群同一时刻只有一个排空任务。`FAILED` 仅是历史结构兼容值，新发布在远端已经更新并建立 rollout 后不再写入该状态或提前开闸。
-- `public_agent_config_rollout_servers`：保存本次需要同步的 `linuxServerId` 及 `PENDING/SYNCED` 状态；服务器在共享 Git 副本更新并登记进程后才写 `SYNCED`。
+- `public_agent_config_rollout_servers`：保存本次需要同步的 `linuxServerId` 及 `PENDING/PROCESSING/RETRY_WAIT/AWAITING_ACTION/SYNCED/DECOMMISSIONED` 状态；服务器在共享 Git 副本更新并登记进程后才写 `SYNCED`。共享未提交修改通过租约 CAS 进入 `AWAITING_ACTION`，等待管理员恢复；原发布仍为 `DRAINING`。恢复事务先锁定该 PUBLIC/DRAINING 主行，再恢复暂停服务器、按显式确认提升既有丢弃授权，防止与纠错替换交错。状态列已有 varchar(32) 且无状态枚举约束，本次不改结构或 Flyway。旧 worker 不领取 `AWAITING_ACTION`；升级先部署全部后端再发布新前端，回滚前应使用新版入口处理暂停任务，禁止手改状态提前解除门禁。
 - `public_agent_config_rollout_targets`：保存 manager 心跳中的存量 opencode `linuxServerId/containerId/port/baseUrl`、`PROCESSING/RETRY_WAIT/DISPOSED`、重试次数、下次重试时间、处理租约和最后错误。认领 SQL 强制 `linux_server_id=当前 Java 所在服务器`，再以 `FOR UPDATE SKIP LOCKED` 允许同服务器多 Java worker 安全认领；发布服务器可以统一落表，但不能跨服务器代查 Session 或 dispose，过期租约由目标所属服务器恢复。
 
 该迁移只创建运行必需结构，不写测试或演示数据。Git 同步补偿、目标轮询和 Session 重试间隔可通过 Spring 属性 `test-agent.public-agent-config.rollout.sync-retry-delay-ms`、`poll-delay-ms`、`retry-delay-ms` 调整，默认均为 5000ms；Redis 广播丢失或 Java 重启后会从 PENDING 服务器记录继续同步，目标会持续重试直至 dispose 成功，不设最大次数。

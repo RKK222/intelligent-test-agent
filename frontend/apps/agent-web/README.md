@@ -313,3 +313,7 @@ Vite 配置按 `Asia/Shanghai` 生成 `VyyyyMMdd.HHmmss` 并注入 `VITE_TEST_AG
 
 - 打开设置 → 工作空间管理，选择目录较多的测试工作库并展开至内容超过目录树高度；鼠标移至面板外时滑块仍可见，拖动滑块和滚轮滚动正常。
 - 目录不足一屏时不强制展示无意义滚动条；其他工作台区域仍沿用原有悬浮显示行为。
+
+### 公共配置等待处理状态
+
+`OpencodePublicConfigManagementPanel` 将服务器 `AWAITING_ACTION` 显示为共享副本存在本地修改。管理员可“重新检查并继续同步”，或明确确认允许本发布所有尚未同步成功的共享副本恢复并删除未跟踪文件后继续；个人 worktree 保留，不调用强制替换/停止 API。恢复沿用原 rollout 的轮询。`scheduler-management-panel.test.ts` 覆盖默认保留、取消丢弃、确认丢弃及原发布 ID 透传。

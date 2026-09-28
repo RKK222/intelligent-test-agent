@@ -330,6 +330,9 @@ class AgentConfigControllerTest {
     @Test
     void superAdminCanUpdateAndPushPublicConfigWithExplicitDiscard() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.localPublicRepositoryStatus(USER_ID)).thenReturn(new PublicRepositoryStatusResponse(
+                "127.0.0.1", "local", "/config", "/config/opencode", "/worktrees", "CONFLICT",
+                true, false, "main", "abc", "本机修改将被提交", true));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.post()
@@ -413,6 +416,68 @@ class AgentConfigControllerTest {
                 .jsonPath("$.details.discardLocalChangesAllowed").isEqualTo(true);
 
         verify(service, never()).updatePublicConfig(any(), any(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void publicPushChecksRemoteSharedChangesBeforeAnyGitMutation() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        AgentConfigBackendRoutingService routing = org.mockito.Mockito.mock(AgentConfigBackendRoutingService.class);
+        when(routing.currentLinuxServerId()).thenReturn("linux-1");
+        when(routing.listPublicRepositories(any(), eq(TRACE_ID))).thenReturn(List.of(
+                new PublicRepositoryStatusResponse("linux-2", "remote", "/config", "/config/opencode",
+                        "/worktrees", "CONFLICT", true, false, "main", "abc", "共享副本有修改", true)));
+        WebTestClient client = client(service, ticketService(new AgentConfigOperationTicketStore()), routing,
+                org.mockito.Mockito.mock(AgentConfigFileRoutingService.class), List.of(Dictionary.ROLE_SUPER_ADMIN));
+        for (String endpoint : List.of("publish", "update-and-push")) {
+            client.post().uri("/api/internal/platform/workspace-management/agent-config/public/" + endpoint)
+                    .header("X-Trace-Id", TRACE_ID).contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue("{\"worktreeId\":\"agw_1\",\"branch\":\"main\",\"discardLocalChanges\":true}")
+                    .exchange().expectStatus().isEqualTo(409).expectBody()
+                    .jsonPath("$.details.linuxServerIds[0]").isEqualTo("linux-2");
+        }
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void publicPushRejectsUnavailableReplicaButAllowsCleanReplicas() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        AgentConfigBackendRoutingService routing = org.mockito.Mockito.mock(AgentConfigBackendRoutingService.class);
+        when(routing.listPublicRepositories(any(), eq(TRACE_ID))).thenReturn(List.of(
+                new PublicRepositoryStatusResponse("linux-2", "remote", null, null, null,
+                        "UNAVAILABLE", false, false, null, null, "连接失败")));
+        WebTestClient client = client(service, ticketService(new AgentConfigOperationTicketStore()), routing,
+                org.mockito.Mockito.mock(AgentConfigFileRoutingService.class), List.of(Dictionary.ROLE_SUPER_ADMIN));
+        client.post().uri("/api/internal/platform/workspace-management/agent-config/public/publish")
+                .header("X-Trace-Id", TRACE_ID).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"worktreeId\":\"agw_1\",\"operationId\":\"aco_1\"}")
+                .exchange().expectStatus().isEqualTo(503);
+        verifyNoInteractions(service);
+        when(routing.listPublicRepositories(any(), eq(TRACE_ID))).thenReturn(List.of(
+                new PublicRepositoryStatusResponse("linux-2", "remote", "/config", "/config/opencode", "/worktrees",
+                        "READY", true, false, "main", "abc", null, false)));
+        client.post().uri("/api/internal/platform/workspace-management/agent-config/public/publish")
+                .header("X-Trace-Id", TRACE_ID).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"worktreeId\":\"agw_1\",\"operationId\":\"aco_1\"}")
+                .exchange().expectStatus().isOk();
+        verify(service).publicPublish("agw_1", "aco_1", USER_ID, TRACE_ID);
+    }
+
+    @Test
+    void onlySuperAdminCanResumeExactPublicRolloutWithExplicitDiscard() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        client(service, List.of(Dictionary.ROLE_APP_ADMIN)).post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/rollout/resume-sync")
+                .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"rolloutId\":\"acr_original\"}")
+                .exchange().expectStatus().isForbidden();
+        verifyNoInteractions(service);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+        for (boolean discard : List.of(false, true)) {
+            client.post().uri("/api/internal/platform/workspace-management/agent-config/public/rollout/resume-sync")
+                    .header("X-Trace-Id", TRACE_ID).contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(java.util.Map.of("rolloutId", "acr_original", "discardLocalChanges", discard))
+                    .exchange().expectStatus().isOk();
+            verify(service).resumePublicConfigSync("acr_original", discard, USER_ID, TRACE_ID);
+        }
     }
 
     @Test

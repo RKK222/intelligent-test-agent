@@ -190,6 +190,31 @@ public class MyBatisPublicAgentConfigRolloutRepository implements PublicAgentCon
     }
 
     @Override
+    public boolean hasAwaitingPublicSync(String rolloutId) {
+        return mapper.hasAwaitingPublicSync(rolloutId);
+    }
+
+    @Override
+    @Transactional
+    public boolean resumePublicSync(String rolloutId, boolean discardSharedRuntimeChanges, Instant now) {
+        // 与 supersede 竞争同一主记录锁；只恢复仍处于当前发布中的暂停服务器。
+        if (mapper.lockPublicRolloutForSyncResume(rolloutId) == null) {
+            return false;
+        }
+        if (mapper.resumePublicServerSyncs(rolloutId, now) == 0) {
+            return false;
+        }
+        mapper.authorizePublicSyncDiscard(rolloutId, discardSharedRuntimeChanges, now);
+        return true;
+    }
+
+    @Override
+    public boolean markServerSyncAwaitingAction(
+            String rolloutId, String linuxServerId, String leaseToken, String errorMessage, Instant now) {
+        return mapper.markServerSyncAwaitingAction(rolloutId, linuxServerId, leaseToken, errorMessage, now) == 1;
+    }
+
+    @Override
     @Transactional
     public boolean supersedePublicRollout(
             String activeRolloutId,

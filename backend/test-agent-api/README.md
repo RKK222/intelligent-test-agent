@@ -242,3 +242,8 @@ Jackson 2 树，不能把 Jackson 2 `JsonNode` 直接声明为 HTTP DTO。请求
 日志切面遇到 `ResponseEntity` 也只序列化摘要；空响应只记录状态码，不展开框架 Header。禁止
 记录 Authorization、文件参数/内容或 Skill 正文。`ApiTokenWebFilter` 只豁免该精确路径，相邻子路径仍按原
 鉴权拒绝。`ProtectedAgentMcpControllerTest`、`ApiLoggingAspectTest` 和 `ApiTokenWebFilterTest` 固化上述边界。
+
+### 公共共享同步暂停与恢复
+
+- `public/publish` 在 worktree 所属 Java 做在线共享副本预检，dirty 返回 409、远端检查不可用返回 503，均早于 Git 修改；旧 `update-and-push` 允许本机待提交内容但检查其它服务器。复用现有公共路由，不增加文件代理。
+- 超管 `POST /public/rollout/resume-sync` 透传精确 rolloutId 与显式丢弃授权；默认 false，恢复原发布，无强停或个人推送。`AgentConfigControllerTest` 覆盖双推送入口预检、远端不可用、正常放行、恢复权限及丢弃标志。

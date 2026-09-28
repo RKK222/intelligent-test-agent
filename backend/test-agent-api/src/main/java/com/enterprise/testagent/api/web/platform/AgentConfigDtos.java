@@ -14,6 +14,10 @@ final class AgentConfigDtos {
     record BranchRequest(String branch, String operationId, Boolean discardLocalChanges) {
     }
 
+    /** 只继续指定旧任务的同步；true 明确授权该任务恢复共享副本，不涉及个人 worktree。 */
+    record ResumePublicSyncRequest(String rolloutId, Boolean discardLocalChanges) {
+    }
+
     /** 超管纠错替换请求；activeRolloutId 是防止误操作新任务的 CAS 前置条件。 */
     record SupersedePublicRolloutRequest(
             String activeRolloutId,

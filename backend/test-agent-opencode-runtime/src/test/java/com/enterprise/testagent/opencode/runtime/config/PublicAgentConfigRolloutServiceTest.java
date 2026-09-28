@@ -377,6 +377,22 @@ class PublicAgentConfigRolloutServiceTest {
     }
 
     @Test
+    void pausedSharedSyncExplainsAdministratorActionAndResumeRejectsStaleRollout() {
+        when(repository.findBlockingRolloutId("usr-1")).thenReturn(Optional.of("acr_dirty"));
+        when(repository.hasAwaitingPublicSync("acr_dirty")).thenReturn(true);
+        var gate = service.status(new UserId("usr-1"));
+        assertThat(gate.allowed()).isFalse();
+        assertThat(gate.reason()).contains("等待管理员", "无需个人提交或推送");
+        assertThatThrownBy(() -> service.resumePublicSync("acr_old", false))
+                .hasMessageContaining("发布已变化");
+        when(repository.resumePublicSync(eq("acr_dirty"), eq(false), any())).thenReturn(true);
+        service.resumePublicSync("acr_dirty", false);
+        verify(repository).resumePublicSync(eq("acr_dirty"), eq(false), any());
+        verify(repository, never()).supersedePublicRollout(any(), any(), any(), any(), any(), anyBoolean(),
+                any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void userGateOpensImmediatelyAfterOwnTargetsAreDisposed() {
         when(repository.findBlockingRolloutId("usr-1")).thenReturn(Optional.empty());
 
