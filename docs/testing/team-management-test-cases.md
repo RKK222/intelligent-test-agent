@@ -318,6 +318,15 @@ corepack pnpm build
 - Chrome 实测：可见右侧栏收起后进入管理视角会自动展开；默认全部成员；浮条仅用户名/全部成员选择，选中 gjq 后关闭列表并收窄只读范围；顶部唯一成员维护入口及单个搜索/选择 combobox 正常。成功回答可从系统会话列表恢复，工作事件显示 `team-review，4 次`。实际截图位于 `output/playwright/team-review-20260927-100/`：`real-ai-answer-detail-release66.png`、`management-auto-expand-release66.png`、`member-picker-release66.png`、`member-management-unified-release66.png`。
 - **未完成项**：当前 MY_TEAM 两名成员在 `wrtest/20260709` 没有在线 default 工作区，故多成员聚合文件/逐人切换读取以及大于 24 文件的原生模型续扫尚未完成共享环境 E2E。既有真实 Git 30 文件测试与单来源 14 文件实测不可替代这些用例；未创建未获授权的临时账号/工作区或改动现有成员服务器归属。Mac 公共配置 rollout 中的一个个人 worktree 冲突保持原状，100 已同步。
 
+### 2026-09-28 共享环境 40 文件原生续扫与临时数据回收
+
+- 继续验收 Jenkins #66 的已部署代码，`http://192.168.8.100:3000` 首页和后端 readiness 均 HTTP 200；本轮未重新部署。实际检查同一应用/版本的现存成员后，只有管理员 `888888888` 在 100 上有可访问的同版本 `default` 工作区，无法用现有成员证明多来源聚合。
+- 经用户允许准备临时验收数据，但平台删除用户会拒绝仍关联个人工作区/进程的账号，且没有受支持的个人工作区删除入口；本机对 100 的 SSH 也不可用。为保证可回收，未新建成员、授权、个人工作区或进程；在既有管理员工作区仅创建 `spec/team-review-e2e-codex-20260928/` 下 40 个子目录、40 个无敏感内容的测试文件。
+- 实际聚合搜索首轮返回 24 文件及 19 个待扫目录；按游标继续搜索后共定位 54 文件（原有 14 + 临时 40），`remainingDirectories=0`、`complete=true`、`unavailable=[]`，并找到 `case-040/note-040.md`。这验证 TC-38 的大于 24 文件/深目录续扫链路，但只有一个来源，不证明 TC-33/TC-34 的跨成员裁决。
+- 在真实 Chrome 页面发送只读问题，原生模型 `opencode/ling-3.0-flash-fin-free` 的 Session `ses_3a58cf6d382e401888d6af92aea86301`、Run `run_2b2810b49af64bfba1ed00fa5bf25111` 终态 `SUCCEEDED`。3 次完成的原生 `team-review` 调用为 `search → search → read`；第二次搜索找到目标，read 携带搜索返回的 `sha256:4d934b2e92cf4eb45fd2fa00d5f472add70fb8ce54f9b6e1a2103f2be7a72522`，读取 158 字节至 `eof=true`。回答正确给出第 40 文件的校验句、路径与来源；输入未预装文件正文，也未调用普通 read/bash/写工具。模型回答将首轮待扫目录数写成 20，实际 Tool 结果为 19，此数字不能作为正确性证据。截图：`output/playwright/team-review-20260928-100/real-40-file-answer.png`、`real-40-file-answer-detail.png`。
+- 清理前逐个核对 40 个测试文件只含预期标记，随后仅经平台文件 WebSocket 删除该临时目录和空的 `spec`。新一轮索引重新得到原有 14 个业务文件、`complete=true`、无不可用来源；没有残留临时文件，也没有待清理的临时成员/授权/工作区。
+- **仍未完成的 E2E**：两名实际成员各有可用同版本工作区时的文件聚合、不同文件作者/时间展示、选中成员后的个人文件树和跨来源冲突裁决。当前环境缺少可安全回收临时个人工作区的受支持路径；单来源 40 文件原生问答不能替代这些场景。后续需可回收的隔离环境/平台回收方式，或明确接受保留专用验收成员及其工作区，方可建立多成员 fixture。
+
 # 3. 案例审核结果
 
 | 审核项 | 审核结果 | 说明 |
