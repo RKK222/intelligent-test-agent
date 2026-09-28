@@ -185,8 +185,39 @@ select status, count(*) from public_agent_config_rollout_targets
 where rollout_id = '<rollout_id>' group by status;
 ```
 
-`DRAINING` 表示仍在排空（该范围用户被禁发新消息），`COMPLETED` 才算全量收敛；
-卡住的目标可从 rollout 页面的 `pendingTargets` 定位用户，并复用运行管理接口停止或受管重启。
+`DRAINING` 同时覆盖服务器同步与旧进程排空，不能仅凭此状态判断为会话忙碌。
+`COMPLETED` 表示主发布的服务器同步与进程目标已收敛；公共个人 worktree 的独立补偿仍可能待用户处理。
+需要先判断阻塞在哪一层，再决定下一条只读证据，不能直接停止用户进程。
+
+### Step 8 区分共享副本同步失败与个人 worktree 补偿
+
+| 证据 | 含义 | 下一条证据 |
+|---|---|---|
+| `public_agent_config_rollout_servers.retry_count` 增长，服务器未 `SYNCED` | 服务器同步流程失败，可能尚未登记该服务器的进程目标 | 该服务器同一 rollout 的 `event=agent_config_public_replica_sync_retry` 日志中的 `message` |
+| 已登记目标的 `retry_count=0`，另有服务器未同步 | 进程目标可能还没有开始执行；`findClaimableTargets` 要求全部服务器已 `SYNCED/DECOMMISSIONED` | 先查未同步服务器，不据此猜测 `SESSION_RUNNING` |
+| 全部服务器已同步，进程目标持续重试 | 已进入进程排空流程 | 对应 target 的 `last_error` 与进程日志 |
+| 主发布 `COMPLETED`，个人 worktree 为 `AWAITING_USER` | 个人合并冲突或本地修改的独立补偿，不阻塞主发布 | 查 `public_agent_config_rollout_public_worktrees.reason` 与所属用户 |
+
+共享副本日志若明确报“服务器共享运行副本存在未提交变更”，应记录服务器、Git 根、文件路径和首次/末次
+失败时间。`ensureExistingRepositoryReadyForSync` 在未授权放弃修改时抛出冲突，后台捕获后继续重试；
+当前实现只限制重试间隔，不会仅因次数到达阈值而退出。文件未恢复前，等待旧会话结束也不能消除这个冲突。
+消息门禁仍可能统一显示“旧会话排空后将自动恢复发送”，不能把提示当作根因。
+
+强制替换包含两项不同的行为：替换旧发布并对精确匹配的旧进程执行停止，以及在另行确认后允许放弃
+共享运行副本的本地变更。是否授权后者以该 rollout 的 `discard_shared_runtime_changes` 为准；
+不能仅凭点击“强制”或新发布成功推断该字段为 true。该标志不授权清理个人 worktree。
+
+替换操作会把旧服务器/目标的错误覆盖为 `ROLLOUT_SUPERSEDED`；成功处理也可能清空原错误。
+需要从**替换前**的实际故障服务器日志恢复原因，不能根据当前错误字段还原历史。
+这里的旧 rollout 服务器状态 `DECOMMISSIONED` 也不能证明物理服务器已被退役。
+
+公共个人补偿表的真实错误字段为 `reason`，没有 `last_error`。
+`PublicAgentConfigRolloutMapper` 汇总查询中的 `w.last_error` 是 `max(reason) AS last_error` 派生列，
+直接查询基表时应使用 `reason`，不能因此推断数据库缺列或补 migration。
+
+若共享副本已恢复干净，当前 `git status` 无法证明之前是谁写入。对话工具沿受管软链写入共享目录、
+服务器脚本和人工编辑均需各自的历史证据；文件属主、当前软链和修改时间不能单独认定写入用户。
+反复发布受阻需继续追查共享副本的写入来源，并单独评估确定性冲突持续重试、长期消息禁发和提示不准确的问题。
 
 ## 5. 修改点与提交动作
 
