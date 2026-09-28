@@ -119,11 +119,11 @@ describe("team review panes", () => {
     await controller.enter(false);
     await controller.selectMember("member-1");
     const part = await controller.prepareChatContext();
-    expect(part?.type).toBe("file");
-    expect((part as { content: string }).content).toContain("team-review");
-    expect((part as { content: string }).content).toContain("trv_test");
-    expect((part as { content: string }).content).toContain("成员甲");
-    expect((part as { content: string }).content).not.toContain("answer = 42");
+    expect(part?.type).toBe("reference");
+    expect((part as { label: string }).label).toContain("team-review");
+    expect((part as { label: string }).label).toContain("trv_test");
+    expect((part as { label: string }).label).toContain("成员甲");
+    expect((part as { label: string }).label).not.toContain("answer = 42");
     expect(backend.readTeamWorkspaceFile).not.toHaveBeenCalled();
     expect(backend.readTeamReviewFileChunk).not.toHaveBeenCalled();
 

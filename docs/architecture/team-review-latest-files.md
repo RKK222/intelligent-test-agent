@@ -17,7 +17,7 @@
 
 ## 同源只读问答
 
-每次发送问题创建独立 scope，冻结当前版本和授权来源集合，不预装 24 文件 / 80k 字符的快照。模型必须调用公共 `team-review` Tool：先 list/search，再按目录返回的 `contentVersion` 分片 read，直到 eof。搜索返回 `remainingDirectories` 时继续扫描。切换成员/应用只影响后续问题，不把迟到文件响应写回新视图。
+每次发送问题创建独立 scope，冻结当前版本和授权来源集合，不预装 24 文件 / 80k 字符的快照。短 scope 和工具使用规则通过既有 `reference → text` PromptPart 路径投递，不把 Markdown 指引伪装为模型文件附件；scope ID 不是正文或访问凭据。模型必须调用公共 `team-review` Tool：先 list/search，再按目录返回的 `contentVersion` 分片 read，直到 eof。搜索返回 `remainingDirectories` 时继续扫描。切换成员/应用只影响后续问题，不把迟到文件响应写回新视图。
 
 UI 与 Tool 共用 `TeamReviewApplicationService` 的来源选择。HTTP 只创建范围、签发 ticket；目录与正文全部走既有平台文件 WebSocket route/ticket/RPC。跨服务器复用 BackendJavaRouteResolver / BackendHttpForwarder 选择权威 Java，目标 Java 再执行同一平台文件 RPC；不新增 HTTP 文件内容代理或物理合并目录。
 

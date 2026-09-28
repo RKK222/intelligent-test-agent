@@ -121,8 +121,9 @@ describe("team management controller", () => {
     await controller.openEntry("src/a.ts", false);
     expect(api.readTeamReviewFileChunk).toHaveBeenCalledWith("trv_test", "src/a.ts", "sha256:test");
     const part = await controller.prepareChatContext();
-    expect((part as { content: string }).content).toContain("全部成员最新文件");
-    expect((part as { content: string }).content).not.toContain("hello");
+    expect(part?.type).toBe("reference");
+    expect((part as { label: string }).label).toContain("全部成员最新文件");
+    expect((part as { label: string }).label).not.toContain("hello");
     expect(api.readTeamWorkspaceFile).not.toHaveBeenCalled();
     await controller.selectMember("member-2");
     expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("pw-2");

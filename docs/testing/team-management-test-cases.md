@@ -279,7 +279,7 @@ CMC 参数依赖：
 | TC-39 Scope 与 Run 撤权 | 换操作者、登录 marker 失效、成员移除、服务器/版本映射变化、终态 Run、复用到其它 Run | 每条协调/来源 RPC 失败关闭；来源节点顶层 FORBIDDEN/UNAUTHENTICATED 错误码不误解析为空目录 |
 | TC-40 只读与凭据隔离 | 请求 workspace.write/delete/git/terminal；用 Git audience 调审阅及反向调用；枚举 .opencode/node_modules、读取 opencode.jsonc/.envrc/.npmrc/.netrc/SSH 私钥/符号链接 | 目录树排除受管配置和依赖；来源 RPC 直读/直列保护路径返回 FORBIDDEN，聚合定位已排除的根目录敏感文件可返回 NOT_FOUND，均无正文；拒绝写操作；Token 不进入模型输入或返回值；控制面 HTTP 不返回目录/正文；旧配置管理 RPC 授权不变 |
 | TC-41 迟到响应和连接 | 并发展开、切应用/成员后旧 ticket/目录/分片迟到；刷新/退出视角 | 同 scope 单飞连接；旧连接关闭、迟到结果不能覆盖新视图，聚合 ID 不当物理 Workspace |
-| TC-42 配套发布与真实模型 | 后端经 Jenkins 发布100，公共 Tool 经个人 worktree 审阅发布，受管重启验收进程 | UI、所有来源节点、公共 Tool 和专用凭据版本配套；账号 binding 不迁 Mac；真实模型读取来源并引用文件路径与作者 |
+| TC-42 配套发布与真实模型 | 后端经 Jenkins 发布100，公共 Tool 经个人 worktree 审阅发布，受管重启验收进程 | UI、所有来源节点、公共 Tool 和专用凭据版本配套；账号 binding 不迁 Mac；短 scope 作为 reference 文本指引投递而非 Markdown file part；真实模型读取来源并引用文件路径与作者 |
 
 自动校验入口：
 
