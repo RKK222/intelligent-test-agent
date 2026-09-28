@@ -18732,3 +18732,28 @@
 
 - 最新企业完整包已生成，可交付路径为：`/Users/kaka/Desktop/mimoagent/0709/test-agent-enterprise-build.bjAFjN/complete-bundle/test-agent-two-backend-complete.zip`；外层 SHA-256 为 `02e848590e818fd0b18052785e842966a4b8e7c284edbb59c476e6aec1574a94`，内层 SHA-256 为 `ad0652ee54ce4b53261e40c9475580f8f20a9f63c360d452829e9b2343876af7`。
 - 本机可复现的构建、迁移和归档门禁已完成；企业目标 PostgreSQL/XXL MySQL 的完整脱敏 `flyway_schema_history` 尚未由现场提供，因此本包不能宣称已通过企业现场历史准入或已部署。目标 Linux worker 仍须按现场内核执行 native namespace E2E。
+
+## 2026-09-28 - 多成员审阅验收账号准备与 Gitee 权限边界
+
+### Why
+
+- 用户同意保留两套专用验收成员及工作区，要求验证切换成员后的对应工作区，并希望由 Codex 尽量完成外部仓库授权。
+
+### What
+
+- 在共享 100 通过现有平台接口创建普通用户 `team_review_accept_20260928_a`（`usr_af2988db42314597adce5a9cb5e3fa56`）和 `team_review_accept_20260928_b`（`usr_32a3e1b5bee34fffa74595c62170f65f`），分别加入 F-COSS 应用和 `888888888` 的团队。
+- 分别生成 ed25519 公钥，私钥加密上传至各自平台账号，临时明文密钥文件已清理。供仓库所有者添加为只读 SSH 部署公钥的公钥为：
+  - A：`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILyxWaod5pRNRUXnGSMIsz++yCRglanBZRE+VKpQsn5t team_review_accept_20260928_a`
+  - B：`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAr6ZDm87xgijbkECngvwpDWEh7UMCztMtIxZrxZJIrE team_review_accept_20260928_b`
+- 在 `docs/testing/team-management-test-cases.md` 记录本次数据准备、切换空态的真实原因和剩余 E2E 步骤；未修改产品代码、环境文件、OpenCode 源码或既有仓库 URL。
+
+### How
+
+- 平台访问预检显示 F-COSS 当前版本仅管理员有可用同版本 `default`；`gjq`、`superadmin01` 在该版本没有 `default`。`selectMember` 会重载贡献并仅选择该成员的 `default`，无来源则显示空态。前端定向 Vitest 2 文件 27 项通过。
+- 两个新账号的 `checkWorkspaceVersionGitAccess` 均返回 `REPOSITORY_PERMISSION_REQUIRED`。实际 Chrome 页面访问 `https://gitee.com/gengxf11/springboot-demo` 显示“登录/注册”，没有已登录的仓库管理会话；仓库公开可读不等于其 SSH 地址允许未授权公钥克隆。
+- 没有借用管理员私钥、绕过 Git 权限、修改 F-COSS 当前仓库 URL，或创建无法正常初始化的个人工作区/进程。
+
+### Result
+
+- 两个长期验收账号及平台加密密钥已经就绪，但仓库所有者需给上述两把公钥分别授权只读访问；在此之前真实多成员工作区切换/聚合/对话验收仍未完成。获得授权后先确认 Git access 为 true，再在 100 上按账号分别初始化进程和同版本 `default`，核对 binding 与物理根目录同属 100，最后执行 UI、文件树、作者/时间与原生模型的跨成员 E2E。
+- 此次无产品代码、HTTP API、事件、数据库结构、性能或兼容协议变更；安全相关写入仅限用户已批准的测试账号、团队/应用关系及其各自加密 SSH 凭据。
