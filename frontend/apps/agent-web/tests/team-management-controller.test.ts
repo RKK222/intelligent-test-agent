@@ -43,6 +43,18 @@ function contribution(userId: string, personalWorkspaceId: string): TeamContribu
   };
 }
 
+function appCatalog() {
+  return [{ appId: "app-1", appName: "应用一", enabled: true, currentMemberCount: 2, historicalMemberCount: 0 }];
+}
+
+function templateCatalog() {
+  return [{ workspaceId: "template-1", appId: "app-1", workspaceName: "空间", enabled: true }];
+}
+
+function versionCatalog() {
+  return [{ versionId: "version-1", applicationWorkspaceId: "template-1", appId: "app-1", version: "v1" }];
+}
+
 function commit(id: string, type: TeamCommit["contributionType"] = "PERSONAL_COMMIT"): TeamCommit {
   return {
     commit: id,
@@ -172,6 +184,30 @@ describe("team management controller", () => {
       { scopeMode: "MY_TEAM", ownerUserId: undefined },
       "member-1"
     );
+  });
+
+  it("loads a selected member's workspace before the slow catalog finishes", async () => {
+    const pendingApplications = deferred<ReturnType<typeof appCatalog>>();
+    const api = createApi();
+    api.listTeamApplications.mockResolvedValue(appCatalog());
+    api.listTeamWorkspaceTemplates.mockResolvedValue(templateCatalog());
+    api.listTeamWorkspaceVersions.mockResolvedValue(versionCatalog());
+    api.listTeamContributions.mockResolvedValue([contribution("member-1", "pw-1"), contribution("member-2", "pw-2")]);
+    const controller = createTeamManagementController(api);
+    await controller.enter(false);
+    api.listTeamApplications.mockReturnValueOnce(pendingApplications.promise);
+
+    const selecting = controller.selectMember("member-2");
+    await vi.waitFor(() => expect(controller.snapshot().entriesByDirectory[""]?.length).toBeGreaterThan(0));
+    expect(controller.snapshot().selectedPersonalWorkspaceId).toBe("pw-2");
+    expect(controller.snapshot().reviewContext?.selectedUserId).toBe("member-2");
+    expect(controller.snapshot().catalogLoading).toBe(true);
+    pendingApplications.resolve(appCatalog());
+    await selecting;
+    expect(controller.snapshot().catalogLoading).toBe(false);
+    expect(api.listTeamApplications).toHaveBeenLastCalledWith({
+      scopeMode: "MY_TEAM", ownerUserId: undefined, targetUserId: "member-2"
+    });
   });
 
   it("starts each super-admin entry on their own team and keeps the read-only platform scope available", async () => {

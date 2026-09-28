@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
+  ChevronLeft,
   ChevronRight,
   X,
   RotateCcw,
@@ -33,6 +34,8 @@ const { controller, state } = useTeamManagementView();
 const memberSearchOpen = ref(false);
 const reviewMemberQuery = ref("");
 const reviewSearchInput = ref<HTMLInputElement | null>(null);
+// 管理视角仅对有权限的用户开放，默认收成边缘小点，避免入口长期遮挡工作区。
+const launcherCollapsed = ref(true);
 const canMaintain = computed(() => canMaintainTeamMembers(state.value));
 const selectedCandidate = computed(() => state.value.candidates.find((item) => item.userId === state.value.candidateUserId));
 const visibleReviewMembers = computed(() => {
@@ -144,6 +147,17 @@ function toggleMemberPicker() {
     controller.openReviewDialog();
     void nextTick(() => reviewSearchInput.value?.focus());
   }
+}
+
+function collapseMemberLauncher() {
+  // 收起时同时关闭选择器，边缘把手仍可用鼠标或键盘重新打开。
+  controller.closeReviewDialog();
+  launcherCollapsed.value = true;
+}
+
+function expandMemberLauncher() {
+  launcherCollapsed.value = false;
+  toggleMemberPicker();
 }
 
 function handleDialogKeydown(event: KeyboardEvent, dialog: "review" | "team-picker" | "members") {
@@ -432,20 +446,26 @@ const launcherStyle = computed(() => ({
       <div
         v-if="!props.rightPanelOpen && state.active"
         class="team-review-launcher-group"
+        :class="{ 'team-review-launcher-group--collapsed': launcherCollapsed }"
         :style="launcherStyle"
       >
-        <section v-if="state.reviewDialogOpen" class="team-review-member-popover" role="dialog" aria-label="选择成员">
+        <section v-if="state.reviewDialogOpen && !launcherCollapsed" class="team-review-member-popover" role="dialog" aria-label="选择成员">
           <div class="team-review-member-popover-header">
             <strong>选择成员</strong>
-            <button type="button" aria-label="关闭成员选择" @click="closeReviewDialog"><X :size="15" /></button>
+            <div class="team-review-member-popover-actions">
+              <button v-if="canMaintain || !state.scopeLocked" type="button" class="team-review-member-add" @click="openMemberManagement">
+                <Plus :size="14" aria-hidden="true" />添加成员
+              </button>
+              <button type="button" aria-label="关闭成员选择" @click="closeReviewDialog"><X :size="15" /></button>
+            </div>
           </div>
-          <div class="team-input-with-icon team-review-member-filter">
-            <Search class="team-input-icon" :size="14" />
-            <input ref="reviewSearchInput" v-model="reviewMemberQuery" aria-label="搜索审阅成员" placeholder="搜索成员姓名或账号">
+          <div class="team-review-member-filter">
+            <Search :size="14" aria-hidden="true" />
+            <input ref="reviewSearchInput" v-model="reviewMemberQuery" type="search" aria-label="搜索审阅成员" placeholder="搜索成员姓名或账号">
           </div>
-          <p v-if="state.catalogLoading && !state.reviewRoster.length" class="team-review-empty">正在读取成员…</p>
+          <p v-if="(state.reviewRosterLoading || state.catalogLoading) && !state.reviewRoster.length" class="team-review-empty">正在读取成员…</p>
           <div v-else class="team-review-member-options" role="listbox" aria-label="成员列表">
-            <button type="button" role="option" :aria-selected="!state.selectedUserId"
+            <button v-if="!reviewMemberQuery.trim()" type="button" role="option" :aria-selected="!state.selectedUserId"
               class="team-review-member-option" @click="selectReviewMember('')">
               <span class="team-review-person-avatar" aria-hidden="true">全</span>
               <span class="team-review-member-option-copy"><strong>全部成员</strong><small>当前应用的最新文件</small></span>
@@ -464,10 +484,15 @@ const launcherStyle = computed(() => ({
               <span class="team-review-member-option-copy"><strong>{{ item.username }}</strong><small>{{ item.unifiedAuthId }}</small></span>
               <span v-if="item.userId === state.selectedUserId" class="team-review-member-current">当前</span>
             </button>
-            <p v-if="!visibleReviewMembers.length" class="team-review-empty">{{ reviewMemberQuery.trim() ? "没有匹配的成员。" : "当前团队暂无成员，请点顶部“添加团队成员”。" }}</p>
+            <p v-if="!visibleReviewMembers.length" class="team-review-empty">{{ reviewMemberQuery.trim() ? "没有匹配的成员。" : "当前团队暂无成员，可在这里添加成员。" }}</p>
           </div>
         </section>
-        <button
+        <button v-if="launcherCollapsed" type="button" class="team-review-launcher-handle"
+          aria-label="展开成员入口" title="展开并选择成员" @click="expandMemberLauncher">
+          <span class="team-review-launcher-dot" aria-hidden="true" />
+          <ChevronLeft :size="12" aria-hidden="true" />
+        </button>
+        <button v-else
           type="button"
           class="team-review-launcher"
           aria-label="选择审阅成员"
@@ -477,6 +502,10 @@ const launcherStyle = computed(() => ({
         >
           <span class="team-review-launcher-dot" aria-hidden="true" />
           <span class="team-review-launcher-text">{{ state.selectedUserId ? (state.reviewRoster.find((item) => item.userId === state.selectedUserId)?.username ?? "选择成员") : "全部成员" }}</span>
+        </button>
+        <button v-if="!launcherCollapsed" type="button" class="team-review-launcher-collapse"
+          aria-label="收起成员入口" title="收起成员入口" @click="collapseMemberLauncher">
+          <ChevronRight :size="13" aria-hidden="true" />
         </button>
       </div>
     </Teleport>
@@ -1178,8 +1207,13 @@ const launcherStyle = computed(() => ({
   background: #ffffff;
   box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.15), 0 4px 6px -2px rgba(15, 23, 42, 0.05);
   transform: translateY(-50%);
-  transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s;
+  transition: right 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s, box-shadow 0.2s;
   padding: 3px 4px 3px 3px;
+}
+
+.team-review-launcher-group--collapsed {
+  padding: 2px;
+  transform: translate(38%, -50%);
 }
 
 .team-review-launcher-group:hover {
@@ -1212,6 +1246,7 @@ const launcherStyle = computed(() => ({
 }
 
 .team-review-member-popover-header strong { font-size: 14px; }
+.team-review-member-popover-actions { display: inline-flex; align-items: center; gap: 4px; }
 .team-review-member-popover-header button {
   display: inline-flex;
   padding: 4px;
@@ -1222,7 +1257,45 @@ const launcherStyle = computed(() => ({
   cursor: pointer;
 }
 
-.team-review-member-filter input { width: 100%; }
+.team-review-member-popover-header .team-review-member-add {
+  align-items: center;
+  gap: 3px;
+  padding: 4px 7px;
+  color: var(--ta-shell-accent-strong, #991b1b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.team-review-member-popover-header button:hover,
+.team-review-member-popover-header button:focus-visible { background: var(--ta-shell-accent-soft, #fdf2f2); }
+
+/* 与工作台上下文菜单的搜索行一致：图标和输入同层，焦点不出现浏览器原生粗边框。 */
+.team-review-member-filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--ta-shell-border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--ta-shell-surface, #fff);
+  color: var(--ta-shell-muted, #6b7280);
+}
+.team-review-member-filter:focus-within { border-color: var(--ta-shell-accent-strong, #991b1b); }
+.team-review-member-filter svg { flex: 0 0 auto; }
+.team-review-member-filter input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ta-shell-header-text, #000);
+  font: inherit;
+  font-size: 12px;
+  line-height: 22px;
+}
+.team-review-member-filter input::placeholder { color: var(--ta-shell-muted, #6b7280); }
+.team-review-member-filter input::-webkit-search-cancel-button { display: none; }
 .team-review-member-options { min-height: 0; overflow-y: auto; }
 .team-review-member-option {
   width: 100%;
@@ -1267,6 +1340,25 @@ const launcherStyle = computed(() => ({
   cursor: pointer;
   transition: background 0.15s;
 }
+
+.team-review-launcher-collapse,
+.team-review-launcher-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 3px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.team-review-launcher-collapse:hover,
+.team-review-launcher-handle:hover { background: #f8fafc; color: #0f172a; }
+.team-review-launcher-collapse:focus-visible,
+.team-review-launcher-handle:focus-visible,
+.team-review-launcher:focus-visible { outline: 2px solid var(--ta-shell-accent-strong, #991b1b); outline-offset: 2px; }
+.team-review-launcher-handle { gap: 3px; min-width: 26px; min-height: 26px; }
 
 .team-review-launcher:hover {
   background: #f8fafc !important;

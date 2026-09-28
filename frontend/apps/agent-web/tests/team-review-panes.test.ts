@@ -168,19 +168,41 @@ describe("team review panes", () => {
       global: { provide }
     });
 
+    const launcherHandle = document.body.querySelector<HTMLButtonElement>("[aria-label='展开成员入口']");
+    expect(launcherHandle).not.toBeNull();
+    launcherHandle?.click();
+    await review.vm.$nextTick();
     const launcher = document.body.querySelector<HTMLButtonElement>("[aria-label='选择审阅成员']");
     expect(launcher).not.toBeNull();
     expect(document.body.querySelector("[aria-label='打开AI对话']")).toBeNull();
     expect(document.body.querySelector("[aria-label='管理团队成员']")).toBeNull();
-    launcher?.click();
-    await review.vm.$nextTick();
     const dialog = document.body.querySelector("[role='dialog'][aria-label='选择成员']");
     expect(dialog).not.toBeNull();
     expect(document.activeElement).toBe(dialog?.querySelector("input[aria-label='搜索审阅成员']"));
     expect(dialog?.textContent).toContain("成员乙");
     expect(dialog?.textContent).not.toContain("个人提交");
     expect(dialog?.textContent).not.toContain("整组导出");
-    dialog?.querySelectorAll<HTMLButtonElement>("[role='option']")[2]?.click();
+    const search = dialog?.querySelector<HTMLInputElement>("input[aria-label='搜索审阅成员']");
+    expect(search?.closest(".team-review-member-filter")).not.toBeNull();
+    if (search) {
+      search.value = "成员乙";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      await review.vm.$nextTick();
+      expect(dialog?.textContent).not.toContain("成员甲");
+      search.value = "";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      await review.vm.$nextTick();
+    }
+    dialog?.querySelector<HTMLButtonElement>(".team-review-member-add")?.click();
+    await review.vm.$nextTick();
+    expect(document.body.querySelector("[role='dialog'][aria-label='成员管理']")).not.toBeNull();
+    document.body.querySelector<HTMLButtonElement>("[aria-label='关闭成员管理']")?.click();
+    await review.vm.$nextTick();
+    launcher?.click();
+    await review.vm.$nextTick();
+    const reopened = document.body.querySelector("[role='dialog'][aria-label='选择成员']");
+    expect(reopened).not.toBeNull();
+    reopened?.querySelectorAll<HTMLButtonElement>("[role='option']")[2]?.click();
     await vi.waitFor(() => expect(controller.snapshot().selectedUserId).toBe("member-2"));
     expect(document.body.querySelector("[role='dialog'][aria-label='选择成员']")).toBeNull();
     expect(launcher?.textContent).toContain("成员乙");
@@ -200,11 +222,19 @@ describe("team review panes", () => {
     const launcherGroup = document.body.querySelector<HTMLElement>(".team-review-launcher-group");
     expect(launcherGroup).not.toBeNull();
     expect(launcherGroup?.style.right).toBe("10px");
+    expect(launcherGroup?.classList.contains("team-review-launcher-group--collapsed")).toBe(true);
 
     expect(document.body.querySelector("[aria-label='打开AI对话']")).toBeNull();
 
     await review.setProps({ chatOpen: true });
     expect(launcherGroup?.style.right).toBe("460px");
+    document.body.querySelector<HTMLButtonElement>("[aria-label='展开成员入口']")?.click();
+    await review.vm.$nextTick();
+    expect(launcherGroup?.classList.contains("team-review-launcher-group--collapsed")).toBe(false);
+    expect(document.body.querySelector("[role='dialog'][aria-label='选择成员']")).not.toBeNull();
+    document.body.querySelector<HTMLButtonElement>("[aria-label='收起成员入口']")?.click();
+    await review.vm.$nextTick();
+    expect(launcherGroup?.classList.contains("team-review-launcher-group--collapsed")).toBe(true);
     review.unmount();
   });
 

@@ -100,6 +100,7 @@ export type TeamManagementState = {
   contributions: TeamContribution[];
   contributionStats: Record<string, TeamContributionStats>;
   reviewRoster: TeamReviewMember[];
+  reviewRosterLoading: boolean;
   selectedAppId: string;
   selectedTemplateId: string;
   selectedVersionId: string;
@@ -234,6 +235,7 @@ function emptyState(): TeamManagementState {
     contributions: [],
     contributionStats: {},
     reviewRoster: [],
+    reviewRosterLoading: false,
     selectedAppId: "",
     selectedTemplateId: "",
     selectedVersionId: "",
@@ -584,18 +586,67 @@ export function createTeamManagementController(
     }
   }
 
+  /** 成员切换只校验当前三项目录，不再让文件树等待应用→模板→版本的串行重载。 */
+  async function refreshMemberCatalog(scopeTicket: number, catalogTicket: number) {
+    const appId = state.selectedAppId;
+    const templateId = state.selectedTemplateId;
+    const versionId = state.selectedVersionId;
+    const selectedUserId = state.selectedUserId;
+    if (!appId || !templateId || !versionId) {
+      await loadApplications(scopeTicket, catalogTicket);
+      return;
+    }
+    state.catalogLoading = true;
+    publish();
+    try {
+      const scope = catalogScope();
+      const [applications, templates, versions] = await Promise.all([
+        api.listTeamApplications(scope),
+        api.listTeamWorkspaceTemplates(scope, appId),
+        api.listTeamWorkspaceVersions(scope, templateId)
+      ]);
+      if (!currentCatalog(scopeTicket, catalogTicket) || state.selectedUserId !== selectedUserId) return;
+      // 目录确实发生变化时回到原有完整选择流程，并废弃并行中的旧文件请求。
+      if (!applications.some((item) => item.appId === appId)
+        || !templates.some((item) => item.workspaceId === templateId && item.enabled !== false)
+        || !versions.some((item) => item.versionId === versionId)) {
+        catalogEpoch += 1;
+        bumpReview(true);
+        await loadApplications(scopeTicket, catalogEpoch);
+        return;
+      }
+      state.applications = applications;
+      state.templates = templates;
+      state.versions = versions;
+      state.catalogLoading = false;
+      publish();
+    } catch (error) {
+      if (!currentCatalog(scopeTicket, catalogTicket)) return;
+      if (accessRevoked(error)) revokeReading(error);
+      else {
+        state.catalogLoading = false;
+        state.catalogError = error instanceof Error ? error.message : String(error);
+        publish();
+      }
+    }
+  }
+
   async function loadReviewRoster(scopeTicket: number) {
     if (state.scopeMode === "GLOBAL") return;
+    state.reviewRosterLoading = true;
+    publish();
     try {
       const page = await api.listSystemAdminTeamMembers(scopeParams(), "", 1, TEAM_ROSTER_PAGE_SIZE);
       if (!state.active || scopeTicket !== scopeEpoch) return;
       state.reviewRoster = page.items.map(reviewMember);
+      state.reviewRosterLoading = false;
       if (!state.reviewRoster.some((item) => item.userId === state.selectedUserId)) {
         state.selectedUserId = "";
       }
       publish();
     } catch (error) {
       if (!state.active || scopeTicket !== scopeEpoch) return;
+      state.reviewRosterLoading = false;
       if (accessRevoked(error)) {
         revokeReading(error);
         return;
@@ -788,8 +839,7 @@ export function createTeamManagementController(
       const scopeTicket = scopeEpoch;
       const catalogTicket = catalogEpoch;
       if (superAdmin) void ensureOwners(scopeTicket);
-      await loadReviewRoster(scopeTicket);
-      await loadApplications(scopeTicket, catalogTicket);
+      await Promise.all([loadReviewRoster(scopeTicket), loadApplications(scopeTicket, catalogTicket)]);
     },
     exit() {
       stopExportPolling();
@@ -828,6 +878,7 @@ export function createTeamManagementController(
       state.memberTotal = 0;
       state.catalogError = "";
       if (mode !== "GLOBAL") state.reviewRoster = [];
+      state.reviewRosterLoading = false;
       publish();
       if (state.memberDialogOpen) void loadMembers(memberEpoch, scopeKey());
       if (mode !== "GLOBAL") await loadReviewRoster(scopeEpoch);
@@ -919,8 +970,20 @@ export function createTeamManagementController(
       state.selectedPersonalWorkspaceId = "";
       state.missingDefaultWorkspace = false;
       state.catalogError = "";
+      state.treeError = "";
       publish();
-      await loadApplications(scopeEpoch, catalogEpoch);
+      const scopeTicket = scopeEpoch;
+      const catalogTicket = catalogEpoch;
+      // 贡献源与目录校验并发进行；授权的审阅 scope 和文件树仍由后端重新创建。
+      const review = loadContributions(scopeTicket, catalogTicket).catch((error: unknown) => {
+        if (!currentCatalog(scopeTicket, catalogTicket)) return;
+        if (accessRevoked(error)) revokeReading(error);
+        else {
+          state.treeError = error instanceof Error ? error.message : String(error);
+          publish();
+        }
+      });
+      await Promise.all([review, refreshMemberCatalog(scopeTicket, catalogTicket)]);
     },
     async toggleDirectory(path: string) {
       if (!state.active || !state.reviewContext) return;

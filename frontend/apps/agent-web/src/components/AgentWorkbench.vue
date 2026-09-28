@@ -13126,7 +13126,6 @@ async function handleLogout() {
     @load-more-notifications="loadMoreUserNotifications"
     @open-notification="handleOpenNotification"
     @switch-workbench-perspective="toggleTeamManagement"
-    @open-team-members="teamController.openMemberDialog()"
   >
     <template #activity>
       <nav v-if="!shareMode" class="figma-activity-nav" aria-label="工作台活动栏">

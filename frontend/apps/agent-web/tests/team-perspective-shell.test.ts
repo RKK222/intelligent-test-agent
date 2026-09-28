@@ -40,8 +40,7 @@ describe("FigmaShell team perspective", () => {
     expect(rail.text()).toContain("应用");
     expect(rail.text()).toContain("工作空间");
     expect(rail.text()).toContain("版本");
-    await wrapper.get('[data-testid="team-add-member"]').trigger("click");
-    expect(wrapper.emitted("open-team-members")).toHaveLength(1);
+    expect(wrapper.find('[data-testid="team-add-member"]').exists()).toBe(false);
     await wrapper.get('[aria-label="应用：应用一"]').trigger("click");
     expect(wrapper.text()).toContain("历史");
     expect(wrapper.text()).not.toContain("加入其他应用");
