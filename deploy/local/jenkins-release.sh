@@ -331,6 +331,21 @@ validate_host() {
     timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker info >/dev/null
     echo "    - runtime image ${JAVA_RUNTIME_IMAGE}"
     timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker run --rm "${JAVA_RUNTIME_IMAGE}" sh -euc 'command -v java >/dev/null; command -v git >/dev/null'
+    if [[ "${ISOLATED_ACCEPTANCE}" == true ]]; then
+        # FUSE 挂载上的 0600 配置不能依赖 Redis UID 直接读取；启动前验证容器内复制后的可读性。
+        [[ -f "${SHARED_ROOT}/redis.conf" && ! -L "${SHARED_ROOT}/redis.conf" ]] || {
+            echo "Isolated Redis config must be a regular non-symlink file." >&2
+            return 1
+        }
+        echo '    - isolated Redis config mount'
+        timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker run --rm --network none --user 0:0 \
+            --mount "type=bind,src=${SHARED_ROOT}/redis.conf,dst=/usr/local/etc/redis/redis.conf,readonly" \
+            --entrypoint sh "${VERIFY_REDIS_IMAGE}" -euc '
+                install -m 0600 /usr/local/etc/redis/redis.conf /tmp/test-agent-redis.conf
+                chown redis:redis /tmp/test-agent-redis.conf
+                exec /usr/bin/setpriv --reuid redis --regid redis --clear-groups test -s /tmp/test-agent-redis.conf
+            '
+    fi
     if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
         echo "    - fixed host control ${HOST_CONTROL}"
         timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" sudo "${HOST_CONTROL}" status
@@ -650,7 +665,9 @@ if isolated_acceptance == "true":
             f"{shared_root}/redis.conf:/usr/local/etc/redis/redis.conf:ro",
             f"{project_name}-redis-data:/data:rw",
         ],
-        "command": ["redis-server", "/usr/local/etc/redis/redis.conf"],
+        # 与企业离线 Redis 启动脚本保持一致：先用 root 复制 0600 配置，再以 redis UID 启动。
+        "entrypoint": ["sh", "-euc", "install -m 0600 /usr/local/etc/redis/redis.conf /tmp/test-agent-redis.conf && chown redis:redis /tmp/test-agent-redis.conf && exec /usr/bin/setpriv --reuid redis --regid redis --clear-groups redis-server /tmp/test-agent-redis.conf"],
+        "command": [],
         "restart": "unless-stopped",
     }
     stack["volumes"] = {f"{project_name}-redis-data": {}}

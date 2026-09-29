@@ -18979,3 +18979,26 @@
 - 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；V2 正式发布仍需用 `26380` 新 manifest 重新验收。
 - 同步增强 readiness 失败时的 Jenkins 诊断，输出后端容器最近 300 行日志，不改变运行逻辑或敏感字段脱敏链路。
 - 目前 Redis 连接根因尚需 #10 的 Redis 容器日志确认，V2 正式发布未完成。
+
+## 2026-09-29 - V2 隔离 Redis 配置挂载启动修正
+
+### Why
+
+- 专用 Jenkins #10 的容器诊断确认 Redis 持续以退出码 1 重启，日志显示以 `redis` 用户直接打开挂载的
+  `/usr/local/etc/redis/redis.conf` 时得到 `No such file or directory`；后端因此连接 `26380` 被拒绝。
+
+### What
+
+- 隔离 Redis 启动沿用 `deploy/internal/deploy-redis.sh` 已验证的权限处理：先以 root 将 `0600` 配置复制到容器内，
+  再切换到 `redis` 用户启动；Jenkins 宿主检查提前验证挂载和副本可读性，避免等待后端 readiness 超时。
+- 部署说明同步记录测试机 FUSE 挂载和容器内配置副本的关系。
+
+### How
+
+- `bash -n deploy/local/jenkins-release.sh`、`tools/verify-jenkins-release.sh`、`git diff --check` 通过；
+  本机以官方 `redis:7.4.9-alpine` 运行同一复制、`chown`、`setpriv` 命令通过。
+
+### Result
+
+- 修改只涉及 V2 独立验收 Redis 启动及早期校验；公开 API、RunEvent、数据库结构与 release 运行栈未变。
+- 目标 x86 Jenkins 仍需生成新不可变发布包并验证 Redis、后端、Worker 和真实 Run；不能用本机容器检查代替远端验收。
