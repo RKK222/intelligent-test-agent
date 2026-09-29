@@ -82,10 +82,29 @@ class OpencodeRuntimeApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         assertThat(result).isEqualTo(Map.of("ok", true));
-        assertThat(fixture.captureCommand().path())
-                .isEqualTo("/session/ses_remote1234567890abcdef/summarize");
+        ArgumentCaptor<OpencodeRuntimeCommand> commands = ArgumentCaptor.forClass(OpencodeRuntimeCommand.class);
+        verify(fixture.facade, times(2)).runtime(commands.capture());
+        assertThat(commands.getAllValues()).extracting(OpencodeRuntimeCommand::path)
+                .containsExactly(
+                        "/session/ses_remote1234567890abcdef/model",
+                        "/session/ses_remote1234567890abcdef/summarize");
+        assertThat(commands.getAllValues().getFirst().body())
+                .isEqualTo(Map.of("model", Map.of("providerID", "openai", "id", "gpt-5")));
         verify(fixture.sessionApplicationService).touchSession(
                 new SessionId("ses_1234567890abcdef"), "trace_1234567890abcdef");
+    }
+
+    @Test
+    void compactSessionRejectsIncompleteModelSelectionBeforeRemoteMutation() {
+        Fixture fixture = new Fixture();
+
+        assertThatThrownBy(() -> fixture.service.compactSession(
+                        "ses_1234567890abcdef", Map.of("providerID", "openai"),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class);
+
+        verify(fixture.facade, never()).runtime(any());
+        verify(fixture.sessionApplicationService, never()).touchSession(any(), anyString());
     }
 
     @Test

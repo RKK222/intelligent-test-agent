@@ -51,6 +51,10 @@ V2 没有 V1 的原生 session share 合约。旧 runtime `/session/{id}/share` 
 `/api/internal/platform/opencode-runtime/sessions/{id}/collaboration-share`
 资源；分享成员、过期、撤销和审计继续由 TestAgent 自己维护。
 
+平台 compact 入口保留前端 `{providerID,modelID}` DTO。V2 `/api/session/{id}/compact`
+只接受 `id/delivery`，因此应用服务先调用 session model 选择，再发送 compact；省略
+模型时沿用会话当前选择，不会把旧模型字段直接转发给严格的 V2 请求体。
+
 平台运行态代理把 V2 的 location envelope 保留在通用目录中供前端解包；
 MCP 状态、资源、工具和 VCS 分支/文件状态则投影回平台稳定 DTO。
 V2 `/api/fs/read/*` 直接返回带 MIME 的文件字节，不再返回 V1 `FileContent` JSON；

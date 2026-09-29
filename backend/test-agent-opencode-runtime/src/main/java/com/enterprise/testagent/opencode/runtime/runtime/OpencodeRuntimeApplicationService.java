@@ -779,10 +779,26 @@ public class OpencodeRuntimeApplicationService {
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
         requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
+        Map<String, Object> request = safeBody(body);
+        String providerId = text(request.get("providerID"));
+        String modelId = text(request.get("modelID"));
+        if ((providerId == null) != (modelId == null)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "压缩会话必须同时指定 providerID 和 modelID");
+        }
+        // V2 compact 请求不接收模型字段；先在固定 session 上选定前端指定的模型，避免悄悄改用旧模型。
+        if (providerId != null) {
+            LinkedHashMap<String, Object> model = new LinkedHashMap<>();
+            model.put("providerID", providerId);
+            model.put("id", modelId);
+            String variant = text(request.get("variant"));
+            if (variant != null) model.put("variant", variant);
+            post(location, "/session/" + encodePath(location.remoteSessionId()) + "/model",
+                    Map.of("model", model), traceId);
+        }
         Object result = post(
                 location,
                 "/session/" + encodePath(location.remoteSessionId()) + "/summarize",
-                safeBody(body),
+                request,
                 traceId);
         if (sessionApplicationService != null) {
             sessionApplicationService.touchSession(new SessionId(sessionId), traceId);
