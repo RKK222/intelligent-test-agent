@@ -3920,8 +3920,8 @@ Session 运行态接口：
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert` | 取消 revert，不发送 body；Web `/redo` 复用该入口。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/command` | 执行 session command。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/shell` | 执行 shell command，body 为 `{ command, agent, model? }`；Web 输入 `!command` 复用该入口，并刷新 Session 消息投影展示原生 shell message/tool part。 |
-| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | 创建 opencode session share。 |
-| `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | 取消 opencode session share。 |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | V2 已无原生 share 合约，返回 `410 API_GONE`；使用平台 `collaboration-share` 创建成员分享。 |
+| `DELETE` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/share` | V2 已无原生 share 合约，返回 `410 API_GONE`；使用平台 `collaboration-share` 撤销分享。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions` | 读取当前 Session 的 pending permission；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions/{requestId}/reply` | 回复 permission，body 支持 `{ "decision": "once|always|reject" }`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions` | 读取当前 Session 的 pending question；OpenCode 原生列表是进程级结果，后端按绑定的 remote session 过滤，不能把其它 Session 的请求返回给当前会话。 |

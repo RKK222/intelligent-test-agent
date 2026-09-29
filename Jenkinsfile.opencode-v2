@@ -131,7 +131,12 @@ pipeline {
 
     post {
         always {
-            sh '"$RELEASE_SCRIPT" collect-logs "$RUN_LOG_DIR" || true'
+            sh '''
+                "$RELEASE_SCRIPT" collect-logs "$RUN_LOG_DIR" || true
+                if [ -n "${RELEASE_TAG:-}" ] && [ -x "$RELEASE_SCRIPT" ]; then
+                    "$RELEASE_SCRIPT" cleanup-worker-image-guard "$RELEASE_TAG" || true
+                fi
+            '''
         }
         success {
             sh '"$RELEASE_SCRIPT" record-result "$RELEASE_DIR" SUCCESS'

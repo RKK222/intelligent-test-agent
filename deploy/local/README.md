@@ -30,6 +30,10 @@ release 的 `stop-legacy`，并禁用独立实例里的 XXL 调度器。一次�
 `http://192.168.8.100:18182/actuator/health/readiness`、`http://192.168.8.100:3100/`、专用 worker
 健康状态及 Jenkins 构建结果。
 
+V2 镜像构建后，专用任务会启动一个无网络、无挂载、无端口的短期镜像保留容器，直到发布结果和日志采集完成。
+这使不可变 release 制备和数据库升级期间镜像持续被 Docker 引用；`post` 阶段按当前 release 标签删除该容器。
+它不属于运行栈，也不影响日常 `release` 任务。
+
 ## 复用边界
 
 - 后端继续使用根 Maven reactor、`test-agent-app` 可执行 JAR 和现有 Flyway migration；前端继续使用

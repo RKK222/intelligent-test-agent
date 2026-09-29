@@ -61,6 +61,7 @@ Commands:
   deploy RELEASE_DIR TAG
   verify-deployment TAG
   collect-logs OUTPUT_DIR
+  cleanup-worker-image-guard TAG
   record-result RELEASE_DIR SUCCESS|FAILED
 EOF
     exit 2
@@ -201,6 +202,31 @@ worker_image_for_tag() {
     local tag=$1
     validate_tag "${tag}"
     printf '%s:%s\n' "${WORKER_IMAGE_REPOSITORY}" "${tag}"
+}
+
+worker_image_guard_name() {
+    local tag=$1
+    validate_tag "${tag}"
+    printf '%s-image-guard-%s\n' "${WORKER_CONTAINER_NAME}" "${tag}"
+}
+
+start_worker_image_guard() {
+    local tag=$1 image=$2 guard_name
+    [[ "${ISOLATED_ACCEPTANCE}" == true ]] || return 0
+    guard_name=$(worker_image_guard_name "${tag}")
+    # 独立验收的镜像在制备 release 期间必须保持被容器引用，避免宿主清理任务移除未运行的镜像。
+    docker run --detach --name "${guard_name}" --network none \
+        --entrypoint sleep "${image}" infinity >/dev/null
+    [[ "$(docker inspect -f '{{.State.Running}}' "${guard_name}")" == true ]]
+}
+
+cleanup_worker_image_guard() {
+    local tag=$1 guard_name
+    [[ "${ISOLATED_ACCEPTANCE}" == true ]] || return 0
+    guard_name=$(worker_image_guard_name "${tag}")
+    if docker container inspect "${guard_name}" >/dev/null 2>&1; then
+        docker rm --force "${guard_name}" >/dev/null
+    fi
 }
 
 manager_build_version() {
@@ -402,6 +428,7 @@ build_release() {
         fi
     fi
     rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
+    start_worker_image_guard "${RELEASE_TAG}" "${worker_image}"
     "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
 }
 
@@ -1106,6 +1133,10 @@ case "${command}" in
     collect-logs)
         [[ $# -eq 1 ]] || usage
         collect_logs "$1"
+        ;;
+    cleanup-worker-image-guard)
+        [[ $# -eq 1 ]] || usage
+        cleanup_worker_image_guard "$1"
         ;;
     record-result)
         [[ $# -eq 2 ]] || usage
