@@ -19029,7 +19029,7 @@
 
 ### How
 
-- `node --test tools/test-opencode-observability-plugin.mjs tools/test-opencode-rtk-plugin.mjs tools/test-opencode-official-launcher.mjs`：36 项通过；`node tools/benchmark-opencode-observability-plugin.mjs`：增量 p99 约 0.002 ms、热路径无 I/O/网络。
+- `node --test tools/test-opencode-observability-plugin.mjs tools/test-opencode-rtk-plugin.mjs tools/test-opencode-official-launcher.mjs`：38 项通过，包含 V2 root/child Trace、未知事件和失败 Step；`node tools/benchmark-opencode-observability-plugin.mjs`：增量 p99 约 0.002 ms、热路径无 I/O/网络。
 - 冻结的 OpenCode `2.0.18` Darwin CLI 在临时 HOME 和工作区加载修改后的本地插件；`/api/info` 与 `POST /api/rpc/testagent.runtime/tools` 返回 200，RPC 枚举 62 个已注册工具。`git diff --check` 通过。
 - 提交前回顾全部七份 `.agents/session-log*.md` 近期条目，未覆盖他人已提交成果，也未修改 OpenCode 只读源码或受保护环境文件。
 

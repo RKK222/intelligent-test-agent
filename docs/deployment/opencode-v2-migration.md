@@ -79,6 +79,7 @@ node --test tools/test-opencode-observability-plugin.mjs
 ```
 
 观测插件单测覆盖 V2 五种 session hook、脱敏、调用 ID、工具失败去重、
+root/child Trace、未知事件透传、失败 Step 不伪造耗时，以及
 `session.step.*` 耗时和 token 投影。使用冻结的 `2.0.18` Darwin CLI、临时隔离 HOME、
 `file://` 插件目录与本地固定依赖做原生加载探针时，`/api/info` 和
 `POST /api/rpc/testagent.runtime/tools`（请求体 `{"input":{}}`）均返回 200，

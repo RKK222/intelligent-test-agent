@@ -219,6 +219,49 @@ test("V2 step events preserve model timing and session metrics", async () => {
   assert.equal(events.find((event) => event.type === "OPENCODE_EVENT").payload.event.type, "session.step.started")
 })
 
+test("V2 session.created binds child events to the root Trace and preserves unknown events", async () => {
+  const requests = []
+  const observer = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+  const emit = (id, type, data) => observer.hooks.event({ event: { id, type, created: 1000, data } })
+  emit("root-created", "session.created", { sessionID: "ses-root" })
+  emit("child-created", "session.created", { sessionID: "ses-child", parentID: "ses-root" })
+  emit("future-event", "session.future.feature", { sessionID: "ses-child", value: 42 })
+  while (observer.inspect().serialized > 0) await observer.flush()
+
+  const events = requests.flatMap((batch) => batch.events)
+  assert.equal(events.length, 3)
+  assert.equal(events[0].traceId, events[1].traceId)
+  assert.equal(events[1].traceId, events[2].traceId)
+  assert.equal(events[1].parentId, "ses-root")
+  assert.equal(events[2].payload.event.id, "future-event")
+})
+
+test("V2 failed step is interrupted without inventing model duration", async () => {
+  const requests = []
+  const observer = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+  const emit = (id, type, created, data) => observer.hooks.event({ event: { id, type, created, data } })
+  emit("step-start", "session.step.started", 1000, {
+    sessionID: "ses-step-failed", assistantMessageID: "msg-failed", started: 990,
+  })
+  emit("step-failed", "session.step.failed", 1100, {
+    sessionID: "ses-step-failed", assistantMessageID: "msg-failed",
+    error: { message: "model unavailable" },
+  })
+  while (observer.inspect().serialized > 0) await observer.flush()
+
+  const step = requests.flatMap((batch) => batch.events)
+    .find((event) => event.type === "ASSISTANT_STEP_METRICS")
+  assert.equal(step.payload.status, "INTERRUPTED")
+  assert.equal(step.payload.durationMs, null)
+  assert.equal(step.payload.timingRecorded, false)
+})
+
 test("correlates test-design skill before and after by callID without parsing title", async () => {
   const requests = []
   const runtime = testRuntime(async (url, request) => {
