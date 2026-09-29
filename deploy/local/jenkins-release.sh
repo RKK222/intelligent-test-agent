@@ -980,6 +980,11 @@ verify_deployment() {
     done
     [[ "${backend_ready}" == true ]] || {
         echo "Backend did not become ready within the deployment window." >&2
+        if [[ "${ISOLATED_ACCEPTANCE}" == true ]]; then
+            docker inspect -f 'Isolated Redis state={{.State.Status}} exit={{.State.ExitCode}} ports={{json .NetworkSettings.Ports}}' \
+                "${ISOLATED_REDIS_CONTAINER_NAME}" >&2 || true
+            docker logs --tail 100 "${ISOLATED_REDIS_CONTAINER_NAME}" >&2 || true
+        fi
         docker logs --tail 300 "${BACKEND_CONTAINER_NAME}" >&2 || true
         return 1
     }

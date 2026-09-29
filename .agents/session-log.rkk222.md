@@ -18968,6 +18968,9 @@
   （同一 Compose 项目）占用该连续端口，V2 栈没有误删现场 MockCenter。
 - Jenkins #8 使用 `26380` 后已成功创建并启动 V2 Redis、前端和后端容器，端口冲突解除；后端 readiness
   在 4 分钟窗口内仍未通过，现有门禁只输出摘要，需增加后端容器尾日志后再复现。
+- Jenkins #9 使用诊断版流水线复用 #8 不可变发布包，后端日志确认启动时 `127.0.0.1:26380` 连接被拒绝，
+  `BackendJavaProcessLifecycleService.registerHeartbeat` 无法完成；模板中后端使用宿主网络，不能直接换成 Compose 服务名。
+  继续在 readiness 失败时打印隔离 Redis 的容器状态和尾日志，区分 Redis 进程退出与宿主端口转发故障。
 
 ### Result
 
@@ -18975,3 +18978,4 @@
 - 将 V2 专用 Redis 宿主端口从 MockCenter 连续端口段调整为 `26380`，同步 Jenkins、bootstrap、发布契约和部署文档；未修改 OpenCode 只读源码、`.env.local` 或 release 栈。
 - 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；V2 正式发布仍需用 `26380` 新 manifest 重新验收。
 - 同步增强 readiness 失败时的 Jenkins 诊断，输出后端容器最近 300 行日志，不改变运行逻辑或敏感字段脱敏链路。
+- 目前 Redis 连接根因尚需 #10 的 Redis 容器日志确认，V2 正式发布未完成。
