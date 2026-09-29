@@ -236,7 +236,10 @@ RUN set -eux; \
       printf '%s  %s\n' "${OPENCODE_BINARY_SHA256}" /out/opencode | sha256sum -c -; \
     fi; \
     chmod +x /out/opencode; \
-    test "$(/out/opencode --version)" = "opencode v${OPENCODE_VERSION}"; \
+    version_output="$(/out/opencode --version)"; \
+    test "${version_output}" = "opencode v${OPENCODE_VERSION}" \
+      || test "${version_output}" = "${OPENCODE_VERSION}" \
+      || test "${version_output}" = "opencode ${OPENCODE_VERSION}"; \
     rtk_url="${RTK_RELEASE_BASE_URL}/v${RTK_VERSION}/${RTK_ASSET_NAME}"; \
     curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 "${rtk_url}" -o /tmp/rtk.tar.gz; \
     test "$(stat -c '%s' /tmp/rtk.tar.gz)" = "${RTK_ASSET_SIZE}"; \
@@ -405,6 +408,8 @@ COPY --from=opencode-download /out/RTK-LICENSE ./RTK-LICENSE
 COPY deploy/internal/opencode-runtime.gitignore ./opencode-runtime.gitignore
 COPY deploy/internal/opencode-observability-plugin.mjs ./opencode-observability-plugin.mjs
 COPY deploy/internal/opencode-rtk-plugin.mjs ./opencode-rtk-plugin.mjs
+COPY deploy/internal/opencode-observability-plugin-v1.mjs ./opencode-observability-plugin-v1.mjs
+COPY deploy/internal/opencode-rtk-plugin-v1.mjs ./opencode-rtk-plugin-v1.mjs
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
 RUN set -eux; \
     mkdir -p ./opencode-observability-plugin ./opencode-rtk-plugin; \
@@ -427,7 +432,11 @@ RUN set -eux; \
     ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
     ./bin/rtk --version; \
-    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode/plugin"), import("@opencode/client"), import("effect"), import("zod")]); console.log("custom Tool and MCP client runtime ok")'; \
+    if grep -Fq '"@opencode/plugin"' package.json; then \
+      node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode/plugin"), import("@opencode/client"), import("effect"), import("zod")]); console.log("OpenCode V2 custom Tool and MCP client runtime ok")'; \
+    else \
+      node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("OpenCode V1 rollback custom Tool and MCP client runtime ok")'; \
+    fi; \
     git --version; \
     ssh -V; \
     rg --version | head -n 1; \

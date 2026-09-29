@@ -1,0 +1,15 @@
+{
+  "name": "test-agent-opencode-official-runtime-rollback",
+  "version": "1.18.4",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@opencode-ai/plugin": "1.18.4",
+    "@opencode-ai/sdk": "1.18.4",
+    "effect": "4.0.0-beta.83",
+    "jsonc-parser": "3.3.1",
+    "playwright-core": "1.61.0",
+    "zod": "4.1.8"
+  }
+}

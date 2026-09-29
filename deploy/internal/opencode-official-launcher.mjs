@@ -6,7 +6,8 @@ import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-const TOOL_DEPENDENCIES = ["@opencode/plugin", "@opencode/client", "effect", "playwright-core", "zod"]
+const V2_TOOL_DEPENDENCIES = ["@opencode/plugin", "@opencode/client", "effect", "playwright-core", "zod"]
+const V1_TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "playwright-core", "zod"]
 const PROJECT_CONFIG_RECONCILE_COMMAND = "__reconcile-project-config"
 const LEGACY_PROJECT_CONFIG_MAINTENANCE_COMMAND = "__maintain-project-config"
 const PROJECT_SCAN_IGNORED_DIRECTORIES = new Set([
@@ -91,7 +92,7 @@ async function visitProjectConfigDirectories(root, visitor) {
 /**
  * 只补齐一个已经存在且物理路径仍位于工作区内的 `.opencode` 目录；定时扫描不能经父级软链接越界。
  */
-async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, workspaceRoot) {
+async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, workspaceRoot, dependencies) {
   let info
   try {
     info = await lstat(directory)
@@ -106,7 +107,7 @@ async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, wor
   ])
   const physicalChild = relative(physicalWorkspaceRoot, physicalDirectory)
   if (physicalChild === ".." || physicalChild.startsWith(`..${sep}`) || isAbsolute(physicalChild)) return false
-  await prepareConfigDirectory(directory, runtimeRoot)
+  await prepareConfigDirectory(directory, runtimeRoot, dependencies)
   return true
 }
 
@@ -116,15 +117,37 @@ async function prepareExistingProjectConfigDirectory(directory, runtimeRoot, wor
 export async function reconcileProjectConfigDirectories({ cwd = process.cwd(), runtimeRoot }) {
   const resolvedRuntimeRoot = resolve(runtimeRoot)
   const resolvedCwd = resolve(cwd)
+  const dependencies = runtimeContract(await runtimeVersion(resolvedRuntimeRoot), resolvedRuntimeRoot).dependencies
   let preparedCount = 0
   await visitProjectConfigDirectories(resolvedCwd, async (directory) => {
     try {
-      if (await prepareExistingProjectConfigDirectory(directory, resolvedRuntimeRoot, resolvedCwd)) preparedCount += 1
+      if (await prepareExistingProjectConfigDirectory(directory, resolvedRuntimeRoot, resolvedCwd, dependencies)) preparedCount += 1
     } catch (error) {
       if (error?.code !== "ENOENT" && error?.code !== "EACCES" && error?.code !== "EPERM") throw error
     }
   })
   return preparedCount
+}
+
+function runtimeContract(runtimeVersion, runtimeRoot) {
+  if (runtimeVersion.major >= 2) {
+    return {
+      v2: true,
+      dependencies: V2_TOOL_DEPENDENCIES,
+      observabilityPlugin: pathToFileURL(join(runtimeRoot, "opencode-observability-plugin")).href,
+      rtkPlugin: pathToFileURL(join(runtimeRoot, "opencode-rtk-plugin")).href,
+      observabilityEntry: join(runtimeRoot, "opencode-observability-plugin", "index.mjs"),
+      rtkEntry: join(runtimeRoot, "opencode-rtk-plugin", "index.mjs"),
+    }
+  }
+  return {
+    v2: false,
+    dependencies: V1_TOOL_DEPENDENCIES,
+    observabilityPlugin: pathToFileURL(join(runtimeRoot, "opencode-observability-plugin-v1.mjs")).href,
+    rtkPlugin: pathToFileURL(join(runtimeRoot, "opencode-rtk-plugin-v1.mjs")).href,
+    observabilityEntry: join(runtimeRoot, "opencode-observability-plugin-v1.mjs"),
+    rtkEntry: join(runtimeRoot, "opencode-rtk-plugin-v1.mjs"),
+  }
 }
 
 function withRequiredConfig(env, runtimeVersion, runtimeRoot) {
@@ -140,32 +163,43 @@ function withRequiredConfig(env, runtimeVersion, runtimeRoot) {
     }
   }
   const config = { ...inherited }
-  // V2 显式 plugins 只接受目录，目录中的 index.mjs 才是 server entrypoint。
-  const observabilityPlugin = pathToFileURL(join(runtimeRoot, "opencode-observability-plugin")).href
-  const inheritedPlugins = Array.isArray(config.plugins) ? config.plugins : []
-  const plugins = inheritedPlugins.map((entry) =>
-    typeof entry === "string" ? { package: entry } : entry,
-  )
-  plugins.push({ package: observabilityPlugin })
-  if (env.TEST_AGENT_RTK_ENABLED === "true") {
-    plugins.push({ package: pathToFileURL(join(runtimeRoot, "opencode-rtk-plugin")).href })
-  }
-  config.plugins = plugins.filter((entry, index, all) =>
-    all.findIndex((candidate) => candidate.package === entry.package) === index,
-  )
-  delete config.plugin
-  if (runtimeVersion.major >= 2) {
+  const contract = runtimeContract(runtimeVersion, runtimeRoot)
+  if (contract.v2) {
+    // V2 显式 plugins 只接受目录，目录中的 index.mjs 才是 server entrypoint。
+    const inheritedPlugins = Array.isArray(config.plugins) ? config.plugins : []
+    const plugins = inheritedPlugins.map((entry) =>
+      typeof entry === "string" ? { package: entry } : entry,
+    )
+    plugins.push({ package: contract.observabilityPlugin })
+    if (env.TEST_AGENT_RTK_ENABLED === "true") {
+      plugins.push({ package: contract.rtkPlugin })
+    }
+    config.plugins = plugins.filter((entry, index, all) =>
+      all.findIndex((candidate) => candidate.package === entry.package) === index,
+    )
+    delete config.plugin
     // V2 的顶层 subagent_depth 被规范化器丢弃，必须放入 experimental。
     delete config.subagent_depth
     const experimental = config.experimental && typeof config.experimental === "object" && !Array.isArray(config.experimental)
       ? { ...config.experimental } : {}
     experimental.subagent_depth = 2
     config.experimental = experimental
-  } else if (runtimeVersion.major === 1 && (runtimeVersion.minor > 18 || (runtimeVersion.minor === 18 && runtimeVersion.patch >= 2))) {
-    config.subagent_depth = 2
   } else {
-    // 1.17.x 会将新字段判定为非法配置；回滚时必须主动移除。
-    delete config.subagent_depth
+    // V1 仍使用旧的 plugin 数组和单文件入口；保留 1.18.4 回滚包的 ABI。
+    const inheritedPlugins = Array.isArray(config.plugin)
+      ? config.plugin
+      : Array.isArray(config.plugins) ? config.plugins : []
+    const plugins = inheritedPlugins.map((entry) => typeof entry === "string" ? entry : entry?.package).filter(Boolean)
+    plugins.push(contract.observabilityPlugin)
+    if (env.TEST_AGENT_RTK_ENABLED === "true") plugins.push(contract.rtkPlugin)
+    config.plugin = [...new Set(plugins)]
+    delete config.plugins
+    if (runtimeVersion.minor > 18 || (runtimeVersion.minor === 18 && runtimeVersion.patch >= 2)) {
+      config.subagent_depth = 2
+    } else {
+      // 1.17.x 会将新字段判定为非法配置；回滚时必须主动移除。
+      delete config.subagent_depth
+    }
   }
   return JSON.stringify(config)
 }
@@ -201,12 +235,12 @@ async function ensureRuntimeGitIgnore(directory, runtimeRoot) {
   await appendFile(gitignore, `${separator}${missing.join("\n")}\n`, "utf8")
 }
 
-async function prepareConfigDirectory(directory, runtimeRoot) {
+async function prepareConfigDirectory(directory, runtimeRoot, dependencies) {
   await mkdir(directory, { recursive: true })
   await ensureRuntimeGitIgnore(directory, runtimeRoot)
   await linkIfMissing(join(runtimeRoot, "package.json"), join(directory, "package.json"))
   await linkIfMissing(join(runtimeRoot, "package-lock.json"), join(directory, "package-lock.json"))
-  for (const dependency of TOOL_DEPENDENCIES) {
+  for (const dependency of dependencies) {
     await linkIfMissing(
       join(runtimeRoot, "node_modules", ...dependency.split("/")),
       join(directory, "node_modules", ...dependency.split("/")),
@@ -222,8 +256,10 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   const resolvedRuntimeRoot = resolve(runtimeRoot)
   const resolvedCwd = resolve(cwd)
   const prepared = { ...env, ...OFFLINE_DEFAULTS }
-  if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-observability-plugin", "index.mjs")))) {
-    throw new Error("OpenCode V2 observability plugin directory is missing from the offline runtime")
+  const version = await runtimeVersion(resolvedRuntimeRoot)
+  const contract = runtimeContract(version, resolvedRuntimeRoot)
+  if (!(await pathExists(contract.observabilityEntry))) {
+    throw new Error(`OpenCode ${contract.v2 ? "V2" : "V1"} observability plugin is missing from the offline runtime`)
   }
   if (!prepared.OPENCODE_PASSWORD && prepared.TEST_AGENT_OPENCODE_SERVER_PASSWORD) {
     // V2 serve 默认随机生成密码；平台由同一受控 secret 让 worker 与 Java gateway 共享认证。
@@ -234,7 +270,7 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
     prepared.TEST_AGENT_RTK_BIN = join(resolvedRuntimeRoot, "bin", process.platform === "win32" ? "rtk.exe" : "rtk")
     prepared.RTK_TELEMETRY_DISABLED = "1"
     prepared.RTK_RECALL = "0"
-    if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-rtk-plugin", "index.mjs")))) {
+    if (!(await pathExists(contract.rtkEntry))) {
       throw new Error("RTK plugin is missing from the offline OpenCode runtime")
     }
     const rtkBinaryInfo = await lstat(prepared.TEST_AGENT_RTK_BIN)
@@ -244,14 +280,14 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   }
   prepared.OPENCODE_CONFIG_CONTENT = withRequiredConfig(
     prepared,
-    await runtimeVersion(resolvedRuntimeRoot),
+    version,
     resolvedRuntimeRoot,
   )
   prepared.OPENCODE_OFFLINE_TOOL_NODE_MODULES = join(resolvedRuntimeRoot, "node_modules")
 
   // OpenCode 进程工作目录是所有个人 worktree 的共同祖先；在这里投影依赖后，
   // 深层应用 workspace 的 .opencode/tools 也能按 Node 标准祖先规则离线解析模块。
-  for (const dependency of TOOL_DEPENDENCIES) {
+  for (const dependency of contract.dependencies) {
     await linkIfMissing(
       join(resolvedRuntimeRoot, "node_modules", ...dependency.split("/")),
       join(resolvedCwd, "node_modules", ...dependency.split("/")),
@@ -264,7 +300,7 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   const existingHomeConfig = join(prepared.HOME || homedir(), ".opencode")
   if (await pathExists(existingHomeConfig)) configDirectories.add(existingHomeConfig)
   for (const directory of configDirectories) {
-    await prepareConfigDirectory(directory, resolvedRuntimeRoot)
+    await prepareConfigDirectory(directory, resolvedRuntimeRoot, contract.dependencies)
   }
   return prepared
 }

@@ -453,9 +453,9 @@ AggregateError: ... errors building ".../opencode/tools/REPLACE_TOOL.ts"
 
 OpenCode 1.18.4 会扫描配置目录下的 `tool/tools` JavaScript 和 TypeScript 文件，并在提示处理时加载全部匹配工具；任一文件存在语法、导入、依赖或导出结构错误，都可能在主模型调用前中止整个提示。此时常见伴随现象是 assistant 消息 token 全为 0、没有 assistant part，随后根 Session 又进入 idle，平台只观察终态后可能产生误导性的 `run.succeeded`。
 
-若底层异常明确为 `Cannot find module '@opencode-ai/plugin'`，且失败路径位于 `personalworktree/.../workspace/.opencode/tools/`，先检查 OpenCode 进程工作目录和祖先依赖投影。超级管理员通常使用公共配置工具，或者现场已存在历史链接，因此可能未触发；这是工作区路径与模块解析差异，不是角色鉴权差异。同一用户进入相同的深层应用 workspace 仍会失败。
+若底层异常明确为 `Cannot find module '@opencode/plugin'` 或 `Cannot find module '@opencode/client'`，且失败路径位于 `personalworktree/.../workspace/.opencode/tools/`，先检查 OpenCode 进程工作目录和祖先依赖投影。超级管理员通常使用公共配置工具，或者现场已存在历史链接，因此可能未触发；这是工作区路径与模块解析差异，不是角色鉴权差异。同一用户进入相同的深层应用 workspace 仍会失败。只有切换到 1.18.4 回滚包时，才检查对应的 V1 `@opencode-ai/plugin`/`@opencode-ai/sdk`。
 
-正式版本由 OpenCode 启动器在进程工作目录的 `node_modules` 自动非覆盖式链接 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect` 和 `zod`。部署包含该修复的新 worker/programs 并重启用户 OpenCode 进程后，无需为每个个人 worktree 单独建链接；验收时从失败工具目录执行模块导入探测，并确认它解析到 `/data/testagent/programs/opencode/node_modules/`。临时手工链接只能用于已保全证据后的现场恢复，不能代替正式发包。
+正式 V2 版本由 OpenCode 启动器在进程工作目录的 `node_modules` 自动非覆盖式链接 `@opencode/plugin`、`@opencode/client`、`effect` 和 `zod`。部署包含该修复的新 worker/programs 并重启用户 OpenCode 进程后，无需为每个个人 worktree 单独建链接；验收时从失败工具目录执行模块导入探测，并确认它解析到 `/data/testagent/programs/opencode/node_modules/`。临时手工链接只能用于已保全证据后的现场恢复，不能代替正式发包。V1 回滚进程由同一 launcher 按 1.18.4 合约投影旧 SDK 依赖。
 
 处置规则：
 
@@ -546,7 +546,7 @@ REPLACE_JSON_REQUEST_BODY = {"model":"DeepSeek-V4-Flash-W8A8","messages":[{"role
 | Java API 日志已有完整 responseBody，直连客户端仍为零字节 | 保留 traceId 和 exact JAR SHA，交响应序列化/路由转发负责人；不要用重复 POST 继续探测。 |
 | SSE 直连正常、Nginx 断流 | 查 SSE 禁缓冲、长连接超时和中间网络设备。 |
 | SSE 到达 `run.succeeded` 但没有文本事件 | 查用户 OpenCode 日志、模型流、消息投影和 `[DONE]`。 |
-| 当前会话出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 先看失败路径和底层异常：公共工具在权威公共配置 Git 中修复；应用工具按应用发布流程修复；深层应用工具缺少 `@opencode-ai/plugin` 时部署已包含祖先依赖投影的新 worker/programs，再重启用户进程。 |
+| 当前会话出现 `prompt_async failed` 和 `errors building .../opencode/tools/*.ts` | 先看失败路径和底层异常：公共工具在权威公共配置 Git 中修复；应用工具按应用发布流程修复；深层应用工具缺少 V2 `@opencode/plugin`/`@opencode/client` 时部署已包含祖先依赖投影的新 worker/programs，再重启用户进程；只有 V1 回滚包按旧 SDK 依赖排查。 |
 | 同时出现 `git add --sparse` 的 `unknown option` | 作为旧 Git 兼容告警单独治理；只有同时出现工具构建错误时，提示中止首因仍是失败工具。 |
 | Java 模型代理正常，只有旧用户 OpenCode 失败 | 在运行管理重启该用户进程，使其重新读取公共配置和逐用户注入环境；不需要重启所有 Java。 |
 | Java 模型代理 `400` 且 0 字节，批准的同机 9070 直连正常 | 核对 provider API 根路径、关联 token、Java 内存快照及 UCID/header；修复后必须以 Java 代理 `200 text/event-stream` 复验。 |

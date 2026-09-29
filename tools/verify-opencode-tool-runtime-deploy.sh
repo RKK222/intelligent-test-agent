@@ -28,10 +28,48 @@ write_runtime_fixture() {
     "${runtime_root}/package.json"
   cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
     "${runtime_root}/package-lock.json"
+  printf '2.0.18\n' >"${runtime_root}/VERSION"
   printf 'export const fixture = true;\n' >"${runtime_root}/opencode-observability-plugin.mjs"
   mkdir -p "${runtime_root}/opencode-observability-plugin" "${runtime_root}/opencode-rtk-plugin"
   cp "${runtime_root}/opencode-observability-plugin.mjs" "${runtime_root}/opencode-observability-plugin/index.mjs"
   printf 'export const fixture = true;\n' >"${runtime_root}/opencode-rtk-plugin/index.mjs"
+  for dependency_entry in "${dependencies[@]}"; do
+    dependency="${dependency_entry%%|*}"
+    version="${dependency_entry#*|}"
+    version="${version%%|*}"
+    entrypoint="${dependency_entry##*|}"
+    mkdir -p "${runtime_root}/node_modules/${dependency}"
+    printf '{\n  "name": "%s",\n  "version": "%s"\n}\n' "${dependency}" "${version}" \
+      >"${runtime_root}/node_modules/${dependency}/package.json"
+    mkdir -p "$(dirname "${runtime_root}/node_modules/${dependency}/${entrypoint}")"
+    printf 'export const fixture = true;\n' \
+      >"${runtime_root}/node_modules/${dependency}/${entrypoint}"
+  done
+}
+
+write_v1_runtime_fixture() {
+  local runtime_root="$1"
+  local dependency_entry dependency version entrypoint
+  local dependencies=(
+    '@modelcontextprotocol/sdk|1.29.0|dist/esm/server/mcp.js'
+    '@opencode-ai/plugin|1.18.4|dist/index.js'
+    '@opencode-ai/sdk|1.18.4|dist/index.js'
+    'effect|4.0.0-beta.83|dist/index.js'
+    'jsonc-parser|3.3.1|lib/esm/main.js'
+    'playwright-core|1.61.0|index.js'
+    'zod|4.1.8|index.js'
+  )
+
+  mkdir -p "${runtime_root}/node_modules"
+  cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime-1.18.4.package.json" \
+    "${runtime_root}/package.json"
+  cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime-1.18.4.package-lock.json" \
+    "${runtime_root}/package-lock.json"
+  printf '1.18.4\n' >"${runtime_root}/VERSION"
+  cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin-v1.mjs" \
+    "${runtime_root}/opencode-observability-plugin-v1.mjs"
+  cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin-v1.mjs" \
+    "${runtime_root}/opencode-rtk-plugin-v1.mjs"
   for dependency_entry in "${dependencies[@]}"; do
     dependency="${dependency_entry%%|*}"
     version="${dependency_entry#*|}"
@@ -53,9 +91,9 @@ write_runtime_fixture "${RUNTIME_ROOT}"
 tar -C "${PROGRAMS_ROOT}" -czf "${PROGRAMS_ARCHIVE}" programs
 
 root_output="$(bash "${VERIFY_SCRIPT}" --root "${RUNTIME_ROOT}")"
-grep -Fq 'client/plugin/effect/playwright/zod are present' <<<"${root_output}"
+grep -Fq 'plugin/sdk/effect/playwright/zod are present' <<<"${root_output}"
 archive_output="$(bash "${VERIFY_SCRIPT}" --archive "${PROGRAMS_ARCHIVE}")"
-grep -Fq 'client/plugin/effect/playwright/zod are present' <<<"${archive_output}"
+grep -Fq 'plugin/sdk/effect/playwright/zod are present' <<<"${archive_output}"
 
 # `@opencode/plugin` 是所有 TypeScript Tool 的定义入口，缺失时必须明确失败。
 rm -f "${RUNTIME_ROOT}/node_modules/@opencode/plugin/package.json"
@@ -90,5 +128,9 @@ if missing_archive_output="$(bash "${VERIFY_SCRIPT}" --archive "${PROGRAMS_ARCHI
   exit 1
 fi
 grep -Fq 'missing required Tool runtime dependencies' <<<"${missing_archive_output}"
+
+write_v1_runtime_fixture "${RUNTIME_ROOT}"
+v1_output="$(bash "${VERIFY_SCRIPT}" --root "${RUNTIME_ROOT}")"
+grep -Fq 'OpenCode V1 Tool runtime dependencies verified' <<<"${v1_output}"
 
 echo 'OpenCode Tool runtime archive/install dependency gates verified'

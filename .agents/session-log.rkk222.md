@@ -19036,3 +19036,29 @@
 ### Result
 
 - V2 插件 domain hook 已接入并可由原生 server 加载；真实模型 Run 的 Trace 上传和前端归档仍待隔离 Jenkins 栈验收。Chrome 的已保存密码安全警告仍由用户处理，不通过自动化绕过。
+
+## 2026-09-29 - 补齐 OpenCode V2 回滚 ABI、运行时验证与事件兼容
+
+### Why
+
+- V2 迁移必须保留可实际装载的 1.18.4 回滚包，且发布脚本、Worker 镜像和启动器不能把 V1/V2 的插件与 SDK ABI 混用。
+- 冻结 V2 事件文档存在 `payload` 命名 envelope，旧平台 VCS 客户端仍可能发送 `git` 模式；需要在适配层保留兼容，不改变平台公开 DTO。
+
+### What
+
+- 新增 1.18.4 的 V1 runtime package/lock、Observability/RTK 插件副本；launcher、Dockerfile、离线依赖 verifier、Worker 镜像 smoke 按 runtime `VERSION` 在 V1/V2 ABI 间选择，V2 使用固定 npm platform package，V1 回滚继续使用旧 `plugin` 配置和 SDK。
+- 运行时 VCS 将旧 `git` 映射到 V2 `working`；RunEvent mapper 支持 `{id,type,time,context,payload}` 并保留上下文身份；部署示例统一使用 V2 npm registry 基址。
+- 同步回滚说明、运行时故障排查、HTTP API、runtime README 和 launcher/tool verifier fixture；未新增数据库表或 Flyway migration。
+
+### How
+
+- 独立 worktree `/Users/kaka/.codex/worktrees/opencode-v2-migration/intelligent-test-agent`、分支 `codex/opencode-v2-migration`，原 `/Users/kaka/Desktop/intelligent-test-agent` 的 `release` 工作区未改动。
+- `node --test tools/test-opencode-official-launcher.mjs tools/test-opencode-observability-plugin.mjs`：36 项通过；工具运行时 V1/V2 归档/安装验证通过；`tools/verify-dev-scripts.sh`、shell 语法、generated SDK path casing 校验通过。
+- JDK 25 下 `mvn -pl test-agent-opencode-client,test-agent-opencode-runtime -am -DskipTests=false test`：client 83 项、runtime 1008 项及 reactor 依赖全部通过；`git diff --check` 通过。
+- 已实际运行 `tools/verify-opencode-node-worker-image.sh test-agent-opencode-worker:internal`；本机没有该镜像，Docker 返回 exit 125（本地缺少镜像并尝试拉取被拒），未将其当作镜像通过证据。隔离 Jenkins 和 Chrome 真实 Run/SSE 验收仍受已保存密码泄露警告阻挡。
+
+### Result
+
+- V2 默认发布链路使用固定 `2.0.18` npm platform 包和 V2 client/plugin，1.18.4 回滚链路拥有独立、可校验的旧 ABI，launcher 不会把 V2 `plugins` 或依赖投影到 V1。
+- 平台 HTTP/RunEvent wire、数据库结构和安全边界保持不变；V1/V2 协议差异集中在 client/runtime adapter、事件 mapper、launcher 和受控部署配置。
+- 远端 Jenkins 镜像 smoke、真实模型 Run、平台 SSE、permission/question、回滚和浏览器 E2E 仍需在用户处理 Chrome 警告后完成；本次未修改 `.env.local` 或 OpenCode 只读源码。

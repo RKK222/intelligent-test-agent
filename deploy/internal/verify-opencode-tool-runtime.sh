@@ -3,15 +3,14 @@ set -euo pipefail
 
 ARCHIVE=""
 RUNTIME_ROOT=""
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PINNED_RUNTIME_MANIFEST="${SCRIPT_DIR}/opencode-node-runtime.package.json"
 
 usage() {
   cat <<'USAGE'
 Usage: verify-opencode-tool-runtime.sh (--archive <programs.tar.gz> | --root <opencode-runtime-dir>)
 
-Verify the pinned OpenCode runtime manifest, lockfile and direct dependencies used
-by custom Tools. Exactly one source must be provided.
+Verify the OpenCode runtime manifest, lockfile and direct dependencies used by custom Tools.
+The manifest selects either the V2 @opencode/* ABI or the V1 rollback @opencode-ai/* ABI.
+Exactly one source must be provided.
 USAGE
 }
 
@@ -42,27 +41,6 @@ if [[ -n "${ARCHIVE}" && -n "${RUNTIME_ROOT}" ]] || [[ -z "${ARCHIVE}" && -z "${
   exit 2
 fi
 
-# 依赖名覆盖受控 runtime manifest 的全部直接依赖；版本继续以既有 package.json 为单一来源，
-# 避免部署脚本再维护一份版本号。Tool 基线四件套不能只在镜像构建时验证。
-DEPENDENCIES=(
-  '@modelcontextprotocol/sdk|dist/esm/server/mcp.js'
-  '@opencode/plugin|dist/promise/index.js'
-  '@opencode/client|dist/promise/index.js'
-  'effect|dist/index.js'
-  'jsonc-parser|lib/esm/main.js'
-  'playwright-core|index.js'
-  'zod|index.js'
-)
-
-[[ -s "${PINNED_RUNTIME_MANIFEST}" ]] || {
-  echo "Pinned OpenCode runtime manifest not found: ${PINNED_RUNTIME_MANIFEST}" >&2
-  exit 1
-}
-
-pinned_dependency_version() {
-  awk -F'"' -v wanted="$1" '$2 == wanted { print $4; exit }' "${PINNED_RUNTIME_MANIFEST}"
-}
-
 TEMP_ROOT=""
 cleanup() {
   [[ -z "${TEMP_ROOT}" ]] || rm -rf "${TEMP_ROOT}"
@@ -76,24 +54,10 @@ if [[ -n "${ARCHIVE}" ]]; then
   }
   SOURCE_LABEL="archive=${ARCHIVE}"
   TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/test-agent-opencode-runtime-verify.XXXXXX")"
-  archive_members=(
-    programs/opencode/package.json
-    programs/opencode/package-lock.json
-    programs/opencode/opencode-observability-plugin.mjs
-    programs/opencode/opencode-observability-plugin/index.mjs
-    programs/opencode/opencode-rtk-plugin/index.mjs
-  )
-  for dependency_entry in "${DEPENDENCIES[@]}"; do
-    dependency="${dependency_entry%%|*}"
-    dependency_entrypoint="${dependency_entry#*|}"
-    archive_members+=(
-      "programs/opencode/node_modules/${dependency}/package.json"
-      "programs/opencode/node_modules/${dependency}/${dependency_entrypoint}"
-    )
-  done
-  # programs 归档较大，只在一次 tar 流中提取需要核对的少量 manifest，避免逐包重复解压。
-  if ! tar -xzf "${ARCHIVE}" -C "${TEMP_ROOT}" "${archive_members[@]}"; then
-    echo "OpenCode programs archive is missing required Tool runtime dependencies: ${ARCHIVE}" >&2
+  # 先取 manifest 决定 V2/V1 ABI，再取对应插件和直接依赖，避免回滚包被 V2 清单误判。
+  if ! tar -xzf "${ARCHIVE}" -C "${TEMP_ROOT}" \
+    programs/opencode/package.json programs/opencode/package-lock.json programs/opencode/VERSION; then
+    echo "OpenCode programs archive is missing runtime manifest: ${ARCHIVE}" >&2
     exit 1
   fi
   RUNTIME_ROOT="${TEMP_ROOT}/programs/opencode"
@@ -124,18 +88,75 @@ require_runtime_file() {
 
 require_runtime_file package.json
 require_runtime_file package-lock.json
-require_runtime_file opencode-observability-plugin.mjs
-require_runtime_file opencode-observability-plugin/index.mjs
-require_runtime_file opencode-rtk-plugin/index.mjs
 runtime_manifest="$(read_runtime_file package.json)"
 runtime_lock="$(read_runtime_file package-lock.json)"
+
+if grep -Fq '"@opencode/plugin"' <<<"${runtime_manifest}"; then
+  ABI="V2"
+  DEPENDENCIES=(
+    '@modelcontextprotocol/sdk|dist/esm/server/mcp.js'
+    '@opencode/plugin|dist/promise/index.js'
+    '@opencode/client|dist/promise/index.js'
+    'effect|dist/index.js'
+    'jsonc-parser|lib/esm/main.js'
+    'playwright-core|index.js'
+    'zod|index.js'
+  )
+  PLUGIN_FILES=(
+    opencode-observability-plugin.mjs
+    opencode-observability-plugin/index.mjs
+    opencode-rtk-plugin/index.mjs
+  )
+else
+  ABI="V1"
+  DEPENDENCIES=(
+    '@modelcontextprotocol/sdk|dist/esm/server/mcp.js'
+    '@opencode-ai/plugin|dist/index.js'
+    '@opencode-ai/sdk|dist/index.js'
+    'effect|dist/index.js'
+    'jsonc-parser|lib/esm/main.js'
+    'playwright-core|index.js'
+    'zod|index.js'
+  )
+  PLUGIN_FILES=(
+    opencode-observability-plugin-v1.mjs
+    opencode-rtk-plugin-v1.mjs
+  )
+fi
+
+if [[ -n "${ARCHIVE}" ]]; then
+  archive_members=()
+  for plugin_file in "${PLUGIN_FILES[@]}"; do
+    archive_members+=("programs/opencode/${plugin_file}")
+  done
+  for dependency_entry in "${DEPENDENCIES[@]}"; do
+    dependency="${dependency_entry%%|*}"
+    dependency_entrypoint="${dependency_entry#*|}"
+    archive_members+=(
+      "programs/opencode/node_modules/${dependency}/package.json"
+      "programs/opencode/node_modules/${dependency}/${dependency_entrypoint}"
+    )
+  done
+  if ! tar -xzf "${ARCHIVE}" -C "${TEMP_ROOT}" "${archive_members[@]}"; then
+    echo "OpenCode programs archive is missing required Tool runtime dependencies (${ABI}): ${ARCHIVE}" >&2
+    exit 1
+  fi
+fi
+
+runtime_dependency_version() {
+  awk -F'"' -v wanted="$1" '$2 == wanted { print $4; exit }' "$(runtime_path package.json)"
+}
+
+for plugin_file in "${PLUGIN_FILES[@]}"; do
+  require_runtime_file "${plugin_file}"
+done
 
 for dependency_entry in "${DEPENDENCIES[@]}"; do
   dependency="${dependency_entry%%|*}"
   dependency_entrypoint="${dependency_entry#*|}"
-  expected_version="$(pinned_dependency_version "${dependency}")"
+  expected_version="$(runtime_dependency_version "${dependency}")"
   [[ -n "${expected_version}" ]] || {
-    echo "Pinned OpenCode runtime manifest does not declare ${dependency}" >&2
+    echo "OpenCode ${ABI} runtime manifest does not declare ${dependency}" >&2
     exit 1
   }
   package_file="node_modules/${dependency}/package.json"
@@ -161,5 +182,5 @@ for dependency_entry in "${DEPENDENCIES[@]}"; do
   }
 done
 
-printf 'OpenCode V2 Tool runtime dependencies verified: %s; client/plugin/effect/playwright/zod are present\n' \
-  "${SOURCE_LABEL}"
+printf 'OpenCode %s Tool runtime dependencies verified: %s; plugin/sdk/effect/playwright/zod are present\n' \
+  "${ABI}" "${SOURCE_LABEL}"

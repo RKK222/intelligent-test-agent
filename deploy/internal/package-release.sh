@@ -988,9 +988,13 @@ plan_release_components() {
     deploy/internal/validate-opencode-models.sh \
     deploy/internal/opencode-node-runtime.package.json \
     deploy/internal/opencode-node-runtime.package-lock.json \
+    deploy/internal/opencode-node-runtime-1.18.4.package.json \
+    deploy/internal/opencode-node-runtime-1.18.4.package-lock.json \
     deploy/internal/opencode-official-launcher.mjs \
     deploy/internal/opencode-observability-plugin.mjs \
     deploy/internal/opencode-rtk-plugin.mjs \
+    deploy/internal/opencode-observability-plugin-v1.mjs \
+    deploy/internal/opencode-rtk-plugin-v1.mjs \
     deploy/internal/opencode-runtime.gitignore \
     deploy/internal/codex-whitebox-mcp-launcher.sh \
     deploy/internal/codex-whitebox-requirements.toml \
@@ -1987,12 +1991,12 @@ PYTHON_SOURCE_SHA256="${PYTHON_SOURCE_SHA256:-639e43243c620a308f968213df9e00f2f8
 PYTHON_SOURCE_BASE_URL="${PYTHON_SOURCE_BASE_URL:-https://mirrors.huaweicloud.com/python}"
 PYTHON_PACKAGE_INDEX_URL="${PYTHON_PACKAGE_INDEX_URL:-https://mirrors.huaweicloud.com/repository/pypi/simple}"
 OPENCODE_VERSION="${OPENCODE_VERSION:-2.0.18}"
-OPENCODE_RELEASE_COMMIT="${OPENCODE_RELEASE_COMMIT:-49c69c5ed3ccf706b61b3febb43c8aaff7f8325e}"
-OPENCODE_ASSET_NAME="${OPENCODE_ASSET_NAME:-opencode-linux-x64-baseline.tar.gz}"
-OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-59265643}"
-OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
-OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5}"
-OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://github.com/anomalyco/opencode/releases/download}"
+OPENCODE_RELEASE_COMMIT="${OPENCODE_RELEASE_COMMIT:-cd9a14a6b688d4021bee381dfd39d2cef9c0f862}"
+OPENCODE_ASSET_NAME="${OPENCODE_ASSET_NAME:-cli-linux-x64-baseline-2.0.18.tgz}"
+OPENCODE_ASSET_SIZE="${OPENCODE_ASSET_SIZE:-90140661}"
+OPENCODE_ASSET_SHA256="${OPENCODE_ASSET_SHA256:-548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd}"
+OPENCODE_BINARY_SHA256="${OPENCODE_BINARY_SHA256:-not-recorded}"
+OPENCODE_RELEASE_BASE_URL="${OPENCODE_RELEASE_BASE_URL:-https://registry.npmjs.org/@opencode/cli-linux-x64-baseline/-}"
 RTK_VERSION="${RTK_VERSION:-0.49.0}"
 RTK_ASSET_NAME="${RTK_ASSET_NAME:-rtk-x86_64-unknown-linux-musl.tar.gz}"
 RTK_ASSET_SIZE="${RTK_ASSET_SIZE:-4791180}"

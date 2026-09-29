@@ -39,6 +39,24 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void mapsPayloadNamedV2EnvelopeWithContextIdentity() throws Exception {
+        RunEventDraft draft = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_payload","type":"session.text.delta","time":1710000000,"context":{"directory":"/tmp/demo","workspace":"/tmp/demo"},"payload":{"sessionID":"ses_root","assistantMessageID":"msg_1","ordinal":0,"delta":"你好"}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope()).getFirst();
+
+        assertThat(draft.type()).isEqualTo(RunEventType.MESSAGE_PART_DELTA);
+        assertThat(draft.payload())
+                .containsEntry("sessionID", "ses_root")
+                .containsEntry("messageID", "msg_1")
+                .containsEntry("text", "你好")
+                .containsEntry("rawEventId", "evt_payload");
+    }
+
+    @Test
     void mapsV2FormEventsToStableQuestionPayload() throws Exception {
         RunEventDraft asked = mapper.toDrafts(objectMapper.readTree("""
                 {"id":"evt_form","type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_root","title":"部署环境","fields":[{"key":"environment","type":"string","title":"选择环境","options":[{"value":"staging","label":"测试环境"}]}]}}}

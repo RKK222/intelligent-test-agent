@@ -492,6 +492,22 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void legacyGitDiffModeUsesV2WorkingMode() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of()))));
+
+        fixture.service.vcsDiff("wrk_1234567890abcdef", "git", 3, "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/vcs/diff");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(command.query()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "mode", "working",
+                "context", "3"));
+    }
+
+    @Test
     void experienceWorkspaceRedactsPhysicalRootFromRuntimeCatalogResponse() {
         Fixture fixture = new Fixture();
         UserId userId = new UserId("usr_1234567890abcdef");

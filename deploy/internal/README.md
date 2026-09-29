@@ -422,9 +422,9 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 
 ## OpenCode worker 版本与回滚包
 
-当前 worker 固定 OpenCode `2.0.18` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
+当前 worker 固定 OpenCode `2.0.18` 官方 `@opencode/cli-linux-x64-baseline` 发布包 `cli-linux-x64-baseline-2.0.18.tgz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
 
-外网构建阶段下载 GitHub release、许可证和固定源码时，对 TLS 握手断连等瞬时网络错误执行有界重试；文件大小、SHA-256 和程序版本校验仍是最终准入条件。重试耗尽或任一校验不一致时必须终止构建，不能复用不完整分片或跳过供应链校验。
+外网构建阶段下载官方 OpenCode npm 发布包、许可证和固定源码时，对 TLS 握手断连等瞬时网络错误执行有界重试；文件大小、SHA-256 和程序版本校验仍是最终准入条件。重试耗尽或任一校验不一致时必须终止构建，不能复用不完整分片或跳过供应链校验。
 
 worker 还固定 Python `3.13.14`：外网 Mac 从 `PYTHON_SOURCE_BASE_URL` 指向的国内镜像下载官方源码，并校验 `23021880` 字节和 SHA-256 `639e43243c620a308f968213df9e00f2f8f62332f7adbaa7a7eeb9783057c690`，再在 Debian 11 bullseye/glibc 2.31 基线上编译。镜像提供 `python3`/`python`、pip、venv、curl、jq、zip/unzip；Git、OpenSSH、ripgrep、Node 和 procps 沿用既有能力。为控制镜像体积和供应链，镜像不保留 gcc/make 等编译器，也不直接烘焙业务第三方库，并通过 `PIP_NO_INDEX=1` 禁止默认访问公网索引。
 
@@ -446,21 +446,23 @@ API key 的官方 `config.toml` 以接入企业 Responses 代理，随后直接�
 不再提供工具改名、参数过滤或固定 workspace 的协议门面。应用启用和现场能力验收见
 `docs/deployment/codex-whitebox-mcp.md`。
 
-1.17.8 紧急回滚包使用同一官方 baseline 资产和对应 Tool lockfile，可在外网构建机执行：
+1.18.4 回滚包保留原 V1 plugin/sdk ABI 和对应 Tool lockfile，可在外网构建机执行：
 
 ```bash
-OPENCODE_VERSION=1.17.8 \
-OPENCODE_RELEASE_COMMIT=11e47f91496005aab4d7c5a2d0a7da5d2651b4ac \
-OPENCODE_ASSET_SIZE=54769220 \
-OPENCODE_ASSET_SHA256=9b34bf34bdc66ea34ddd5858a131febf28b6247693acbfb5fb5c9ad94d90388b \
+OPENCODE_VERSION=1.18.4 \
+OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e \
+OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download/v1.18.4 \
+OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz \
+OPENCODE_ASSET_SIZE=59265643 \
+OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc \
 OPENCODE_BINARY_SHA256=not-recorded \
-OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime-1.17.8.package.json \
-OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime-1.17.8.package-lock.json \
-TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:1.17.8 \
-deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/dist-opencode-1.17.8
+OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime-1.18.4.package.json \
+OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime-1.18.4.package-lock.json \
+TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:1.18.4 \
+deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/dist-opencode-1.18.4
 ```
 
-回滚时先加载 1.17.8 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 移除 1.17.8 不支持的 `subagent_depth`，而 2.0.18 继续强制深度 2。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
+回滚时先加载 1.18.4 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 使用 V1 `plugin` 配置、旧依赖和顶层 `subagent_depth`，而 2.0.18 使用 V2 `plugins`、V2 依赖和 `experimental.subagent_depth`。现存 1.17.8 包仍作为更早的应急兼容包保留，但不再作为当前 V2 回滚基线。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
 
 ## 自定义 Tool 离线依赖
 
@@ -489,7 +491,7 @@ git status --short --untracked-files=all
 
 前三个路径应命中 `opencode/.gitignore`，最后一条不应出现上述运行文件；真实 Agent、Skill、Tool 或公共配置改动仍应显示。若 `git ls-files -- opencode/package.json opencode/package-lock.json` 有输出，说明文件已被历史提交跟踪，部署脚本会保留现场，必须先人工确认仓库内容再决定是否从版本控制中移除。
 
-worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游官方 `opencode-linux-x64-baseline.tar.gz`。`/usr/local/lib/opencode/RELEASE` 固定记录 asset、归档 SHA、二进制 SHA 和 release commit；源码快照仅用于审计。Node 22 只承载轻量启动器和自定义 Tool 离线依赖。
+worker 不再从 OpenCode 源码生成 Node bundle，而是下载并校验上游官方 V2 baseline 发布包。`/usr/local/lib/opencode/RELEASE` 固定记录 asset、归档 SHA、二进制 SHA 和 release commit；源码快照仅用于审计。Node 22 只承载轻量启动器和自定义 Tool 离线依赖。
 
 这套基线覆盖使用官方 `tool(...)`、schema、SDK 类型和 Effect/Zod 的 Tool。`axios`、数据库驱动或企业私有 SDK 等任意业务依赖不会被猜测加入；新增这类 import 时，必须同步修改 `opencode-node-runtime.package.json` 和 lockfile，在外网 Mac 重新打完整企业包。升级依赖不能只替换 Tool 文件，必须同时解压新 programs、导入新 worker 镜像并重启 worker；标准 `deploy-internal-release.sh` 已按该顺序执行。
 

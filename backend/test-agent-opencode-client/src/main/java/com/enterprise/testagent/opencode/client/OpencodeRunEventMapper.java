@@ -336,6 +336,16 @@ public class OpencodeRunEventMapper {
             merged.setAll((com.fasterxml.jackson.databind.node.ObjectNode) v2Data);
             return merged;
         }
+        // 部分冻结版 V2 文档仍使用 payload 命名事件正文；保留该 envelope，不能只依赖 data。
+        JsonNode v2Payload = rawEvent.path("payload");
+        if (v2Payload.isObject()) {
+            var merged = objectMapper.createObjectNode();
+            copyObjectField(rawEvent, merged, "context");
+            copyObjectField(rawEvent, merged, "location");
+            copyObjectField(rawEvent, merged, "metadata");
+            merged.setAll((com.fasterxml.jackson.databind.node.ObjectNode) v2Payload);
+            return merged;
+        }
         JsonNode topLevelProperties = rawEvent.path("properties");
         if (topLevelProperties.isObject()) {
             return topLevelProperties;

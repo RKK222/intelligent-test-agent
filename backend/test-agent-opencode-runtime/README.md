@@ -155,7 +155,7 @@ globalSequence 定位的记录读取，Assistant 只汇聚同 `messageId`、Tool
 - `AiRunFeedbackApplicationServiceTest` 覆盖 Run 反馈创建/更新、成功状态、主对话、归属、批量查询上限；`AiMessageFeedbackApplicationServiceTest` 保留旧消息兼容边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
 - `InternalModelProviderRegistryTest` 覆盖两个 Provider 使用不同 Token、缺失 Token 安全失败和响应快照不泄露明文；`InternalModelThinkStreamConverterTest` 覆盖企业内部模型流式 `<think>` 标签跨 chunk 转换为 `reasoning_content`；模型目录接口和 Run 选择测试以 opencode 原生目录透传为准。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、permission reply body 兼容和 question 回复成功事件回填。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传、旧 `git` VCS diff 模式到 V2 `working` 的兼容映射、permission reply body 兼容和 question 回复成功事件回填。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码、本地进程适配，以及交互 shell 显式读取 stdin 的启动参数和真实命令回显。
 
 ## 允许依赖

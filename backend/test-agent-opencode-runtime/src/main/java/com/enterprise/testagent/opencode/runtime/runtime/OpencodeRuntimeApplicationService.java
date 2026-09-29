@@ -375,11 +375,11 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 读取远端 VCS Diff，mode 缺省为 working，context 仅在调用方传入时透传。
+     * 读取远端 VCS Diff；旧平台的 git 模式与 V2 working 均表示相对 HEAD 的工作区改动。
      */
     public Object vcsDiff(String workspaceId, String mode, Integer context, String traceId) {
         Map<String, String> query = new LinkedHashMap<>();
-        query.put("mode", mode == null || mode.isBlank() ? "working" : mode);
+        query.put("mode", mode == null || mode.isBlank() || "git".equals(mode) ? "working" : mode);
         if (context != null) {
             query.put("context", Integer.toString(context));
         }

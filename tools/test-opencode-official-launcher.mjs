@@ -20,6 +20,8 @@ async function createRuntime(root) {
   await mkdir(join(root, "bin"), { recursive: true })
   await mkdir(join(root, "node_modules", "@opencode", "plugin"), { recursive: true })
   await mkdir(join(root, "node_modules", "@opencode", "client"), { recursive: true })
+  await mkdir(join(root, "node_modules", "@opencode-ai", "plugin"), { recursive: true })
+  await mkdir(join(root, "node_modules", "@opencode-ai", "sdk"), { recursive: true })
   await mkdir(join(root, "node_modules", "effect"), { recursive: true })
   await mkdir(join(root, "node_modules", "playwright-core"), { recursive: true })
   await mkdir(join(root, "node_modules", "zod"), { recursive: true })
@@ -29,6 +31,22 @@ async function createRuntime(root) {
   )
   await writeFile(
     join(root, "node_modules", "@opencode", "plugin", "index.js"),
+    "export const loaded = true\n",
+  )
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "plugin", "package.json"),
+    '{"name":"@opencode-ai/plugin","type":"module","exports":"./index.js"}\n',
+  )
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "plugin", "index.js"),
+    "export const loaded = true\n",
+  )
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "sdk", "package.json"),
+    '{"name":"@opencode-ai/sdk","type":"module","exports":"./index.js"}\n',
+  )
+  await writeFile(
+    join(root, "node_modules", "@opencode-ai", "sdk", "index.js"),
     "export const loaded = true\n",
   )
   await writeFile(
@@ -48,6 +66,8 @@ async function createRuntime(root) {
   await writeFile(join(root, "VERSION"), "2.0.18\n")
   await writeFile(join(root, "opencode-observability-plugin.mjs"), "export default async () => ({})\n")
   await writeFile(join(root, "opencode-rtk-plugin.mjs"), "export default async () => ({})\n")
+  await writeFile(join(root, "opencode-observability-plugin-v1.mjs"), "export default async () => ({})\n")
+  await writeFile(join(root, "opencode-rtk-plugin-v1.mjs"), "export default async () => ({})\n")
   await mkdir(join(root, "opencode-observability-plugin"), { recursive: true })
   await mkdir(join(root, "opencode-rtk-plugin"), { recursive: true })
   await writeFile(join(root, "opencode-observability-plugin", "index.mjs"), "export default async () => ({})\n")
@@ -180,6 +200,35 @@ test("keeps recursive project scanning out of user startup and prepares it throu
       assert.equal((await lstat(join(directory, "package-lock.json"))).isSymbolicLink(), true)
       await assertToolDependencyLinks(directory, runtimeRoot)
     }
+  } finally {
+    await rm(root, { force: true, recursive: true })
+  }
+})
+
+test("keeps the 1.18.4 rollback plugin ABI and subagent depth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-1-18-4-"))
+  try {
+    const runtimeRoot = join(root, "runtime")
+    await createRuntime(runtimeRoot)
+    await writeFile(join(runtimeRoot, "VERSION"), "1.18.4\n")
+
+    const prepared = await prepareOfflineRuntime({
+      cwd: root,
+      env: {
+        HOME: join(root, "home"),
+        OPENCODE_CONFIG_CONTENT: '{"theme":"dark","plugins":[{"package":"file:///custom/plugin"}]}',
+      },
+      runtimeRoot,
+    })
+
+    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
+      theme: "dark",
+      plugin: [
+        "file:///custom/plugin",
+        `file://${join(runtimeRoot, "opencode-observability-plugin-v1.mjs")}`,
+      ],
+      subagent_depth: 2,
+    })
   } finally {
     await rm(root, { force: true, recursive: true })
   }
@@ -402,7 +451,7 @@ test("does not inject unsupported subagent depth into the 1.17 rollback runtime"
 
     assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
       theme: "dark",
-      plugins: [{ package: `file://${join(runtimeRoot, "opencode-observability-plugin")}` }],
+      plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin-v1.mjs")}`],
     })
   } finally {
     await rm(root, { force: true, recursive: true })
