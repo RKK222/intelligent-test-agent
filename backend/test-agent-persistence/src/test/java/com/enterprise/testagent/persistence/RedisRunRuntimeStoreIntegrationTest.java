@@ -227,6 +227,57 @@ class RedisRunRuntimeStoreIntegrationTest {
     }
 
     @Test
+    void cancellationTerminalWinsOverLateOpenCodeTerminalEvents() {
+        String configuredPort = System.getProperty("test.redis.port");
+        Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());
+        RedisStandaloneConfiguration configuration = new RedisStandaloneConfiguration(
+                "127.0.0.1", Integer.parseInt(configuredPort));
+        LettuceConnectionFactory connectionFactory = new LettuceConnectionFactory(configuration);
+        connectionFactory.afterPropertiesSet();
+        connectionFactory.start();
+        StringRedisTemplate redis = new StringRedisTemplate(connectionFactory);
+        redis.afterPropertiesSet();
+        redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        RedisRunRuntimeStore store = new RedisRunRuntimeStore(
+                redis, new ObjectMapper().registerModule(new JavaTimeModule()), Clock.fixed(NOW, ZoneOffset.UTC));
+        RunRuntimeManifest manifest = manifest("run_redis_cancel_late_terminal", RunStatus.RUNNING);
+        try {
+            store.initialize(manifest, input(manifest.runId()));
+            RunRuntimeAppendResult cancelled = store.appendDurable(new RunEventDraft(
+                    manifest.runId(),
+                    RunEventType.RUN_CANCELLED,
+                    "trace_cancel_late_terminal",
+                    NOW.plusSeconds(1),
+                    Map.of("status", RunStatus.CANCELLED.name())));
+            assertThat(cancelled.visible()).isTrue();
+
+            RunRuntimeAppendResult lateFailed = store.appendDurable(new RunEventDraft(
+                    manifest.runId(),
+                    RunEventType.RUN_FAILED,
+                    "trace_cancel_late_terminal",
+                    NOW.plusSeconds(2),
+                    Map.of("status", RunStatus.FAILED.name(), "message", "late abort stream close")));
+            RunRuntimeAppendResult lateSucceeded = store.appendDurable(new RunEventDraft(
+                    manifest.runId(),
+                    RunEventType.RUN_SUCCEEDED,
+                    "trace_cancel_late_terminal",
+                    NOW.plusSeconds(3),
+                    Map.of("status", RunStatus.SUCCEEDED.name())));
+
+            assertThat(lateFailed.visible()).isFalse();
+            assertThat(lateSucceeded.visible()).isFalse();
+            assertThat(store.findManifest(manifest.runId()).orElseThrow().status())
+                    .isEqualTo(RunStatus.CANCELLED);
+            assertThat(store.replayAfter(manifest.runId(), 0, 100).durableEvents())
+                    .extracting(event -> event.type())
+                    .containsExactly(RunEventType.RUN_CANCELLED);
+        } finally {
+            redis.getConnectionFactory().getConnection().serverCommands().flushDb();
+            connectionFactory.destroy();
+        }
+    }
+
+    @Test
     void capacityOverflowDeletesStreamAndRequiresSnapshotReset() {
         String configuredPort = System.getProperty("test.redis.port");
         Assumptions.assumeTrue(configuredPort != null && !configuredPort.isBlank());

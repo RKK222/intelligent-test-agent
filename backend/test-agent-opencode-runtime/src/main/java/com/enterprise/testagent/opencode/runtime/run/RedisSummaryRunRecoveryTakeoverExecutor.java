@@ -272,10 +272,12 @@ public class RedisSummaryRunRecoveryTakeoverExecutor implements RunRecoveryTakeo
                             status.name(),
                             null,
                             false));
-            eventAppender.append(sanitized, RunStorageMode.REDIS_SUMMARY, ownership.lease());
-            // Redis 已以 fencing token 原子接受终态，后续条件接管会被拒绝，DB CAS 可继续完成。
-            terminalProjection.project(
-                    manifest.runId(), status, "RECOVERY_REMOTE_ROOT", status.name(), null, false, draft.traceId());
+            boolean accepted = eventAppender.appendAccepted(sanitized, RunStorageMode.REDIS_SUMMARY, ownership.lease());
+            if (accepted) {
+                // Redis 已以 fencing token 原子接受终态，后续条件接管会被拒绝，DB CAS 可继续完成。
+                terminalProjection.project(
+                        manifest.runId(), status, "RECOVERY_REMOTE_ROOT", status.name(), null, false, draft.traceId());
+            }
             return;
         }
         RunEventDraft sanitized = persistencePolicy.sanitizeForPersistence(draft);

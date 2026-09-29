@@ -72,6 +72,11 @@ LSP 状态接口，平台只报告 `unknown` 或显式关闭时的 `disabled`。
 `TEST_AGENT_PART_PHASE=fallback` 使用独立 `session_v2/session_message` fixture，
 并通过原生 HTTP、平台历史和 session-tree 三层核对。
 
+取消路径对 V2 `abort` 的迟到事件采用终态仲裁：平台先写入 `CANCELLED`，随后到达的
+`run.failed`、`run.succeeded` 或非终态事件不能覆盖该结果；只有先发生的传输型
+`FAILED` 可以由确认的 root `SUCCEEDED` 事实纠正。Redis durable/transient Lua、legacy
+Run 投影和终态重试路径使用同一规则，避免 V2 abort 关闭 SSE 时把用户取消误报为失败。
+
 ## 验证
 
 ```bash
@@ -115,6 +120,12 @@ OpenCode `1.18.4` worker，再通过同一公共 manager 生命周期部署。�
 运行时再由 `redis` 用户读取容器内副本，以兼容测试机的 FUSE 目录权限。
 V2 后端 Compose 同时固定 `3100` 为浏览器 CORS 来源，并在发布后验证登录接口的预检响应；仅检查
 `/actuator/health/readiness` 不足以证明前端可登录。
+
+隔离 Jenkins #20（提交 `333c6ba58`）已完成 V2 worker 镜像、后端/前端构建、数据库升级、
+Compose 重建和 readiness/CORS/部署清单校验；远端平台 API 已验证进程状态、agent/model/provider/config、
+文件树/文件读取/搜索、VCS、LSP、MCP、worktree、session 历史、Run SSE 和消息持久化。
+取消验收随后发现迟到 `run.failed` 覆盖 `CANCELLED`，本次终态仲裁修复需在下一次 Jenkins
+发布中复验；本机 Docker worker 仍因无内部镜像未执行镜像 smoke。
 
 本地 `tools/dev-phase11-real-e2e.sh`、`tools/dev-runnable-loop-check.sh` 和
 `tools/verify-opencode-user-process-scenarios.sh` 共用

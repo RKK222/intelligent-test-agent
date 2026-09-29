@@ -19134,3 +19134,27 @@
 
 - 代码级验证已覆盖 V2 文件的文本/二进制响应和旧平台 projection；待提交、推送并重新部署隔离 Jenkins 栈后，用远端真实 `fs/read` 再确认 200 和内容兼容。
 - 未新增数据库/Flyway、HTTP 路径或 RunEvent 类型，未修改 `.env.local`、OpenCode 只读源码或公共进程生命周期流程；本机 Docker worker 镜像仍因缺少本地镜像未验证。
+
+## 2026-09-30 - 修复 V2 取消后的迟到终态覆盖
+
+### Why
+
+- 远端隔离栈的真实取消验收复现了：平台取消请求返回 `CANCELLED` 后，OpenCode V2 abort 关闭事件流产生的迟到 `run.failed` 又把同一 Run 改成 `FAILED`。
+- 这会直接破坏迁移方案要求的取消、SSE 终态和失败恢复语义，必须在 Redis 原子层和 legacy 投影层同时收紧。
+
+### What
+
+- Redis durable/transient Lua 终态规则改为只允许同终态重复写入，保留 `FAILED -> SUCCEEDED` 的传输纠正；`CANCELLED` 不再被任何迟到终态覆盖。
+- `RunEventAppender` 新增返回 Redis 事件是否被接受的受控入口；Run 主订阅、恢复接管和 pending ask 终态投影只在事件实际被接受时执行关系库终态投影。
+- legacy Run 终态投影增加同样的取消/成功仲裁；新增真实 Redis 集成测试覆盖取消后迟到 failed/succeeded 的丢弃。
+- 同步 `docs/deployment/opencode-v2-migration.md`，记录 V2 abort 终态仲裁和下一次隔离 Jenkins 复验要求。
+
+### How
+
+- 远端隔离栈第一次复现脚本创建临时 session、启动长 prompt、等待 `RUNNING` 后取消，SSE 顺序含 `run.cancelled` 后 `run.failed`，最终状态为 `FAILED`；脚本随后删除 session。
+- JDK 25 下执行 `mvn -pl test-agent-event,test-agent-persistence,test-agent-opencode-runtime -am -DskipTests=false -Dtest=RedisRunRuntimeStoreIntegrationTest,RunApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`：RunApplicationServiceTest 80 项通过，Redis 集成测试 11 项因未配置 `test.redis.port` 跳过；编译通过，`git diff --check` 通过。
+
+### Result
+
+- 迟到 V2 终态不会再覆盖已确认的用户取消；下一步需提交、推送并通过专用 Jenkins 隔离发布，在远端重复取消+SSE 场景确认最终 `CANCELLED`。
+- 未新增数据库/Flyway、HTTP 路径或事件 wire 类型，未修改 `.env.local`、OpenCode 只读源码和原 `release` 工作区。

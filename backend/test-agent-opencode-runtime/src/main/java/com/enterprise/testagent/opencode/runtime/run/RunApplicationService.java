@@ -4330,10 +4330,19 @@ public class RunApplicationService {
                         terminalReasonCode,
                         safeErrorMessage,
                         false);
-                runEventAppender.append(
+                boolean accepted = runEventAppender.appendAccepted(
                         runEventPersistencePolicy.sanitizeForPersistence(terminalDraft),
                         storageMode,
                         ownerLeaseIfPresent(ownership));
+                if (!accepted) {
+                    // Redis Lua 已经以更早的终态（尤其是用户 CANCELLED）赢得仲裁，
+                    // 晚到的 OpenCode V2 终态只能丢弃，不能再写关系库投影。
+                    LOGGER.info(
+                            "Ignore late OpenCode terminal event after runtime terminal arbitration, runId={}, "
+                                    + "terminalStatus={}, traceId={}",
+                            originalRun.runId().value(), terminalStatus, eventDraft.traceId());
+                    return;
+                }
                 // fenced terminal append 已把 manifest 原子推进终态，后续接管会被拒绝，可安全执行一次 DB CAS。
                 runTerminalProjectionService.project(
                         originalRun.runId(),
@@ -4350,6 +4359,13 @@ public class RunApplicationService {
             }
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
+            if (!acceptsRemoteTerminalFact(current.status(), terminalStatus)) {
+                LOGGER.info(
+                        "Ignore late OpenCode terminal event after legacy terminal arbitration, runId={}, "
+                                + "currentStatus={}, terminalStatus={}, traceId={}",
+                        originalRun.runId().value(), current.status(), terminalStatus, eventDraft.traceId());
+                return;
+            }
             Run terminal = current.applyTerminalFact(terminalStatus, eventDraft.occurredAt());
             Run saved = runRepository.save(terminal);
             runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(eventDraft), storageMode);
@@ -4374,6 +4390,17 @@ public class RunApplicationService {
                 runEventPersistencePolicy.sanitizeForPersistence(eventDraft),
                 storageMode,
                 ownerLeaseIfPresent(ownership));
+    }
+
+    /**
+     * 远端 root 终态允许纠正 transport error 产生的 FAILED，但不能推翻用户已确认的取消或成功。
+     */
+    private boolean acceptsRemoteTerminalFact(RunStatus currentStatus, RunStatus nextStatus) {
+        if (currentStatus == null || !currentStatus.isTerminal()) {
+            return true;
+        }
+        return currentStatus == nextStatus
+                || (currentStatus == RunStatus.FAILED && nextStatus == RunStatus.SUCCEEDED);
     }
 
     /**

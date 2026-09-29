@@ -275,9 +275,12 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local nextStatus = ARGV[16]
             if nextStatus ~= '' then
-              local currentTerminal = currentStatus == 'SUCCEEDED' or currentStatus == 'FAILED' or currentStatus == 'CANCELLED'
               local nextTerminal = nextStatus == 'SUCCEEDED' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'
-              local statusAllowed = currentStatus == nextStatus or (currentTerminal and nextTerminal)
+              -- 终态只允许重复写入；失败终态可被随后确认的 root success 纠正。
+              -- CANCELLED 一旦落地必须赢过 OpenCode 迟到的 failed/succeeded 事件，
+              -- 否则用户取消会在 V2 abort 的异步事件到达后被错误改写。
+              local terminalCorrection = currentStatus == 'FAILED' and nextStatus == 'SUCCEEDED'
+              local statusAllowed = currentStatus == nextStatus or terminalCorrection
                 or (currentStatus == 'PENDING' and (nextStatus == 'RUNNING' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'))
                 or (currentStatus == 'RUNNING' and (nextStatus == 'CANCELLING' or nextTerminal))
                 or (currentStatus == 'CANCELLING' and nextTerminal)
@@ -625,9 +628,10 @@ public class RedisRunRuntimeStore implements RunRuntimeStore {
             local currentStatus = redis.call('HGET', KEYS[1], 'status') or ''
             local nextStatus = ARGV[16]
             if nextStatus ~= '' then
-              local currentTerminal = currentStatus == 'SUCCEEDED' or currentStatus == 'FAILED' or currentStatus == 'CANCELLED'
               local nextTerminal = nextStatus == 'SUCCEEDED' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'
-              local statusAllowed = currentStatus == nextStatus or (currentTerminal and nextTerminal)
+              -- 与 durable append 保持相同的终态仲裁，防止 transient V2 事件回退取消结果。
+              local terminalCorrection = currentStatus == 'FAILED' and nextStatus == 'SUCCEEDED'
+              local statusAllowed = currentStatus == nextStatus or terminalCorrection
                 or (currentStatus == 'PENDING' and (nextStatus == 'RUNNING' or nextStatus == 'FAILED' or nextStatus == 'CANCELLED'))
                 or (currentStatus == 'RUNNING' and (nextStatus == 'CANCELLING' or nextTerminal))
                 or (currentStatus == 'CANCELLING' and nextTerminal)

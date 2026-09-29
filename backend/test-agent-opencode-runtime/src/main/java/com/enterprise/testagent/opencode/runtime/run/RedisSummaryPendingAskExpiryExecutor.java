@@ -117,7 +117,7 @@ public class RedisSummaryPendingAskExpiryExecutor implements RunPendingAskExpiry
             RunEventType terminalEventType = terminalStatus == RunStatus.CANCELLED
                     ? RunEventType.RUN_CANCELLED
                     : RunEventType.RUN_FAILED;
-            eventAppender.append(new RunEventDraft(
+            boolean accepted = eventAppender.appendAccepted(new RunEventDraft(
                     manifest.runId(),
                     terminalEventType,
                     traceId,
@@ -132,15 +132,17 @@ public class RedisSummaryPendingAskExpiryExecutor implements RunPendingAskExpiry
                             remoteStopConfirmed)),
                     RunStorageMode.REDIS_SUMMARY,
                     ownership.lease());
-            // fenced terminal append 已原子封闭接管窗口，关系型 CAS 失败则进入安全重试队列。
-            terminalProjection.project(
-                    manifest.runId(),
-                    terminalStatus,
-                    terminalSource,
-                    terminalReasonCode,
-                    safeMessage,
-                    remoteStopConfirmed,
-                    traceId);
+            if (accepted) {
+                // fenced terminal append 已原子封闭接管窗口，关系型 CAS 失败则进入安全重试队列。
+                terminalProjection.project(
+                        manifest.runId(),
+                        terminalStatus,
+                        terminalSource,
+                        terminalReasonCode,
+                        safeMessage,
+                        remoteStopConfirmed,
+                        traceId);
+            }
             return true;
         } finally {
             try {

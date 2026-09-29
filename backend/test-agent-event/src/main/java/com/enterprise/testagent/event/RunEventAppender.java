@@ -92,6 +92,36 @@ public class RunEventAppender {
     }
 
     /**
+     * 追加 durable 事件并返回运行数据面是否接受该事件。
+     *
+     * <p>Redis 终态之后的晚到事件会由 Lua 原子丢弃，但仍返回一个兼容用的事件对象；
+     * 终态投影调用方必须使用这个结果，避免把被丢弃的远端失败再次投影到 PostgreSQL。
+     */
+    public boolean appendAccepted(
+            RunEventDraft draft,
+            RunStorageMode storageMode,
+            RunOwnerLease ownerLease) {
+        Objects.requireNonNull(draft, "draft must not be null");
+        Objects.requireNonNull(storageMode, "storageMode must not be null");
+        if (storageMode == RunStorageMode.REDIS_SUMMARY) {
+            var result = ownerLease == null
+                    ? requireRuntimeStore().appendDurable(draft)
+                    : requireRuntimeStore().appendDurable(draft, ownerLease);
+            RunEvent event = result.event();
+            if (result.visible() && liveBus != null) {
+                liveBus.publishDurable(event);
+            }
+            return result.visible();
+        }
+        RunEvent event = runEventRepository.append(draft);
+        appendLegacyHotTail(draft);
+        if (liveBus != null) {
+            liveBus.publishDurable(event);
+        }
+        return true;
+    }
+
+    /**
      * 发布 transient 事件。新模式先更新 Redis 物化快照再进 live bus；legacy 无 manifest 时保持原行为。
      */
     public boolean publishTransient(RunEventDraft draft) {
