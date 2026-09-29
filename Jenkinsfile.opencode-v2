@@ -46,7 +46,6 @@ pipeline {
         WORKER_IMAGE_REPOSITORY = 'test-agent-opencode-worker-v2'
         WORKER_PORT_START = '4296'
         WORKER_PORT_END = '4305'
-        OPENCODE_ABI = 'V2'
         VERIFY_NAMESPACE = 'test_agent_v2_verify'
         ISOLATED_ACCEPTANCE = 'true'
         ISOLATED_REDIS_PORT = '26380'
@@ -121,7 +120,9 @@ pipeline {
                 expression { params.ACTION == 'ROLLBACK' && params.ROLLBACK_ABI == 'V1' }
             }
             steps {
-                sh '"$RELEASE_SCRIPT" build-worker'
+                withEnv(['OPENCODE_ABI=V1']) {
+                    sh '"$RELEASE_SCRIPT" build-worker'
+                }
             }
         }
 
@@ -139,7 +140,9 @@ pipeline {
                 expression { params.ACTION == 'ROLLBACK' && params.ROLLBACK_ABI == 'V1' }
             }
             steps {
-                sh '"$RELEASE_SCRIPT" prepare-rollback "$SOURCE_RELEASE_TAG" "$RELEASE_TAG" "$RELEASE_DIR"'
+                withEnv(['OPENCODE_ABI=V1']) {
+                    sh '"$RELEASE_SCRIPT" prepare-rollback "$SOURCE_RELEASE_TAG" "$RELEASE_TAG" "$RELEASE_DIR"'
+                }
             }
         }
 

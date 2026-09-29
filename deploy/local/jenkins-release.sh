@@ -925,7 +925,10 @@ prepare_rollback_release() {
 }
 
 validate_manifest() {
-    local release_dir=$1 tag=$2 manifest=${release_dir}/manifest.json
+    local release_dir=$1 tag=$2
+    # Bash 会先展开同一条 local 命令的所有右值；manifest 若与 release_dir 同行声明，
+    # 在嵌套回滚调用中会意外读取调用方的目标目录，而不是当前参数对应的目录。
+    local manifest="${release_dir}/manifest.json"
     local values schema_version commit expected_jar actual_jar expected_nginx actual_nginx
     local expected_stack actual_stack expected_worker_stack actual_worker_stack worker_image worker_image_id actual_worker_image_id
     local runtime_abi runtime_version
