@@ -241,7 +241,7 @@ verify_scenario() {
   grant_response="$(api POST "/api/internal/platform/system-management/support-access/grants" "${token}" '{"incidentId":"sai_codex_opencode_scenario_123456","reason":"OpenCode 用户进程与工作区路由验证","durationMinutes":5,"readOnlyAcknowledged":true}')"
   grant_token="$(jq -r '.data.grantToken' <<<"${grant_response}")"
   route_linux="$(api POST "/api/internal/platform/system-management/support-access/targets/${USER_PREFIX}${suffix}/workspaces/${WORKSPACE_PREFIX}${suffix}/file-ws-route" "${token}" "" "X-Support-Access-Grant: ${grant_token}" | jq -r '.data.linuxServerId')"
-  curl -fsS "${base_url%/}/api/info" >/dev/null
+  OPENCODE_BASE_URL="${base_url}" node "${ROOT_DIR}/tools/probe-opencode-v2-info.mjs" >/dev/null
   echo "OK ${label}: process=${base_url} routeLinuxServer=${route_linux} runtime=${runtime_health:-ok}"
   # 场景之间释放有限的本地 manager 端口，避免测试夹具自身耗尽容量。
   cleanup_data
@@ -271,6 +271,7 @@ verify_stale_binding_rejected() {
 require_command curl
 require_command jq
 require_command lsof
+require_command node
 require_command psql
 
 load_env_file "${ENV_FILE}"
