@@ -19086,4 +19086,26 @@
 ### Result
 
 - V1 回滚现在有独立不可变目录、镜像、manifest 和运行版本门禁，失败时不会伪装成 V2 回滚成功。
-- 当前尚待：推送本次改动后执行专用 Jenkins 的 V2 DEPLOY、`ROLLBACK_ABI=V1` 回滚和 V2 恢复；浏览器首次登录引导层仍阻塞真实 prompt/Run/SSE E2E。
+
+### 2026-09-30 - 完成 OpenCode V2、V1 回滚和 V2 恢复远端验收
+
+### Why
+
+- 需要把专用 Jenkins 隔离栈上的 V2 默认部署、独立 V1 ABI 回滚和 V2 恢复串成一次可复核的验收闭环；首次尝试还暴露了 Jenkins Declarative environment 覆盖 ABI 和 Bash 同行 `local` 展开目录的问题。
+
+### What
+
+- 移除 Jenkinsfile 中固定的 `OPENCODE_ABI=V2` 环境覆盖，V1 build/prepare 阶段显式使用 `withEnv(['OPENCODE_ABI=V1'])`。
+- 修正 `validate_manifest` 的 Bash 局部变量初始化顺序，避免回滚校验误读目标目录 manifest。
+
+### How
+
+- Jenkins #15（提交 `203f62c9`）V2 DEPLOY 成功，worker smoke 为 `opencode v2.0.18`，隔离数据库升级、服务启动和 `verify-deployment` 通过。
+- Jenkins #16 先验证出上述两个缺陷；修复提交 `49d417735` 后，#17 `ROLLBACK_ABI=V1` 成功生成 `rollback-v1-17-203f62c9`，worker smoke 明确为 `1.18.4`，V1 manager health fallback、manifest、部署和 `verify-deployment` 全部通过。
+- Jenkins #18 `ROLLBACK_ABI=V2` 成功恢复 `release-15-203f62c9`，隔离栈最终保持 V2。提交前重新回顾全部 `.agents/session-log*.md`，本次只改本日志。
+
+### Result
+
+- V2 默认发布、V1 独立 ABI 回滚和 V2 恢复均有远端 Jenkins 成功证据，回滚不再是重部署 V2 标签。
+- 未新增数据库表或 Flyway migration；平台 HTTP/RunEvent wire、业务 DTO、进程公共启动/停止/状态流程和安全边界保持不变；未修改 `.env.local` 或 OpenCode 只读源码。
+- Chrome 首次登录引导层仍阻塞真实 prompt/Run/SSE 浏览器 E2E；本机 Docker worker smoke 仍因缺少本地镜像未验证，远端镜像 smoke 已覆盖 V1/V2。
