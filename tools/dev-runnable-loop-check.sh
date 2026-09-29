@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
 usage() {
   cat <<'USAGE'
 Usage: tools/dev-runnable-loop-check.sh [--api] [--help]
@@ -17,6 +19,7 @@ Environment:
   TEST_AGENT_FRONTEND_URL  default: http://127.0.0.1:3000
   TEST_AGENT_BASE_URL      default: http://127.0.0.1:8080
   OPENCODE_BASE_URL        default: http://127.0.0.1:4096
+  TEST_AGENT_OPENCODE_SERVER_PASSWORD  optional V2 Basic auth password
   TEST_AGENT_API_TOKEN     optional Bearer token for /api probes
 
 Options:
@@ -53,14 +56,8 @@ echo "OK ${frontend_url}"
 curl -fsS --max-time 5 "${backend_url}/actuator/health" >/dev/null
 echo "OK ${backend_url}/actuator/health"
 
-if curl -fsS --max-time 5 "${opencode_url}/doc" >/dev/null; then
-  echo "OK ${opencode_url}/doc"
-elif curl -fsS --max-time 5 "${opencode_url}/health" >/dev/null; then
-  echo "OK ${opencode_url}/health"
-else
-  echo "opencode server is not reachable at ${opencode_url}/doc or /health" >&2
-  exit 1
-fi
+OPENCODE_BASE_URL="${opencode_url}" node "${ROOT_DIR}/tools/probe-opencode-v2-info.mjs"
+echo "OK ${opencode_url}/api/info"
 
 if [[ "${with_api}" == "true" ]]; then
   if [[ -n "${TEST_AGENT_API_TOKEN:-}" ]]; then

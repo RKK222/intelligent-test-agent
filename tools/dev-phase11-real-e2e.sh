@@ -134,7 +134,7 @@ backend_ready() {
 }
 
 opencode_ready() {
-  http_ok "${opencode_url}/doc" || http_ok "${opencode_url}/health"
+  OPENCODE_BASE_URL="${opencode_url}" node "${ROOT_DIR}/tools/probe-opencode-v2-info.mjs" >/dev/null 2>&1
 }
 
 wait_until() {
@@ -209,6 +209,7 @@ start_backend_if_needed() {
 
 require_command curl
 require_command corepack
+require_command node
 
 mkdir -p "${LOG_DIR}"
 echo "Phase 11 real E2E log directory: ${LOG_DIR}"

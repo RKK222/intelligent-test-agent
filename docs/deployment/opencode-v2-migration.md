@@ -83,3 +83,8 @@ command、compact、interrupt、diff 和 `/api/event` smoke；V1 发布包继续
 [`deploy/local/README.md`](../../deploy/local/README.md)。远端验收必须以 Jenkins
 最终 `SUCCESS`、实际 URL、原生 V2 smoke 和平台 RunEvent/历史对照为准，
 仅本地测试通过不能视为部署完成。
+
+本地 `tools/dev-phase11-real-e2e.sh` 和 `tools/dev-runnable-loop-check.sh` 共用
+OpenCode V2 `/api/info` 就绪探针；
+启用 Basic auth 时从 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`（或
+`OPENCODE_PASSWORD`）读取凭据，不在命令行或日志中输出密码。
