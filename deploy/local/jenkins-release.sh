@@ -980,6 +980,7 @@ verify_deployment() {
     done
     [[ "${backend_ready}" == true ]] || {
         echo "Backend did not become ready within the deployment window." >&2
+        docker logs --tail 300 "${BACKEND_CONTAINER_NAME}" >&2 || true
         return 1
     }
     for attempt in $(seq 1 30); do

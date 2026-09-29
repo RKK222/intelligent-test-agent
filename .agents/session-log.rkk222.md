@@ -18966,9 +18966,12 @@
   （Compose 项目 `mockcenter-isolated`），因此按隔离边界拒绝清理。
 - Jenkins #7 使用新生成的 `16381` manifest，再次确认现场 `mockcenter-isolated-redis-3-1`
   （同一 Compose 项目）占用该连续端口，V2 栈没有误删现场 MockCenter。
+- Jenkins #8 使用 `26380` 后已成功创建并启动 V2 Redis、前端和后端容器，端口冲突解除；后端 readiness
+  在 4 分钟窗口内仍未通过，现有门禁只输出摘要，需增加后端容器尾日志后再复现。
 
 ### Result
 
 - 迁移代码和构建链路仍保持可复现；V2 正式发布暂未完成，真实模型 Run、平台 SSE、回滚和完整账号 E2E 仍未验收。
 - 将 V2 专用 Redis 宿主端口从 MockCenter 连续端口段调整为 `26380`，同步 Jenkins、bootstrap、发布契约和部署文档；未修改 OpenCode 只读源码、`.env.local` 或 release 栈。
 - 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；V2 正式发布仍需用 `26380` 新 manifest 重新验收。
+- 同步增强 readiness 失败时的 Jenkins 诊断，输出后端容器最近 300 行日志，不改变运行逻辑或敏感字段脱敏链路。
