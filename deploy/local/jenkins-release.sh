@@ -1055,6 +1055,15 @@ deploy_release() {
     if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
         sudo "${HOST_CONTROL}" stop-legacy
     fi
+    if [[ "${ISOLATED_ACCEPTANCE}" == true ]]; then
+        # 专用任务的上一次失败可能留下已创建但未启动的 Compose 容器；Docker 仍会为其保留
+        # 16380 端口，下一次 up 会在绑定端口前失败。只清理本任务固定项目和容器，保留 Redis 卷。
+        docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
+            -f "${release_dir}/stack.json" down --remove-orphans --timeout 30 >/dev/null 2>&1 || true
+        for stale_container in "${BACKEND_CONTAINER_NAME}" "${FRONTEND_CONTAINER_NAME}" "${ISOLATED_REDIS_CONTAINER_NAME}"; do
+            docker rm --force "${stale_container}" >/dev/null 2>&1 || true
+        done
+    fi
     docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
         -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans
     verify_deployment "${tag}"

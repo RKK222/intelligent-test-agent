@@ -128,6 +128,8 @@ grep -Fq "RUNTIME_DATA_SOURCE = '/data2/deploy/intelligent-test-agent/v2-accepta
 grep -Fq 'jenkins-opencode-v2-bootstrap.sh' "${v2_jenkinsfile}"
 grep -Fq 'cleanup-worker-image-guard "$RELEASE_TAG"' "${v2_jenkinsfile}"
 grep -Fq '"${ISOLATED_ACCEPTANCE}" != true' "${release_script}"
+grep -Fq 'down --remove-orphans --timeout 30' "${release_script}"
+grep -Fq 'docker rm --force "${stale_container}"' "${release_script}"
 grep -Fq 'Isolated V2 acceptance must use its cloned database.' "${release_script}"
 grep -Fq 'TEST_AGENT_REDIS_PASSWORD=' "${release_script}"
 grep -Fq '[[ "${JOB_NAME:-}" == "intelligent-test-agent-opencode-v2" ]]' "${v2_bootstrap}"

@@ -18935,6 +18935,7 @@
 - 专用 Jenkins #1 已在隔离数据库及目录初始化后进入构建，Linux Java 编译发现 4 个 V1→V2 模型的 Git 文件名仍为 `MCP...`，而生成类已改名 `Mcp...`；macOS 大小写不敏感文件系统隐藏了该差异。通过 Git 大小写重命名同步两份生成源码的索引，并在 SDK 生成和 Jenkins 契约校验时加入公共类型、真实路径与 Git 索引检查；本地校验和 SDK Maven 测试通过。
 - Jenkins #2 在目标 x86 主机完成后端、前端与 Worker 镜像构建，Worker API/离线依赖等检查运行后只因停止时返回 `130` 被旧断言拒绝。确认 V2 Bun 收到 `SIGTERM` 后会关闭 watcher 再以 `130` 退出；启动器仅在已转发信号时将其归一化为 `0`，保留镜像验证的严格停止断言。新增信号回归后 launcher 11 项测试通过。
 - Jenkins #3 在目标 x86 主机通过后端 26 模块、前端 typecheck/build，以及 OpenCode 2.0.18 Worker 镜像和离线依赖验证；随后制备不可变发布包耗时约 9 分钟，Docker 报 `No such image`，未进入数据库克隆升级或发布。为避免镜像在长时间制备期间被宿主清理，专用 V2 构建在镜像验证前启动无网络、无挂载、无端口的短期保留容器，流水线 `post` 按不可变标签清理；日常 release 不启用此路径。同步修正旧原生 share API 在 V2 下返回 `410 API_GONE` 的文档。
+- Jenkins #4 验证了镜像保留修复：Worker 镜像、不可变发布包、镜像身份清单和克隆数据库 Flyway readiness 均通过；正式 Compose 启动时发现上次失败留下的专用 `test-agent-v2-redis` 容器仍占用 `127.0.0.1:16380`，任务失败且未影响 release 3000 栈。专用部署在重新 `up` 前增加固定项目 `down --remove-orphans` 和三个固定容器清理，保留 Redis 数据卷，避免失败重试被残留端口阻塞。
 - 补齐两个本地验收入口遗漏的 V1 `/doc`/`/health` 就绪探针，并让用户进程场景脚本复用同一个 V2 `/api/info` 检查；密码从环境构造 Basic auth，不出现在进程参数或日志。这些脚本改动发生在 Jenkins #4 检出后，仅影响本地验收入口。
 - 共用探针通过 Node 语法和有认证成功/无认证拒绝的本地 HTTP fixture；三个 shell 入口通过 `bash -n`，`tools/verify-dev-scripts.sh`、文档校验与 `git diff --check` 通过。
 - 提交前回顾全部 `.agents/session-log*.md` 的近期记录，未发现本次暂存范围覆盖其他提交者成果或残留合并标记。
