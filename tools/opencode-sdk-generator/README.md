@@ -36,6 +36,7 @@ OPENCODE_BASE_URL=http://127.0.0.1:4096 tools/generate-opencode-java-sdk.sh
 
 ```bash
 tools/opencode-sdk-generator/gradlew -p tools/opencode-sdk-generator clean build -x test --no-daemon
+python3 tools/verify-opencode-generated-sdk-case.py
 ```
 
 ## Rules

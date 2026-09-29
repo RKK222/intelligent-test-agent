@@ -18932,8 +18932,9 @@
 - 从冻结 V2 OpenAPI 执行 `tools/generate-opencode-java-sdk.sh`，未手改 generated SDK；本地原生 V2 服务器已验证健康、目录、文件、VCS、session/shell/fork/revert/compact/interrupt 等路由。
 - Java 相关 reactor 测试 1007 项通过；前端全量测试、类型检查与构建在本会话前序验证通过，本轮 backend-api 定向 129 项通过；launcher、Observability、RTK、工具依赖、开发脚本、Jenkins 契约与文档检查通过。隔离应用/Worker Compose 模板在本地解析通过。
 - Apple Silicon 上的 linux/amd64 Worker 跨架构镜像构建在官方 Bun 二进制版本检查时因 QEMU 缺少 AVX 崩溃；这不是目标 x86 服务器的运行结论，仍需 Jenkins 原生构建、镜像检验和全链路验收。
+- 专用 Jenkins #1 已在隔离数据库及目录初始化后进入构建，Linux Java 编译发现 4 个 V1→V2 模型的 Git 文件名仍为 `MCP...`，而生成类已改名 `Mcp...`；macOS 大小写不敏感文件系统隐藏了该差异。通过 Git 大小写重命名同步两份生成源码的索引，并在 SDK 生成和 Jenkins 契约校验时加入公共类型、真实路径与 Git 索引检查；本地校验和 SDK Maven 测试通过。
 - 提交前回顾全部 `.agents/session-log*.md` 的近期记录，未发现本次暂存范围覆盖其他提交者成果或残留合并标记。
 
 ### Result
 
-- 本分支本地代码与构建检查通过；共享测试机专用任务、真实模型 Run、V1 回滚包与原生 x86 Worker 尚未验收，不能据此宣布迁移完成。涉及 OpenCode 内部 API/事件、部署/运行配置及兼容性；无新增数据库 migration 或独立部署节点，不改变平台公开 RunEvent wire format。
+- 本分支本地代码与构建检查通过；Jenkins #1 因上述大小写差异失败，修复后仍需重新发布验证。真实模型 Run、V1 回滚包与原生 x86 Worker 尚未验收，不能据此宣布迁移完成。涉及 OpenCode 内部 API/事件、部署/运行配置及兼容性；无新增数据库 migration 或独立部署节点，不改变平台公开 RunEvent wire format。

@@ -103,6 +103,7 @@ OPENCODE_BASE_URL=http://127.0.0.1:4096 tools/generate-opencode-java-sdk.sh
 
 \`\`\`bash
 tools/opencode-sdk-generator/gradlew -p tools/opencode-sdk-generator clean build -x test --no-daemon
+python3 tools/verify-opencode-generated-sdk-case.py
 \`\`\`
 
 ## Rules
@@ -119,6 +120,7 @@ require_command curl
 require_command jq
 require_command perl
 require_command rsync
+require_command python3
 
 if command -v openapi-generator-cli >/dev/null 2>&1; then
   OPENAPI_GENERATOR_COMMAND=(openapi-generator-cli)
@@ -222,5 +224,6 @@ echo "Building generated SDK"
 echo "Synchronizing generated Java sources to backend module"
 mkdir -p "${BACKEND_SDK_JAVA_DIR}"
 rsync -a --delete "${SDK_DIR}/src/main/java/" "${BACKEND_SDK_JAVA_DIR}/"
+python3 "${REPO_ROOT}/tools/verify-opencode-generated-sdk-case.py"
 
 echo "opencode Java SDK generation and build completed."

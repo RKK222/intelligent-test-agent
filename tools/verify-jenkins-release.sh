@@ -10,6 +10,7 @@ v2_bootstrap="${root_dir}/deploy/local/jenkins-opencode-v2-bootstrap.sh"
 sudoers_file="${root_dir}/deploy/local/jenkins-sudoers"
 
 bash -n "${release_script}" "${host_control}" "${v2_bootstrap}"
+python3 "${root_dir}/tools/verify-opencode-generated-sdk-case.py"
 "${release_script}" validate-tag release-1-deadbeef
 if "${release_script}" validate-tag release-0-deadbeef >/dev/null 2>&1; then
     echo 'validate-tag accepted build number zero.' >&2
