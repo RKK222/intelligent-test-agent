@@ -101,6 +101,7 @@ function sessionIdOf(input, output) {
   return input?.sessionID
     ?? input?.sessionId
     ?? input?.message?.sessionID
+    ?? input?.event?.data?.sessionID
     ?? input?.event?.properties?.sessionID
     ?? input?.event?.properties?.sessionId
     ?? input?.event?.properties?.info?.id
@@ -113,7 +114,7 @@ function sessionIdOf(input, output) {
 }
 
 function correlationOf(input, output) {
-  const source = input?.event?.properties ?? input ?? {}
+  const source = input?.event?.data ?? input?.event?.properties ?? input ?? {}
   // OpenCode 1.18.4 的 session.created 把父 Session 放在 properties.info.parentID，
   // 而 sessionID 仍位于 properties 顶层；两种结构都要兼容，才能让整棵 Agent 树共用 Trace。
   const sessionInfo = source.info ?? source.session ?? {}
@@ -123,16 +124,21 @@ function correlationOf(input, output) {
   return {
     runId: source.runID ?? source.runId ?? output?.runID ?? output?.runId ?? null,
     turnId: source.turnID ?? source.turnId ?? output?.turnID ?? output?.turnId ?? null,
-    stepId: source.stepID ?? source.stepId ?? (partIsStep ? part.id : null) ?? output?.stepID ?? output?.stepId ?? null,
+    stepId: source.stepID ?? source.stepId ?? (partIsStep ? part.id : null)
+      ?? (eventType.startsWith("session.step.") ? source.assistantMessageID : null)
+      ?? output?.stepID ?? output?.stepId ?? null,
     messageId: source.messageID
       ?? source.messageId
       ?? source.message?.id
+      ?? source.assistantMessageID
       ?? part.messageID
       ?? (eventType.startsWith("message.") ? sessionInfo.id : null)
       ?? output?.messageID
       ?? output?.messageId
       ?? null,
-    callId: source.callID ?? source.callId ?? part.callID ?? part.callId ?? output?.callID ?? output?.callId ?? null,
+    callId: source.callID ?? source.callId ?? part.callID ?? part.callId
+      ?? (eventType.startsWith("session.tool.") ? source.id : null)
+      ?? output?.callID ?? output?.callId ?? null,
     parentId: source.parentID
       ?? source.parentId
       ?? source.parentSessionID
@@ -146,7 +152,7 @@ function correlationOf(input, output) {
 function parentSessionIdOf(input) {
   const event = input?.event
   if (event?.type !== "session.created" && event?.type !== "session.updated") return null
-  const properties = event.properties ?? {}
+  const properties = event.data ?? event.properties ?? {}
   const sessionInfo = properties.info ?? properties.session ?? {}
   return properties.parentSessionID
     ?? properties.parentSessionId
@@ -191,7 +197,7 @@ function fragmentedPayloadSummary(payload, fragmentGroupId, fragmentCount, origi
   return summary
 }
 
-/** 创建可注入 OpenCode 1.18.4 的同一份插件实现；测试可传入 fetch/clock 调度器而不访问网络。 */
+/** 创建可注入的采集器；测试可传入 fetch/clock 调度器而不访问网络。 */
 export function createObservabilityPlugin(options = {}) {
   const env = options.env ?? process.env
   const endpoint = observabilityEndpoint(env.TEST_AGENT_OBSERVABILITY_BASE_URL)
@@ -213,12 +219,14 @@ export function createObservabilityPlugin(options = {}) {
   const traceIdsBySession = new Map()
   const traceDroppedCounts = new Map()
   const toolCalls = new Map()
+  const terminalToolCalls = new Set()
   const parentSessionBySession = new Map()
   const turnSequenceBySession = new Map()
   const currentTurnBySession = new Map()
   const currentStepByMessage = new Map()
   const currentStepBySession = new Map()
   const sessionStats = new Map()
+  const sessionMetricsRecorded = new Set()
   let queuedBytes = 0
   let globalSequence = 0
   let droppedCount = 0
@@ -285,6 +293,12 @@ export function createObservabilityPlugin(options = {}) {
       decodeTokens: stats.decodeTokens,
       cost: stats.cost,
     }
+  }
+
+  function recordSessionMetrics(input, sessionId) {
+    if (sessionMetricsRecorded.has(sessionId)) return
+    sessionMetricsRecorded.add(sessionId)
+    enqueue("SESSION_METRICS", input, null, sessionMetricsPayload(sessionId), { sessionId })
   }
 
   function envelope(raw, type, sequence, sessionSequence) {
@@ -503,6 +517,12 @@ export function createObservabilityPlugin(options = {}) {
 
   function toolAfter(input, output) {
     const callId = input?.callID ?? input?.callId
+    // V2 的 tool.failed 事件与 execute.after hook 可能同时到达；同一调用只归档一次终态。
+    if (callId && terminalToolCalls.has(callId)) return
+    if (callId) {
+      terminalToolCalls.add(callId)
+      if (terminalToolCalls.size > 4096) terminalToolCalls.delete(terminalToolCalls.values().next().value)
+    }
     const before = callId ? toolCalls.get(callId) : null
     if (callId) toolCalls.delete(callId)
     const tool = before?.tool ?? input?.tool ?? "unknown"
@@ -600,7 +620,7 @@ export function createObservabilityPlugin(options = {}) {
 
   function onEvent(input) {
     const event = input?.event
-    const properties = event?.properties ?? {}
+    const properties = event?.data ?? event?.properties ?? {}
     const part = properties.part
     const sessionId = properties.sessionID ?? part?.sessionID
     const metricBoundary = event?.type === "message.part.delta"
@@ -612,6 +632,60 @@ export function createObservabilityPlugin(options = {}) {
 
     if (event?.type === "session.created" || event?.type === "session.updated") {
       bindParentTrace(sessionId, parentSessionIdOf(input))
+    }
+    if (event?.type === "session.execution.started" && sessionId) sessionMetricsRecorded.delete(sessionId)
+    // V2 的 Step/Tool 是独立事件，不再投影为 message.part.updated；直接使用其真实时间和身份。
+    if (event?.data && event?.type === "session.step.started" && sessionId) {
+      const step = {
+        stepId: event.id ?? properties.assistantMessageID,
+        messageId: properties.assistantMessageID,
+        sessionId,
+        startedAtMs: Number.isFinite(properties.started) ? properties.started : event.created,
+        firstTokenAtMs: null,
+        responseAtMs: null,
+        turnId: currentTurnBySession.get(sessionId) ?? null,
+      }
+      currentStepByMessage.set(step.messageId, step)
+      currentStepBySession.set(sessionId, step)
+    }
+    if (event?.data && (event?.type === "session.text.delta" || event?.type === "session.reasoning.delta")
+        && typeof properties.delta === "string" && properties.delta.length > 0) {
+      const step = currentStepByMessage.get(properties.assistantMessageID)
+      if (step && step.firstTokenAtMs === null) step.firstTokenAtMs = event.created
+    }
+    if (event?.data && event?.type === "session.step.streamed") {
+      const step = currentStepByMessage.get(properties.assistantMessageID)
+      if (step) step.responseAtMs = event.created
+    }
+    if (event?.data && (event?.type === "session.step.ended" || event?.type === "session.step.failed")) {
+      const step = currentStepByMessage.get(properties.assistantMessageID)
+      if (step) {
+        step.cost = properties.cost
+        step.finishReason = properties.finish
+        finalizeStep(input, sessionId, step,
+          event.type === "session.step.failed" ? "INTERRUPTED" : "COMPLETED",
+          event.type === "session.step.failed" ? null : (step.responseAtMs ?? event.created),
+          event.type === "session.step.failed" ? {} : (properties.tokens ?? {}))
+      }
+    }
+    if (event?.data && (event?.type === "session.tool.success" || event?.type === "session.tool.failed")
+        && toolCalls.has(properties.id)) {
+      const before = toolCalls.get(properties.id)
+      toolAfter({
+        tool: before.tool,
+        sessionID: sessionId,
+        messageID: properties.assistantMessageID,
+        callID: properties.id,
+        args: before.args,
+      }, event.type === "session.tool.failed"
+        ? { error: properties.error, output: properties.content ?? null, metadata: properties.metadata ?? null }
+        : { output: properties.content, metadata: properties.metadata ?? null })
+    }
+    if (event?.data && sessionId && (event?.type === "session.execution.succeeded"
+        || event?.type === "session.execution.failed" || event?.type === "session.execution.interrupted")) {
+      const unfinished = currentStepBySession.get(sessionId)
+      if (unfinished) finalizeStep(input, sessionId, unfinished, "INTERRUPTED", null, {})
+      recordSessionMetrics(input, sessionId)
     }
     if (event?.type === "message.part.updated" && part?.type === "step-start" && sessionId) {
       const step = {
@@ -692,7 +766,7 @@ export function createObservabilityPlugin(options = {}) {
       if (unfinished) finalizeStep(input, sessionId, unfinished, "INTERRUPTED", null, {})
     }
     if ((event?.type === "session.idle" || event?.type === "session.deleted") && sessionId) {
-      enqueue("SESSION_METRICS", input, null, sessionMetricsPayload(sessionId), { sessionId })
+      recordSessionMetrics(input, sessionId)
     }
     if (event?.type === "session.deleted" && sessionId) {
       // 删除后不再需要累积投影；延后清理，确保本轮已入队事件先取得连续 Session 序号和根 Trace。
@@ -702,12 +776,14 @@ export function createObservabilityPlugin(options = {}) {
         turnSequenceBySession.delete(sessionId)
         currentStepBySession.delete(sessionId)
         parentSessionBySession.delete(sessionId)
+        sessionMetricsRecorded.delete(sessionId)
       })
     }
   }
 
   function chatMessage(input, output) {
     const sessionId = sessionIdOf(input, output)
+    sessionMetricsRecorded.delete(sessionId)
     const turn = (turnSequenceBySession.get(sessionId) ?? 0) + 1
     turnSequenceBySession.set(sessionId, turn)
     const messageId = input?.messageID ?? output?.message?.id ?? output?.id ?? null
@@ -719,9 +795,56 @@ export function createObservabilityPlugin(options = {}) {
       turn,
       // OpenCode 1.18.4 chat.message 的公开 input.agent 是本轮 Agent 权威名称。
       agentName: input?.agent ?? null,
+      admission: input?.admission ?? null,
       input,
       message: output?.message ?? output,
     }, { correlation: { turnId, messageId } })
+  }
+
+  /** V2 prompt 在 durable admission 前调用，因此明确标记待接收，避免把尝试误写成已持久化消息。 */
+  function sessionPrompt(event) {
+    chatMessage({
+      sessionID: event.sessionID,
+      messageID: event.messageID,
+      admission: "pending",
+    }, {
+      message: {
+        id: event.messageID,
+        sessionID: event.sessionID,
+        role: "user",
+        prompt: event.prompt,
+        metadata: event.metadata ?? null,
+        delivery: event.delivery,
+      },
+    })
+  }
+
+  /** V2 的辅助请求不会经过 context hook，四种请求各自记录发送给模型的最终上下文。 */
+  function sessionRequest(event, requestKind) {
+    const input = { sessionID: event.sessionID, agent: event.agent, model: event.model }
+    enqueue("SYSTEM_PROMPT", input, null, {
+      recordKind: "system",
+      requestKind,
+      agentName: event.agent ?? null,
+      model: event.model,
+      system: event.system,
+    })
+    enqueue("CONTEXT_MESSAGES", input, null, {
+      recordKind: "context",
+      requestKind,
+      contextKind: requestKind === "primary" ? "ACTIVE" : requestKind.toUpperCase(),
+      agentName: event.agent ?? null,
+      messages: event.messages,
+    })
+    if (requestKind === "compaction") {
+      enqueue("COMPACTION_CONTEXT", input, null, {
+        recordKind: "context",
+        contextKind: "COMPACTION_REQUEST",
+        agentName: event.agent ?? null,
+        context: event.messages,
+        prompt: event.system,
+      })
+    }
   }
 
   async function dispose() {
@@ -765,6 +888,8 @@ export function createObservabilityPlugin(options = {}) {
 
   return {
     hooks,
+    sessionPrompt,
+    sessionRequest,
     inspect: () => ({
       coverageStartAt,
       droppedCount,
@@ -778,70 +903,91 @@ export function createObservabilityPlugin(options = {}) {
   }
 }
 
-async function TestAgentObservabilityPlugin() {
-  return createObservabilityPlugin().hooks
-}
-
-/** V2 插件入口；V1 hooks 通过 promise API 的 domain hook/event 适配到同一采集实现。 */
-export default Plugin.define({
-  id: "test-agent-opencode-observability",
-  async setup(ctx) {
-    const observer = createObservabilityPlugin()
-    // V2 不再公开 V1 的 tool catalog API，受管插件通过原生 RPC 暴露当前真实注册工具。
-    const catalog = await ctx.rpc.register({
-      id: "testagent.runtime",
-      methods: {
-        tools: {
-          input: { type: "object", additionalProperties: false },
-          output: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                toolId: { type: "string" },
-                name: { type: "string" },
-                description: { type: "string" },
-                source: { type: "string" },
-              },
-              required: ["toolId", "name", "description", "source"],
-              additionalProperties: false,
+/** V2 插件入口；使用冻结 2.0.18 的 domain hook，复用脱敏和有界上传队列。 */
+export async function setupObservabilityPlugin(ctx, observer = createObservabilityPlugin()) {
+  // V2 不再公开 V1 的 tool catalog API，受管插件通过原生 RPC 暴露当前真实注册工具。
+  const catalog = await ctx.rpc.register({
+    id: "testagent.runtime",
+    methods: {
+      tools: {
+        input: { type: "object", additionalProperties: false },
+        output: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              toolId: { type: "string" },
+              name: { type: "string" },
+              description: { type: "string" },
+              source: { type: "string" },
             },
+            required: ["toolId", "name", "description", "source"],
+            additionalProperties: false,
           },
         },
       },
-      events: {},
+    },
+    events: {},
+  }, {
+    tools: async () => (await ctx.tool.list()).map((tool) => ({
+      toolId: tool.id,
+      name: tool.name,
+      description: tool.description,
+      source: tool.options?.namespace?.startsWith("mcp") ? "mcp" : "runtime",
+    })),
+  })
+  const toolBefore = await ctx.tool.hook("execute.before", (event) => {
+    observer.hooks["tool.execute.before"]({
+      tool: event.tool,
+      sessionID: event.sessionID,
+      messageID: event.messageID,
+      callID: event.id,
+      agent: event.agent,
+    }, { args: event.input })
+  })
+  const toolAfter = await ctx.tool.hook("execute.after", (event) => {
+    observer.hooks["tool.execute.after"]({
+      tool: event.tool,
+      sessionID: event.sessionID,
+      messageID: event.messageID,
+      callID: event.id,
+      agent: event.agent,
     }, {
-      tools: async () => (await ctx.tool.list()).map((tool) => ({
-        toolId: tool.id,
-        name: tool.name,
-        description: tool.description,
-        source: tool.options?.namespace?.startsWith("mcp") ? "mcp" : "runtime",
-      })),
+      args: event.input,
+      output: event.status === "completed" ? event.result?.output ?? event.result?.content : null,
+      metadata: event.status === "completed" ? event.result?.metadata : null,
+      error: event.status === "error" ? event.error : null,
     })
-    const toolBefore = await ctx.tool.hook("execute.before", async (event) => {
-      await observer.hooks["tool.execute.before"](event, { args: event.input })
-    })
-    const toolAfter = await ctx.tool.hook("execute.after", async (event) => {
-      await observer.hooks["tool.execute.after"](event, {
-        args: event.input,
-        output: event.status === "completed" ? event.result?.output : null,
-        error: event.status === "error" ? event.error : null,
-      })
-    })
-    const controller = new AbortController()
-    const eventTask = (async () => {
-      try {
-        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-          await observer.hooks.event({ event: { ...event, properties: event.data ?? event.properties ?? {} } })
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) throw error
+  })
+  const sessionHooks = await Promise.all([
+    ctx.session.hook("prompt", (event) => observer.sessionPrompt(event)),
+    ctx.session.hook("context", (event) => observer.sessionRequest(event, "primary")),
+    ctx.session.hook("compaction", (event) => observer.sessionRequest(event, "compaction")),
+    ctx.session.hook("generate", (event) => observer.sessionRequest(event, "generate")),
+    ctx.session.hook("title", (event) => observer.sessionRequest(event, "title")),
+  ])
+  const controller = new AbortController()
+  const eventTask = (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        await observer.hooks.event({ event: { ...event, properties: event.data ?? event.properties ?? {} } })
       }
-    })()
-    return async () => {
-      controller.abort()
-      await Promise.allSettled([eventTask, toolBefore.dispose(), toolAfter.dispose(), catalog.dispose()])
-      await observer.flush()
+    } catch (error) {
+      // 观测通道失败不得终止用户会话，下一次进程启动会重新订阅。
+      if (!controller.signal.aborted) void error
     }
-  },
+  })()
+  return async () => {
+    controller.abort()
+    await Promise.allSettled([
+      eventTask, toolBefore.dispose(), toolAfter.dispose(), catalog.dispose(),
+      ...sessionHooks.map((registration) => registration.dispose()),
+    ])
+    await observer.hooks.dispose()
+  }
+}
+
+export default Plugin.define({
+  id: "test-agent-opencode-observability",
+  setup: setupObservabilityPlugin,
 })

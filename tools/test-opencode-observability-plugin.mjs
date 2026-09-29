@@ -6,6 +6,7 @@ import test from "node:test"
 import {
   createObservabilityPlugin,
   sanitizeObservabilityValue,
+  setupObservabilityPlugin,
 } from "../deploy/internal/opencode-observability-plugin.mjs"
 import observabilityPluginModule from "../deploy/internal/opencode-observability-plugin.mjs"
 
@@ -47,6 +48,7 @@ test("V2 runtime RPC returns registered tools instead of plugin identities", asy
       list: async () => [{ id: "mcp_search", name: "search", description: "Search files", options: { namespace: "mcp.files" } }],
       hook: async () => ({ dispose: async () => {} }),
     },
+    session: { hook: async () => ({ dispose: async () => {} }) },
     event: {
       subscribe: async function* ({ signal }) {
         await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
@@ -60,6 +62,161 @@ test("V2 runtime RPC returns registered tools instead of plugin identities", asy
   }])
   await cleanup()
   assert.equal(disposed, true)
+})
+
+test("V2 session hooks capture prompt, primary and auxiliary model context with one session identity", async () => {
+  const requests = []
+  const observer = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+  const hooks = new Map()
+  const disposed = []
+  const context = {
+    rpc: { register: async () => ({ dispose: async () => disposed.push("rpc") }) },
+    tool: {
+      list: async () => [],
+      hook: async (name) => ({ dispose: async () => disposed.push(name) }),
+    },
+    session: {
+      hook: async (name, callback) => {
+        hooks.set(name, callback)
+        return { dispose: async () => disposed.push(name) }
+      },
+    },
+    event: {
+      subscribe: async function* ({ signal }) {
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
+      },
+    },
+  }
+  const cleanup = await setupObservabilityPlugin(context, observer)
+  assert.deepEqual([...hooks.keys()], ["prompt", "context", "compaction", "generate", "title"])
+
+  hooks.get("prompt")({
+    sessionID: "ses-v2",
+    messageID: "msg-v2",
+    prompt: { text: "SERVICE_API_KEY=private-credential 请检查登录" },
+    delivery: "immediate",
+  })
+  const request = {
+    sessionID: "ses-v2",
+    agent: "build",
+    model: { providerID: "openai", id: "gpt-5" },
+    system: [{ type: "text", text: "You are a tester." }],
+    messages: [{ role: "user", content: [{ type: "text", text: "请检查登录" }] }],
+    options: {},
+    tools: {},
+  }
+  hooks.get("context")(request)
+  hooks.get("compaction")({ ...request, system: [{ type: "text", text: "压缩会话" }] })
+  hooks.get("generate")(request)
+  hooks.get("title")(request)
+  await cleanup()
+
+  const events = requests.flatMap((batch) => batch.events)
+  const prompt = events.find((event) => event.type === "CHAT_MESSAGE")
+  assert.equal(prompt.sessionId, "ses-v2")
+  assert.equal(prompt.messageId, "msg-v2")
+  assert.equal(prompt.payload.admission, "pending")
+  assert.equal(prompt.payload.message.prompt.text, "SERVICE_API_KEY=[REDACTED] 请检查登录")
+  assert.deepEqual(events.filter((event) => event.type === "SYSTEM_PROMPT")
+    .map((event) => event.payload.requestKind), ["primary", "compaction", "generate", "title"])
+  assert.deepEqual(events.filter((event) => event.type === "CONTEXT_MESSAGES")
+    .map((event) => event.payload.contextKind), ["ACTIVE", "COMPACTION", "GENERATE", "TITLE"])
+  assert.equal(events.find((event) => event.type === "COMPACTION_CONTEXT").sessionId, "ses-v2")
+  assert.equal(events.find((event) => event.type === "COMPACTION_CONTEXT").payload.agentName, "build")
+  assert.equal(disposed.length, 8)
+})
+
+test("V2 tool hook id and terminal event produce one correlated capability fact", async () => {
+  const requests = []
+  const observer = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  }, [1000, 1010, 1060, 1070])
+  const toolHooks = new Map()
+  const context = {
+    rpc: { register: async () => ({ dispose: async () => {} }) },
+    tool: {
+      list: async () => [],
+      hook: async (name, callback) => {
+        toolHooks.set(name, callback)
+        return { dispose: async () => {} }
+      },
+    },
+    session: { hook: async () => ({ dispose: async () => {} }) },
+    event: {
+      subscribe: async function* ({ signal }) {
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
+      },
+    },
+  }
+  const cleanup = await setupObservabilityPlugin(context, observer)
+  const call = {
+    tool: "skill", sessionID: "ses-v2-tool", messageID: "msg-v2-tool", id: "call-v2",
+    agent: "build", input: { name: "test-design" },
+  }
+  toolHooks.get("execute.before")(call)
+  observer.hooks.event({ event: {
+    id: "event-v2-tool", type: "session.tool.failed", created: 1060,
+    data: {
+      sessionID: "ses-v2-tool", assistantMessageID: "msg-v2-tool", id: "call-v2",
+      error: { message: "intentional failure" }, executed: true,
+    },
+  } })
+  toolHooks.get("execute.after")({ ...call, status: "error", error: { message: "intentional failure" } })
+  await cleanup()
+
+  const events = requests.flatMap((batch) => batch.events)
+  const before = events.find((event) => event.type === "TOOL_EXECUTE_BEFORE")
+  const terminal = events.filter((event) => event.type === "TOOL_EXECUTE_AFTER")
+  assert.equal(before.callId, "call-v2")
+  assert.equal(before.messageId, "msg-v2-tool")
+  assert.equal(terminal.length, 1)
+  assert.equal(terminal[0].callId, "call-v2")
+  assert.equal(terminal[0].payload.status, "FAILED")
+  assert.equal(terminal[0].payload.skillName, "test-design")
+})
+
+test("V2 step events preserve model timing and session metrics", async () => {
+  const requests = []
+  const observer = testRuntime(async (_url, request) => {
+    requests.push(JSON.parse(request.body))
+    return { ok: true, status: 200 }
+  })
+  observer.sessionPrompt({ sessionID: "ses-v2-step", messageID: "msg-user", prompt: { text: "hi" }, delivery: "immediate" })
+  const emit = (id, type, created, data) => observer.hooks.event({ event: { id, type, created, data } })
+  emit("step-start", "session.step.started", 1000, {
+    sessionID: "ses-v2-step", assistantMessageID: "msg-assistant", agent: "build", started: 990,
+  })
+  emit("text-delta", "session.text.delta", 1020, {
+    sessionID: "ses-v2-step", assistantMessageID: "msg-assistant", ordinal: 0, delta: "hello",
+  })
+  emit("step-streamed", "session.step.streamed", 1080, {
+    sessionID: "ses-v2-step", assistantMessageID: "msg-assistant",
+  })
+  emit("step-ended", "session.step.ended", 1150, {
+    sessionID: "ses-v2-step", assistantMessageID: "msg-assistant", finish: "stop", cost: 0.01,
+    tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 3 } },
+  })
+  emit("execution-succeeded", "session.execution.succeeded", 1160, { sessionID: "ses-v2-step" })
+  emit("session-idle", "session.idle", 1161, { sessionID: "ses-v2-step" })
+  while (observer.inspect().serialized > 0) await observer.flush()
+
+  const events = requests.flatMap((batch) => batch.events)
+  const step = events.find((event) => event.type === "ASSISTANT_STEP_METRICS")
+  assert.equal(step.sessionId, "ses-v2-step")
+  assert.equal(step.payload.durationMs, 90)
+  assert.equal(step.payload.ttftMs, 30)
+  assert.equal(step.payload.decodeMs, 60)
+  assert.equal(step.payload.tokensCacheRead, 2)
+  assert.equal(step.payload.status, "COMPLETED")
+  const summary = events.find((event) => event.type === "SESSION_METRICS")
+  assert.equal(events.filter((event) => event.type === "SESSION_METRICS").length, 1)
+  assert.equal(summary.payload.steps, 1)
+  assert.equal(summary.payload.turns, 1)
+  assert.equal(events.find((event) => event.type === "OPENCODE_EVENT").payload.event.type, "session.step.started")
 })
 
 test("correlates test-design skill before and after by callID without parsing title", async () => {
@@ -113,7 +270,7 @@ test("counts a protected MCP skill resource read from args.name without parsing 
   assert.deepEqual(facts.map((event) => event.callId), ["call-protected", "call-protected"])
 })
 
-test("uses the real OpenCode 2.0.18 messages transform output to bind context to its session", async () => {
+test("uses the legacy OpenCode 1.18.4 messages transform output to bind context to its session", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -129,7 +286,7 @@ test("uses the real OpenCode 2.0.18 messages transform output to bind context to
   assert.notEqual(requests[0].events[0].traceId, "unknown")
 })
 
-test("uses OpenCode 2.0.18 chat.message input.agent as the Trace agent name", async () => {
+test("uses legacy OpenCode 1.18.4 chat.message input.agent as the Trace agent name", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -160,7 +317,7 @@ test("does not create an unknown Trace for process-level OpenCode events", async
   assert.equal(runtime.inspect().globalSequence, 0)
 })
 
-test("turns a real OpenCode 2.0.18 tool error part into one failed capability fact", async () => {
+test("turns a legacy OpenCode 1.18.4 tool error part into one failed capability fact", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -229,7 +386,7 @@ test("extracts message, call and step correlations from real OpenCode event part
   assert.equal(event.stepId, "step-1")
 })
 
-test("projects DSH-aligned turn step TTFT decode and cache-token metrics from OpenCode 2.0.18 events", async () => {
+test("projects DSH-aligned turn step TTFT decode and cache-token metrics from legacy OpenCode 1.18.4 events", async () => {
   const requests = []
   let clock = 990
   const runtime = createObservabilityPlugin({
@@ -404,7 +561,7 @@ test("counts an interrupted OpenCode 2.0.18 step without fabricating DSH wall ti
   })
 })
 
-test("records cancelled tool calls once from the real OpenCode 2.0.18 error part", async () => {
+test("records cancelled tool calls once from the legacy OpenCode 1.18.4 error part", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -443,7 +600,7 @@ test("records cancelled tool calls once from the real OpenCode 2.0.18 error part
   assert.equal(terminal[0].payload.status, "CANCELLED")
 })
 
-test("marks compacted context and captures the published 2.0.18 compaction hook", async () => {
+test("marks compacted context and captures the legacy 1.18.4 compaction hook", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))

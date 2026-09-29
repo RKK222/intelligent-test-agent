@@ -28,6 +28,13 @@ observability 和 RTK 插件通过 `Plugin.define({ id, setup })` 注册 domain 
 Observability 插件另外注册 `testagent.runtime/tools` RPC，通过
 `POST /api/rpc/testagent.runtime/tools` 读取实际 `ctx.tool.list()`；原生
 `/api/plugin` 是插件目录，不能当作已注册工具列表。
+Observability 使用 `ctx.session.hook("prompt")` 记录待接收的用户输入，
+`context/compaction/generate/title` 分别记录主请求和辅助请求的最终模型上下文；
+prompt hook 在 durable admission 前执行，所以 Trace 的 `CHAT_MESSAGE.payload.admission=pending`
+仅代表提交尝试。V2 `ctx.tool.hook` 的调用身份来自 `event.id`，插件将其映射到既有
+`callId`；`session.tool.failed` 与 `execute.after` 同时到达时按该 ID 只保留一条终态。
+V2 原生 `session.step.*` 和 `session.text/reasoning.delta` 直接生成 Step、TTFT、decode、
+token 与费用指标，模型响应边界优先取 `session.step.streamed`；事件原文继续脱敏入队。
 公共工具通过本地 `tool-compat` 把旧 `args/execute` 写法转换为 V2
 `Tool.Info`，这样工具 DTO 不会泄漏到 Java 业务模块。
 
@@ -68,7 +75,15 @@ LSP 状态接口，平台只报告 `unknown` 或显式关闭时的 `disabled`。
 JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
   PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH \
   mvn -pl test-agent-opencode-client -am -DskipTests compile
+node --test tools/test-opencode-observability-plugin.mjs
 ```
+
+观测插件单测覆盖 V2 五种 session hook、脱敏、调用 ID、工具失败去重、
+`session.step.*` 耗时和 token 投影。使用冻结的 `2.0.18` Darwin CLI、临时隔离 HOME、
+`file://` 插件目录与本地固定依赖做原生加载探针时，`/api/info` 和
+`POST /api/rpc/testagent.runtime/tools`（请求体 `{"input":{}}`）均返回 200，
+后者返回 62 个已注册工具；此探针只证明插件成功加载和 RPC 可用，真实模型调用、
+上传归档与前端 Trace 仍需在专用 Jenkins 栈做端到端验收。
 
 Worker 构建还会校验固定 npm runtime lockfile、V2 平台包摘要、V2 插件和
 client 入口。生产发布仍需在隔离 Worker 上执行 `/api/info`、session、prompt、

@@ -19014,3 +19014,25 @@
 - Chrome 用已保存的测试账号成功登录 V2 工作台并显示克隆的应用/工作区；随后 Chrome 弹出已保存密码泄露警告，
   阻挡了首次使用引导交互。浏览器安全警告需用户自行处理，真实 Run、SSE、历史、permission/question 和回滚
   尚未在 V2 页面完成端到端验收；原生 `/api/info` 与 `/api/event` 未认证探针均返回 `401`。
+
+## 2026-09-29 - 补齐 OpenCode V2 Observability domain hook 与原生事件指标
+
+### Why
+
+- V2 插件入口虽然已使用 `Plugin.define`，但实际只注册工具和事件订阅；旧版 `chat.message`、上下文转换和压缩 hook 仅存在于测试用采集器内部，运行时不会调用。冻结的 `@opencode/plugin@2.0.18` 同时确认工具调用 ID 位于 `event.id`，旧包装器会丢失调用关联。
+
+### What
+
+- Observability 运行入口注册 `session.prompt/context/compaction/generate/title`，在 Trace 中分别记录待接收 prompt、主请求及辅助请求上下文；工具 hook 将 V2 `id` 映射到既有 `callId`，工具终态按调用 ID 去重。
+- V2 `session.step.*`、`session.text/reasoning.delta`、`session.tool.*` 与 `session.execution.*` 直接投影模型耗时、TTFT、decode、token、工具失败及会话指标；停机时调用采集器完整排空。平台公开 API、RunEvent wire format、数据库结构均未改变。
+- 同步 `docs/deployment/opencode-v2-migration.md`、`deploy/internal/README.md` 与 `docs/README.md` 的插件契约和验收说明。
+
+### How
+
+- `node --test tools/test-opencode-observability-plugin.mjs tools/test-opencode-rtk-plugin.mjs tools/test-opencode-official-launcher.mjs`：36 项通过；`node tools/benchmark-opencode-observability-plugin.mjs`：增量 p99 约 0.002 ms、热路径无 I/O/网络。
+- 冻结的 OpenCode `2.0.18` Darwin CLI 在临时 HOME 和工作区加载修改后的本地插件；`/api/info` 与 `POST /api/rpc/testagent.runtime/tools` 返回 200，RPC 枚举 62 个已注册工具。`git diff --check` 通过。
+- 提交前回顾全部七份 `.agents/session-log*.md` 近期条目，未覆盖他人已提交成果，也未修改 OpenCode 只读源码或受保护环境文件。
+
+### Result
+
+- V2 插件 domain hook 已接入并可由原生 server 加载；真实模型 Run 的 Trace 上传和前端归档仍待隔离 Jenkins 栈验收。Chrome 的已保存密码安全警告仍由用户处理，不通过自动化绕过。

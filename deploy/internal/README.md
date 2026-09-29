@@ -468,6 +468,12 @@ deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/
 
 标准后台部署脚本会调用 `verify-opencode-tool-runtime.sh`，在 `included` programs 解压前后以及 `reuse` 现场复用时核对 runtime manifest、lockfile、全部固定直接依赖的包元数据和入口文件；`@opencode/plugin`、`@opencode/client`、`effect`、`playwright-core`、`zod` 缺失、为空、未锁定或版本不符都会在服务变更前失败。专项校验可执行 `tools/verify-opencode-tool-runtime-deploy.sh`。
 
+Observability 插件在 2.0.18 下注册 `session.prompt/context/compaction/generate/title` 和
+`tool.execute.before/after` domain hook；V2 原生 Step/Tool 事件补齐耗时、token 与失败事实。
+变更插件后先运行 `node --test tools/test-opencode-observability-plugin.mjs`，再用同一固定
+runtime 的原生 server 验证 `POST /api/rpc/testagent.runtime/tools`（请求体 `{"input":{}}`）
+和 Trace 上传；只有加载成功不能代替真实模型 Run 的归档验收。
+
 运行依赖的 Git 忽略清单以 `deploy/internal/opencode-runtime.gitignore` 为单一来源，固定包含 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`。后台升级脚本会对已经初始化的标准公共配置目录幂等补齐缺失规则，不覆盖管理员已有规则；新增节点尚未 clone 公共仓库时不会提前创建目录，随后由 worker 后台维护器在创建 package/lockfile 链接前补齐同一清单。因此升级、扩容、重复启动或新建工作区后，这些运行文件不会让公共仓库误报本地变更，`agents/**`、`skills/**`、`tools/**` 和用户维护的 OpenCode 配置仍按原 Git 规则检测。忽略规则不会自动取消已经跟踪的文件，也不会删除任何未跟踪文件。
 
 升级或新增后台完成后，在该后台验证：
