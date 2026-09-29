@@ -19109,3 +19109,28 @@
 - V2 默认发布、V1 独立 ABI 回滚和 V2 恢复均有远端 Jenkins 成功证据，回滚不再是重部署 V2 标签。
 - 未新增数据库表或 Flyway migration；平台 HTTP/RunEvent wire、业务 DTO、进程公共启动/停止/状态流程和安全边界保持不变；未修改 `.env.local` 或 OpenCode 只读源码。
 - Chrome 首次登录引导层仍阻塞真实 prompt/Run/SSE 浏览器 E2E；本机 Docker worker smoke 仍因缺少本地镜像未验证，远端镜像 smoke 已覆盖 V1/V2。
+
+## 2026-09-30 - 修复 V2 文件读取二进制响应适配
+
+### Why
+
+- 隔离 V2 栈的真实平台 API 冒烟发现 `GET /api/internal/platform/opencode-runtime/fs/read` 返回 502：
+  OpenCode V2 `/api/fs/read/*` 按协议返回 `application/octet-stream` 文件字节，而通用 runtime 网关仍按 `JsonNode` 解码。
+- 该错误会阻断工作区文件查看和前端依赖文件读取的全部流程，必须在 client 模块恢复平台原有 `FileContent` DTO 语义。
+
+### What
+
+- `GeneratedOpencodeSdkGateway` 为 `/file/content` 增加专用字节响应适配：严格 UTF-8 且不含 NUL 的内容投影为 `text`，其它内容投影为 base64 `binary` 并保留 MIME 类型。
+- 保持 V2 `/api/fs/read/{path}`、`location[directory]`、trace header 和平台 runtime JSON wire 不变；generated SDK 仍未手改。
+- 新增文本、二进制和请求路径/query 回归用例，并同步 client、部署和 HTTP API 文档。
+
+### How
+
+- 先对照冻结源码确认 V2 `server.fs.fs.read` 使用 `HttpServerResponse.uint8Array`，V1 `/file/content` 的文本 trim、NUL/UTF-8 判定和 base64 字段语义，再实现边界转换。
+- JDK 25 下执行 `mvn -pl test-agent-opencode-client -am -DskipTests=false -Dtest=GeneratedOpencodeSdkGatewayTest -Dsurefire.failIfNoSpecifiedTests=false test`（24 项通过）。
+- 随后执行 `mvn -pl test-agent-opencode-client,test-agent-opencode-runtime -am -DskipTests=false test`（client 85 项、runtime 1008 项及 reactor 依赖全部通过）。
+
+### Result
+
+- 代码级验证已覆盖 V2 文件的文本/二进制响应和旧平台 projection；待提交、推送并重新部署隔离 Jenkins 栈后，用远端真实 `fs/read` 再确认 200 和内容兼容。
+- 未新增数据库/Flyway、HTTP 路径或 RunEvent 类型，未修改 `.env.local`、OpenCode 只读源码或公共进程生命周期流程；本机 Docker worker 镜像仍因缺少本地镜像未验证。

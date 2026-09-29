@@ -53,6 +53,9 @@ V2 没有 V1 的原生 session share 合约。旧 runtime `/session/{id}/share` 
 
 平台运行态代理把 V2 的 location envelope 保留在通用目录中供前端解包；
 MCP 状态、资源、工具和 VCS 分支/文件状态则投影回平台稳定 DTO。
+V2 `/api/fs/read/*` 直接返回带 MIME 的文件字节，不再返回 V1 `FileContent` JSON；
+client 适配器在边界按严格 UTF-8 与 NUL 检测恢复 `{type:"text",content}` 或
+`{type:"binary",content,encoding:"base64",mimeType}`，平台 runtime 的文件读取响应保持兼容。
 V2 `/api/config` 是配置来源数组，不再返回旧 `enabled_providers` 合并对象；
 冻结的 2.0.18 会把受控旧配置里的 `provider/enabled_providers/small_model`
 规范化为 V2 `providers`、`experimental.policies` 和 title agent model。

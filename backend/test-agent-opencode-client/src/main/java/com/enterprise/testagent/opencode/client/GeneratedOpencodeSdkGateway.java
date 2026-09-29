@@ -5,6 +5,10 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -670,6 +674,11 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         if (v2Path.endsWith("/diff") && runtimeQuery.containsKey("messageID")) {
             runtimeQuery.putIfAbsent("to", runtimeQuery.remove("messageID"));
         }
+        if ("GET".equals(method) && "/file/content".equals(path)) {
+            // V1 返回 FileContent JSON，而 V2 fs.read 直接返回文件字节；在 client 边界恢复
+            // 原有平台 DTO，避免二进制响应被通用 JsonNode 解码器误判为坏网关。
+            return invokeFileContent(apiClient, v2Path, directory, runtimeQuery);
+        }
         Object v2Body = toolCatalog ? Map.of("input", Map.of())
                 : noBodyEndpoint(v2Path, method) ? null : normalizeRuntimeBody(v2Path, body);
         HttpMethod v2Method = toolCatalog ? HttpMethod.POST : HttpMethod.valueOf(method);
@@ -701,6 +710,78 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .defaultIfEmpty(objectMapper.createObjectNode().put("accepted", true))
                 .map(result -> toolCatalog ? projectRuntimeToolCatalog(path, result) : projectRuntimeResponse(path, result))
                 .map(OpencodeRuntimeResult::new);
+    }
+
+    private Mono<OpencodeRuntimeResult> invokeFileContent(
+            ApiClient apiClient,
+            String v2Path,
+            String directory,
+            Map<String, String> runtimeQuery) {
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, v2Path, directory);
+        runtimeQuery.forEach((name, value) -> {
+            if (value != null && !value.isBlank()) {
+                queryParams.putAll(apiClient.parameterToMultiValueMap(null, name, value));
+            }
+        });
+        ParameterizedTypeReference<byte[]> returnType = new ParameterizedTypeReference<>() {
+        };
+        List<MediaType> accepts = List.of(
+                MediaType.APPLICATION_OCTET_STREAM,
+                MediaType.TEXT_PLAIN,
+                MediaType.APPLICATION_JSON);
+        return apiClient.invokeAPI(
+                        v2Path,
+                        HttpMethod.GET,
+                        Map.of(),
+                        queryParams,
+                        null,
+                        new HttpHeaders(),
+                        new LinkedMultiValueMap<>(),
+                        new LinkedMultiValueMap<>(),
+                        accepts,
+                        apiClient.selectHeaderContentType(new String[]{}),
+                        new String[]{},
+                        returnType)
+                .toEntity(byte[].class)
+                .map(response -> new OpencodeRuntimeResult(projectFileContent(response)));
+    }
+
+    private JsonNode projectFileContent(ResponseEntity<byte[]> response) {
+        byte[] bytes = response.getBody() == null ? new byte[0] : response.getBody();
+        String text = decodeUtf8(bytes);
+        if (text != null && !containsNul(bytes)) {
+            return objectMapper.createObjectNode()
+                    .put("type", "text")
+                    .put("content", text.trim());
+        }
+        var projected = objectMapper.createObjectNode()
+                .put("type", "binary")
+                .put("content", Base64.getEncoder().encodeToString(bytes))
+                .put("encoding", "base64");
+        MediaType contentType = response.getHeaders().getContentType();
+        if (contentType != null) {
+            projected.put("mimeType", contentType.getType() + "/" + contentType.getSubtype());
+        }
+        return projected;
+    }
+
+    private String decodeUtf8(byte[] bytes) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+        } catch (CharacterCodingException ignored) {
+            return null;
+        }
+    }
+
+    private boolean containsNul(byte[] bytes) {
+        for (byte value : bytes) {
+            if (value == 0) return true;
+        }
+        return false;
     }
 
     /** V2 的 location envelope 与平台旧运行态 DTO 在 client 边界归一化。 */

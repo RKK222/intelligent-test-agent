@@ -3495,7 +3495,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/status?workspaceId=` | 读取 opencode runtime 健康状态，后端映射到 OpenCode V2 `/api/info`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/fs/list?workspaceId=&path=` | 通过 opencode runtime 列目录。 |
 | `GET` | `/api/internal/platform/opencode-runtime/fs/find?workspaceId=&query=` | 通过 opencode runtime 查找文件。 |
-| `GET` | `/api/internal/platform/opencode-runtime/fs/read?workspaceId=&path=` | 通过 opencode runtime 读文件内容。 |
+| `GET` | `/api/internal/platform/opencode-runtime/fs/read?workspaceId=&path=` | 通过 opencode runtime 读文件内容；V2 原始字节在 client 边界投影为兼容的 `{type:"text",content}` 或 `{type:"binary",content,encoding:"base64",mimeType}`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/vcs/status?workspaceId=` | 合并 V2 `/api/vcs` 分支与 `/api/vcs/status` 文件列表，返回 `status/branch/defaultBranch/files[]`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/vcs/diff?workspaceId=&mode=working\|git\|branch\|committed&context=` | 读取 VCS Diff；兼容旧客户端的 `git`，向 V2 映射为 `working`（均为相对 HEAD 的工作区改动）。`committed` 为 V2 原生模式。 |
 | `GET` | `/api/internal/platform/opencode-runtime/lsp/status?workspaceId=` | V2 无实时 LSP 状态接口；配置明确 `lsp:false` 时返回 `disabled`，否则返回 `unknown`，不把配置存在误报为就绪。 |

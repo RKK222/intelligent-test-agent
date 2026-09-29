@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -495,6 +496,68 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayProjectsV2FileReadTextAsLegacyFileContent() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "text/plain", "  hello from v2  \n");
+        });
+
+        try {
+            JsonNode result = new GeneratedOpencodeSdkGateway(List.of())
+                    .runtime(
+                            node(server),
+                            "GET",
+                            "/file/content",
+                            "/tmp/demo",
+                            null,
+                            Map.of("path", "README.md"),
+                            null,
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5))
+                    .body();
+
+            assertThat(result.path("type").asText()).isEqualTo("text");
+            assertThat(result.path("content").asText()).isEqualTo("hello from v2");
+            assertThat(request.get().method()).isEqualTo("GET");
+            assertThat(request.get().path()).isEqualTo("/api/fs/read/README.md");
+            assertThat(request.get().query()).containsEntry("location[directory]", List.of("/tmp/demo"));
+            assertThat(request.get().query()).doesNotContainKey("path");
+            assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayProjectsV2FileReadBinaryAsBase64LegacyFileContent() throws Exception {
+        byte[] content = new byte[]{0x00, 0x01, (byte) 0xff, 0x2a};
+        HttpServer server = startServer(exchange -> respondBytes(exchange, 200, "application/octet-stream", content));
+
+        try {
+            JsonNode result = new GeneratedOpencodeSdkGateway(List.of())
+                    .runtime(
+                            node(server),
+                            "GET",
+                            "/file/content",
+                            "/tmp/demo",
+                            null,
+                            Map.of("path", "assets/logo.bin"),
+                            null,
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5))
+                    .body();
+
+            assertThat(result.path("type").asText()).isEqualTo("binary");
+            assertThat(result.path("encoding").asText()).isEqualTo("base64");
+            assertThat(Base64.getDecoder().decode(result.path("content").asText())).isEqualTo(content);
+            assertThat(result.path("mimeType").asText()).isEqualTo("application/octet-stream");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayReadsRegisteredToolsThroughV2PluginRpc() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {
@@ -842,7 +905,10 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     private static void respond(HttpExchange exchange, int status, String contentType, String body) throws IOException {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        respondBytes(exchange, status, contentType, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void respondBytes(HttpExchange exchange, int status, String contentType, byte[] bytes) throws IOException {
         exchange.getResponseHeaders().set("Content-Type", contentType);
         exchange.sendResponseHeaders(status, bytes.length);
         exchange.getResponseBody().write(bytes);
