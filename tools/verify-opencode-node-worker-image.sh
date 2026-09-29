@@ -3,26 +3,31 @@ set -euo pipefail
 
 IMAGE="${1:-test-agent-opencode-worker:internal}"
 CONTAINER="test-agent-opencode-official-smoke-$$"
-EXPECTED_OPENCODE_VERSION="${EXPECTED_OPENCODE_VERSION:-2.0.18}"
-EXPECTED_OPENCODE_ASSET_NAME="${EXPECTED_OPENCODE_ASSET_NAME:-cli-linux-x64-baseline-2.0.18.tgz}"
-EXPECTED_OPENCODE_ASSET_SHA256="${EXPECTED_OPENCODE_ASSET_SHA256:-548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd}"
-EXPECTED_OPENCODE_SUBAGENT_DEPTH="${EXPECTED_OPENCODE_SUBAGENT_DEPTH:-2}"
 EXPECTED_OPENCODE_ABI="${EXPECTED_OPENCODE_ABI:-auto}"
 
 if [[ "${EXPECTED_OPENCODE_ABI}" == "auto" ]]; then
-  case "${EXPECTED_OPENCODE_VERSION%%.*}" in
+  opencode_version_probe="${EXPECTED_OPENCODE_VERSION:-2.0.18}"
+  case "${opencode_version_probe%%.*}" in
     2|3|4|5|6|7|8|9) EXPECTED_OPENCODE_ABI=V2 ;;
     *) EXPECTED_OPENCODE_ABI=V1 ;;
   esac
 fi
 case "${EXPECTED_OPENCODE_ABI}" in
   V2)
+    EXPECTED_OPENCODE_VERSION="${EXPECTED_OPENCODE_VERSION:-2.0.18}"
+    EXPECTED_OPENCODE_ASSET_NAME="${EXPECTED_OPENCODE_ASSET_NAME:-cli-linux-x64-baseline-2.0.18.tgz}"
+    EXPECTED_OPENCODE_ASSET_SHA256="${EXPECTED_OPENCODE_ASSET_SHA256:-548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd}"
+    EXPECTED_OPENCODE_SUBAGENT_DEPTH="${EXPECTED_OPENCODE_SUBAGENT_DEPTH:-2}"
     EXPECTED_HEALTH_PATH=/api/info
     EXPECTED_DEPENDENCIES=("@opencode/plugin" "@opencode/client" "effect" "zod")
     PUBLIC_TOOL_SOURCE='import { z } from "zod"; export default { description: "public offline probe", input: z.object({ value: z.string().optional() }), async execute(input) { return { output: input.value ?? "public-ok" } } }'
     WORKSPACE_TOOL_SOURCE='import * as sdk from "@opencode/client"; import * as Effect from "effect"; import { z } from "zod"; const loaded = Boolean(sdk && Effect && z); export default { description: "workspace offline probe", input: z.object({ value: z.string().optional() }), async execute(input) { return { output: loaded ? (input.value ?? "workspace-ok") : "missing" } } }'
     ;;
   V1)
+    EXPECTED_OPENCODE_VERSION="${EXPECTED_OPENCODE_VERSION:-1.18.4}"
+    EXPECTED_OPENCODE_ASSET_NAME="${EXPECTED_OPENCODE_ASSET_NAME:-opencode-linux-x64-baseline.tar.gz}"
+    EXPECTED_OPENCODE_ASSET_SHA256="${EXPECTED_OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
+    EXPECTED_OPENCODE_SUBAGENT_DEPTH="${EXPECTED_OPENCODE_SUBAGENT_DEPTH:-2}"
     EXPECTED_HEALTH_PATH=/global/health
     EXPECTED_DEPENDENCIES=("@opencode-ai/plugin" "@opencode-ai/sdk" "effect" "zod")
     PUBLIC_TOOL_SOURCE='import { tool } from "@opencode-ai/plugin"; export default tool({ description: "public offline probe", args: { value: tool.schema.string().optional() }, async execute(args) { return args.value ?? "public-ok" } })'

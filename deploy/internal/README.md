@@ -464,6 +464,13 @@ deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/
 
 回滚时先加载 1.18.4 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 使用 V1 `plugin` 配置、旧依赖和顶层 `subagent_depth`，而 2.0.18 使用 V2 `plugins`、V2 依赖和 `experimental.subagent_depth`。现存 1.17.8 包仍作为更早的应急兼容包保留，但不再作为当前 V2 回滚基线。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
 
+专用 Jenkins 任务 `intelligent-test-agent-opencode-v2` 也提供可重复的 V1 worker 回滚验收：
+选择 `ACTION=ROLLBACK`、`ROLLBACK_ABI=V1`，并把 `ROLLBACK_TAG` 填为已成功发布的源 release。
+任务不会覆盖源目录，而是生成 `rollback-v1-<build>-<source-commit-prefix>` immutable release，
+沿用源 release 的 backend/frontend/source，按上面的固定参数构建 1.18.4 worker，并在部署后从
+容器内 `/usr/local/lib/opencode/VERSION` 校验实际版本。`ROLLBACK_ABI=V2` 才会直接重新部署
+`ROLLBACK_TAG`，因此不能把 V2 重部署当作 V1 回滚验证。
+
 ## 自定义 Tool 离线依赖
 
 `test-agent-programs.tar.gz` 已内置与 OpenCode `2.0.18` 锁定的自定义 Tool 基线：`@modelcontextprotocol/sdk`、`@opencode/plugin`、`@opencode/client`、`effect`、`jsonc-parser`、`zod`、`playwright-core@1.61.0` 及其全部传递依赖；Playwright 只通过 CDP 操作麒麟系统已安装的企业 360 浏览器，不随包下载 Chromium。本地浏览器 Tool 使用 OpenCode/Bun 原生 WebSocket 实现 Playwright 公开 transport，不依赖用户系统 Node；`playwright-core` 随签名公共能力包落入用户私有目录，企业现场不得执行 npm。worker 中 Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。官方 OpenCode 仍会对每个配置目录执行依赖一致性检查，启动器不能依赖上游不存在的禁用环境变量。用户进程启动前会把 `playwright-core` 与其它固定 Tool 依赖一起非覆盖式链接到 XDG 全局配置、用户 HOME `.opencode`、公共配置、当前目录及共同祖先 `node_modules`；工作区树递归扫描改由每台 worker 唯一的后台维护循环承担。entrypoint 先启动 manager，manager 在连接 Java 前清除上一容器进程世代遗留的 PID state，避免旧用户 PID 复用成 manager/entrypoint 后被迟到停止命令误杀；Java 根据平台 binding 恢复应运行实例。维护循环首轮等待 60 秒，之后每轮只临时启动一个单次扫描 Node 进程，扫描结束立即释放内存和文件句柄；不再常驻 Node 递归文件监听器，避免大工作区放大 worker 资源。新建 `.opencode` 在下一轮扫描自动收敛，默认间隔 60 秒加本轮实际扫描耗时。扫描不跟随软链接，也不进入 `.git`、`node_modules` 和常见构建产物目录。共同祖先投影可让深层应用 workspace 的 `.opencode/tools` 按 Node 标准祖先规则解析随包模块；任何目标位置已有同名文件或目录时均保留现场版本。管理员自定义 package/lockfile 时必须自行保证离线依赖闭包完整，启动器不会覆盖现场 metadata。

@@ -40,8 +40,8 @@ type Checker struct {
 }
 
 // Check 执行本地 PID、HTTP 存活和配置可加载检查。
-// /api/info 只证明 V2 服务存活；/api/config 用于确认公共配置符合当前
-// OpenCode 原生 schema，避免进程绿灯但 command/skill 等运行时接口全部返回 400。
+// V2 优先检查 /api/info + /api/config；V1 回滚包使用 /global/health + /global/config，
+// 这样 manager 的公共生命周期仍可验证实际运行的 ABI，而不是只看 PID 存活。
 func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 	alive := c.ProcessAlive
 	if alive == nil {
@@ -76,23 +76,34 @@ func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 			password = strings.TrimSpace(os.Getenv("OPENCODE_PASSWORD"))
 		}
 	}
-	if ok, _ := httpOK(checkCtx, client, baseURL, "/api/info", password); !ok {
+	if ok, _ := httpOK(checkCtx, client, baseURL, "/api/info", password); ok {
+		if ok, configMessage := httpOK(checkCtx, client, baseURL, "/api/config", password); ok {
+			return healthy(record, configMessage)
+		}
 		return Result{
 			Status:  StatusUnhealthy,
 			Port:    record.Port,
 			PID:     record.PID,
-			Message: "opencode /api/info endpoint is not reachable",
+			Message: "opencode configuration is not loadable",
 			TraceID: record.TraceID,
 		}
-	}
-	if ok, message := httpOK(checkCtx, client, baseURL, "/api/config", password); ok {
-		return healthy(record, message)
+	} else if ok, _ := httpOK(checkCtx, client, baseURL, "/global/health", password); ok {
+		if ok, configMessage := httpOK(checkCtx, client, baseURL, "/global/config", password); ok {
+			return healthy(record, configMessage)
+		}
+		return Result{
+			Status:  StatusUnhealthy,
+			Port:    record.Port,
+			PID:     record.PID,
+			Message: "opencode V1 configuration is not loadable",
+			TraceID: record.TraceID,
+		}
 	}
 	return Result{
 		Status:  StatusUnhealthy,
 		Port:    record.Port,
 		PID:     record.PID,
-		Message: "opencode configuration is not loadable",
+		Message: "opencode /api/info endpoint is not reachable",
 		TraceID: record.TraceID,
 	}
 }

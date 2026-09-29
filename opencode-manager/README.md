@@ -92,7 +92,7 @@ opencode-manager restart --port 4096 --trace-id trace_1234567890abcdef
 opencode-manager list --trace-id trace_1234567890abcdef
 ```
 
-`health` 先检查 PID 是否存在，再依次请求 `http://127.0.0.1:{port}/api/info` 和 `/api/config`。前者确认进程 HTTP 存活，后者确认 `OPENCODE_CONFIG_DIR` 中的公共配置符合当前 OpenCode 原生 schema；任一失败都返回 `UNHEALTHY`，不回退只能证明 HTTP 可访问的 `/doc`。例如 OpenCode 1.17.7 的额外技能目录配置必须写成 `"skills": {"paths": ["./skills"]}`，不能使用旧数组形式。
+`health` 先检查 PID 是否存在，再优先请求 `http://127.0.0.1:{port}/api/info` 和 `/api/config`。V1 回滚包没有 V2 `/api` 路由时，manager 有界回退到 `/global/health` 和 `/global/config`，确认实际 1.18.4 进程及其配置仍可加载；两套探测都失败才返回 `UNHEALTHY`。这不是只检查 `/doc` 的宽松存活探测。例如 OpenCode 1.17.7 的额外技能目录配置必须写成 `"skills": {"paths": ["./skills"]}`，不能使用旧数组形式。
 
 `start`、`stop` 和 `restart` 在 manager 生命周期锁内串行执行。`start` 对已经写入本地 state 且健康、端口/UCID/session/config 均一致的进程保持幂等：重复启动返回 `STARTED`、既有 PID、state 中的权威 `startedAt` 和 `processCreated=false`，不会再拉起第二个 opencode server；本次实际新建进程时返回 `processCreated=true` 及同一份 state `startedAt`。Java 必须持久化该 manager 时间，不能在收到回包后自行取时。已有平台 binding 的 Java 启动命令额外携带可选 `bindingRecovery=true`，表示按数据库原端口恢复而非新增调度，因此不受 `maxProcesses` 容量过滤；首次分配和端口迁移不携带该字段，仍执行原容量限制。旧 Java 缺字段时按首次分配处理。同一 UCID 已在其它端口托管时返回 `IDENTITY_ALREADY_MANAGED`，身份或路径配置不一致返回 `IDENTITY_CONFIG_MISMATCH`；目标端口超出当前池返回 `PORT_OUT_OF_RANGE`，被其它 state/身份或外部监听器占用返回 `PORT_CONFLICT`。端口探测覆盖 loopback 和宿主机活动网卡，但忽略 macOS `utun` 等点对点隧道，避免 VPN 代理接受任意端口连接时把空闲端口误报为冲突。若该端口已有匹配 state 但健康检查失败，`start` 返回普通失败，Java 必须先通过公共停止服务确认退出后再在原端口启动；除 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 外的错误都不允许触发端口迁移。`stop` 对 state 存在但 OS 进程已结束的端口按幂等成功处理；SIGTERM 超时并发送 SIGKILL 后仍须再次确认 PID 已退出，未确认时保留 state 并返回失败。停止路径发现目标 PID 已复用为容器 PID 1、entrypoint 父进程或 manager 自身时，只删除失效 state，绝不向控制进程发送 TERM/KILL。`list` 和心跳只清理端口与 PID 仍匹配当前 state 的陈旧记录，不能用旧心跳快照删除同端口 restart 刚写入的新 PID。
 

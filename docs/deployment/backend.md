@@ -611,7 +611,7 @@ tools/verify-opencode-process-deployment.sh \
 
 该脚本只检查 `/actuator/health`、manager 兼容诊断端点和超级管理员 overview，不会启动、停止、重启或健康检测用户进程。未提供 token 时对应高权限接口会被跳过；生产验收建议传入两个 token，并在 shell history 策略中避免保存真实值。
 
-worker 镜像发布前执行 `tools/verify-opencode-node-worker-image.sh <image>`；企业打包还会通过 `tools/verify-codex-whitebox-worker-image.sh <image>` 在 `--network none` 容器内检查 Python `3.13.14`、`python`/`python3` 一致性、pip、venv、常用标准库及 `curl/jq/zip/unzip`。前一脚本会真实启动 OpenCode V2，核验 PID 1 继承的 HOME/XDG/TMP/config 环境、`/api/location` 的工作目录、`/api/info.paths.tmp`，以及 data、cache、state、tmp 下的 `opencode` 普通子目录。Python 只来自 worker 镜像，不继承宿主机；镜像不含业务第三方包或编译工具链。pandas、Excel、Word 与 JSON 第三方库通过 `package-python-libs.sh` 生成独立哈希锁制品，`deploy-python-libs.sh` 在目标机断网校验后挂载，升级库不重建 worker；运行时 `PIP_NO_INDEX=1`，不得访问公网安装。
+worker 镜像发布前执行 `tools/verify-opencode-node-worker-image.sh <image>`；企业打包还会通过 `tools/verify-codex-whitebox-worker-image.sh <image>` 在 `--network none` 容器内检查 Python `3.13.14`、`python`/`python3` 一致性、pip、venv、常用标准库及 `curl/jq/zip/unzip`。前一脚本按 `EXPECTED_OPENCODE_ABI=V2` 或 `V1` 真实启动对应 OpenCode，分别核验 `/api/info` 或 `/global/health`、插件依赖、PID 1 继承的 HOME/XDG/TMP/config 环境和运行目录；V1 回滚 worker 仍必须通过同一检查。Python 只来自 worker 镜像，不继承宿主机；镜像不含业务第三方包或编译工具链。pandas、Excel、Word 与 JSON 第三方库通过 `package-python-libs.sh` 生成独立哈希锁制品，`deploy-python-libs.sh` 在目标机断网校验后挂载，升级库不重建 worker；运行时 `PIP_NO_INDEX=1`，不得访问公网安装。
 
 手工验收清单：
 

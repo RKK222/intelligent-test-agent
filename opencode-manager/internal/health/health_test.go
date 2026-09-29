@@ -47,7 +47,7 @@ func TestCheckerReportsHealthyWhenPIDAliveAndGlobalHealthSucceeds(t *testing.T) 
 
 func TestCheckerReportsUnhealthyWhenGlobalHealthFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/info" {
+		if r.URL.Path == "/api/info" || r.URL.Path == "/global/health" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -67,6 +67,52 @@ func TestCheckerReportsUnhealthyWhenGlobalHealthFails(t *testing.T) {
 	}
 	if result.Message != "opencode /api/info endpoint is not reachable" {
 		t.Fatalf("expected specific message, got %s", result.Message)
+	}
+}
+
+func TestCheckerReportsHealthyForV1RollbackEndpoints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/info":
+			w.WriteHeader(http.StatusNotFound)
+		case "/global/health", "/global/config":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	checker := Checker{
+		Client:       server.Client(),
+		ProcessAlive: func(pid int) bool { return pid == 12345 },
+		ProbeBaseURL: server.URL,
+	}
+	result := checker.Check(context.Background(), state.ProcessRecord{PID: 12345, Port: 4096})
+	if result.Status != StatusHealthy {
+		t.Fatalf("expected V1 rollback health to be healthy, got %#v", result)
+	}
+}
+
+func TestCheckerReportsUnhealthyWhenV1ConfigIsInvalid(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/info":
+			w.WriteHeader(http.StatusNotFound)
+		case "/global/health":
+			w.WriteHeader(http.StatusOK)
+		case "/global/config":
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	checker := Checker{Client: server.Client(), ProcessAlive: func(int) bool { return true }, ProbeBaseURL: server.URL}
+	result := checker.Check(context.Background(), state.ProcessRecord{PID: 12345, Port: 4096})
+	if result.Status != StatusUnhealthy || result.Message != "opencode V1 configuration is not loadable" {
+		t.Fatalf("expected V1 configuration failure, got %#v", result)
 	}
 }
 

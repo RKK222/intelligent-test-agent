@@ -24,9 +24,11 @@
 
 专用任务也使用同一发布脚本和不可变标签，但 `ISOLATED_ACCEPTANCE=true` 会校验所有隔离路径与端口，跳过
 release 的 `stop-legacy`，并禁用独立实例里的 XXL 调度器。一次性数据库克隆只供 V2 验收使用；V2 Flyway
-只能写该副本。两个流水线不得并发操作同一个 V2 任务，缓存可以共享。专用任务的 `ROLLBACK` 只能选择其自身
-`v2-acceptance/releases` 中已存在且验证通过的标签；回滚 V1 之前须先在这个独立栈制备兼容 V1 的不可变制品并
-验证数据库向后兼容，不能使用日常 release 的目录或覆盖 `3000`。验收完成后核对
+只能写该副本。两个流水线不得并发操作同一个 V2 任务，缓存可以共享。专用任务的 `ROLLBACK` 使用
+`ROLLBACK_TAG` 指向其自身 `v2-acceptance/releases` 中已存在且验证通过的源标签，并通过 `ROLLBACK_ABI`
+明确选择 `V2` 直接重部署或 `V1` 生成独立 `rollback-v1-*` 制品。V1 路径不会覆盖源 release，也不会使用日常
+release 的目录或覆盖 `3000`；它会重新构建并校验 1.18.4 worker，再由部署门禁核对清单版本与容器内 `VERSION`。
+验收完成后核对
 `http://192.168.8.100:18182/actuator/health/readiness`、`http://192.168.8.100:3100/`、专用 worker
 健康状态及 Jenkins 构建结果。
 

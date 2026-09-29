@@ -35,6 +35,7 @@ WORKER_IMAGE_REPOSITORY=${WORKER_IMAGE_REPOSITORY:-test-agent-opencode-worker}
 WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worker}
 WORKER_PORT_START=${WORKER_PORT_START:-4096}
 WORKER_PORT_END=${WORKER_PORT_END:-4105}
+OPENCODE_ABI=${OPENCODE_ABI:-V2}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 # 宿主机检查必须有界结束，避免远端 Docker/数据库/端口探测异常时无声占住 Jenkins。
 HOST_CHECK_TIMEOUT_SECONDS=${HOST_CHECK_TIMEOUT_SECONDS:-60}
@@ -55,8 +56,11 @@ Commands:
   validate-tag TAG
   validate-host
   validate-manifest RELEASE_DIR TAG
+  manifest-commit RELEASE_DIR TAG
   build
+  build-worker
   prepare TAG COMMIT RELEASE_DIR
+  prepare-rollback SOURCE_TAG TARGET_TAG TARGET_RELEASE_DIR
   verify-database-upgrade RELEASE_DIR TAG
   deploy RELEASE_DIR TAG
   verify-deployment TAG
@@ -84,7 +88,7 @@ sha256_file() {
 
 validate_tag() {
     local tag=$1
-    [[ "${tag}" =~ ^release-[1-9][0-9]*-[0-9a-f]{8}$ ]] || {
+    [[ "${tag}" =~ ^(release|rollback-v1)-[1-9][0-9]*-[0-9a-f]{8}$ ]] || {
         echo "Invalid immutable release tag: ${tag}" >&2
         return 1
     }
@@ -228,6 +232,58 @@ validate_timeout() {
     }
 }
 
+validate_opencode_abi() {
+    case "${1:-${OPENCODE_ABI}}" in
+        V1|V2) ;;
+        *)
+            echo "Unsupported OpenCode ABI: ${1:-${OPENCODE_ABI}} (expected V1 or V2)" >&2
+            return 1
+            ;;
+    esac
+}
+
+opencode_version_for_abi() {
+    validate_opencode_abi "$1"
+    case "$1" in
+        V1) printf '%s\n' '1.18.4' ;;
+        V2) printf '%s\n' '2.0.18' ;;
+    esac
+}
+
+# 所有 OpenCode 下载参数集中在这里，V1 回滚与 V2 发布共用同一个受控 Dockerfile，
+# 避免回滚时只替换 VERSION 而实际仍下载 V2 二进制或安装 V2 ABI。
+opencode_build_args() {
+    validate_opencode_abi
+    case "${OPENCODE_ABI}" in
+        V1)
+            OPENCODE_BUILD_ARGS=(
+                --build-arg 'OPENCODE_VERSION=1.18.4'
+                --build-arg 'OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e'
+                --build-arg 'OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download/v1.18.4'
+                --build-arg 'OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz'
+                --build-arg 'OPENCODE_ASSET_SIZE=59265643'
+                --build-arg 'OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc'
+                --build-arg 'OPENCODE_BINARY_SHA256=not-recorded'
+                --build-arg 'OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime-1.18.4.package.json'
+                --build-arg 'OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime-1.18.4.package-lock.json'
+            )
+            ;;
+        V2)
+            OPENCODE_BUILD_ARGS=(
+                --build-arg 'OPENCODE_VERSION=2.0.18'
+                --build-arg 'OPENCODE_RELEASE_COMMIT=cd9a14a6b688d4021bee381dfd39d2cef9c0f862'
+                --build-arg 'OPENCODE_RELEASE_BASE_URL=https://registry.npmjs.org/@opencode/cli-linux-x64-baseline/-'
+                --build-arg 'OPENCODE_ASSET_NAME=cli-linux-x64-baseline-2.0.18.tgz'
+                --build-arg 'OPENCODE_ASSET_SIZE=90140661'
+                --build-arg 'OPENCODE_ASSET_SHA256=548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd'
+                --build-arg 'OPENCODE_BINARY_SHA256=not-recorded'
+                --build-arg 'OPENCODE_RUNTIME_PACKAGE_JSON=deploy/internal/opencode-node-runtime.package.json'
+                --build-arg 'OPENCODE_RUNTIME_PACKAGE_LOCK=deploy/internal/opencode-node-runtime.package-lock.json'
+            )
+            ;;
+    esac
+}
+
 worker_image_for_tag() {
     local tag=$1
     validate_tag "${tag}"
@@ -289,6 +345,7 @@ validate_host() {
     local item source_db_name configured_data_root
     require_command timeout
     validate_timeout "${HOST_CHECK_TIMEOUT_SECONDS}"
+    validate_opencode_abi
     echo "==> Validate Jenkins host prerequisites (timeout ${HOST_CHECK_TIMEOUT_SECONDS}s)"
     require_command docker
     require_command curl
@@ -391,8 +448,65 @@ validate_runtime_release_access() {
         >/dev/null
 }
 
-build_release() {
+build_worker_image() {
     local worker_image build_version worker_build_log
+    validate_opencode_abi
+    [[ -n "${RELEASE_TAG:-}" ]] || {
+        echo 'RELEASE_TAG is required to build the immutable OpenCode worker image.' >&2
+        return 1
+    }
+    worker_image=$(worker_image_for_tag "${RELEASE_TAG}")
+    build_version=$(manager_build_version "${GIT_COMMIT_FULL:-HEAD}")
+    opencode_build_args
+    echo "==> Build and verify immutable OpenCode ${OPENCODE_ABI} worker image ${worker_image}"
+    worker_build_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build.XXXXXX")
+    worker_retry_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-retry.XXXXXX")
+    worker_recovery_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-recovery.XXXXXX")
+    if ! docker build \
+        --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
+        --tag "${worker_image}" \
+        --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
+        "${OPENCODE_BUILD_ARGS[@]}" \
+        "${repository_root}" 2>&1 | tee "${worker_build_log}"; then
+        # 测试机构建缓存偶发丢失 BuildKit snapshot；只对该明确错误做一次无缓存重建，业务构建错误仍立即失败。
+        if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_build_log}"; then
+            rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
+            return 1
+        fi
+        echo 'BuildKit snapshot cache is inconsistent; retrying the worker image once without cache.' >&2
+        if ! docker build --no-cache \
+            --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
+            --tag "${worker_image}" \
+            --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
+            "${OPENCODE_BUILD_ARGS[@]}" \
+            "${repository_root}" 2>&1 | tee "${worker_retry_log}"; then
+            if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_retry_log}"; then
+                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
+                return 1
+            fi
+            # 两次均命中同一精确错误时，只清理 BuildKit 自己的构建缓存再重试一次；
+            # 不删除镜像、容器或卷，业务构建错误仍立即失败。worker Dockerfile 使用
+            # BuildKit 的只读上下文挂载，不能退回不支持该语法的 legacy builder。
+            echo 'BuildKit snapshot cache remains inconsistent; pruning builder cache before one final retry.' >&2
+            docker builder prune --all --force
+            if ! docker build --no-cache \
+                --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
+                --tag "${worker_image}" \
+                --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
+                "${OPENCODE_BUILD_ARGS[@]}" \
+                "${repository_root}" 2>&1 | tee "${worker_recovery_log}"; then
+                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
+                return 1
+            fi
+        fi
+    fi
+    rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
+    start_worker_image_guard "${RELEASE_TAG}" "${worker_image}"
+    EXPECTED_OPENCODE_ABI="${OPENCODE_ABI}" \
+        "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
+}
+
+build_release() {
     validate_host
     echo '==> Verify Flyway migration naming and immutable bytes'
     maven_run \
@@ -427,54 +541,7 @@ build_release() {
             corepack pnpm build
         '
 
-    [[ -n "${RELEASE_TAG:-}" ]] || {
-        echo 'RELEASE_TAG is required to build the immutable OpenCode worker image.' >&2
-        return 1
-    }
-    worker_image=$(worker_image_for_tag "${RELEASE_TAG}")
-    build_version=$(manager_build_version "${GIT_COMMIT_FULL:-HEAD}")
-    echo "==> Build and verify immutable OpenCode worker image ${worker_image}"
-    worker_build_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build.XXXXXX")
-    worker_retry_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-retry.XXXXXX")
-    worker_recovery_log=$(mktemp "${TMPDIR:-/tmp}/test-agent-worker-build-recovery.XXXXXX")
-    if ! docker build \
-        --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
-        --tag "${worker_image}" \
-        --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
-        "${repository_root}" 2>&1 | tee "${worker_build_log}"; then
-        # 测试机构建缓存偶发丢失 BuildKit snapshot；只对该明确错误做一次无缓存重建，业务构建错误仍立即失败。
-        if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_build_log}"; then
-            rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
-            return 1
-        fi
-        echo 'BuildKit snapshot cache is inconsistent; retrying the worker image once without cache.' >&2
-        if ! docker build --no-cache \
-            --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
-            --tag "${worker_image}" \
-            --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
-            "${repository_root}" 2>&1 | tee "${worker_retry_log}"; then
-            if ! grep -Eq 'failed to stat active key during commit|snapshot .* does not exist' "${worker_retry_log}"; then
-                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
-                return 1
-            fi
-            # 两次均命中同一精确错误时，只清理 BuildKit 自己的构建缓存再重试一次；
-            # 不删除镜像、容器或卷，业务构建错误仍立即失败。worker Dockerfile 使用
-            # BuildKit 的只读上下文挂载，不能退回不支持该语法的 legacy builder。
-            echo 'BuildKit snapshot cache remains inconsistent; pruning builder cache before one final retry.' >&2
-            docker builder prune --all --force
-            if ! docker build --no-cache \
-                --file "${repository_root}/deploy/internal/opencode-worker.Dockerfile" \
-                --tag "${worker_image}" \
-                --build-arg "MANAGER_BUILD_VERSION=${build_version}" \
-                "${repository_root}" 2>&1 | tee "${worker_recovery_log}"; then
-                rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
-                return 1
-            fi
-        fi
-    fi
-    rm -f -- "${worker_build_log}" "${worker_retry_log}" "${worker_recovery_log}"
-    start_worker_image_guard "${RELEASE_TAG}" "${worker_image}"
-    "${repository_root}/tools/verify-opencode-node-worker-image.sh" "${worker_image}"
+    build_worker_image
 }
 
 write_worker_stack() {
@@ -681,7 +748,10 @@ PY
 
 write_manifest() {
     local release_dir=$1 tag=$2 commit=$3
-    local jar_sha nginx_sha stack_sha worker_stack_sha worker_image worker_image_id
+    local jar_sha nginx_sha stack_sha worker_stack_sha worker_image worker_image_id runtime_abi runtime_version
+    validate_opencode_abi
+    runtime_abi=${OPENCODE_ABI}
+    runtime_version=$(opencode_version_for_abi "${runtime_abi}")
     jar_sha=$(sha256_file "${release_dir}/backend.jar")
     nginx_sha=$(sha256_file "${release_dir}/nginx.conf")
     stack_sha=$(sha256_file "${release_dir}/stack.json")
@@ -698,7 +768,8 @@ write_manifest() {
             | xargs -0 sha256sum >source.sha256
     )
     python3 - "${release_dir}/manifest.json" "${tag}" "${commit}" "${jar_sha}" "${nginx_sha}" \
-        "${stack_sha}" "${worker_stack_sha}" "${worker_image}" "${worker_image_id}" "${BUILD_URL:-}" <<'PY'
+        "${stack_sha}" "${worker_stack_sha}" "${worker_image}" "${worker_image_id}" \
+        "${runtime_abi}" "${runtime_version}" "${BUILD_URL:-}" <<'PY'
 import json
 import sys
 
@@ -712,6 +783,8 @@ import sys
     worker_stack_sha,
     worker_image,
     worker_image_id,
+    runtime_abi,
+    runtime_version,
     build_url,
 ) = sys.argv[1:]
 manifest = {
@@ -725,6 +798,8 @@ manifest = {
     "workerStackSha256": worker_stack_sha,
     "workerImage": worker_image,
     "workerImageId": worker_image_id,
+    "runtimeAbi": runtime_abi,
+    "runtimeVersion": runtime_version,
     "frontendChecksums": "frontend.sha256",
     "sourceChecksums": "source.sha256",
 }
@@ -778,10 +853,82 @@ prepare_release() {
     validate_manifest "${release_dir}" "${tag}"
 }
 
+manifest_commit() {
+    local release_dir=$1 tag=$2 manifest
+    manifest="${release_dir}/manifest.json"
+    validate_release_dir "${release_dir}" "${tag}"
+    [[ -f "${manifest}" ]] || { echo "Missing release manifest: ${manifest}" >&2; return 1; }
+    local commit
+    commit=$(python3 - "${manifest}" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    commit = json.load(source).get("commit", "")
+if not re.fullmatch(r"[0-9a-f]{40}", commit):
+    raise SystemExit("Release manifest commit is invalid")
+print(commit)
+PY
+    )
+    validate_commit "${commit}" "${tag}"
+    printf '%s\n' "${commit}"
+}
+
+# 为 V1 回滚生成独立 immutable release：沿用目标 release 的平台制品和源码，
+# 只重新绑定 1.18.4 worker 镜像，避免覆盖原 V2 manifest 或误把一次 V2 重部署当成 V1 回滚。
+prepare_rollback_release() {
+    local source_tag=$1 target_tag=$2 release_dir=$3 source_dir source_commit worker_image
+    validate_release_dir "${release_dir}" "${target_tag}"
+    validate_tag "${source_tag}"
+    source_dir="${RELEASE_ROOT}/${source_tag}"
+    [[ "${source_dir}" != "${release_dir}" ]] || {
+        echo 'Rollback target release must be different from the source release.' >&2
+        return 1
+    }
+    validate_manifest "${source_dir}" "${source_tag}"
+    source_commit=$(manifest_commit "${source_dir}" "${source_tag}")
+    validate_commit "${source_commit}" "${target_tag}"
+    [[ ! -e "${release_dir}" ]] || { echo "Immutable rollback release already exists: ${release_dir}" >&2; return 1; }
+    [[ -f "${source_dir}/backend.jar" && -f "${source_dir}/nginx.conf" ]] || {
+        echo "Source release is missing platform artifacts: ${source_dir}" >&2
+        return 1
+    }
+    [[ -d "${source_dir}/source" && -d "${source_dir}/frontend" ]] || {
+        echo "Source release is missing source or frontend artifacts: ${source_dir}" >&2
+        return 1
+    }
+    worker_image=$(worker_image_for_tag "${target_tag}")
+    docker image inspect "${worker_image}" >/dev/null
+
+    umask 022
+    mkdir -p "${release_dir}"
+    cp "${source_dir}/backend.jar" "${release_dir}/backend.jar"
+    cp -R "${source_dir}/source" "${release_dir}/source"
+    cp -R "${source_dir}/frontend" "${release_dir}/frontend"
+    sed \
+        -e "s/__RUNTIME_SERVICE_HOST__/${RUNTIME_SERVICE_HOST}/g" \
+        -e "s/__BACKEND_PORT__/${BACKEND_PORT}/g" \
+        -e "s/__XXL_JOB_ADMIN_PORT__/${XXL_JOB_ADMIN_PORT}/g" \
+        "${script_dir}/jenkins-nginx.conf" >"${release_dir}/nginx.conf"
+    mkdir -p "${release_dir}/source/backend/logs" "${release_dir}/source/temp"
+    chmod 0644 "${release_dir}/backend.jar" "${release_dir}/nginx.conf"
+    chmod -R u=rwX,go=rX "${release_dir}/source" "${release_dir}/frontend"
+    validate_backend_jar "${release_dir}/backend.jar"
+    write_stack "${release_dir}" "${release_dir}/stack.json"
+    write_worker_stack "${release_dir}/worker-stack.json" "${worker_image}"
+    docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" -f "${release_dir}/stack.json" config --quiet
+    docker compose --env-file "${ENV_FILE}" -p "${WORKER_PROJECT_NAME}" \
+        -f "${release_dir}/worker-stack.json" config --quiet
+    write_manifest "${release_dir}" "${target_tag}" "${source_commit}"
+    validate_manifest "${release_dir}" "${target_tag}"
+}
+
 validate_manifest() {
     local release_dir=$1 tag=$2 manifest=${release_dir}/manifest.json
     local values schema_version commit expected_jar actual_jar expected_nginx actual_nginx
     local expected_stack actual_stack expected_worker_stack actual_worker_stack worker_image worker_image_id actual_worker_image_id
+    local runtime_abi runtime_version
     validate_release_dir "${release_dir}" "${tag}"
     [[ -f "${manifest}" ]] || { echo "Missing release manifest: ${manifest}" >&2; return 1; }
     values=$(python3 - "${manifest}" "${tag}" <<'PY'
@@ -805,6 +952,8 @@ values = [
     manifest.get("workerStackSha256", ""),
     manifest.get("workerImage", ""),
     manifest.get("workerImageId", ""),
+    manifest.get("runtimeAbi", "V2"),
+    manifest.get("runtimeVersion", ""),
 ]
 if any("|" in str(value) for value in values):
     raise SystemExit("Release manifest contains an invalid delimiter")
@@ -812,7 +961,12 @@ print("|".join(values))
 PY
     )
     IFS='|' read -r schema_version commit expected_jar expected_nginx expected_stack \
-        expected_worker_stack worker_image worker_image_id <<<"${values}"
+        expected_worker_stack worker_image worker_image_id runtime_abi runtime_version <<<"${values}"
+    validate_opencode_abi "${runtime_abi}"
+    if [[ -n "${runtime_version}" && "${runtime_version}" != "$(opencode_version_for_abi "${runtime_abi}")" ]]; then
+        echo "OpenCode runtime version does not match ABI: ${runtime_abi}/${runtime_version}" >&2
+        return 1
+    fi
     validate_commit "${commit}" "${tag}"
     actual_jar=$(sha256_file "${release_dir}/backend.jar")
     actual_nginx=$(sha256_file "${release_dir}/nginx.conf")
@@ -982,6 +1136,7 @@ verify_database_upgrade() {
 verify_deployment() {
     local tag=$1 attempt backend_ready=false frontend_ready=false xxl_admin_ready=false xxl_admin_proxy_ready=false
     local xxl_executor_ready=false worker_ready=false manager_ready=false
+    local manifest_runtime_version actual_runtime_version
     validate_tag "${tag}"
     [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' "${FRONTEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
@@ -1100,6 +1255,22 @@ PY
         echo "OpenCode manager did not receive an applied runtime configuration from this server's backend." >&2
         return 1
     }
+    manifest_runtime_version=$(python3 - "${RELEASE_ROOT}/${tag}/manifest.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as source:
+    print(json.load(source).get("runtimeVersion", ""))
+PY
+    )
+    if [[ -n "${manifest_runtime_version}" ]]; then
+        actual_runtime_version=$(docker exec "${WORKER_CONTAINER_NAME}" \
+            cat /usr/local/lib/opencode/VERSION 2>/dev/null || true)
+        [[ "${actual_runtime_version}" == "${manifest_runtime_version}" ]] || {
+            echo "OpenCode worker runtime version mismatch: expected=${manifest_runtime_version} actual=${actual_runtime_version:-missing}" >&2
+            return 1
+        }
+    fi
 }
 
 deploy_release() {
@@ -1186,13 +1357,25 @@ case "${command}" in
         [[ $# -eq 2 ]] || usage
         validate_manifest "$1" "$2"
         ;;
+    manifest-commit)
+        [[ $# -eq 2 ]] || usage
+        manifest_commit "$1" "$2"
+        ;;
     build)
         [[ $# -eq 0 ]] || usage
         build_release
         ;;
+    build-worker)
+        [[ $# -eq 0 ]] || usage
+        build_worker_image
+        ;;
     prepare)
         [[ $# -eq 3 ]] || usage
         prepare_release "$1" "$2" "$3"
+        ;;
+    prepare-rollback)
+        [[ $# -eq 3 ]] || usage
+        prepare_rollback_release "$1" "$2" "$3"
         ;;
     verify-database-upgrade)
         [[ $# -eq 2 ]] || usage

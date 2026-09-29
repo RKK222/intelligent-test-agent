@@ -89,7 +89,13 @@ root/child Trace、未知事件透传、失败 Step 不伪造耗时，以及
 Worker 构建还会校验固定 npm runtime lockfile、V2 平台包摘要、V2 插件和
 client 入口。生产发布仍需在隔离 Worker 上执行 `/api/info`、session、prompt、
 command、compact、interrupt、diff 和 `/api/event` smoke；V1 发布包继续作为
-独立回滚包保留。
+独立回滚包保留。V1 回滚不覆盖原 V2 release：专用 Jenkins 任务的
+`ROLLBACK_ABI=V1` 会以 `ROLLBACK_TAG` 指向的 immutable release 为平台制品来源，
+生成 `rollback-v1-<build>-<source-commit-prefix>` 新清单，重新构建并校验
+OpenCode `1.18.4` worker，再通过同一公共 manager 生命周期部署。清单记录
+`runtimeAbi/runtimeVersion`，发布后的 verify 阶段会从运行中的 worker 读取
+`/usr/local/lib/opencode/VERSION`，确保实际进程确实是 V1；`ROLLBACK_ABI=V2` 才是
+原 V2 release 的直接重部署。
 
 测试机的远端验收使用独立 Jenkins 任务 `intelligent-test-agent-opencode-v2`，
 只检出 `codex/opencode-v2-migration`，从 `Jenkinsfile.opencode-v2` 发布到

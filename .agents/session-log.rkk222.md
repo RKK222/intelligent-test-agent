@@ -19062,3 +19062,28 @@
 - V2 默认发布链路使用固定 `2.0.18` npm platform 包和 V2 client/plugin，1.18.4 回滚链路拥有独立、可校验的旧 ABI，launcher 不会把 V2 `plugins` 或依赖投影到 V1。
 - 平台 HTTP/RunEvent wire、数据库结构和安全边界保持不变；V1/V2 协议差异集中在 client/runtime adapter、事件 mapper、launcher 和受控部署配置。
 - 远端 Jenkins 镜像 smoke、真实模型 Run、平台 SSE、permission/question、回滚和浏览器 E2E 仍需在用户处理 Chrome 警告后完成；本次未修改 `.env.local` 或 OpenCode 只读源码。
+
+## 2026-09-30 - 将 V1 回滚从 V2 重部署改为可验证的独立 ABI 回滚
+
+### Why
+
+- Jenkins #14 的 `ROLLBACK` 只重新部署了 V2 `release-13-54938148`，没有真正装载 1.18.4；这不满足迁移方案中“保留并验证 V1 回滚包”的要求。
+- 需要让 V1 回滚不覆盖 V2 immutable release，并让 manager、worker smoke 和发布清单能够证明实际运行的 ABI。
+
+### What
+
+- `deploy/local/jenkins-release.sh` 新增 V1/V2 固定 OpenCode build args、`build-worker`、`prepare-rollback`、manifest commit 读取、`rollback-v1-*` 标签校验，以及 `runtimeAbi/runtimeVersion` 清单字段和容器版本校验。
+- `Jenkinsfile.opencode-v2` 新增 `ROLLBACK_ABI`；V1 回滚从源 release 复制平台制品、重建 1.18.4 worker 并生成独立 release，V2 保持原标签直接重部署。
+- Worker image verifier 按 V1/V2 ABI 选择版本、asset、健康路由和依赖；opencode-manager 健康探测增加 V1 `/global/health` + `/global/config` 回退，并补充 Go 单测。
+- 同步 `deploy/internal/README.md`、`deploy/local/README.md`、`docs/deployment/backend.md` 和 `docs/deployment/opencode-v2-migration.md` 的回滚操作说明。
+
+### How
+
+- 本地验证：`go test ./...`（opencode-manager 全部通过）、`bash tools/verify-jenkins-release.sh`、`bash tools/verify-opencode-tool-runtime-deploy.sh`、相关脚本 `bash -n`、`git diff --check`；本地缺少 worker 镜像，未把 Docker image smoke 的 exit 125 当作通过。
+- 提交前回顾全部 `.agents/session-log*.md`，确认未修改 `.env.local`、OpenCode 只读源码、数据库/Flyway 或原 `release` 工作区。
+- Jenkins #13 的 V2 发布仍以 `54938148` 成功为基线；#14 仅证明旧逻辑可重部署 V2，新的 V1 rollback 需要本次提交推送后重新运行专用任务验证。
+
+### Result
+
+- V1 回滚现在有独立不可变目录、镜像、manifest 和运行版本门禁，失败时不会伪装成 V2 回滚成功。
+- 当前尚待：推送本次改动后执行专用 Jenkins 的 V2 DEPLOY、`ROLLBACK_ABI=V1` 回滚和 V2 恢复；浏览器首次登录引导层仍阻塞真实 prompt/Run/SSE E2E。
