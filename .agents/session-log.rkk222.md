@@ -19008,3 +19008,9 @@
 - 随后浏览器尝试登录 V2 发现 `OPTIONS /api/auth/login` 返回 403：克隆的原测试配置没有允许隔离前端
   `http://192.168.8.100:3100`。隔离 Compose 对后端显式覆盖该 CORS Origin，发布门禁新增相同预检；
   这只扩大 V2 后端对白名单内专用前端的访问，不更改原 release 配置或认证规则。下一次不可变发布需验证真实登录。
+- Jenkins #12 生成 `release-12-69f0c8b5` 并 `SUCCESS`；目标机重新通过后端、前端、Worker 2.0.18、克隆数据库升级、
+  正式 Compose、后端/前端/manager 健康门禁及新增登录预检。Mac 直连 `3100` 来源预检为 `200` 且返回精确
+  `Access-Control-Allow-Origin`；原 `3000` 来源对 V2 后端仍为 `403`，V2 和 release 的 readiness 均为 `UP`。
+- Chrome 用已保存的测试账号成功登录 V2 工作台并显示克隆的应用/工作区；随后 Chrome 弹出已保存密码泄露警告，
+  阻挡了首次使用引导交互。浏览器安全警告需用户自行处理，真实 Run、SSE、历史、permission/question 和回滚
+  尚未在 V2 页面完成端到端验收；原生 `/api/info` 与 `/api/event` 未认证探针均返回 `401`。
