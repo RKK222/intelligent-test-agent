@@ -18962,8 +18962,11 @@
 - `bash -n deploy/local/jenkins-release.sh`、`tools/verify-jenkins-release.sh` 和 `git diff --check` 通过。
 - Jenkins #5 重新确认检出 `1b61a4009`，在发布阶段复现端口占用；后端 `3000/18082` 和前端 `3100` 仍可访问，未影响
   release。下一步应以本次 fail-closed 诊断为依据确认端口持有者，再通过专用任务重试，不直接删除未知资源。
+- Jenkins #6 以回滚参数复用 `release-5-1b61a400`，确认占用者为现场 `mockcenter-isolated-redis-2-1`
+  （Compose 项目 `mockcenter-isolated`），因此按隔离边界拒绝清理。
 
 ### Result
 
 - 迁移代码和构建链路仍保持可复现；V2 正式发布暂未完成，真实模型 Run、平台 SSE、回滚和完整账号 E2E 仍未验收。
-- 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；未修改 OpenCode 只读源码、`.env.local` 或 release 栈。
+- 将 V2 专用 Redis 宿主端口从与 MockCenter 冲突的 `16380` 调整为 `16381`，同步 Jenkins、bootstrap、发布契约和部署文档；未修改 OpenCode 只读源码、`.env.local` 或 release 栈。
+- 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；V2 正式发布仍需用新端口重新验收。
