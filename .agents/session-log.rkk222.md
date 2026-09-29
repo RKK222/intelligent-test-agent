@@ -19002,3 +19002,9 @@
 
 - 修改只涉及 V2 独立验收 Redis 启动及早期校验；公开 API、RunEvent、数据库结构与 release 运行栈未变。
 - 目标 x86 Jenkins 仍需生成新不可变发布包并验证 Redis、后端、Worker 和真实 Run；不能用本机容器检查代替远端验收。
+- Jenkins #11 生成 `release-11-f798bb53`，目标 x86 后端 26 模块、前端 typecheck/build、Worker
+  `opencode v2.0.18` 镜像、克隆数据库升级和正式 Compose 均通过，流水线 `SUCCESS`；V2 `18182/3100`
+  与原 release `18082/3000` 的 readiness/HTTP 均正常。
+- 随后浏览器尝试登录 V2 发现 `OPTIONS /api/auth/login` 返回 403：克隆的原测试配置没有允许隔离前端
+  `http://192.168.8.100:3100`。隔离 Compose 对后端显式覆盖该 CORS Origin，发布门禁新增相同预检；
+  这只扩大 V2 后端对白名单内专用前端的访问，不更改原 release 配置或认证规则。下一次不可变发布需验证真实登录。

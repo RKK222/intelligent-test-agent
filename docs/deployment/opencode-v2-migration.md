@@ -88,6 +88,8 @@ command、compact、interrupt、diff 和 `/api/event` smoke；V1 发布包继续
 占用时会 fail-closed 并保留占用诊断，不会为了发布停止 release 服务或未知进程。
 隔离 Redis 配置仍以 `0600` 文件保存在专用 `shared` 目录；Jenkins 启动前先验证该文件可挂载并在容器内复制，
 运行时再由 `redis` 用户读取容器内副本，以兼容测试机的 FUSE 目录权限。
+V2 后端 Compose 同时固定 `3100` 为浏览器 CORS 来源，并在发布后验证登录接口的预检响应；仅检查
+`/actuator/health/readiness` 不足以证明前端可登录。
 
 本地 `tools/dev-phase11-real-e2e.sh`、`tools/dev-runnable-loop-check.sh` 和
 `tools/verify-opencode-user-process-scenarios.sh` 共用

@@ -655,6 +655,7 @@ if isolated_acceptance == "true":
     stack["services"]["backend"]["environment"].update({
         "TEST_AGENT_REDIS_HOST": "127.0.0.1",
         "TEST_AGENT_REDIS_PORT": isolated_redis_port,
+        "TEST_AGENT_CORS_ALLOWED_ORIGINS": f"http://192.168.8.100:{frontend_port}",
         "TEST_AGENT_XXL_JOB_ENABLED": "false",
     })
     stack["services"]["redis"] = {
@@ -1017,6 +1018,18 @@ verify_deployment() {
         echo "Frontend did not become ready within the deployment window." >&2
         return 1
     }
+    if [[ "${ISOLATED_ACCEPTANCE}" == true ]]; then
+        # 前端构建与后端端口都可能健康，但克隆的旧 CORS 白名单仍会让浏览器登录失败。
+        curl -sSi --connect-timeout 2 --max-time 5 -X OPTIONS \
+            "${BACKEND_BASE_URL}/api/auth/login" \
+            -H "Origin: ${FRONTEND_URL}" \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type' \
+            | grep -Fqi "Access-Control-Allow-Origin: ${FRONTEND_URL}" || {
+                echo "Isolated V2 frontend origin is not allowed by backend CORS." >&2
+                return 1
+            }
+    fi
     # 独立 V2 验收不启动 XXL，避免与 release 的调度实例共用 MySQL 和 executor。
     if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
     # 主上下文 readiness 不包含独立 Servlet 子上下文；必须单独等待 XXL Admin，防止端口冲突被误报为发布成功。
