@@ -29,7 +29,7 @@ BACKEND_CONTAINER_NAME=${BACKEND_CONTAINER_NAME:-test-agent-jenkins-backend}
 FRONTEND_CONTAINER_NAME=${FRONTEND_CONTAINER_NAME:-test-agent-jenkins-frontend}
 VERIFY_NAMESPACE=${VERIFY_NAMESPACE:-test_agent_jenkins_verify}
 ISOLATED_ACCEPTANCE=${ISOLATED_ACCEPTANCE:-false}
-ISOLATED_REDIS_PORT=${ISOLATED_REDIS_PORT:-16381}
+ISOLATED_REDIS_PORT=${ISOLATED_REDIS_PORT:-26380}
 ISOLATED_REDIS_CONTAINER_NAME=${ISOLATED_REDIS_CONTAINER_NAME:-test-agent-v2-redis}
 WORKER_IMAGE_REPOSITORY=${WORKER_IMAGE_REPOSITORY:-test-agent-opencode-worker}
 WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worker}
@@ -180,7 +180,7 @@ validate_isolated_acceptance() {
        "${WORKER_CONTAINER_NAME}" == test-agent-v2-opencode-worker &&
        "${BACKEND_PORT}" == 18182 && "${FRONTEND_PORT}" == 3100 &&
        "${WORKER_PORT_START}" == 4296 && "${WORKER_PORT_END}" == 4305 &&
-       "${ISOLATED_REDIS_PORT}" == 16381 ]] || {
+       "${ISOLATED_REDIS_PORT}" == 26380 ]] || {
         echo 'Isolated V2 acceptance paths, projects or ports differ from the dedicated contract.' >&2
         return 1
     }
@@ -1087,7 +1087,7 @@ deploy_release() {
     fi
     if [[ "${ISOLATED_ACCEPTANCE}" == true ]]; then
         # 专用任务的上一次失败可能留下已创建但未启动的 Compose 容器；Docker 仍会为其保留
-        # 16381 端口，下一次 up 会在绑定端口前失败。只清理本任务固定项目和容器，保留 Redis 卷。
+        # 26380 端口，下一次 up 会在绑定端口前失败。只清理本任务固定项目和容器，保留 Redis 卷。
         docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
             -f "${release_dir}/stack.json" down --remove-orphans --timeout 30 >/dev/null 2>&1 || true
         for stale_container in "${BACKEND_CONTAINER_NAME}" "${FRONTEND_CONTAINER_NAME}" "${ISOLATED_REDIS_CONTAINER_NAME}"; do

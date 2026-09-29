@@ -47,7 +47,7 @@ pipeline {
         WORKER_PORT_END = '4305'
         VERIFY_NAMESPACE = 'test_agent_v2_verify'
         ISOLATED_ACCEPTANCE = 'true'
-        ISOLATED_REDIS_PORT = '16381'
+        ISOLATED_REDIS_PORT = '26380'
         ISOLATED_REDIS_CONTAINER_NAME = 'test-agent-v2-redis'
         RELEASE_SCRIPT = 'deploy/local/jenkins-release.sh'
     }

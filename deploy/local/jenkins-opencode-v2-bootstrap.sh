@@ -102,7 +102,7 @@ database = sys.argv[3]
 overrides = {
     "TEST_AGENT_TEST_DB_NAME": database,
     "TEST_AGENT_REDIS_HOST": "127.0.0.1",
-    "TEST_AGENT_REDIS_PORT": "16381",
+    "TEST_AGENT_REDIS_PORT": "26380",
     "TEST_AGENT_REDIS_PASSWORD": secrets.token_hex(32),
     "TEST_AGENT_OPENCODE_MANAGER_TOKEN": secrets.token_hex(32),
     "TEST_AGENT_OPENCODE_SERVER_PASSWORD": secrets.token_hex(32),
