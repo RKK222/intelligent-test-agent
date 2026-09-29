@@ -306,7 +306,9 @@ async function runOfficialBinary() {
   const exitCode = await new Promise((resolveExit, reject) => {
     child.once("error", reject)
     child.once("exit", (code, signal) => {
-      if (forwardedSignal && (signal === forwardedSignal || code === 128 + (forwardedSignal === "SIGTERM" ? 15 : 2))) {
+      // OpenCode V2 的 Bun serve 收到 SIGTERM 后会清理 watcher 再以 130 退出；
+      // 仅在本启动器确实转发停止信号时将该退出视为受控停止。
+      if (forwardedSignal && (signal === forwardedSignal || code === 130 || code === 128 + (forwardedSignal === "SIGTERM" ? 15 : 2))) {
         resolveExit(0)
         return
       }

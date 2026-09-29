@@ -35,6 +35,9 @@ V2 `serve` 强制 Basic auth。部署时应把同一受控 secret 注入 Java ba
 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 和 worker 的同名环境变量；launcher 会
 将它传给 `OPENCODE_PASSWORD`，gateway 只在变量存在时发送
 `Authorization: Basic opencode:<secret>`，日志不会打印 secret。
+V2 Bun server 收到受控 `SIGTERM` 后会先关闭 watcher，再以退出码 `130` 结束；
+启动器只在已转发该停止信号时将其归一化为成功停止，Worker 镜像的
+`docker stop` 验证仍要求最终容器退出码为 `0`。
 
 V2 没有 V1 的原生 session share 合约。旧 runtime `/session/{id}/share` 兼容入口
 现在返回 `API_GONE`，平台分享必须使用已有的

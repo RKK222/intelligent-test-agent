@@ -453,3 +453,33 @@ test("executes the official binary when invoked through the installed symlink", 
     await rm(root, { force: true, recursive: true })
   }
 })
+
+test("normalizes OpenCode V2 exit 130 only after forwarding a stop signal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-official-launcher-stop-"))
+  let launcherProcess = null
+  try {
+    const launcher = new URL("../deploy/internal/opencode-official-launcher.mjs", import.meta.url)
+    const launcherLink = join(root, "opencode")
+    const officialBinary = join(root, "opencode-official")
+    const ready = join(root, "ready")
+    const stopped = join(root, "stopped")
+    await symlink(launcher, launcherLink)
+    await writeFile(
+      officialBinary,
+      `#!/usr/bin/env node\nconst { writeFileSync } = require("node:fs")\nprocess.on("SIGTERM", () => { writeFileSync(${JSON.stringify(stopped)}, "stopped"); process.exit(130) })\nwriteFileSync(${JSON.stringify(ready)}, "ready")\nsetInterval(() => {}, 1000)\n`,
+    )
+    await chmod(officialBinary, 0o755)
+    launcherProcess = spawn(process.execPath, [launcherLink, "--version"], {
+      env: { ...process.env, OPENCODE_REAL_BIN: officialBinary },
+      stdio: "ignore",
+    })
+    const exited = new Promise((resolveExit) => launcherProcess.once("exit", (code, signal) => resolveExit({ code, signal })))
+    await waitForPath(ready)
+    launcherProcess.kill("SIGTERM")
+    assert.deepEqual(await exited, { code: 0, signal: null })
+    assert.equal(await readFile(stopped, "utf8"), "stopped")
+  } finally {
+    if (launcherProcess?.exitCode === null && launcherProcess?.signalCode === null) launcherProcess.kill("SIGKILL")
+    await rm(root, { force: true, recursive: true })
+  }
+})
