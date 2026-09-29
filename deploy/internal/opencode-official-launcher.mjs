@@ -4,9 +4,9 @@ import { spawn } from "node:child_process"
 import { appendFile, lstat, mkdir, readFile, readdir, realpath, symlink } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
-const TOOL_DEPENDENCIES = ["@opencode-ai/plugin", "@opencode-ai/sdk", "effect", "playwright-core", "zod"]
+const TOOL_DEPENDENCIES = ["@opencode/plugin", "@opencode/client", "effect", "playwright-core", "zod"]
 const PROJECT_CONFIG_RECONCILE_COMMAND = "__reconcile-project-config"
 const LEGACY_PROJECT_CONFIG_MAINTENANCE_COMMAND = "__maintain-project-config"
 const PROJECT_SCAN_IGNORED_DIRECTORIES = new Set([
@@ -127,7 +127,7 @@ export async function reconcileProjectConfigDirectories({ cwd = process.cwd(), r
   return preparedCount
 }
 
-function withRequiredConfig(env, supportsSubagentDepth, runtimeRoot) {
+function withRequiredConfig(env, runtimeVersion, runtimeRoot) {
   let inherited = {}
   if (env.OPENCODE_CONFIG_CONTENT) {
     try {
@@ -140,14 +140,28 @@ function withRequiredConfig(env, supportsSubagentDepth, runtimeRoot) {
     }
   }
   const config = { ...inherited }
-  const observabilityPlugin = new URL(`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`).href
-  const inheritedPlugins = Array.isArray(config.plugin) ? config.plugin : []
-  const plugins = [...inheritedPlugins, observabilityPlugin]
+  // V2 显式 plugins 只接受目录，目录中的 index.mjs 才是 server entrypoint。
+  const observabilityPlugin = pathToFileURL(join(runtimeRoot, "opencode-observability-plugin")).href
+  const inheritedPlugins = Array.isArray(config.plugins) ? config.plugins : []
+  const plugins = inheritedPlugins.map((entry) =>
+    typeof entry === "string" ? { package: entry } : entry,
+  )
+  plugins.push({ package: observabilityPlugin })
   if (env.TEST_AGENT_RTK_ENABLED === "true") {
-    plugins.push(new URL(`file://${join(runtimeRoot, "opencode-rtk-plugin.mjs")}`).href)
+    plugins.push({ package: pathToFileURL(join(runtimeRoot, "opencode-rtk-plugin")).href })
   }
-  config.plugin = [...new Set(plugins)]
-  if (supportsSubagentDepth) {
+  config.plugins = plugins.filter((entry, index, all) =>
+    all.findIndex((candidate) => candidate.package === entry.package) === index,
+  )
+  delete config.plugin
+  if (runtimeVersion.major >= 2) {
+    // V2 的顶层 subagent_depth 被规范化器丢弃，必须放入 experimental。
+    delete config.subagent_depth
+    const experimental = config.experimental && typeof config.experimental === "object" && !Array.isArray(config.experimental)
+      ? { ...config.experimental } : {}
+    experimental.subagent_depth = 2
+    config.experimental = experimental
+  } else if (runtimeVersion.major === 1 && (runtimeVersion.minor > 18 || (runtimeVersion.minor === 18 && runtimeVersion.patch >= 2))) {
     config.subagent_depth = 2
   } else {
     // 1.17.x 会将新字段判定为非法配置；回滚时必须主动移除。
@@ -156,12 +170,12 @@ function withRequiredConfig(env, supportsSubagentDepth, runtimeRoot) {
   return JSON.stringify(config)
 }
 
-async function runtimeSupportsSubagentDepth(runtimeRoot) {
+async function runtimeVersion(runtimeRoot) {
   const version = (await readFile(join(runtimeRoot, "VERSION"), "utf8")).trim()
   const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version)
   if (!match) throw new Error(`invalid OpenCode runtime VERSION: ${version}`)
   const [, major, minor, patch] = match.map(Number)
-  return major > 1 || (major === 1 && (minor > 18 || (minor === 18 && patch >= 2)))
+  return { major, minor, patch }
 }
 
 /**
@@ -208,12 +222,19 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   const resolvedRuntimeRoot = resolve(runtimeRoot)
   const resolvedCwd = resolve(cwd)
   const prepared = { ...env, ...OFFLINE_DEFAULTS }
+  if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-observability-plugin", "index.mjs")))) {
+    throw new Error("OpenCode V2 observability plugin directory is missing from the offline runtime")
+  }
+  if (!prepared.OPENCODE_PASSWORD && prepared.TEST_AGENT_OPENCODE_SERVER_PASSWORD) {
+    // V2 serve 默认随机生成密码；平台由同一受控 secret 让 worker 与 Java gateway 共享认证。
+    prepared.OPENCODE_PASSWORD = prepared.TEST_AGENT_OPENCODE_SERVER_PASSWORD
+  }
   if (prepared.TEST_AGENT_RTK_ENABLED === "true") {
     // 运行包内固定二进制是平台交付边界，不允许父进程环境把 RTK 替换成任意路径。
     prepared.TEST_AGENT_RTK_BIN = join(resolvedRuntimeRoot, "bin", process.platform === "win32" ? "rtk.exe" : "rtk")
     prepared.RTK_TELEMETRY_DISABLED = "1"
     prepared.RTK_RECALL = "0"
-    if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-rtk-plugin.mjs")))) {
+    if (!(await pathExists(join(resolvedRuntimeRoot, "opencode-rtk-plugin", "index.mjs")))) {
       throw new Error("RTK plugin is missing from the offline OpenCode runtime")
     }
     const rtkBinaryInfo = await lstat(prepared.TEST_AGENT_RTK_BIN)
@@ -223,7 +244,7 @@ export async function prepareOfflineRuntime({ cwd = process.cwd(), env = process
   }
   prepared.OPENCODE_CONFIG_CONTENT = withRequiredConfig(
     prepared,
-    await runtimeSupportsSubagentDepth(resolvedRuntimeRoot),
+    await runtimeVersion(resolvedRuntimeRoot),
     resolvedRuntimeRoot,
   )
   prepared.OPENCODE_OFFLINE_TOOL_NODE_MODULES = join(resolvedRuntimeRoot, "node_modules")

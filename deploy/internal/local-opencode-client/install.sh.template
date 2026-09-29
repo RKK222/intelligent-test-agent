@@ -304,7 +304,7 @@ verify_manifest() {
   [ "$(manifest_string platform)" = linux ] || fail "发布清单平台不兼容"
   [ "$(manifest_string architecture)" = arm64 ] || fail "发布清单架构不兼容"
   [ "$(manifest_string protocolVersion)" = local-opencode-client.v1 ] || fail "发布清单协议不兼容"
-  [ "$(manifest_string opencodeVersion)" = 1.18.4 ] || fail "OpenCode 版本不兼容"
+  [ "$(manifest_string opencodeVersion)" = 2.0.18 ] || fail "OpenCode 版本不兼容"
   launcher_min="$(manifest_number launcherVersionMin)"
   launcher_max="$(manifest_number launcherVersionMax)"
   [ -n "${launcher_min}" ] && [ -n "${launcher_max}" ] \
@@ -334,7 +334,7 @@ select_latest_compatible_version() {
         && [ "$(manifest_string platform)" = linux ] \
         && [ "$(manifest_string architecture)" = arm64 ] \
         && [ "$(manifest_string protocolVersion)" = local-opencode-client.v1 ] \
-        && [ "$(manifest_string opencodeVersion)" = 1.18.4 ] \
+        && [ "$(manifest_string opencodeVersion)" = 2.0.18 ] \
         && [ -n "${launcher_min}" ] && [ -n "${launcher_max}" ] \
         && [ "${launcher_min}" -le "${LAUNCHER_VERSION}" ] \
         && [ "${launcher_max}" -ge "${LAUNCHER_VERSION}" ]; then

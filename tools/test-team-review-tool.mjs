@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 const require = createRequire(new URL("../frontend/package.json", import.meta.url));
 const ts = require("typescript");
 const raw = await readFile(new URL("../public-agent-config/opencode/tools/team-review.ts", import.meta.url), "utf8");
-const source = ts.transpileModule(raw.replace('import { tool } from "@opencode-ai/plugin"', "const tool = globalThis.testTool"), {
+const source = ts.transpileModule(raw.replace('import { tool } from "./tool-compat"', "const tool = globalThis.testTool"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }
 }).outputText;
 function fixture({ configured = true, forbidden = false, deferred = false } = {}) {

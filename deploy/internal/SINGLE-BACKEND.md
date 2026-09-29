@@ -244,7 +244,7 @@ OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
-OPENCODE_VERSION=1.18.4
+OPENCODE_VERSION=2.0.18
 OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
 OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
 OPENCODE_ASSET_SIZE=59265643
@@ -455,7 +455,7 @@ Python 库部署脚本独立校验和替换 `/data/testagent/python-libs`，再�
 
 后台部署脚本在替换 JAR 前会校验已有 systemd unit 的 `ExecStart` 和 `EnvironmentFile`，执行 `systemctl stop` 后检查 `8080`。若端口仍由同一路径的 `test-agent-app.jar` 占用，脚本会先 TERM、超时后仅对仍匹配该 JAR 的 PID 执行 KILL；若是其他程序占用则拒绝误杀。启动后还会确认 systemd `MainPID` 正是 `8080` 的监听进程，避免旧手工 Java 让 health 误通过。
 
-同一入口会在变更服务前校验 `test-agent-programs.tar.gz`，并在解压后再次校验 `/data/testagent/programs/opencode`；增量复用包则直接校验现有目录。runtime manifest、lockfile、固定依赖的包元数据或入口文件中任一项缺失、为空、未锁定或版本不符都会停止部署，其中 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 是自定义 Tool 的强制基线，不能在内网用 `npm install` 临时补齐。
+同一入口会在变更服务前校验 `test-agent-programs.tar.gz`，并在解压后再次校验 `/data/testagent/programs/opencode`；增量复用包则直接校验现有目录。runtime manifest、lockfile、固定依赖的包元数据或入口文件中任一项缺失、为空、未锁定或版本不符都会停止部署，其中 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 是自定义 Tool 的强制基线，不能在内网用 `npm install` 临时补齐。
 
 如果现场此前已经启用了 `.4` 双后台，最后在 `.4` 停止 worker 和 Java，但保留 `/data/testagent` 数据以便回滚：
 
@@ -569,7 +569,7 @@ deepseek-prod
 
 更新公共配置后，要在运行管理中重启已有用户 OpenCode 进程；只重启 Java 不会让已运行的 OpenCode 重新读取公共配置。供应商地址、启用状态或 token 变化后先点击“刷新 Java 内存”；单后台广播异常时可直接重启 Java 重新加载数据库快照。
 
-公共自定义 Tool 文件放在本服务器公共配置的 `tools/*.ts`，项目专用 Tool 放在工作区 `.opencode/tools/*.ts`。当前企业包已离线内置 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及传递依赖；Tool 使用 Node 22 自带 `fetch` 不需要另加包。仅修改 Tool 文件时，由超级管理员保存并重启相关用户 OpenCode 进程即可；若 Tool 新增了上述基线之外的第三方 import，则必须重新打包并部署 programs/worker，不能在内网执行 `npm install`。
+公共自定义 Tool 文件放在本服务器公共配置的 `tools/*.ts`，项目专用 Tool 放在工作区 `.opencode/tools/*.ts`。当前企业包已离线内置 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 及传递依赖；Tool 使用 Node 22 自带 `fetch` 不需要另加包。仅修改 Tool 文件时，由超级管理员保存并重启相关用户 OpenCode 进程即可；若 Tool 新增了上述基线之外的第三方 import，则必须重新打包并部署 programs/worker，不能在内网执行 `npm install`。
 
 ## 8. 变更与重启判断
 
@@ -629,7 +629,7 @@ nc -vz ai-code.sdc.enterprise 9070
 预期 worker 日志出现当前结构化事件 `event=manager_config_update status=applied`；旧版 worker 可能输出 `manager config update applied`，部署脚本兼容两者。资源限制检查应显示 `PidsLimit=8192`，`Ulimits` 同时包含 `nofile` 的 soft/hard `262144` 和 `nproc` 的 soft/hard `8192`；容器 `/proc/1/limits` 应显示最大打开文件数 `262144`、最大用户进程数 `8192`。任一值不符都表示容器没有使用当前脚本重建，应停止验收并重新执行 worker `restart`。再在管理页面确认一个 Java、一个 manager、一个容器均在线；初始化一个用户 OpenCode 进程后，用其实际动态端口检查：
 
 ```bash
-curl -fsS http://127.0.0.1:<实际端口>/global/health
+curl -fsS http://127.0.0.1:<实际端口>/api/info
 curl -fsS http://127.0.0.1:<实际端口>/api/provider
 curl -fsS http://127.0.0.1:<实际端口>/api/model
 ```

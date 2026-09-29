@@ -48,7 +48,7 @@ final class PublicClientCapabilityPackageBuilder {
     static final long MAX_UNCOMPRESSED_BYTES = 512L * 1024 * 1024;
     static final int MAX_FILES = 100_000;
     private static final Set<String> ROOTS = Set.of("agents", "skills", "tools");
-    private static final String OPENCODE_PLUGIN = "@opencode-ai/plugin";
+    private static final String OPENCODE_PLUGIN = "@opencode/plugin";
     private static final byte[] RUNTIME_GITIGNORE =
             "node_modules\npackage.json\npackage-lock.json\nbun.lock\n.gitignore".getBytes(StandardCharsets.UTF_8);
     private static final Set<String> BUILTINS = Set.of(
@@ -371,8 +371,8 @@ final class PublicClientCapabilityPackageBuilder {
         manifest.put("contentDigest", contentDigest);
         manifest.put("protocolCapability", PROTOCOL_CAPABILITY);
         manifest.put("runtimeLayoutVersion", RUNTIME_LAYOUT_VERSION);
-        manifest.put("opencodeVersionMin", "1.18.4");
-        manifest.put("opencodeVersionMax", "1.18.x");
+        manifest.put("opencodeVersionMin", "2.0.18");
+        manifest.put("opencodeVersionMax", "2.0.x");
         manifest.put("requiresRestart", requiresRestart);
         manifest.put("createdAt", createdAt.toString());
         ObjectNode countNode = manifest.putObject("counts");

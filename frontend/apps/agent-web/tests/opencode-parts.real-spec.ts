@@ -3,16 +3,30 @@ import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:f
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import {
+  getNativeV2Session,
+  listNativeV2Messages,
+  nativeV2AuthHeaders,
+  nativeV2SessionDirectory,
+  patchNativeV2SessionTitle,
+  projectedNativeV2Parts,
+  type NativeV2Message
+} from "./opencode-v2-native";
 
 import {
   PART_KINDS,
   PART_SPECS,
+  V2_CONTENT_KINDS,
   assertPartProjection,
+  assertV2ContentProjection,
   buildNativePartFixture,
+  buildNativeV2ContentFixture,
   createNativeFixtureManifestStore,
   detectSafeRetryProvider,
   executeNativeFixtureCleanupSql,
   executeNativeFixtureSql,
+  executeNativeV2FixtureCleanupSql,
+  executeNativeV2FixtureSql,
   fixtureUiProbe,
   interactionExpectation,
   resolveVerifiedNativeDatabase,
@@ -23,7 +37,8 @@ import {
   waitForCapturedPart,
   writePartEvidence,
   type NativeFixtureManifest,
-  type PartKind
+  type PartKind,
+  type V2ContentKind
 } from "./opencode-parts-real-e2e";
 import {
   apiDelete,
@@ -40,8 +55,10 @@ import {
   type WorkspaceCreateOperation
 } from "./real-e2e-api";
 
-const enabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && process.env.TEST_AGENT_PART_PHASE === "natural";
-const fallbackEnabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && process.env.TEST_AGENT_PART_PHASE === "fallback";
+const phase = process.env.TEST_AGENT_PART_PHASE;
+const enabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && (phase === "natural" || phase === "natural-v1");
+const fallbackEnabled = process.env.TEST_AGENT_RUN_PART_E2E === "1" && (phase === "fallback" || phase === "fallback-v1");
+const v2Fixture = phase === "fallback";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
 const evidenceRoot = path.resolve(process.cwd(), "../.tmp/e2e/opencode-parts");
 
@@ -51,7 +68,7 @@ test.use({ trace: "off" });
 test.describe("OpenCode 12 Part natural real E2E", () => {
   test.skip(!enabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=natural to run natural Part E2E.");
 
-  for (const kind of PART_KINDS) {
+  for (const kind of phase === "natural-v1" ? PART_KINDS : V2_CONTENT_KINDS) {
     test(`${kind}: exactly one natural trigger`, async ({ page, context }) => {
       test.setTimeout(180_000);
       const fixture = await createWorkspace(kind);
@@ -115,7 +132,7 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
             remoteSessionId ??= await tryResolveRemoteSessionId(session.sessionId);
             if (!remoteSessionId) return { observed: false };
             const raw = await loadNativeMessages(opencodeBaseUrl!, remoteSessionId, fixture.workspaceRootPath);
-            return { observed: Boolean(findPartByKind(raw, kind)), rawSnapshot: raw };
+            return { observed: Boolean(findPartByKind(raw, kind, remoteSessionId!)), rawSnapshot: raw };
           }
         });
         runId ??= result.runId;
@@ -125,7 +142,7 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
         await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "natural-result.json", value: evidenceSummary });
         if (sse) {
           if (result.classification === "natural-pass") {
-            const observedPart = findPartByKind(result.rawSnapshot, kind);
+            const observedPart = findPartByKind(result.rawSnapshot, kind, remoteSessionId!);
             await sse.waitForPart(kind, String(observedPart?.id ?? ""), 5_000);
           }
           await sse.stop();
@@ -136,7 +153,7 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
 
         if (result.classification === "natural-pass") {
           if (!remoteSessionId) throw new Error(`${kind} natural-pass has no remote session id`);
-          const rawPart = findPartByKind(result.rawSnapshot, kind);
+          const rawPart = findPartByKind(result.rawSnapshot, kind, remoteSessionId);
           if (!rawPart) throw new Error(`${kind} target Part disappeared from raw snapshot`);
           const platformMessages = await apiGet(
             `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(session.sessionId)}/messages?page=1&size=100&refresh=true`
@@ -198,8 +215,8 @@ test.describe("OpenCode 12 Part natural real E2E", () => {
   }
 });
 
-test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
-  test.skip(!fallbackEnabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=fallback to run native fixture Part E2E.");
+test.describe("OpenCode native fixture recovery real E2E", () => {
+  test.skip(!fallbackEnabled, "Set TEST_AGENT_RUN_PART_E2E=1 and TEST_AGENT_PART_PHASE=fallback for V2, or fallback-v1 for V1 rollback.");
 
   test("projects every native Part without adding non-native timeline renderers", async ({ page }) => {
     test.setTimeout(600_000);
@@ -224,7 +241,7 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
       openCodeDatabasePath = database.databasePath;
 
       // fallback 只执行一次最小真实 Run 建立平台 Session 与原生 Session 的归属映射；
-      // 12 种目标 Part 均由后续原生 fixture 产生，不重复自然触发模型。
+      // V2 三类 content 或 V1 十二类 Part 均由原生 fixture 产生，不重复自然触发模型。
       const setupRun = await apiPost<{ runId: string }>("/api/internal/agent/opencode/runs", {
         sessionId: platformSessionId,
         prompt: `Reply with exactly FIXTURE_SETUP_${workspace.marker}. Do not use tools.`,
@@ -235,13 +252,13 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
       await updateNativeSessionTitle(opencodeBaseUrl, remoteSessionId, workspace.workspaceRootPath, platformTitle);
       const nativeSession = await loadNativeSession(opencodeBaseUrl, remoteSessionId, workspace.workspaceRootPath);
       const nativeTitle = String(nativeSession.title ?? "");
-      const nativeDirectory = String(nativeSession.directory ?? "");
+      const nativeDirectory = nativeV2SessionDirectory(nativeSession) ?? "";
       if (!nativeTitle || nativeDirectory !== workspace.workspaceRootPath) {
         throw new Error("OpenCode native Session ownership does not match the platform workspace");
       }
 
-      for (const kind of PART_KINDS) {
-        const fixture = buildNativePartFixture({
+      for (const kind of v2Fixture ? V2_CONTENT_KINDS : PART_KINDS) {
+        const fixtureInput = {
           kind,
           // manifest 所有权必须由 Workspace 目录段与原生 Session 标题共同证明；
           // kind 已由独立 manifest/Part ID 隔离，不能把目录中不存在的后缀冒充 owner marker。
@@ -249,12 +266,18 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
           remoteSessionId,
           directory: nativeDirectory,
           title: nativeTitle
-        });
+        };
+        const fixture = v2Fixture
+          ? buildNativeV2ContentFixture({ ...fixtureInput, kind: kind as V2ContentKind })
+          : buildNativePartFixture(fixtureInput);
         const store = createNativeFixtureManifestStore(database, `part-${kind}.json`);
         const unfinished = await store.read();
         if (unfinished) {
           const residue = await fixtureRecordCount(openCodeDatabasePath, unfinished);
-          if (residue > 0) await executeNativeFixtureCleanupSql(database, unfinished);
+          if (residue > 0) {
+            if (unfinished.runtimeVersion === "v2") await executeNativeV2FixtureCleanupSql(database, unfinished);
+            else await executeNativeFixtureCleanupSql(database, unfinished);
+          }
           await store.clear(unfinished);
         }
         let fixtureInserted = false;
@@ -262,10 +285,11 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
         try {
           await updateNativeSessionTitle(opencodeBaseUrl, remoteSessionId, nativeDirectory, fixture.manifest.title);
           await store.write(fixture.manifest);
-          await executeNativeFixtureSql(database, fixture);
+          if (v2Fixture) await executeNativeV2FixtureSql(database, fixture as ReturnType<typeof buildNativeV2ContentFixture>);
+          else await executeNativeFixtureSql(database, fixture as ReturnType<typeof buildNativePartFixture>);
           fixtureInserted = true;
           const rawMessages = await waitForNativePart(opencodeBaseUrl, remoteSessionId, nativeDirectory, fixture.manifest.partId, 5_000);
-          const rawPart = findPartById(rawMessages, fixture.manifest.partId);
+          const rawPart = findPartById(rawMessages, fixture.manifest.partId, remoteSessionId);
           if (!rawPart) throw new Error(`${kind} fixture Part was not returned by OpenCode HTTP`);
           const platformMessages = await apiGet(
             `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(platformSessionId)}/messages?page=1&size=100&refresh=true`
@@ -276,7 +300,8 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-messages.json", value: platformMessages });
           await writePartEvidence({ root: evidenceRoot, runId: evidenceRunId, kind, name: "platform-tree.json", value: tree });
           await writeSseEvidence(evidenceRunId, kind, [{ status: "not-claimed", reason: "native-sqlite-fixture-does-not-produce-sse" }]);
-          assertPartProjection(kind, rawPart, platformMessages, tree);
+          if (v2Fixture) assertV2ContentProjection(kind as V2ContentKind, rawPart, platformMessages, tree);
+          else assertPartProjection(kind, rawPart, platformMessages, tree);
           await openHistorySession(page, platformTitle);
           await verifyUi(page, kind, fixture.manifest.partId, workspace.marker, evidenceRunId, "current-ui.png");
           await leaveSessionBeforeHistoryRecovery(page, platformTitle, kind, workspace.marker);
@@ -295,7 +320,8 @@ test.describe("OpenCode 12 Part native fixture recovery real E2E", () => {
           try {
             if (fixtureInserted) {
               await updateNativeSessionTitle(opencodeBaseUrl, remoteSessionId, nativeDirectory, fixture.manifest.title);
-              await executeNativeFixtureCleanupSql(database, fixture.manifest);
+              if (v2Fixture) await executeNativeV2FixtureCleanupSql(database, fixture.manifest);
+              else await executeNativeFixtureCleanupSql(database, fixture.manifest);
             }
             await store.clear(fixture.manifest);
             await assertFixtureRecordsAbsent(openCodeDatabasePath, fixture.manifest);
@@ -387,26 +413,20 @@ async function tryResolveRemoteSessionId(sessionId: string): Promise<string | un
 }
 
 async function loadNativeMessages(baseUrl: string, remoteSessionId: string, directory: string): Promise<unknown> {
-  const response = await fetch(`${baseUrl}/session/${encodeURIComponent(remoteSessionId)}/message?directory=${encodeURIComponent(directory)}`);
-  if (!response.ok) throw new Error(`OpenCode raw messages failed: ${response.status}`);
-  return response.json();
+  const session = await getNativeV2Session(baseUrl, remoteSessionId);
+  if (nativeV2SessionDirectory(session) !== directory) throw new Error("OpenCode V2 session location changed outside the owned workspace");
+  return listNativeV2Messages(baseUrl, remoteSessionId);
 }
 
 async function loadNativeSession(baseUrl: string, remoteSessionId: string, directory: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`${baseUrl}/session/${encodeURIComponent(remoteSessionId)}?directory=${encodeURIComponent(directory)}`);
-  if (!response.ok) throw new Error(`OpenCode native Session failed: ${response.status}`);
-  const payload = await response.json();
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("OpenCode native Session response is invalid");
-  return payload as Record<string, unknown>;
+  const session = await getNativeV2Session(baseUrl, remoteSessionId);
+  if (nativeV2SessionDirectory(session) !== directory) throw new Error("OpenCode V2 session location changed outside the owned workspace");
+  return session;
 }
 
 async function updateNativeSessionTitle(baseUrl: string, remoteSessionId: string, directory: string, title: string): Promise<void> {
-  const response = await fetch(`${baseUrl}/session/${encodeURIComponent(remoteSessionId)}?directory=${encodeURIComponent(directory)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title })
-  });
-  if (!response.ok) throw new Error(`OpenCode native Session title update failed: ${response.status}`);
+  await loadNativeSession(baseUrl, remoteSessionId, directory);
+  await patchNativeV2SessionTitle(baseUrl, remoteSessionId, title);
 }
 
 async function waitForRemoteSessionId(platformSessionId: string, timeoutMs: number): Promise<string> {
@@ -435,22 +455,15 @@ async function waitForNativePart(
   let snapshot: unknown = [];
   while (Date.now() <= deadline) {
     snapshot = await loadNativeMessages(baseUrl, remoteSessionId, directory);
-    if (findPartById(snapshot, partId)) return snapshot;
+    if (findPartById(snapshot, partId, remoteSessionId)) return snapshot;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`OpenCode native Part ${partId} was not visible within ${timeoutMs}ms`);
 }
 
-function findPartById(raw: unknown, partId: string): Record<string, unknown> | undefined {
+function findPartById(raw: unknown, partId: string, remoteSessionId: string): Record<string, unknown> | undefined {
   if (!Array.isArray(raw)) return undefined;
-  for (const message of raw) {
-    if (!message || typeof message !== "object") continue;
-    const parts = (message as { parts?: unknown }).parts;
-    if (!Array.isArray(parts)) continue;
-    const found = parts.find((part) => part && typeof part === "object" && (part as { id?: unknown }).id === partId);
-    if (found) return found as Record<string, unknown>;
-  }
-  return undefined;
+  return projectedNativeV2Parts(raw as NativeV2Message[], remoteSessionId).find((part) => part.id === partId);
 }
 
 async function assertFixtureRecordsAbsent(databasePath: string, manifest: NativeFixtureManifest): Promise<void> {
@@ -460,23 +473,18 @@ async function assertFixtureRecordsAbsent(databasePath: string, manifest: Native
 async function fixtureRecordCount(databasePath: string, manifest: NativeFixtureManifest): Promise<number> {
   const exec = promisify(execFile);
   const quote = (value: string) => value.replaceAll("'", "''");
-  const query = `SELECT (SELECT count(*) FROM part WHERE id='${quote(manifest.partId)}') + (SELECT count(*) FROM message WHERE id IN ('${quote(manifest.messageId)}','${quote(manifest.parentMessageId)}'));`;
+  const query = manifest.runtimeVersion === "v2"
+    ? `SELECT count(*) FROM session_message WHERE id IN ('${quote(manifest.messageId)}','${quote(manifest.parentMessageId)}');`
+    : `SELECT (SELECT count(*) FROM part WHERE id='${quote(manifest.partId)}') + (SELECT count(*) FROM message WHERE id IN ('${quote(manifest.messageId)}','${quote(manifest.parentMessageId)}'));`;
   const { stdout } = await exec("sqlite3", ["-readonly", databasePath, query]);
   const count = Number(stdout.trim());
   if (!Number.isInteger(count) || count < 0) throw new Error(`${manifest.kind} fixture SQLite residue query is invalid`);
   return count;
 }
 
-function findPartByKind(raw: unknown, kind: PartKind): Record<string, unknown> | undefined {
+function findPartByKind(raw: unknown, kind: PartKind, remoteSessionId: string): Record<string, unknown> | undefined {
   if (!Array.isArray(raw)) return undefined;
-  for (const message of raw) {
-    if (!message || typeof message !== "object") continue;
-    const parts = (message as { parts?: unknown }).parts;
-    if (!Array.isArray(parts)) continue;
-    const found = parts.find((part) => part && typeof part === "object" && (part as { type?: unknown }).type === kind);
-    if (found) return found as Record<string, unknown>;
-  }
-  return undefined;
+  return projectedNativeV2Parts(raw as NativeV2Message[], remoteSessionId).find((part) => part.type === kind);
 }
 
 type SseCapture = {
@@ -716,10 +724,19 @@ async function cleanupFixture(input: {
     },
     async () => {
       if (!input.remoteSessionId || !input.opencodeBaseUrl) return;
-      const nativeUrl = `${input.opencodeBaseUrl}/session/${encodeURIComponent(input.remoteSessionId)}?directory=${encodeURIComponent(input.fixture.workspaceRootPath)}`;
-      const response = await fetch(nativeUrl, { method: "DELETE" });
+      const nativeUrl = `${input.opencodeBaseUrl}/api/session/${encodeURIComponent(input.remoteSessionId)}`;
+      const before = await fetch(nativeUrl, { headers: nativeV2AuthHeaders() });
+      if (before.ok) {
+        const envelope = await before.json() as { data?: Record<string, unknown> };
+        if (nativeV2SessionDirectory(envelope.data ?? {}) !== input.fixture.workspaceRootPath) {
+          throw new Error("OpenCode V2 cleanup session is outside the owned workspace");
+        }
+      } else if (before.status !== 404) {
+        throw new Error(`OpenCode V2 session ownership check failed: ${before.status}`);
+      }
+      const response = await fetch(nativeUrl, { method: "DELETE", headers: nativeV2AuthHeaders() });
       if (!response.ok && response.status !== 404) throw new Error(`OpenCode session delete failed: ${response.status}`);
-      const probe = await fetch(nativeUrl);
+      const probe = await fetch(nativeUrl, { headers: nativeV2AuthHeaders() });
       if (probe.status !== 404) throw new Error(`OpenCode session still accessible after delete: ${probe.status}`);
       if (!input.openCodeDatabasePath) throw new Error("owned OpenCode SQLite path was not resolved before cleanup");
       await assertNativeSessionAbsentInSqlite(input.openCodeDatabasePath, input.remoteSessionId);

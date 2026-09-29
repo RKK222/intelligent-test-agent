@@ -272,7 +272,7 @@ export async function resolveOwnedOpenCodeDatabase(
   return { databasePath: canonicalDatabasePath, sessionPath: canonicalSessionPath, pid: statePid, port };
 }
 
-/** 只读查询指定测试 Session 的三张原生表，任何非零计数都作为资源泄漏失败。 */
+/** 只读查询指定测试 Session 的原生表，兼容 V2 消息内嵌 content 与 V1 独立 part 表。 */
 export async function assertNativeSessionAbsentInSqlite(
   databasePath: string,
   remoteSessionId: string,
@@ -391,10 +391,18 @@ async function findListenerPid(port: number): Promise<number> {
 
 async function queryNativeSessionCounts(databasePath: string, remoteSessionId: string): Promise<NativeSessionCounts> {
   const id = remoteSessionId.replaceAll("'", "''");
+  const { stdout: tables } = await execFileAsync("sqlite3", ["-readonly", databasePath,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('session_v2','session','session_message','message','part');"
+  ], { encoding: "utf8" });
+  const present = new Set(tables.trim().split("\n").filter(Boolean));
+  const v2 = present.has("session_v2") && present.has("session_message");
+  if (!v2 && !(present.has("session") && present.has("message") && present.has("part"))) {
+    throw new Error("OpenCode SQLite has neither V2 nor V1 session schema");
+  }
   const sql = [
-    `SELECT 'session', COUNT(*) FROM session WHERE id='${id}'`,
-    `SELECT 'message', COUNT(*) FROM message WHERE session_id='${id}'`,
-    `SELECT 'part', COUNT(*) FROM part WHERE session_id='${id}'`
+    `SELECT 'session', COUNT(*) FROM ${v2 ? "session_v2" : "session"} WHERE id='${id}'`,
+    `SELECT 'message', COUNT(*) FROM ${v2 ? "session_message" : "message"} WHERE session_id='${id}'`,
+    v2 ? "SELECT 'part', 0" : `SELECT 'part', COUNT(*) FROM part WHERE session_id='${id}'`
   ].join(" UNION ALL ");
   const { stdout } = await execFileAsync("sqlite3", ["-readonly", "-separator", "\t", databasePath, sql], { encoding: "utf8" });
   const counts: NativeSessionCounts = { session: -1, message: -1, part: -1 };

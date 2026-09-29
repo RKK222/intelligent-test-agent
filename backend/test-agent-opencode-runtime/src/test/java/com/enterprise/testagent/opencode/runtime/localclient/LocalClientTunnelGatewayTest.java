@@ -116,7 +116,7 @@ class LocalClientTunnelGatewayTest {
     }
 
     private LocalClientPayloads.HttpRequest requestPayload() {
-        return new LocalClientPayloads.HttpRequest("GET", "/global/health", java.util.Map.of(), null, false);
+        return new LocalClientPayloads.HttpRequest("GET", "/api/info", java.util.Map.of(), null, false);
     }
 
     private LocalClientFrame chunk(String requestId, long generation, long sequence) {

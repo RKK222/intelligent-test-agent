@@ -482,7 +482,7 @@ class OpencodeProcessStatusQueryServiceTest {
         assertThat(result.healthy()).isFalse();
         assertThat(result.message()).isEqualTo("HTTP 503");
         assertThat(httpClient.requests).singleElement().satisfies(request -> {
-            assertThat(request.uri().toString()).isEqualTo("http://10.8.0.21:4096/global/health");
+            assertThat(request.uri().toString()).isEqualTo("http://10.8.0.21:4096/api/info");
             assertThat(request.headers().firstValue("X-Trace-Id")).contains(TRACE_ID);
         });
     }

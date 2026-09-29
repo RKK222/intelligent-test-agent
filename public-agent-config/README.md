@@ -73,4 +73,4 @@ BDSP 案例设计通过 `test-design` 的 `big-data-common-cases.md` 接入设�
 
 ## 客户端兼容状态
 
-`opencode/tools/package.json` 锁定 `@opencode-ai/plugin 1.18.4` 和 `playwright-core 1.61.0`，包内按规则不携带原始 `node_modules`。发布给本地客户端前必须确认受控可移植运行时已经包含这两个精确依赖；未确认或不匹配时，本候选版本应标记为 `SERVER_ONLY`，不能让客户端自动安装或联网补依赖。
+`opencode/tools/package.json` 锁定 `@opencode/plugin 2.0.18` 和 `playwright-core 1.61.0`，包内按规则不携带原始 `node_modules`。发布给本地客户端前必须确认受控可移植运行时已经包含这两个精确依赖；未确认或不匹配时，本候选版本应标记为 `SERVER_ONLY`，不能让客户端自动安装或联网补依赖。

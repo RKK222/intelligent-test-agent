@@ -8,7 +8,7 @@
  *           启动命令: cd 项目目录 && mvn spring-boot:run
  */
 
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 /** 后端代理服务地址，按需修改 */
 const PROXY_BASE_URL_ENV = "TEST_AGENT_RPC_PROXY_BASE_URL"

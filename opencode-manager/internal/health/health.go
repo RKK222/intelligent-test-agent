@@ -2,8 +2,10 @@ package health
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -33,10 +35,12 @@ type Checker struct {
 	ProcessAlive func(pid int) bool
 	Timeout      time.Duration
 	ProbeBaseURL string
+	// Password 是 V2 server 的 Basic Auth 密码；为空时读取 worker 环境变量。
+	Password string
 }
 
 // Check 执行本地 PID、HTTP 存活和配置可加载检查。
-// /global/health 只证明服务存活；/global/config 用于确认公共配置符合当前
+// /api/info 只证明 V2 服务存活；/api/config 用于确认公共配置符合当前
 // OpenCode 原生 schema，避免进程绿灯但 command/skill 等运行时接口全部返回 400。
 func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 	alive := c.ProcessAlive
@@ -65,16 +69,23 @@ func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 	defer cancel()
 
 	baseURL := c.probeBaseURL(record)
-	if ok, _ := httpOK(checkCtx, client, baseURL, "/global/health"); !ok {
+	password := strings.TrimSpace(c.Password)
+	if password == "" {
+		password = strings.TrimSpace(os.Getenv("TEST_AGENT_OPENCODE_SERVER_PASSWORD"))
+		if password == "" {
+			password = strings.TrimSpace(os.Getenv("OPENCODE_PASSWORD"))
+		}
+	}
+	if ok, _ := httpOK(checkCtx, client, baseURL, "/api/info", password); !ok {
 		return Result{
 			Status:  StatusUnhealthy,
 			Port:    record.Port,
 			PID:     record.PID,
-			Message: "opencode /global/health endpoint is not reachable",
+			Message: "opencode /api/info endpoint is not reachable",
 			TraceID: record.TraceID,
 		}
 	}
-	if ok, message := httpOK(checkCtx, client, baseURL, "/global/config"); ok {
+	if ok, message := httpOK(checkCtx, client, baseURL, "/api/config", password); ok {
 		return healthy(record, message)
 	}
 	return Result{
@@ -103,10 +114,13 @@ func healthy(record state.ProcessRecord, message string) Result {
 	}
 }
 
-func httpOK(ctx context.Context, client *http.Client, baseURL string, path string) (bool, string) {
+func httpOK(ctx context.Context, client *http.Client, baseURL string, path string, password string) (bool, string) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+path, nil)
 	if err != nil {
 		return false, err.Error()
+	}
+	if password != "" {
+		request.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("opencode:"+password)))
 	}
 	response, err := client.Do(request)
 	if err != nil {

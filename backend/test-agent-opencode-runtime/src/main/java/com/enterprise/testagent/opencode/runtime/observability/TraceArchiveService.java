@@ -243,7 +243,7 @@ public class TraceArchiveService {
     }
 
     /**
-     * 只读取一条 DSH 语义记录的正文。Assistant 按 messageId 汇聚 1.18.4 流式 part，Tool 按 callId
+     * 只读取一条 DSH 语义记录的正文。Assistant 按 messageId 汇聚 2.0.18 流式 part，Tool 按 callId
      * 汇聚 before/after；其它类型只返回目标事件及其正文分片，避免点击记录时下载整条 Trace。
      */
     public OpencodeObservabilityModels.RawEventPage readRecordEvents(
@@ -880,7 +880,7 @@ public class TraceArchiveService {
         return "TOOL_EXECUTE_BEFORE".equals(type) ? "STARTED" : "COMPLETED";
     }
 
-    /** DSH Trajectory 的闭集记录类型；插件派生类型优先，其余从 1.18.4 事件结构确定。 */
+    /** DSH Trajectory 的闭集记录类型；插件派生类型优先，其余从 2.0.18 事件结构确定。 */
     private String recordKind(String type, JsonNode payload) {
         String explicit = text(payload, "recordKind");
         if (!blank(explicit)) {
@@ -916,7 +916,7 @@ public class TraceArchiveService {
         return firstNonBlank(
                 text(payload, "agentName"),
                 firstNonBlank(
-                        // OpenCode 1.18.4 chat.message 公开契约把 Agent 放在 input.agent；
+                        // OpenCode 2.0.18 chat.message 公开契约把 Agent 放在 input.agent；
                         // 新插件同时提升为 payload.agentName，以下路径用于兼容已上传的旧批次。
                         text(payload.path("input"), "agent"),
                         firstNonBlank(
@@ -1024,7 +1024,7 @@ public class TraceArchiveService {
                 : Math.max(0D, value.asDouble());
     }
 
-    /** 兼容插件派生耗时和 OpenCode 1.18.4 message/part 的真实毫秒时间结构。 */
+    /** 兼容插件派生耗时和 OpenCode 2.0.18 message/part 的真实毫秒时间结构。 */
     private long durationMs(JsonNode payload) {
         long direct = longValue(payload, "durationMs");
         if (direct > 0) {

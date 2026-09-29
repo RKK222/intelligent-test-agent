@@ -211,7 +211,7 @@ public class OpencodeProcessStatusQueryService {
     }
 
     /**
-     * 前端轮询用弱健康检查：只读取 Redis 快照并直接访问 opencode /global/health。
+     * 前端轮询用弱健康检查：只读取 Redis 快照并直接访问 opencode /api/info。
      *
      * <p>该方法不读取或写入数据库，不调用 manager gateway，也不刷新 Redis heartbeat；
      * 它只表达当前瞬时健康结果，供前端降低 `/processes/me` 强状态查询频率。

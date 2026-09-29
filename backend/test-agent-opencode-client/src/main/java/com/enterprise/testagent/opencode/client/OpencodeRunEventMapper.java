@@ -90,6 +90,8 @@ public class OpencodeRunEventMapper {
             payload.put("rawEventId", rawEventId);
         }
         payload.put("rawPayload", toMap(rawEvent));
+        normalizeV2Interaction(rawType, payload);
+        normalizeV2Message(rawType, payload);
         appendScopePayload(payload, scopeContext);
         appendCommonPayloadAliases(payload);
 
@@ -103,6 +105,9 @@ public class OpencodeRunEventMapper {
 
         List<RunEventDraft> drafts = new ArrayList<>();
         drafts.add(new RunEventDraft(runId, type, traceId, now.get(), payload, scopeContext));
+        if ("session.message.content.updated".equals(rawType)) {
+            appendV2ContentParts(drafts, payload, runId, traceId, scopeContext);
+        }
         if (scopeContext != null && !scopeContext.childSession() && isRootSuccessSignal(rawType, payload)) {
             drafts.add(new RunEventDraft(
                     runId,
@@ -112,7 +117,9 @@ public class OpencodeRunEventMapper {
                     derivedTerminalPayload(payload),
                     scopeContext));
         }
-        if (scopeContext != null && !scopeContext.childSession() && "session.error".equals(rawType)) {
+        if (scopeContext != null
+                && !scopeContext.childSession()
+                && ("session.error".equals(rawType) || "session.execution.failed".equals(rawType))) {
             drafts.add(new RunEventDraft(
                     runId,
                     RunEventType.RUN_FAILED,
@@ -188,36 +195,50 @@ public class OpencodeRunEventMapper {
      */
     private RunEventType mapType(String rawType, Map<String, Object> payload) {
         return switch (rawType) {
-            case "session.next.prompted" -> RunEventType.RUN_STARTED;
+            case "session.next.prompted", "session.step.started" -> RunEventType.RUN_STARTED;
+            case "session.execution.started" -> RunEventType.RUN_STARTED;
+            case "session.execution.succeeded" -> RunEventType.SESSION_STATUS;
+            case "session.execution.failed", "session.execution.interrupted" -> RunEventType.SESSION_ERROR;
             case "session.next.step.ended" -> RunEventType.OPENCODE_EVENT_UNKNOWN;
             case "session.idle", "session.status" -> mapSessionStatus(payload);
             case "session.error" -> RunEventType.SESSION_ERROR;
             case "session.created" -> RunEventType.SESSION_CREATED;
-            case "session.updated" -> RunEventType.SESSION_UPDATED;
+            case "session.updated", "session.renamed", "session.moved", "session.metadata.updated" -> RunEventType.SESSION_UPDATED;
             case "session.deleted" -> RunEventType.SESSION_DELETED;
-            case "session.next.step.failed" -> mapStepFailed(payload);
+            case "session.next.step.failed", "session.step.failed" -> mapStepFailed(payload);
+            case "session.step.ended", "session.retry.scheduled" -> RunEventType.SESSION_STATUS;
             case "session.next.text.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
             case "message.updated" -> RunEventType.MESSAGE_UPDATED;
             case "message.removed" -> RunEventType.MESSAGE_REMOVED;
             case "message.part.updated" -> RunEventType.MESSAGE_PART_UPDATED;
             case "message.part.removed" -> RunEventType.MESSAGE_PART_REMOVED;
             case "message.part.delta" -> RunEventType.MESSAGE_PART_DELTA;
-            case "session.next.tool.called", "session.next.tool.input.started" -> RunEventType.TOOL_STARTED;
+            case "session.message.content.updated" -> RunEventType.MESSAGE_UPDATED;
+            case "session.text.delta", "session.reasoning.delta" -> RunEventType.MESSAGE_PART_DELTA;
+            case "session.next.tool.called", "session.next.tool.input.started",
+                    "session.tool.called", "session.tool.input.started" -> RunEventType.TOOL_STARTED;
             case "session.next.tool.success" -> {
                 payload.put("status", "success");
                 yield RunEventType.TOOL_FINISHED;
             }
-            case "session.next.tool.failed" -> {
+            case "session.next.tool.failed", "session.tool.failed" -> {
                 payload.put("status", "failed");
                 yield RunEventType.TOOL_FINISHED;
             }
-            case "session.diff" -> RunEventType.SESSION_DIFF;
+            case "session.tool.success" -> {
+                payload.put("status", "success");
+                yield RunEventType.TOOL_FINISHED;
+            }
+            case "session.diff", "session.revert.staged", "session.revert.committed", "session.revert.cleared" -> RunEventType.SESSION_DIFF;
             case "todo.updated" -> RunEventType.TODO_UPDATED;
             case "permission.asked", "permission.v2.asked" -> RunEventType.PERMISSION_ASKED;
             case "permission.replied", "permission.v2.replied" -> RunEventType.PERMISSION_REPLIED;
             case "question.asked", "question.v2.asked" -> RunEventType.QUESTION_ASKED;
             case "question.replied", "question.v2.replied" -> RunEventType.QUESTION_REPLIED;
             case "question.rejected", "question.v2.rejected" -> RunEventType.QUESTION_REJECTED;
+            case "form.created" -> RunEventType.QUESTION_ASKED;
+            case "form.replied" -> RunEventType.QUESTION_REPLIED;
+            case "form.cancelled" -> RunEventType.QUESTION_REJECTED;
             case "vcs.branch.updated" -> RunEventType.VCS_BRANCH_UPDATED;
             case "lsp.updated" -> RunEventType.LSP_UPDATED;
             case "mcp.tools.changed" -> RunEventType.MCP_TOOLS_CHANGED;
@@ -248,7 +269,7 @@ public class OpencodeRunEventMapper {
     }
 
     private boolean isRootSuccessSignal(String rawType, Map<String, Object> payload) {
-        if ("session.idle".equals(rawType)) {
+        if ("session.idle".equals(rawType) || "session.execution.succeeded".equals(rawType)) {
             return true;
         }
         if (!"session.status".equals(rawType)) {
@@ -304,6 +325,17 @@ public class OpencodeRunEventMapper {
         if (syncData.isObject()) {
             return syncData;
         }
+        JsonNode v2Data = rawEvent.path("data");
+        // V2 event envelope 将 location/context/metadata 放在 data 外层；合并后
+        // session、message、part 与工作区身份都能沿用同一 scope/filter 逻辑。
+        if (v2Data.isObject()) {
+            var merged = objectMapper.createObjectNode();
+            copyObjectField(rawEvent, merged, "context");
+            copyObjectField(rawEvent, merged, "location");
+            copyObjectField(rawEvent, merged, "metadata");
+            merged.setAll((com.fasterxml.jackson.databind.node.ObjectNode) v2Data);
+            return merged;
+        }
         JsonNode topLevelProperties = rawEvent.path("properties");
         if (topLevelProperties.isObject()) {
             return topLevelProperties;
@@ -313,6 +345,11 @@ public class OpencodeRunEventMapper {
             return payloadProperties;
         }
         return objectMapper.createObjectNode();
+    }
+
+    private void copyObjectField(JsonNode source, com.fasterxml.jackson.databind.node.ObjectNode target, String name) {
+        JsonNode value = source.path(name);
+        if (value.isObject()) target.set(name, value);
     }
 
     private JsonNode syncEvent(JsonNode rawEvent) {
@@ -371,6 +408,99 @@ public class OpencodeRunEventMapper {
         appendAlias(payload, "partID", "partId");
         appendAlias(payload, "callID", "callId");
         appendAlias(payload, "requestID", "requestId");
+    }
+
+    /** V2 permission/form 事件保持平台既有 RunEvent payload 字段，前端无需识别原生 DTO。 */
+    private void normalizeV2Interaction(String rawType, Map<String, Object> payload) {
+        if ("permission.asked".equals(rawType)) {
+            Object resources = payload.get("resources");
+            if (resources instanceof List<?>) payload.putIfAbsent("patterns", resources);
+            Object message = payload.get("message");
+            if (message instanceof String) payload.putIfAbsent("description", message);
+            return;
+        }
+        if ("form.created".equals(rawType) && payload.get("form") instanceof Map<?, ?> form) {
+            payload.putAll(OpencodeV2FormAdapter.toQuestion(form));
+            return;
+        }
+        if (("form.replied".equals(rawType) || "form.cancelled".equals(rawType))
+                && payload.get("id") instanceof String id) {
+            payload.put("requestID", id);
+            if (payload.get("answer") instanceof Map<?, ?> answer) {
+                List<Object> ordered = new ArrayList<>(answer.values());
+                payload.put("answers", ordered.stream()
+                        .map(value -> value instanceof List<?> list ? list : List.of(value))
+                        .toList());
+            }
+        }
+    }
+
+    /** V2 按 assistantMessageID/ordinal 发增量；转换为前端已有的 message/part ID。 */
+    private void normalizeV2Message(String rawType, Map<String, Object> payload) {
+        if (rawType == null || !rawType.startsWith("session.")) return;
+        Object messageId = payload.get("assistantMessageID");
+        if (messageId instanceof String id) {
+            payload.putIfAbsent("messageID", id);
+            Object ordinal = payload.get("ordinal");
+            if (ordinal instanceof Number number) {
+                String kind = rawType.startsWith("session.reasoning") ? "reasoning" : "text";
+                payload.putIfAbsent("partID", "part_" + id + "_" + number.intValue());
+                payload.putIfAbsent("partType", kind);
+            }
+        }
+        if ("session.message.content.updated".equals(rawType)) {
+            String id = payload.get("messageID") instanceof String value ? value : null;
+            if (id != null) {
+                LinkedHashMap<String, Object> message = new LinkedHashMap<>();
+                message.put("id", id);
+                message.put("role", "assistant");
+                if (payload.get("sessionID") instanceof String sessionId) message.put("sessionID", sessionId);
+                payload.put("message", message);
+            }
+        }
+        if ("session.retry.scheduled".equals(rawType)) {
+            LinkedHashMap<String, Object> status = new LinkedHashMap<>();
+            status.put("type", "retry");
+            if (payload.get("attempt") instanceof Number attempt) status.put("attempt", attempt);
+            if (payload.get("error") instanceof Map<?, ?> error) {
+                Object data = error.get("data");
+                Object message = data instanceof Map<?, ?> details ? details.get("message") : error.get("message");
+                if (message instanceof String text) status.put("message", text);
+            }
+            payload.put("status", status);
+        }
+        if (rawType.startsWith("session.tool.") && payload.get("id") instanceof String callId) {
+            payload.putIfAbsent("callID", callId);
+        }
+    }
+
+    /** V2 整体 content 快照按稳定 ordinal 拆成现有 message.part.updated wire 事件。 */
+    private void appendV2ContentParts(
+            List<RunEventDraft> drafts,
+            Map<String, Object> payload,
+            RunId runId,
+            String traceId,
+            RunEventScopeContext scopeContext) {
+        if (!(payload.get("content") instanceof List<?> content)
+                || !(payload.get("messageID") instanceof String messageId)) return;
+        String sessionId = payload.get("sessionID") instanceof String id ? id : null;
+        for (int index = 0; index < content.size(); index++) {
+            if (!(content.get(index) instanceof Map<?, ?> raw)) continue;
+            Map<String, Object> part = OpencodeV2ContentAdapter.project(raw, sessionId, messageId, index);
+            String partId = (String) part.get("id");
+            LinkedHashMap<String, Object> item = new LinkedHashMap<>(payload);
+            item.remove("rawPayload");
+            item.remove("content");
+            item.remove("message");
+            if (item.remove("rawEventId") instanceof String rawId) {
+                item.put("rawEventId", rawId + "#part-" + index);
+                item.put("derivedFromRawEventId", rawId);
+            }
+            item.put("part", part);
+            item.put("partID", partId);
+            drafts.add(new RunEventDraft(runId, RunEventType.MESSAGE_PART_UPDATED,
+                    traceId, now.get(), item, scopeContext));
+        }
     }
 
     private void appendAlias(Map<String, Object> payload, String sourceKey, String aliasKey) {

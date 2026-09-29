@@ -649,6 +649,57 @@ describe("backend-api", () => {
     ]);
   });
 
+  it("filters V2 disabled models and providers from native location catalogs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = String(input);
+      const data = path.endsWith("/config") ? [{ type: "document", info: { plugins: [] } }]
+        : path.includes("/models") ? { location: { directory: "/tmp/workspace" }, data: [
+            { id: "usable", providerID: "enterprise", enabled: true,
+              variants: [{ id: "low", settings: {} }, { id: "high", settings: {} }],
+              capabilities: { tools: true, input: ["text", "image"], output: ["text"] } },
+            { id: "disabled", providerID: "enterprise", enabled: false }
+          ] }
+          : { location: { directory: "/tmp/workspace" }, data: [
+              { id: "enterprise", name: "Enterprise", activation: "enabled" },
+              { id: "removed", name: "Removed", activation: "disabled" }
+            ] };
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    const models = await client.listModels();
+    expect(models.map((item) => item.id)).toEqual(["usable"]);
+    expect(models[0]).toMatchObject({ variants: ["low", "high"],
+      capabilities: { attachment: true, input: { text: true, audio: false, image: true, video: false, pdf: false } } });
+    expect((await client.listProviders()).map((item) => item.providerId)).toEqual(["enterprise"]);
+  });
+
+  it("applies normalized V2 provider policies before the native catalog finishes reloading", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+      const path = String(input);
+      const data = path.endsWith("/config") ? [
+        { type: "document", info: { experimental: { policies: [
+          { action: "provider.use", resource: "*", effect: "deny" },
+          { action: "provider.use", resource: "enterprise-*", effect: "allow" },
+          { action: "provider.use", resource: "enterprise-disabled", effect: "deny" }
+        ] } } }
+      ] : path.includes("/models") ? { data: [
+        { id: "zen", providerID: "opencode", enabled: true },
+        { id: "allowed", providerID: "enterprise-allowed", enabled: true },
+        { id: "disabled", providerID: "enterprise-disabled", enabled: true }
+      ] } : { data: [
+        { id: "opencode", activation: "enabled" },
+        { id: "enterprise-allowed", activation: "enabled" },
+        { id: "enterprise-disabled", activation: "enabled" }
+      ] };
+      return new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data }), { status: 200 });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    expect((await client.listModels()).map((item) => item.id)).toEqual(["allowed"]);
+    expect((await client.listProviders()).map((item) => item.providerId)).toEqual(["enterprise-allowed"]);
+  });
+
   it("sends typed OpenCode TUI session action payloads through the platform runtime routes", async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify({
       success: true,

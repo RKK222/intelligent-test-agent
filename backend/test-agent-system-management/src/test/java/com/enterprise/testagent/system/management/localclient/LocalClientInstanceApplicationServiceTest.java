@@ -146,7 +146,7 @@ class LocalClientInstanceApplicationServiceTest {
                 "linux",
                 "arm64",
                 "20260820190000",
-                "1.18.4",
+                "2.0.18",
                 "1",
                 List.of("SELF_UPDATE_V1"),
                 true,

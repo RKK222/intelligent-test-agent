@@ -2,11 +2,13 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
+import com.example.opencode.sdk.model.AgentListLocationParameter;
+import com.example.opencode.sdk.model.ExperimentalFsWrite200Response;
 import java.io.File;
-import com.example.opencode.sdk.model.InvalidRequestError;
-import com.example.opencode.sdk.model.UnauthorizedError;
-import com.example.opencode.sdk.model.V2AgentListLocationParameter;
-import com.example.opencode.sdk.model.V2FsList200Response;
+import com.example.opencode.sdk.model.FileNotFoundErrorEncoded;
+import com.example.opencode.sdk.model.FsList200Response;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -50,33 +52,231 @@ public class FilesystemApi {
         this.apiClient = apiClient;
     }
 
-    public class V2FsFindRequest {
-        private @jakarta.annotation.Nonnull String query;
-        private @jakarta.annotation.Nullable V2AgentListLocationParameter location;
+    public class ExperimentalFsWriteRequest {
+        private @jakarta.annotation.Nonnull String path;
+        private @jakarta.annotation.Nonnull File body;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
+
+        public ExperimentalFsWriteRequest() {}
+
+        public ExperimentalFsWriteRequest(@jakarta.annotation.Nonnull String path, @jakarta.annotation.Nonnull File body, @jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.path = path;
+            this.body = body;
+            this.location = location;
+        }
+
+        public @jakarta.annotation.Nonnull String path() {
+            return this.path;
+        }
+        public ExperimentalFsWriteRequest path(@jakarta.annotation.Nonnull String path) {
+            this.path = path;
+            return this;
+        }
+
+        public @jakarta.annotation.Nonnull File body() {
+            return this.body;
+        }
+        public ExperimentalFsWriteRequest body(@jakarta.annotation.Nonnull File body) {
+            this.body = body;
+            return this;
+        }
+
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
+            return this.location;
+        }
+        public ExperimentalFsWriteRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.location = location;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            ExperimentalFsWriteRequest request = (ExperimentalFsWriteRequest) o;
+            return Objects.equals(this.path, request.path()) &&
+                Objects.equals(this.body, request.body()) &&
+                Objects.equals(this.location, request.location());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(path, body, location);
+        }
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalFsWrite request parameters as object
+     * @return ExperimentalFsWrite200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ExperimentalFsWrite200Response> experimentalFsWrite(ExperimentalFsWriteRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalFsWrite(requestParameters.path(), requestParameters.body(), requestParameters.location());
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalFsWrite request parameters as object
+     * @return ResponseEntity&lt;ExperimentalFsWrite200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<ExperimentalFsWrite200Response>> experimentalFsWriteWithHttpInfo(ExperimentalFsWriteRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalFsWriteWithHttpInfo(requestParameters.path(), requestParameters.body(), requestParameters.location());
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalFsWrite request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec experimentalFsWriteWithResponseSpec(ExperimentalFsWriteRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalFsWriteWithResponseSpec(requestParameters.path(), requestParameters.body(), requestParameters.location());
+    }
+
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param path The path parameter
+     * @param body The body parameter
+     * @param location The location parameter
+     * @return ExperimentalFsWrite200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec experimentalFsWriteRequestCreation(@jakarta.annotation.Nonnull String path, @jakarta.annotation.Nonnull File body, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        Object postBody = body;
+        // verify the required parameter 'path' is set
+        if (path == null) {
+            throw new WebClientResponseException("Missing the required parameter 'path' when calling experimentalFsWrite", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'body' is set
+        if (body == null) {
+            throw new WebClientResponseException("Missing the required parameter 'body' when calling experimentalFsWrite", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "path", path));
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = {
+            "application/octet-stream"
+        };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<ExperimentalFsWrite200Response> localVarReturnType = new ParameterizedTypeReference<ExperimentalFsWrite200Response>() {};
+        return apiClient.invokeAPI("/api/experimental/fs/write", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param path The path parameter
+     * @param body The body parameter
+     * @param location The location parameter
+     * @return ExperimentalFsWrite200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ExperimentalFsWrite200Response> experimentalFsWrite(@jakarta.annotation.Nonnull String path, @jakarta.annotation.Nonnull File body, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ExperimentalFsWrite200Response> localVarReturnType = new ParameterizedTypeReference<ExperimentalFsWrite200Response>() {};
+        return experimentalFsWriteRequestCreation(path, body, location).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param path The path parameter
+     * @param body The body parameter
+     * @param location The location parameter
+     * @return ResponseEntity&lt;ExperimentalFsWrite200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<ExperimentalFsWrite200Response>> experimentalFsWriteWithHttpInfo(@jakarta.annotation.Nonnull String path, @jakarta.annotation.Nonnull File body, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ExperimentalFsWrite200Response> localVarReturnType = new ParameterizedTypeReference<ExperimentalFsWrite200Response>() {};
+        return experimentalFsWriteRequestCreation(path, body, location).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Write file
+     * Write the raw request body to an absolute path or a path relative to the requested location, creating parent directories, and return the resolved absolute path. Unlike read, the target is not confined to the location. Experimental: may change without compatibility guarantees.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param path The path parameter
+     * @param body The body parameter
+     * @param location The location parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec experimentalFsWriteWithResponseSpec(@jakarta.annotation.Nonnull String path, @jakarta.annotation.Nonnull File body, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return experimentalFsWriteRequestCreation(path, body, location);
+    }
+
+    public class FsFindRequest {
+        private @jakarta.annotation.Nullable String query;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
         private @jakarta.annotation.Nullable String type;
         private @jakarta.annotation.Nullable String limit;
 
-        public V2FsFindRequest() {}
+        public FsFindRequest() {}
 
-        public V2FsFindRequest(@jakarta.annotation.Nonnull String query, @jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) {
+        public FsFindRequest(@jakarta.annotation.Nullable String query, @jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) {
             this.query = query;
             this.location = location;
             this.type = type;
             this.limit = limit;
         }
 
-        public @jakarta.annotation.Nonnull String query() {
+        public @jakarta.annotation.Nullable String query() {
             return this.query;
         }
-        public V2FsFindRequest query(@jakarta.annotation.Nonnull String query) {
+        public FsFindRequest query(@jakarta.annotation.Nullable String query) {
             this.query = query;
             return this;
         }
 
-        public @jakarta.annotation.Nullable V2AgentListLocationParameter location() {
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
             return this.location;
         }
-        public V2FsFindRequest location(@jakarta.annotation.Nullable V2AgentListLocationParameter location) {
+        public FsFindRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
             this.location = location;
             return this;
         }
@@ -84,7 +284,7 @@ public class FilesystemApi {
         public @jakarta.annotation.Nullable String type() {
             return this.type;
         }
-        public V2FsFindRequest type(@jakarta.annotation.Nullable String type) {
+        public FsFindRequest type(@jakarta.annotation.Nullable String type) {
             this.type = type;
             return this;
         }
@@ -92,7 +292,7 @@ public class FilesystemApi {
         public @jakarta.annotation.Nullable String limit() {
             return this.limit;
         }
-        public V2FsFindRequest limit(@jakarta.annotation.Nullable String limit) {
+        public FsFindRequest limit(@jakarta.annotation.Nullable String limit) {
             this.limit = limit;
             return this;
         }
@@ -105,7 +305,7 @@ public class FilesystemApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            V2FsFindRequest request = (V2FsFindRequest) o;
+            FsFindRequest request = (FsFindRequest) o;
             return Objects.equals(this.query, request.query()) &&
                 Objects.equals(this.location, request.location()) &&
                 Objects.equals(this.type, request.type()) &&
@@ -124,12 +324,12 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsFind request parameters as object
-     * @return V2FsList200Response
+     * @param requestParameters The fsFind request parameters as object
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<V2FsList200Response> v2FsFind(V2FsFindRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsFind(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
+    public Mono<FsList200Response> fsFind(FsFindRequest requestParameters) throws WebClientResponseException {
+        return this.fsFind(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
     }
 
     /**
@@ -138,12 +338,12 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsFind request parameters as object
-     * @return ResponseEntity&lt;V2FsList200Response&gt;
+     * @param requestParameters The fsFind request parameters as object
+     * @return ResponseEntity&lt;FsList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<V2FsList200Response>> v2FsFindWithHttpInfo(V2FsFindRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsFindWithHttpInfo(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
+    public Mono<ResponseEntity<FsList200Response>> fsFindWithHttpInfo(FsFindRequest requestParameters) throws WebClientResponseException {
+        return this.fsFindWithHttpInfo(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
     }
 
     /**
@@ -152,12 +352,12 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsFind request parameters as object
+     * @param requestParameters The fsFind request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2FsFindWithResponseSpec(V2FsFindRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsFindWithResponseSpec(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
+    public ResponseSpec fsFindWithResponseSpec(FsFindRequest requestParameters) throws WebClientResponseException {
+        return this.fsFindWithResponseSpec(requestParameters.query(), requestParameters.location(), requestParameters.type(), requestParameters.limit());
     }
 
 
@@ -171,14 +371,14 @@ public class FilesystemApi {
      * @param location The location parameter
      * @param type The type parameter
      * @param limit The limit parameter
-     * @return V2FsList200Response
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec v2FsFindRequestCreation(@jakarta.annotation.Nonnull String query, @jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
+    private ResponseSpec fsFindRequestCreation(@jakarta.annotation.Nullable String query, @jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
         Object postBody = null;
         // verify the required parameter 'query' is set
         if (query == null) {
-            throw new WebClientResponseException("Missing the required parameter 'query' when calling v2FsFind", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+            throw new WebClientResponseException("Missing the required parameter 'query' when calling fsFind", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
         }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -189,7 +389,6 @@ public class FilesystemApi {
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "query", query));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "type", type));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
@@ -203,7 +402,7 @@ public class FilesystemApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
         return apiClient.invokeAPI("/api/fs/find", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -217,12 +416,12 @@ public class FilesystemApi {
      * @param location The location parameter
      * @param type The type parameter
      * @param limit The limit parameter
-     * @return V2FsList200Response
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<V2FsList200Response> v2FsFind(@jakarta.annotation.Nonnull String query, @jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
-        return v2FsFindRequestCreation(query, location, type, limit).bodyToMono(localVarReturnType);
+    public Mono<FsList200Response> fsFind(@jakarta.annotation.Nullable String query, @jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
+        return fsFindRequestCreation(query, location, type, limit).bodyToMono(localVarReturnType);
     }
 
     /**
@@ -235,12 +434,12 @@ public class FilesystemApi {
      * @param location The location parameter
      * @param type The type parameter
      * @param limit The limit parameter
-     * @return ResponseEntity&lt;V2FsList200Response&gt;
+     * @return ResponseEntity&lt;FsList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<V2FsList200Response>> v2FsFindWithHttpInfo(@jakarta.annotation.Nonnull String query, @jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
-        return v2FsFindRequestCreation(query, location, type, limit).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<FsList200Response>> fsFindWithHttpInfo(@jakarta.annotation.Nullable String query, @jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
+        return fsFindRequestCreation(query, location, type, limit).toEntity(localVarReturnType);
     }
 
     /**
@@ -256,25 +455,25 @@ public class FilesystemApi {
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2FsFindWithResponseSpec(@jakarta.annotation.Nonnull String query, @jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
-        return v2FsFindRequestCreation(query, location, type, limit);
+    public ResponseSpec fsFindWithResponseSpec(@jakarta.annotation.Nullable String query, @jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String type, @jakarta.annotation.Nullable String limit) throws WebClientResponseException {
+        return fsFindRequestCreation(query, location, type, limit);
     }
 
-    public class V2FsListRequest {
-        private @jakarta.annotation.Nullable V2AgentListLocationParameter location;
+    public class FsListRequest {
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
         private @jakarta.annotation.Nullable String path;
 
-        public V2FsListRequest() {}
+        public FsListRequest() {}
 
-        public V2FsListRequest(@jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String path) {
+        public FsListRequest(@jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String path) {
             this.location = location;
             this.path = path;
         }
 
-        public @jakarta.annotation.Nullable V2AgentListLocationParameter location() {
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
             return this.location;
         }
-        public V2FsListRequest location(@jakarta.annotation.Nullable V2AgentListLocationParameter location) {
+        public FsListRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
             this.location = location;
             return this;
         }
@@ -282,7 +481,7 @@ public class FilesystemApi {
         public @jakarta.annotation.Nullable String path() {
             return this.path;
         }
-        public V2FsListRequest path(@jakarta.annotation.Nullable String path) {
+        public FsListRequest path(@jakarta.annotation.Nullable String path) {
             this.path = path;
             return this;
         }
@@ -295,7 +494,7 @@ public class FilesystemApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            V2FsListRequest request = (V2FsListRequest) o;
+            FsListRequest request = (FsListRequest) o;
             return Objects.equals(this.location, request.location()) &&
                 Objects.equals(this.path, request.path());
         }
@@ -308,59 +507,59 @@ public class FilesystemApi {
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsList request parameters as object
-     * @return V2FsList200Response
+     * @param requestParameters The fsList request parameters as object
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<V2FsList200Response> v2FsList(V2FsListRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsList(requestParameters.location(), requestParameters.path());
+    public Mono<FsList200Response> fsList(FsListRequest requestParameters) throws WebClientResponseException {
+        return this.fsList(requestParameters.location(), requestParameters.path());
     }
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsList request parameters as object
-     * @return ResponseEntity&lt;V2FsList200Response&gt;
+     * @param requestParameters The fsList request parameters as object
+     * @return ResponseEntity&lt;FsList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<V2FsList200Response>> v2FsListWithHttpInfo(V2FsListRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsListWithHttpInfo(requestParameters.location(), requestParameters.path());
+    public Mono<ResponseEntity<FsList200Response>> fsListWithHttpInfo(FsListRequest requestParameters) throws WebClientResponseException {
+        return this.fsListWithHttpInfo(requestParameters.location(), requestParameters.path());
     }
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
-     * @param requestParameters The v2FsList request parameters as object
+     * @param requestParameters The fsList request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2FsListWithResponseSpec(V2FsListRequest requestParameters) throws WebClientResponseException {
-        return this.v2FsListWithResponseSpec(requestParameters.location(), requestParameters.path());
+    public ResponseSpec fsListWithResponseSpec(FsListRequest requestParameters) throws WebClientResponseException {
+        return this.fsListWithResponseSpec(requestParameters.location(), requestParameters.path());
     }
 
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
      * @param path The path parameter
-     * @return V2FsList200Response
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec v2FsListRequestCreation(@jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
+    private ResponseSpec fsListRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -371,7 +570,6 @@ public class FilesystemApi {
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "path", path));
 
         final String[] localVarAccepts = {
@@ -383,45 +581,45 @@ public class FilesystemApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
         return apiClient.invokeAPI("/api/fs/list", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
      * @param path The path parameter
-     * @return V2FsList200Response
+     * @return FsList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<V2FsList200Response> v2FsList(@jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
-        return v2FsListRequestCreation(location, path).bodyToMono(localVarReturnType);
+    public Mono<FsList200Response> fsList(@jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
+        return fsListRequestCreation(location, path).bodyToMono(localVarReturnType);
     }
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
      * @param path The path parameter
-     * @return ResponseEntity&lt;V2FsList200Response&gt;
+     * @return ResponseEntity&lt;FsList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<V2FsList200Response>> v2FsListWithHttpInfo(@jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
-        ParameterizedTypeReference<V2FsList200Response> localVarReturnType = new ParameterizedTypeReference<V2FsList200Response>() {};
-        return v2FsListRequestCreation(location, path).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<FsList200Response>> fsListWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
+        ParameterizedTypeReference<FsList200Response> localVarReturnType = new ParameterizedTypeReference<FsList200Response>() {};
+        return fsListRequestCreation(location, path).toEntity(localVarReturnType);
     }
 
     /**
      * List directory
-     * List direct children of one directory relative to the requested location.
+     * List direct children using an absolute path or a path relative to the requested location, including parents and siblings outside its directory. Entry paths remain relative to the requested location; listing does not switch locations.
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
@@ -430,8 +628,8 @@ public class FilesystemApi {
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2FsListWithResponseSpec(@jakarta.annotation.Nullable V2AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
-        return v2FsListRequestCreation(location, path);
+    public ResponseSpec fsListWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location, @jakarta.annotation.Nullable String path) throws WebClientResponseException {
+        return fsListRequestCreation(location, path);
     }
 
     /**
@@ -440,11 +638,12 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - FileNotFoundError
      * @param location The location parameter
      * @return File
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec v2FsReadRequestCreation(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
+    private ResponseSpec fsReadRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -455,7 +654,6 @@ public class FilesystemApi {
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
         final String[] localVarAccepts = {
             "application/octet-stream", "application/json"
@@ -476,13 +674,14 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - FileNotFoundError
      * @param location The location parameter
      * @return File
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<File> v2FsRead(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
+    public Mono<File> fsRead(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         ParameterizedTypeReference<File> localVarReturnType = new ParameterizedTypeReference<File>() {};
-        return v2FsReadRequestCreation(location).bodyToMono(localVarReturnType);
+        return fsReadRequestCreation(location).bodyToMono(localVarReturnType);
     }
 
     /**
@@ -491,13 +690,14 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - FileNotFoundError
      * @param location The location parameter
      * @return ResponseEntity&lt;File&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<File>> v2FsReadWithHttpInfo(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
+    public Mono<ResponseEntity<File>> fsReadWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         ParameterizedTypeReference<File> localVarReturnType = new ParameterizedTypeReference<File>() {};
-        return v2FsReadRequestCreation(location).toEntity(localVarReturnType);
+        return fsReadRequestCreation(location).toEntity(localVarReturnType);
     }
 
     /**
@@ -506,11 +706,12 @@ public class FilesystemApi {
      * <p><b>200</b> - Success
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - FileNotFoundError
      * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2FsReadWithResponseSpec(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
-        return v2FsReadRequestCreation(location);
+    public ResponseSpec fsReadWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return fsReadRequestCreation(location);
     }
 }

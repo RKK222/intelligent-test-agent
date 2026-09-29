@@ -17,7 +17,7 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 64
 fi
 
-# OpenCode 1.18.4 的 models.dev 插件会直接读取 limit 和能力字段；只检查 JSON 根对象会让
+# OpenCode V2 的 models.dev 插件仍直接读取 limit 和能力字段；只检查 JSON 根对象会让
 # 缺字段的目录进入运行时并使 /config、/provider 等接口整体失败，因此在重建 worker 前失败关闭。
 if ! jq -e '
   def nonempty_string:
@@ -72,7 +72,7 @@ if ! jq -e '
       )
   )
 ' "${catalog_file}" >/dev/null; then
-  echo "OpenCode models catalog is incompatible with the required OpenCode 1.18.4 models.dev structure: ${catalog_file}" >&2
+  echo "OpenCode models catalog is incompatible with the required OpenCode 2.0.18 models.dev structure: ${catalog_file}" >&2
   exit 64
 fi
 

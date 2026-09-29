@@ -48,7 +48,7 @@ class LocalClientRegistrationServiceTest {
                 "windows",
                 "amd64",
                 "20260825135217",
-                "1.18.4",
+                "2.0.18",
                 List.of("127.0.0.1"),
                 "001177621",
                 "1",

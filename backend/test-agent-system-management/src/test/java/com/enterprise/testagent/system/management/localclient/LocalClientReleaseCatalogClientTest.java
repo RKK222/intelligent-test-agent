@@ -98,7 +98,7 @@ class LocalClientReleaseCatalogClientTest {
     @Test
     void shouldAcceptSignedWindowsTenX64Release() throws Exception {
         byte[] manifest = manifest(
-                "1.18.4", "releases/20260820120000/", "windows", "x64");
+                "2.0.18", "releases/20260820120000/", "windows", "x64");
         publishManifest(manifest);
         LocalClientVersionRepository repository = mock(LocalClientVersionRepository.class);
         when(repository.findRelease(anyString())).thenReturn(Optional.empty());
@@ -144,7 +144,7 @@ class LocalClientReleaseCatalogClientTest {
 
     @Test
     void shouldRejectSignedManifestWhoseArtifactEscapesItsReleasePrefix() throws Exception {
-        byte[] manifest = manifest("1.18.4", "releases/20260820110000/");
+        byte[] manifest = manifest("2.0.18", "releases/20260820110000/");
         publishManifest(manifest);
         LocalClientVersionRepository repository = mock(LocalClientVersionRepository.class);
 
@@ -171,7 +171,7 @@ class LocalClientReleaseCatalogClientTest {
     }
 
     private byte[] validManifest() throws Exception {
-        return manifest("1.18.4", "releases/20260820120000/");
+        return manifest("2.0.18", "releases/20260820120000/");
     }
 
     private byte[] manifest(String opencodeVersion, String prefix) throws Exception {

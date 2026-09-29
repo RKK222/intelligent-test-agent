@@ -2,10 +2,10 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
-import com.example.opencode.sdk.model.InvalidRequestError;
-import com.example.opencode.sdk.model.UnauthorizedError;
-import com.example.opencode.sdk.model.V2AgentListLocationParameter;
-import com.example.opencode.sdk.model.V2ReferenceList200Response;
+import com.example.opencode.sdk.model.AgentListLocationParameter;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.ReferenceList200Response;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -56,10 +56,10 @@ public class ReferenceApi {
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
-     * @return V2ReferenceList200Response
+     * @return ReferenceList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec v2ReferenceListRequestCreation(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
+    private ResponseSpec referenceListRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -70,7 +70,6 @@ public class ReferenceApi {
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
         localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", location.getWorkspace()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -81,7 +80,7 @@ public class ReferenceApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<V2ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<V2ReferenceList200Response>() {};
+        ParameterizedTypeReference<ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<ReferenceList200Response>() {};
         return apiClient.invokeAPI("/api/reference", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
@@ -92,12 +91,12 @@ public class ReferenceApi {
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
-     * @return V2ReferenceList200Response
+     * @return ReferenceList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<V2ReferenceList200Response> v2ReferenceList(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
-        ParameterizedTypeReference<V2ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<V2ReferenceList200Response>() {};
-        return v2ReferenceListRequestCreation(location).bodyToMono(localVarReturnType);
+    public Mono<ReferenceList200Response> referenceList(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<ReferenceList200Response>() {};
+        return referenceListRequestCreation(location).bodyToMono(localVarReturnType);
     }
 
     /**
@@ -107,12 +106,12 @@ public class ReferenceApi {
      * <p><b>400</b> - InvalidRequestError
      * <p><b>401</b> - UnauthorizedError
      * @param location The location parameter
-     * @return ResponseEntity&lt;V2ReferenceList200Response&gt;
+     * @return ResponseEntity&lt;ReferenceList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<V2ReferenceList200Response>> v2ReferenceListWithHttpInfo(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
-        ParameterizedTypeReference<V2ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<V2ReferenceList200Response>() {};
-        return v2ReferenceListRequestCreation(location).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<ReferenceList200Response>> referenceListWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ReferenceList200Response> localVarReturnType = new ParameterizedTypeReference<ReferenceList200Response>() {};
+        return referenceListRequestCreation(location).toEntity(localVarReturnType);
     }
 
     /**
@@ -125,7 +124,7 @@ public class ReferenceApi {
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec v2ReferenceListWithResponseSpec(@jakarta.annotation.Nullable V2AgentListLocationParameter location) throws WebClientResponseException {
-        return v2ReferenceListRequestCreation(location);
+    public ResponseSpec referenceListWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return referenceListRequestCreation(location);
     }
 }

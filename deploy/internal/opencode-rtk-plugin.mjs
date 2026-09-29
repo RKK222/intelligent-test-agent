@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { Plugin } from "@opencode/plugin"
 
 const DEFAULT_TIMEOUT_MS = 2_000
 
@@ -43,11 +44,16 @@ export function createRtkPlugin(options = {}) {
   }
 }
 
-async function rtkServerPlugin() {
-  return createRtkPlugin()
-}
-
-export default {
+export default Plugin.define({
   id: "test-agent-rtk",
-  server: rtkServerPlugin,
-}
+  async setup(ctx) {
+    const configuration = createRtkPlugin()
+    if (!configuration["tool.execute.before"]) return
+    return ctx.tool.hook("execute.before", async (event) => {
+      await configuration["tool.execute.before"](
+        event,
+        { args: event.input },
+      )
+    })
+  },
+})

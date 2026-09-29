@@ -27,7 +27,7 @@ class LocalClientVersionCheckTest {
         assertThat(check.clientInstanceId()).isEqualTo(state.clientInstanceId());
         assertThat(check.clientVersion()).isEqualTo("20260820153045");
         assertThat(check.launcherVersion()).isEqualTo("1");
-        assertThat(check.opencodeVersion()).isEqualTo("1.18.4");
+        assertThat(check.opencodeVersion()).isEqualTo("2.0.18");
         assertThat(check.capabilities()).containsExactly(
                 "SELF_UPDATE_V1",
                 "OPENCODE_OBSERVABILITY_V1",

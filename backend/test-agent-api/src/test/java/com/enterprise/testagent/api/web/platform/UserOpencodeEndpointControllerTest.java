@@ -109,7 +109,7 @@ class UserOpencodeEndpointControllerTest {
                 "darwin",
                 "arm64",
                 "20260823090000",
-                "1.18.4",
+                "2.0.18",
                 true,
                 3,
                 List.of("127.0.0.1"),

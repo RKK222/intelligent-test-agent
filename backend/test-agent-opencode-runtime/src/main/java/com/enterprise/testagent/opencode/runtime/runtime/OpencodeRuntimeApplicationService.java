@@ -3,6 +3,7 @@ package com.enterprise.testagent.opencode.runtime.runtime;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
+import com.enterprise.testagent.agent.runtime.AgentSessionMessage;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesCommand;
 import com.enterprise.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.enterprise.testagent.common.error.ErrorCode;
@@ -28,6 +29,7 @@ import com.enterprise.testagent.opencode.runtime.run.RunApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.SessionApplicationService;
 import com.enterprise.testagent.opencode.runtime.session.UserRuntimeDisposeCoordinator;
 import com.enterprise.testagent.opencode.runtime.support.ExperienceWorkspacePathRedactor;
+import com.enterprise.testagent.opencode.client.OpencodeV2FormAdapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -252,6 +254,10 @@ public class OpencodeRuntimeApplicationService {
     public Object listAgents(String workspaceId, String traceId) {
         AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
         Object nativeCatalog = get(location, "/agent", Map.of(), traceId);
+        if (nativeCatalog instanceof Map<?, ?> envelope && envelope.get("data") instanceof List<?> items) {
+            // V2 agent 目录带 location envelope；受保护 Agent 合并必须以真实目录数组为底。
+            nativeCatalog = items;
+        }
         UserId userId = userContext.get();
         if (protectedAgentDefinitionResolver == null
                 || userId == null
@@ -337,7 +343,7 @@ public class OpencodeRuntimeApplicationService {
      * 查询 opencode runtime 健康状态，兼容 Web App 原始 /api/status 请求。
      */
     public Object runtimeStatus(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/global/health", Map.of(), traceId);
+        return get(workspaceLocation(workspaceId, traceId), "/api/info", Map.of(), traceId);
     }
 
     /**
@@ -434,14 +440,18 @@ public class OpencodeRuntimeApplicationService {
      * 读取 opencode 全局配置；只供 Agent 标准 global/config 兼容路径使用。
      */
     public Object getConfig(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId, traceId), "/global/config", Map.of(), traceId);
+        return get(workspaceLocation(workspaceId, traceId), "/api/config", Map.of(), traceId);
     }
 
     /**
      * 更新 opencode 全局配置，body 只做空值兜底，字段兼容由 opencode runtime 负责。
      */
     public Object updateConfig(String workspaceId, Map<String, Object> body, String traceId) {
-        return patch(workspaceLocation(workspaceId, traceId), "/global/config", safeBody(body), traceId);
+        Map<String, Object> requested = safeBody(body);
+        if (!requested.keySet().stream().allMatch("shell"::equals)) {
+            throw new PlatformException(ErrorCode.API_GONE, "OpenCode V2 只支持通过 config API 更新 shell 字段");
+        }
+        return patch(workspaceLocation(workspaceId, traceId), "/api/config", requested, traceId);
     }
 
     /**
@@ -469,44 +479,90 @@ public class OpencodeRuntimeApplicationService {
      * 发起 provider OAuth 授权。
      */
     public Object authorizeProviderOAuth(String providerId, Map<String, Object> body, String traceId) {
-        return post(workspaceLocation(null, traceId), "/provider/" + encodePath(providerId) + "/oauth/authorize", safeBody(body), traceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(null, traceId);
+        Map<String, Object> source = safeBody(body);
+        String methodId = text(source.get("methodID"));
+        if (methodId == null) {
+            Object integration = get(location, "/provider/" + encodePath(providerId), Map.of(), traceId);
+            Object data = integration instanceof Map<?, ?> envelope ? envelope.get("data") : null;
+            Object methods = data instanceof Map<?, ?> info ? info.get("methods") : null;
+            if (methods instanceof List<?> entries) {
+                for (Object entry : entries) {
+                    if (entry instanceof Map<?, ?> method && "oauth".equals(method.get("type"))) {
+                        methodId = text(method.get("id"));
+                        if (methodId != null) break;
+                    }
+                }
+            }
+        }
+        if (methodId == null) {
+            throw new PlatformException(ErrorCode.API_GONE, "OpenCode V2 集成没有可用的 OAuth 授权方法");
+        }
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        request.put("methodID", methodId);
+        if (source.get("answer") instanceof Map<?, ?> answer) request.put("answer", answer);
+        if (source.get("label") instanceof String label) request.put("label", label);
+        return post(location, "/provider/" + encodePath(providerId) + "/oauth/authorize", request, traceId);
     }
 
     /**
      * 完成 provider OAuth 回调。
      */
     public Object completeProviderOAuth(String providerId, Map<String, Object> body, String traceId) {
-        return post(workspaceLocation(null, traceId), "/provider/" + encodePath(providerId) + "/oauth/callback", safeBody(body), traceId);
+        Map<String, Object> source = safeBody(body);
+        String attemptId = text(source.get("attemptID"));
+        if (attemptId == null) attemptId = text(source.get("attemptId"));
+        if (attemptId == null) throw new PlatformException(ErrorCode.VALIDATION_ERROR, "V2 OAuth 回调缺少 attemptID");
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        request.put("attemptID", attemptId);
+        if (source.get("code") instanceof String code) request.put("code", code);
+        return post(workspaceLocation(null, traceId),
+                "/provider/" + encodePath(providerId) + "/oauth/callback", request, traceId);
     }
 
     /**
      * 写入 provider auth secret，secret 不在应用层记录日志或持久化。
      */
     public Object setProviderAuth(String providerId, Map<String, Object> body, String traceId) {
-        return put(workspaceLocation(null, traceId), "/auth/" + encodePath(providerId), safeBody(body), traceId);
+        Map<String, Object> source = safeBody(body);
+        String key = text(source.get("key"));
+        if (key == null) key = text(source.get("token"));
+        if (key == null) key = text(source.get("apiKey"));
+        if (key == null) throw new PlatformException(ErrorCode.VALIDATION_ERROR, "V2 provider auth 缺少 key");
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        request.put("key", key);
+        if (source.get("answer") instanceof Map<?, ?> answer) request.put("answer", answer);
+        if (source.get("label") instanceof String label) request.put("label", label);
+        return post(workspaceLocation(null, traceId), "/auth/" + encodePath(providerId), request, traceId);
     }
 
     /**
      * 删除 provider auth secret。
      */
     public Object removeProviderAuth(String providerId, String traceId) {
-        return delete(workspaceLocation(null, traceId), "/auth/" + encodePath(providerId), Map.of(), traceId);
+        throw new PlatformException(
+                ErrorCode.API_GONE,
+                "OpenCode V2 未提供删除 provider auth 的原生接口，请在 provider 配置中移除凭据");
     }
 
     /**
      * 查询 opencode experimental worktree 列表。
      */
     public Object listWorktrees(String workspaceId, String traceId) {
-        return get(nonExperienceWorkspaceLocation(workspaceId, traceId), "/experimental/worktree", Map.of(), traceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = nonExperienceWorkspaceLocation(workspaceId, traceId);
+        return get(location, "/experimental/worktree", Map.of("projectID", opencodeProjectId(location, traceId)), traceId);
     }
 
     /**
      * 创建 worktree；workspaceId 只用于平台路由，不透传为额外策略。
      */
     public Object createWorktree(Map<String, Object> body, String traceId) {
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location =
+                nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId);
         Map<String, Object> forwarded = worktreeBody(body);
+        forwarded.put("projectID", opencodeProjectId(location, traceId));
         return post(
-                nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId),
+                location,
                 "/experimental/worktree",
                 forwarded,
                 traceId);
@@ -519,7 +575,10 @@ public class OpencodeRuntimeApplicationService {
         AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location =
                 nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId);
         Map<String, Object> forwarded = worktreeBody(body);
-        requireListedWorktree(location, requiredWorktreeDirectory(forwarded), traceId);
+        String projectId = opencodeProjectId(location, traceId);
+        requireListedWorktree(location, projectId, requiredWorktreeDirectory(forwarded), traceId);
+        forwarded.put("projectID", projectId);
+        forwarded.putIfAbsent("force", false);
         return delete(
                 location,
                 "/experimental/worktree",
@@ -534,11 +593,12 @@ public class OpencodeRuntimeApplicationService {
         AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location =
                 nonExperienceWorkspaceLocation(requiredWorktreeWorkspaceId(body), traceId);
         Map<String, Object> forwarded = worktreeBody(body);
-        requireListedWorktree(location, requiredWorktreeDirectory(forwarded), traceId);
+        String projectId = opencodeProjectId(location, traceId);
+        requireListedWorktree(location, projectId, requiredWorktreeDirectory(forwarded), traceId);
         return post(
                 location,
                 "/experimental/worktree/reset",
-                forwarded,
+                Map.of("projectID", projectId),
                 traceId);
     }
 
@@ -547,7 +607,8 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object sessionChildren(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/children", Map.of(), traceId);
+        // V2 removes the session-scoped /children route; the list endpoint accepts parentID instead.
+        return get(location, "/session", Map.of("parentID", location.remoteSessionId()), traceId);
     }
 
     /**
@@ -555,7 +616,30 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object sessionTodo(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/todo", Map.of(), traceId);
+        AgentSessionMessagesResult messages = location.runtime().sessionMessages(new AgentSessionMessagesCommand(
+                        location.node(),
+                        location.remoteSessionId(),
+                        200,
+                        "desc",
+                        null,
+                        traceId))
+                .block();
+        List<Map<String, Object>> latest = List.of();
+        if (messages != null) {
+            for (AgentSessionMessage message : messages.messages()) {
+                if (!"assistant".equalsIgnoreCase(text(message.message().get("role")))) {
+                    continue;
+                }
+                for (Map<String, Object> part : message.parts()) {
+                    List<Map<String, Object>> snapshot = todoSnapshotFromPart(part);
+                    if (snapshot != null) {
+                        latest = snapshot;
+                    }
+                }
+            }
+        }
+        // V2 没有旧的 session/{id}/todo endpoint；从消息中的 todowrite part 恢复平台 Todo。
+        return Map.of("data", latest);
     }
 
     /**
@@ -619,34 +703,33 @@ public class OpencodeRuntimeApplicationService {
         boolean compacted = false;
         try {
             ModelSelection model = parseModel(input.model());
+            String temporaryPath = "/session/" + encodePath(temporarySessionId);
+            if (input.agent() != null) {
+                post(location, temporaryPath + "/agent", Map.of("agent", input.agent()), traceId);
+            }
+            if (model != null) {
+                post(location, temporaryPath + "/model", Map.of("model", Map.of(
+                        "providerID", model.providerId(), "id", model.modelId())), traceId);
+            }
             if (shouldCompact) {
                 if (model == null) {
                     throw new IllegalArgumentException("side question requires model provider/model when context compaction is needed");
                 }
                 post(
                         location,
-                        "/session/" + encodePath(temporarySessionId) + "/summarize",
-                        Map.of("providerID", model.providerId(), "modelID", model.modelId()),
+                        temporaryPath + "/summarize",
+                        Map.of(),
                         traceId);
+                waitForSideQuestionSession(location, temporaryPath, traceId);
                 compacted = true;
             }
-
-            LinkedHashMap<String, Object> messageBody = new LinkedHashMap<>();
-            if (input.agent() != null) {
-                messageBody.put("agent", input.agent());
-            }
-            if (model != null) {
-                messageBody.put("model", Map.of("providerID", model.providerId(), "modelID", model.modelId()));
-            }
-            // 使用 plan agent 的权限边界允许只读检查；不再用 tools=false，否则模型只能把工具调用协议写成文本而无法得到工具结果。
-            messageBody.put("system", SideQuestionPolicy.SYSTEM_PROMPT);
-            messageBody.put("parts", List.of(Map.of("type", "text", "text", question)));
-            Object answerResponse = post(
-                    location,
-                    "/session/" + encodePath(temporarySessionId) + "/message",
-                    messageBody,
-                    traceId);
-            String answer = SIDE_QUESTION_ANSWER_EXTRACTOR.extract(answerResponse);
+            // V2 prompt 只接受 text；先固定临时 session 的 agent/model，再把只读约束加入用户问题。
+            post(location, temporaryPath + "/prompt",
+                    Map.of("text", SideQuestionPolicy.SYSTEM_PROMPT + "\n\n" + question), traceId);
+            waitForSideQuestionSession(location, temporaryPath, traceId);
+            Object messages = get(location, temporaryPath + "/message",
+                    Map.of("order", "desc", "limit", "40"), traceId);
+            String answer = latestSideQuestionAnswer(messages);
             if (answer == null) {
                 throw new IllegalStateException("opencode side question response did not contain a natural-language answer");
             }
@@ -662,6 +745,32 @@ public class OpencodeRuntimeApplicationService {
                         cleanupFailure.getClass().getSimpleName());
             }
         }
+    }
+
+    /** V2 wait 对已经空闲的临时会话可能返回 404，随后仍需从消息快照确认最终答案。 */
+    private void waitForSideQuestionSession(
+            AgentRuntimeTargetResolver.SessionRuntimeTarget location,
+            String temporaryPath,
+            String traceId) {
+        try {
+            post(location, temporaryPath + "/wait", Map.of(), traceId);
+        } catch (PlatformException exception) {
+            if (!Integer.valueOf(404).equals(exception.details().get("status"))) throw exception;
+        }
+    }
+
+    /** V2 消息按倒序读取，第一条 assistant 才是刚完成的回答，不能回退到 fork 的历史回答。 */
+    private String latestSideQuestionAnswer(Object response) {
+        Object items = response instanceof Map<?, ?> envelope ? envelope.get("data") : response;
+        if (!(items instanceof List<?> list)) return SIDE_QUESTION_ANSWER_EXTRACTOR.extract(response);
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> message)) continue;
+            Object info = message.get("info") instanceof Map<?, ?> nested ? nested : message;
+            if (!(info instanceof Map<?, ?> map)) continue;
+            if (!"assistant".equals(text(map.get("role"))) && !"assistant".equals(text(map.get("type")))) continue;
+            return SIDE_QUESTION_ANSWER_EXTRACTOR.extract(List.of(item));
+        }
+        return null;
     }
 
     /**
@@ -696,7 +805,7 @@ public class OpencodeRuntimeApplicationService {
     public Object unrevertSession(String sessionId, Map<String, Object> body, String traceId) {
         requireSessionUnlocked(sessionId);
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/unrevert", safeBody(body), traceId);
+        return delete(location, "/session/" + encodePath(location.remoteSessionId()) + "/unrevert", Map.of(), traceId);
     }
 
     /**
@@ -723,18 +832,18 @@ public class OpencodeRuntimeApplicationService {
      * 创建 opencode 会话分享链接，sessionId 经平台映射后再访问远端。
      */
     public Object shareSession(String sessionId, String traceId) {
-        requireSessionUnlocked(sessionId);
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
+        throw new PlatformException(
+                ErrorCode.API_GONE,
+                "OpenCode V2 已移除原生分享接口，请使用平台 collaboration-share 接口");
     }
 
     /**
      * 取消 opencode 会话分享。
      */
     public Object unshareSession(String sessionId, String traceId) {
-        requireSessionUnlocked(sessionId);
-        AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return delete(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
+        throw new PlatformException(
+                ErrorCode.API_GONE,
+                "OpenCode V2 已移除原生分享接口，请使用平台 collaboration-share 接口");
     }
 
     private void requireSessionUnlocked(String sessionId) {
@@ -762,7 +871,8 @@ public class OpencodeRuntimeApplicationService {
         try {
             result = post(
                     location,
-                    "/permission/" + encodePath(requestId) + "/reply",
+                    "/session/" + encodePath(location.remoteSessionId()) + "/permission/"
+                            + encodePath(requestId) + "/reply",
                     permissionReplyBody(body),
                     traceId);
         } catch (PlatformException exception) {
@@ -777,9 +887,10 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listQuestions(String sessionId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return filterSessionInteractions(
+        Object filtered = filterSessionInteractions(
                 get(location, "/question", Map.of(), traceId),
                 location.remoteSessionId());
+        return projectQuestionForms(filtered);
     }
 
     /**
@@ -787,18 +898,23 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        Map<String, Object> normalizedBody = questionReplyBody(body);
         Object result;
         try {
+            String formPath = "/session/" + encodePath(location.remoteSessionId())
+                    + "/form/" + encodePath(requestId);
+            Object detail = get(location, formPath, Map.of(), traceId);
+            Map<?, ?> form = detail instanceof Map<?, ?> envelope && envelope.get("data") instanceof Map<?, ?> data
+                    ? data : detail instanceof Map<?, ?> raw ? raw : Map.of();
+            Map<String, Object> normalizedBody = OpencodeV2FormAdapter.toReply(safeBody(body), form);
             result = post(
                     location,
-                    "/question/" + encodePath(requestId) + "/reply",
+                    formPath + "/reply",
                     normalizedBody,
                     traceId);
         } catch (PlatformException exception) {
             throw translateExpiredInteraction(exception, "question", requestId, traceId);
         }
-        recordQuestionReplyAcknowledged(sessionId, location, requestId, normalizedBody, traceId);
+        recordQuestionReplyAcknowledged(sessionId, location, requestId, safeBody(body), traceId);
         reconcileAfterInteractionReply(sessionId, location, traceId);
         return result;
     }
@@ -810,9 +926,9 @@ public class OpencodeRuntimeApplicationService {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
         Object result;
         try {
-            result = post(
+            result = delete(
                     location,
-                    "/question/" + encodePath(requestId) + "/reject",
+                    "/session/" + encodePath(location.remoteSessionId()) + "/form/" + encodePath(requestId),
                     Map.of(),
                     traceId);
         } catch (PlatformException exception) {
@@ -912,7 +1028,7 @@ public class OpencodeRuntimeApplicationService {
      * 删除 MCP auth。
      */
     public Object removeMcpAuth(String name, String traceId) {
-        return delete(workspaceLocation(null, traceId), "/mcp/" + encodePath(name) + "/auth", Map.of(), traceId);
+        return post(workspaceLocation(null, traceId), "/mcp/" + encodePath(name) + "/auth/disconnect", Map.of(), traceId);
     }
 
     /**
@@ -1052,6 +1168,31 @@ public class OpencodeRuntimeApplicationService {
             }
         }
         return false;
+    }
+
+    /** V2 Form.Info 列表投影为现有 Question DTO，保留列表 envelope 和旧事件兼容。 */
+    private Object projectQuestionForms(Object value) {
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::projectQuestionForm).toList();
+        }
+        if (value instanceof Map<?, ?> raw) {
+            Object data = raw.get("data");
+            if (data instanceof List<?> list) {
+                LinkedHashMap<String, Object> envelope = new LinkedHashMap<>();
+                raw.forEach((key, item) -> {
+                    if (key instanceof String name) envelope.put(name, item);
+                });
+                envelope.put("data", list.stream().map(this::projectQuestionForm).toList());
+                return envelope;
+            }
+            return projectQuestionForm(value);
+        }
+        return value;
+    }
+
+    private Object projectQuestionForm(Object value) {
+        return value instanceof Map<?, ?> map && map.get("fields") instanceof List<?>
+                ? OpencodeV2FormAdapter.toQuestion(map) : value;
     }
 
     private String extractSessionId(Object response) {
@@ -1225,9 +1366,10 @@ public class OpencodeRuntimeApplicationService {
      */
     private void requireListedWorktree(
             AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location,
+            String projectId,
             String directory,
             String traceId) {
-        Object listed = get(location, "/experimental/worktree", Map.of(), traceId);
+        Object listed = get(location, "/experimental/worktree", Map.of("projectID", projectId), traceId);
         boolean registered = listed instanceof List<?> items && items.stream().anyMatch(item ->
                 item instanceof Map<?, ?> worktree && directory.equals(text(worktree.get("directory"))));
         if (!registered) {
@@ -1235,12 +1377,77 @@ public class OpencodeRuntimeApplicationService {
         }
     }
 
+    /** 工作区目录对应的 V2 projectID 只能从当前进程的 location 查询，不能用平台 Workspace ID 代替。 */
+    private String opencodeProjectId(AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location, String traceId) {
+        Object info = get(location, "/api/location", Map.of(), traceId);
+        if (info instanceof Map<?, ?> raw && raw.get("project") instanceof Map<?, ?> project) {
+            String projectId = text(project.get("id"));
+            if (projectId != null) return projectId;
+        }
+        throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "OpenCode V2 location 未返回 projectID");
+    }
+
     private String text(Object value) {
         return value instanceof String text && !text.isBlank() ? text : null;
     }
 
+    /** 从 V2 tool part 的 input/metadata/state 兼容位置提取最新 Todo 快照。 */
+    private List<Map<String, Object>> todoSnapshotFromPart(Map<String, Object> part) {
+        if (!"tool".equals(part.get("type"))) {
+            return null;
+        }
+        String toolName = text(part.get("toolName"));
+        if (toolName == null) {
+            toolName = text(part.get("tool"));
+        }
+        if (toolName == null || !"todowrite".equalsIgnoreCase(toolName)) {
+            return null;
+        }
+        List<Map<String, Object>> snapshot = todoItems(part.get("input"));
+        if (snapshot != null) {
+            return snapshot;
+        }
+        snapshot = todoItems(part.get("metadata"));
+        if (snapshot != null) {
+            return snapshot;
+        }
+        Object state = part.get("state");
+        if (state instanceof Map<?, ?> stateMap) {
+            snapshot = todoItems(stateMap.get("input"));
+            if (snapshot != null) {
+                return snapshot;
+            }
+            return todoItems(stateMap.get("metadata"));
+        }
+        return null;
+    }
+
+    /** 兼容 V2 Todo 的数组、todos、todo 和 items 包装。 */
+    private List<Map<String, Object>> todoItems(Object value) {
+        Object raw = value;
+        if (value instanceof Map<?, ?> map) {
+            raw = map.containsKey("todos") ? map.get("todos")
+                    : map.containsKey("todo") ? map.get("todo") : map.get("items");
+        }
+        if (!(raw instanceof List<?> list)) {
+            return null;
+        }
+        return list.stream()
+                .filter(item -> item instanceof Map<?, ?>)
+                .map(item -> {
+                    LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+                    ((Map<?, ?>) item).forEach((key, itemValue) -> {
+                        if (key instanceof String name && itemValue != null) {
+                            normalized.put(name, itemValue);
+                        }
+                    });
+                    return (Map<String, Object>) normalized;
+                })
+                .toList();
+    }
+
     /**
-     * 兼容前端 permission decision 字段，转换为 opencode 期望的 reply 字段。
+     * 兼容前端 permission decision/reply 字段，统一转换为 V2 的 decision envelope。
      */
     private Map<String, Object> permissionReplyBody(Map<String, Object> body) {
         Map<String, Object> source = safeBody(body);
@@ -1249,7 +1456,7 @@ public class OpencodeRuntimeApplicationService {
             return source;
         }
         Map<String, Object> normalized = new LinkedHashMap<>();
-        normalized.put("reply", reply);
+        normalized.put("decision", reply);
         if (source.containsKey("message")) {
             normalized.put("message", source.get("message"));
         }
@@ -1257,23 +1464,7 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 兼容前端扁平 answers 字段，转换为 opencode 期望的嵌套结构。
-     * <p>
-     * opencode {@code /question/{requestId}/reply} 要求 {@code answers} 为 {@code List<List<String>>}：
-     * 外层数组每个问题一个内层数组，内层放选中的 label。前端 {@code RuntimeDock} 只发送扁平
-     * {@code string[]}（单选 {@code [label]}、文本 {@code [text]}、多选 {@code [l1,l2]}），
-     * 且每条回复只针对一个问题，因此把扁平数组整体包成单个内层数组即可。
-     * 对已嵌套或空数组做幂等处理，避免重复包装。
-     */
-    private Map<String, Object> questionReplyBody(Map<String, Object> body) {
-        Map<String, Object> source = safeBody(body);
-        Map<String, Object> normalized = new LinkedHashMap<>();
-        normalized.put("answers", toQuestionAnswers(source.get("answers")));
-        return normalized;
-    }
-
-    /**
-     * 把前端 answers 归一化为 opencode 的 {@code List<List<String>>}。
+     * 把前端 answers 归一化为平台事件审计使用的 {@code List<List<String>>}。
      * <ul>
      *   <li>null 或非数组 → 空列表；</li>
      *   <li>空数组 → 空列表；</li>

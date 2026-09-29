@@ -35,7 +35,7 @@ manager 先合并 WebSocket `command.environment`，再强制覆盖 `HOME`、`XD
 
 `OPENCODE_REFERENCES_DIR` 不是 manager 自身环境变量。Java 后端在公共进程启动程序中按目标平台解析通用参数，并通过 WebSocket `command.environment` 传给 manager；manager 将收到的其它非空键值合并进子进程环境。滚动升级期间参数缺失不会阻断 opencode server 启动。新增运行目录变量及引用目录变量只对新启动的进程，以及由平台公共停止/启动程序完成的受管重启生效；已经运行的进程不会因参数变化自动重启。
 
-企业 Linux worker 中该兼容 CLI 由 Node 22 启动 OpenCode `1.18.4` server bundle，只实现 manager 实际依赖的 `--version` 与 `serve --hostname/--port/--cors/--print-logs` 接口，不使用上游 npm 包内嵌的 Bun 可执行文件。manager 的启动、健康探测、state 和停止语义保持不变。
+企业 Linux worker 中该兼容 CLI 由 Node 22 启动 OpenCode `2.0.18` server bundle，只实现 manager 实际依赖的 `--version` 与 `serve --hostname/--port/--cors/--print-logs` 接口，不使用上游 npm 包内嵌的 Bun 可执行文件。manager 的启动、健康探测、state 和停止语义保持不变。
 
 worker 镜像同时内置从官方源码构建的 Python `3.13.14`，并提供 `python3`/`python`、`pip`、`venv`、`curl`、`jq`、`zip` 和 `unzip`，供获得 `bash` 权限的 Agent 执行通用脚本。Python 与 OpenCode 子进程继承同一容器 `PATH`，不会读取宿主服务器的解释器。镜像不保留编译器，也不直接烘焙业务第三方包；pandas、openpyxl、XlsxWriter、python-docx、jsonschema、orjson 及其传递依赖由独立的 Python 3.13 / Linux amd64 哈希锁制品部署到宿主机，再以只读目录和 `PYTHONPATH` 挂载进 worker。运行时默认 `PIP_NO_INDEX=1`，禁止访问公网索引安装。
 
@@ -92,7 +92,7 @@ opencode-manager restart --port 4096 --trace-id trace_1234567890abcdef
 opencode-manager list --trace-id trace_1234567890abcdef
 ```
 
-`health` 先检查 PID 是否存在，再依次请求 `http://127.0.0.1:{port}/global/health` 和 `/global/config`。前者确认进程 HTTP 存活，后者确认 `OPENCODE_CONFIG_DIR` 中的公共配置符合当前 OpenCode 原生 schema；任一失败都返回 `UNHEALTHY`，不回退只能证明 HTTP 可访问的 `/doc`。例如 OpenCode 1.17.7 的额外技能目录配置必须写成 `"skills": {"paths": ["./skills"]}`，不能使用旧数组形式。
+`health` 先检查 PID 是否存在，再依次请求 `http://127.0.0.1:{port}/api/info` 和 `/api/config`。前者确认进程 HTTP 存活，后者确认 `OPENCODE_CONFIG_DIR` 中的公共配置符合当前 OpenCode 原生 schema；任一失败都返回 `UNHEALTHY`，不回退只能证明 HTTP 可访问的 `/doc`。例如 OpenCode 1.17.7 的额外技能目录配置必须写成 `"skills": {"paths": ["./skills"]}`，不能使用旧数组形式。
 
 `start`、`stop` 和 `restart` 在 manager 生命周期锁内串行执行。`start` 对已经写入本地 state 且健康、端口/UCID/session/config 均一致的进程保持幂等：重复启动返回 `STARTED`、既有 PID、state 中的权威 `startedAt` 和 `processCreated=false`，不会再拉起第二个 opencode server；本次实际新建进程时返回 `processCreated=true` 及同一份 state `startedAt`。Java 必须持久化该 manager 时间，不能在收到回包后自行取时。已有平台 binding 的 Java 启动命令额外携带可选 `bindingRecovery=true`，表示按数据库原端口恢复而非新增调度，因此不受 `maxProcesses` 容量过滤；首次分配和端口迁移不携带该字段，仍执行原容量限制。旧 Java 缺字段时按首次分配处理。同一 UCID 已在其它端口托管时返回 `IDENTITY_ALREADY_MANAGED`，身份或路径配置不一致返回 `IDENTITY_CONFIG_MISMATCH`；目标端口超出当前池返回 `PORT_OUT_OF_RANGE`，被其它 state/身份或外部监听器占用返回 `PORT_CONFLICT`。端口探测覆盖 loopback 和宿主机活动网卡，但忽略 macOS `utun` 等点对点隧道，避免 VPN 代理接受任意端口连接时把空闲端口误报为冲突。若该端口已有匹配 state 但健康检查失败，`start` 返回普通失败，Java 必须先通过公共停止服务确认退出后再在原端口启动；除 `PORT_CONFLICT/PORT_OUT_OF_RANGE` 外的错误都不允许触发端口迁移。`stop` 对 state 存在但 OS 进程已结束的端口按幂等成功处理；SIGTERM 超时并发送 SIGKILL 后仍须再次确认 PID 已退出，未确认时保留 state 并返回失败。停止路径发现目标 PID 已复用为容器 PID 1、entrypoint 父进程或 manager 自身时，只删除失效 state，绝不向控制进程发送 TERM/KILL。`list` 和心跳只清理端口与 PID 仍匹配当前 state 的陈旧记录，不能用旧心跳快照删除同端口 restart 刚写入的新 PID。
 
@@ -136,7 +136,7 @@ manager 当前接受的命令为 `start`、`health`、`stop`、`restart`、`stop
 - 最大进程数来自通用参数表中的全局 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`），manager 收到后按自身端口池容量 clamp（`<1` 拒绝、超上限 clamp 到容量），并通过即时心跳把生效值写回运行管理 Redis 快照。该值缺失或非法时后端不下发可启动配置，manager 保持未 ready 并拒绝启动用户进程。
 - 用户进程 session 与公共配置源来自 `common_parameters.OPENCODE_SESSION_DIR` 和 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR`。Java 通过用户仓储解析统一认证号，把 session 固定为 `{OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`，把有效配置路径固定为 `{sessionPath}/.testagent-runtime/current-public-config`，先维护软链接再分别通过 `start.sessionPath/start.configPath/start.unifiedAuthId` 下发给 manager；manager 将 session 及其 `.cache`、`.local/state`、`.tmp` 创建为持久化 `0755` 普通目录并固定派生运行环境，但不改配置链接。首次完整 `configUpdate` 必须带齐公共源路径；后续最大进程数刷新允许只带 `maxProcesses`，路径字段为空表示沿用已生效路径。非 Windows manager 使用 Java 当前平台解析到的 Linux 参数；Windows 若无法创建受管软链接会由 Java 明确拒绝，不降级复制。`OPENCODE_SESSION_ROOT`、`OPENCODE_CONFIG_DIR`、`OPENCODE_MANAGER_MAX_PROCESSES` 不再是 `run` 模式主路径。OpenCode 会合并用户全局配置、`OPENCODE_CONFIG_DIR` 和请求工作区 `.opencode`，企业部署必须保证运行用户 `~/.config/opencode/config.json`、`opencode.json`、`opencode.jsonc` 不维护模型或供应商，最多保留只含 `$schema` 的空配置；公共配置 Git 库 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/opencode.jsonc` 是模型、供应商和内部代理 provider 的事实源。manager 执行 `start` 时检查本次实际 `configPath` 必须可解析为存在、非空且可读的目录，并在 fork 前检查所有用户运行目录；失败消息写明当前 `linuxServerId` 和实际路径，不会自动创建配置。未携带 `sessionPath/configPath` 的本地 CLI 或旧命令帧仍分别按 `{OPENCODE_SESSION_DIR}/{port}` 和公共共享目录兼容；旧进程必须经过平台受管重启才会取得新增环境变量。
 - `opencode-models.json` 是独立的 models.dev 元数据快照，不属于上述公共 Git 配置。企业 worker 通过只读挂载设置 `OPENCODE_MODELS_PATH`；manager 的 Linux/Windows starter 都以当前进程环境为基线，再叠加命令环境，因此全部受管用户进程继承该路径。manager 不读取、复制或热更新该文件；文件替换后必须由部署程序重启 worker，entrypoint 校验通过后才重新拉起用户进程。
-- 企业 Node launcher 禁止 OpenCode 启动期联网安装配置依赖，并把 programs 内锁定的 Tool runtime 暴露给公共 `tools/` 与工作区 `.opencode/tools/`。基线包含 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及其传递依赖；新增其它第三方 import 需要重新构建和部署 programs/worker，manager 不负责 npm 下载或业务依赖安装。
+- 企业 Node launcher 禁止 OpenCode 启动期联网安装配置依赖，并把 programs 内锁定的 Tool runtime 暴露给公共 `tools/` 与工作区 `.opencode/tools/`。基线包含 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 及其传递依赖；新增其它第三方 import 需要重新构建和部署 programs/worker，manager 不负责 npm 下载或业务依赖安装。
 - Java 后端写入的 `.serverid` 和 manager 注册上报的 `linuxServerId` 必须是同一稳定服务器身份；`.serverhost` 只用于连接 Java 和生成用户进程访问地址。`containerId/managerId` 均由该稳定身份自动派生，`containerName` 才是容器或本机的可读展示名称。
 
 ## 边界

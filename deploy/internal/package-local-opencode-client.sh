@@ -22,7 +22,7 @@ SKIP_BUILD=0
 JDK_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_URL:-https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.9%2B10/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.9_10.tar.gz}"
 JDK_LINUX_SHA="${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_SHA256:-edf0da4debe7cf475dbe320d174d6eed81479eb363f41e38a2efb740428c603a}"
 JDK_LINUX_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_JDK_LINUX_ARM64_GLIBC_ARCHIVE:-}"
-OPENCODE_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_URL:-https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-linux-arm64.tar.gz}"
+OPENCODE_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_URL:-https://registry.npmjs.org/@opencode/cli-linux-arm64/-/cli-linux-arm64-2.0.18.tgz}"
 OPENCODE_LINUX_SHA="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_SHA256:-eba87efba3976d533a24cca0316f8ef375b5f8e797c0a95c25ee919700b7ba35}"
 OPENCODE_LINUX_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_LINUX_ARM64_GLIBC_ARCHIVE:-}"
 RTK_LINUX_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_LINUX_ARM64_GLIBC_URL:-https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-aarch64-unknown-linux-gnu.tar.gz}"
@@ -238,17 +238,17 @@ normalize_opencode() {
     exit 1
   }
   stage="${work}/stage"
-  mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins"
+  mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins/test-agent-observability" "${stage}/opencode/plugins/test-agent-rtk"
   cp -a "${executable}" "${stage}/opencode/bin/opencode"
   cp -a "${rtk_binary}" "${stage}/opencode/bin/rtk"
   chmod 0755 "${stage}/opencode/bin/opencode"
   chmod 0755 "${stage}/opencode/bin/rtk"
   cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
-    "${stage}/opencode/plugins/test-agent-observability.mjs"
+    "${stage}/opencode/plugins/test-agent-observability/index.mjs"
   cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
-    "${stage}/opencode/plugins/test-agent-rtk.mjs"
-  chmod 0644 "${stage}/opencode/plugins/test-agent-observability.mjs"
-  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk.mjs"
+    "${stage}/opencode/plugins/test-agent-rtk/index.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-observability/index.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk/index.mjs"
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
     chmod 0644 "${stage}/opencode/LICENSE"
@@ -344,7 +344,7 @@ MANIFEST="${STAGING_DIR}/manifest.json"
   printf '  "launcherVersionMin": 1,\n'
   printf '  "launcherVersionMax": 1,\n'
   printf '  "protocolVersion": "local-opencode-client.v1",\n'
-  printf '  "opencodeVersion": "1.18.4",\n'
+  printf '  "opencodeVersion": "2.0.18",\n'
   printf '  "rtkVersion": "0.49.0",\n'
   printf '  "artifacts": [\n'
   printf '    {"kind": "CLIENT_JAR", "path": "releases/%s/test-agent-local-client.jar", "size": %s, "sha256": "%s", "signaturePath": "releases/%s/test-agent-local-client.jar.sig"},\n' "${VERSION}" "$(file_size "${STAGING_DIR}/test-agent-local-client.jar")" "${CLIENT_SHA}" "${VERSION}"

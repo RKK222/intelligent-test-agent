@@ -376,7 +376,7 @@ final class LocalClientReleaseDownloader {
                 || manifest.launcherVersionMin() > 1
                 || manifest.launcherVersionMax() < 1
                 || !LocalClientProtocol.VERSION.equals(manifest.protocolVersion())
-                || !"1.18.4".equals(manifest.opencodeVersion())
+                || !"2.0.18".equals(manifest.opencodeVersion())
                 || manifest.artifacts() == null) {
             throw new IllegalArgumentException("release manifest is incompatible with this launcher");
         }

@@ -46,8 +46,8 @@ fi
 # 避免部署脚本再维护一份版本号。Tool 基线四件套不能只在镜像构建时验证。
 DEPENDENCIES=(
   '@modelcontextprotocol/sdk|dist/esm/server/mcp.js'
-  '@opencode-ai/plugin|dist/index.js'
-  '@opencode-ai/sdk|dist/index.js'
+  '@opencode/plugin|dist/promise/index.js'
+  '@opencode/client|dist/promise/index.js'
   'effect|dist/index.js'
   'jsonc-parser|lib/esm/main.js'
   'playwright-core|index.js'
@@ -80,6 +80,8 @@ if [[ -n "${ARCHIVE}" ]]; then
     programs/opencode/package.json
     programs/opencode/package-lock.json
     programs/opencode/opencode-observability-plugin.mjs
+    programs/opencode/opencode-observability-plugin/index.mjs
+    programs/opencode/opencode-rtk-plugin/index.mjs
   )
   for dependency_entry in "${DEPENDENCIES[@]}"; do
     dependency="${dependency_entry%%|*}"
@@ -123,6 +125,8 @@ require_runtime_file() {
 require_runtime_file package.json
 require_runtime_file package-lock.json
 require_runtime_file opencode-observability-plugin.mjs
+require_runtime_file opencode-observability-plugin/index.mjs
+require_runtime_file opencode-rtk-plugin/index.mjs
 runtime_manifest="$(read_runtime_file package.json)"
 runtime_lock="$(read_runtime_file package-lock.json)"
 
@@ -157,5 +161,5 @@ for dependency_entry in "${DEPENDENCIES[@]}"; do
   }
 done
 
-printf 'OpenCode Tool runtime dependencies verified: %s; plugin/sdk/effect/playwright/zod are present\n' \
+printf 'OpenCode V2 Tool runtime dependencies verified: %s; client/plugin/effect/playwright/zod are present\n' \
   "${SOURCE_LABEL}"

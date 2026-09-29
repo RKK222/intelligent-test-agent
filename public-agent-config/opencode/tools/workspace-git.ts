@@ -1,4 +1,4 @@
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 const ENDPOINT_PATH = "/api/internal/agent/opencode/workspace-git-tool"
 const WRITE_ACTIONS = new Set([

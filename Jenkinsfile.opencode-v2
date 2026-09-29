@@ -1,0 +1,147 @@
+pipeline {
+    agent {
+        node {
+            label ''
+            customWorkspace '/data2/deploy/intelligent-test-agent/v2-acceptance/workspace'
+        }
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timeout(time: 180, unit: 'MINUTES')
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+
+    parameters {
+        choice(name: 'ACTION', choices: ['DEPLOY', 'ROLLBACK'], description: '只管理隔离的 OpenCode V2 验收栈。')
+        string(name: 'ROLLBACK_TAG', defaultValue: '', trim: true, description: '回滚时填写本任务的不可变 release 标签。')
+    }
+
+    environment {
+        RELEASE_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/releases'
+        LOG_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/logs'
+        SHARED_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/shared'
+        ENV_FILE = '/data2/deploy/intelligent-test-agent/v2-acceptance/shared/runtime.env'
+        RUNTIME_DATA_SOURCE = '/data2/deploy/intelligent-test-agent/v2-acceptance/data'
+        RUNTIME_DATA_ROOT = '/data/.testagent'
+        MAVEN_CACHE_DIR = '/data2/deploy/shared/maven-repository'
+        PNPM_STORE_DIR = '/data2/deploy/shared/pnpm-store'
+        COREPACK_CACHE_DIR = '/data2/deploy/shared/corepack-cache'
+        BACKEND_BASE_URL = 'http://192.168.8.100:18182'
+        FRONTEND_URL = 'http://192.168.8.100:3100'
+        BACKEND_PORT = '18182'
+        FRONTEND_PORT = '3100'
+        RUNTIME_SERVICE_HOST = '192.168.8.100'
+        XXL_JOB_ADMIN_PORT = '18183'
+        XXL_JOB_EXECUTOR_PORT = '19999'
+        VERIFY_BACKEND_PORT = '28182'
+        PROJECT_NAME = 'intelligent-test-agent-v2'
+        WORKER_PROJECT_NAME = 'intelligent-test-agent-v2-opencode'
+        BACKEND_CONTAINER_NAME = 'test-agent-v2-backend'
+        FRONTEND_CONTAINER_NAME = 'test-agent-v2-frontend'
+        WORKER_CONTAINER_NAME = 'test-agent-v2-opencode-worker'
+        WORKER_IMAGE_REPOSITORY = 'test-agent-opencode-worker-v2'
+        WORKER_PORT_START = '4296'
+        WORKER_PORT_END = '4305'
+        VERIFY_NAMESPACE = 'test_agent_v2_verify'
+        ISOLATED_ACCEPTANCE = 'true'
+        ISOLATED_REDIS_PORT = '16380'
+        ISOLATED_REDIS_CONTAINER_NAME = 'test-agent-v2-redis'
+        RELEASE_SCRIPT = 'deploy/local/jenkins-release.sh'
+    }
+
+    stages {
+        stage('Checkout isolated V2 branch') {
+            steps {
+                deleteDir()
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/codex/opencode-v2-migration']],
+                    userRemoteConfigs: [[
+                        credentialsId: 'intelligent-test-agent-git-ssh',
+                        url: 'ssh://git@192.168.8.100:8022/wrui/intelligent-test-agent.git'
+                    ]]
+                ])
+                script {
+                    env.GIT_COMMIT_FULL = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    if (params.ACTION == 'DEPLOY') {
+                        env.RELEASE_TAG = "release-${env.BUILD_NUMBER}-${env.GIT_COMMIT_FULL.take(8)}"
+                    } else {
+                        env.RELEASE_TAG = params.ROLLBACK_TAG.trim()
+                        sh '"$RELEASE_SCRIPT" validate-tag "$RELEASE_TAG"'
+                    }
+                    env.RELEASE_DIR = "${env.RELEASE_ROOT}/${env.RELEASE_TAG}"
+                    env.RUN_LOG_DIR = "${env.LOG_ROOT}/${env.BUILD_NUMBER}-${params.ACTION.toLowerCase()}-${env.RELEASE_TAG}"
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} ${params.ACTION} ${env.RELEASE_TAG}"
+                }
+            }
+        }
+
+        stage('Bootstrap isolated acceptance') {
+            steps {
+                sh 'deploy/local/jenkins-opencode-v2-bootstrap.sh'
+            }
+        }
+
+        stage('Release contract') {
+            steps {
+                sh 'tools/verify-jenkins-release.sh'
+                sh '"$RELEASE_SCRIPT" validate-host'
+            }
+        }
+
+        stage('Build backend, frontend and worker') {
+            when {
+                expression { params.ACTION == 'DEPLOY' }
+            }
+            steps {
+                sh '"$RELEASE_SCRIPT" build'
+            }
+        }
+
+        stage('Prepare immutable release') {
+            when {
+                expression { params.ACTION == 'DEPLOY' }
+            }
+            steps {
+                sh '"$RELEASE_SCRIPT" prepare "$RELEASE_TAG" "$GIT_COMMIT_FULL" "$RELEASE_DIR"'
+            }
+        }
+
+        stage('Verify cloned database upgrade') {
+            when {
+                expression { params.ACTION == 'DEPLOY' }
+            }
+            steps {
+                sh '"$RELEASE_SCRIPT" verify-database-upgrade "$RELEASE_DIR" "$RELEASE_TAG"'
+            }
+        }
+
+        stage('Publish and verify') {
+            steps {
+                sh '''
+                    "$RELEASE_SCRIPT" deploy "$RELEASE_DIR" "$RELEASE_TAG"
+                    "$RELEASE_SCRIPT" verify-deployment "$RELEASE_TAG"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            sh '"$RELEASE_SCRIPT" collect-logs "$RUN_LOG_DIR" || true'
+        }
+        success {
+            sh '"$RELEASE_SCRIPT" record-result "$RELEASE_DIR" SUCCESS'
+        }
+        failure {
+            sh '''
+                if [ -n "${RELEASE_DIR:-}" ] && [ -d "$RELEASE_DIR" ]; then
+                    "$RELEASE_SCRIPT" record-result "$RELEASE_DIR" FAILED || true
+                fi
+            '''
+        }
+    }
+}

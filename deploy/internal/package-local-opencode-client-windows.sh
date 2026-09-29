@@ -23,7 +23,7 @@ SKIP_BUILD=0
 JDK_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_URL:-https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12.1%2B1/OpenJDK21U-jdk_x64_windows_hotspot_21.0.12.1_1.zip}"
 JDK_WINDOWS_SHA="${TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_SHA256:-f9d6e191ab098c0d416e7d588a24420a8621cd2f4720dab2459b8b7b2d2d8b4e}"
 JDK_WINDOWS_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_JDK_WINDOWS_X64_ARCHIVE:-}"
-OPENCODE_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_URL:-https://github.com/anomalyco/opencode/releases/download/v1.18.4/opencode-windows-x64-baseline.zip}"
+OPENCODE_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_URL:-https://registry.npmjs.org/@opencode/cli-windows-x64-baseline/-/cli-windows-x64-baseline-2.0.18.tgz}"
 OPENCODE_WINDOWS_SHA="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_SHA256:-3bfb70c41d0278221d1fbc58efe77f79615491252498ff3f5a82db64266234e0}"
 OPENCODE_WINDOWS_ARCHIVE="${TEST_AGENT_LOCAL_CLIENT_OPENCODE_WINDOWS_X64_ARCHIVE:-}"
 RTK_WINDOWS_URL="${TEST_AGENT_LOCAL_CLIENT_RTK_WINDOWS_X64_URL:-https://github.com/rtk-ai/rtk/releases/download/v0.49.0/rtk-x86_64-pc-windows-msvc.zip}"
@@ -177,21 +177,21 @@ normalize_windows_opencode() {
     exit 1
   }
   stage="${work}/stage"
-  mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins"
+  mkdir -p "${stage}/opencode/bin" "${stage}/opencode/plugins/test-agent-observability" "${stage}/opencode/plugins/test-agent-rtk"
   cp "${executable}" "${stage}/opencode/bin/opencode.exe"
   cp "${rtk_binary}" "${stage}/opencode/bin/rtk.exe"
   chmod 0755 "${stage}/opencode/bin/opencode.exe"
   chmod 0755 "${stage}/opencode/bin/rtk.exe"
   cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
-    "${stage}/opencode/plugins/test-agent-observability.mjs"
+    "${stage}/opencode/plugins/test-agent-observability/index.mjs"
   cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
-    "${stage}/opencode/plugins/test-agent-rtk.mjs"
+    "${stage}/opencode/plugins/test-agent-rtk/index.mjs"
   if [[ -f "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" ]]; then
     cp "${ROOT_DIR}/opencode-source/opencode-1.18.4/LICENSE" "${stage}/opencode/LICENSE"
   fi
   cp "${rtk_license}" "${stage}/opencode/RTK-LICENSE"
-  chmod 0644 "${stage}/opencode/plugins/test-agent-observability.mjs"
-  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-observability/index.mjs"
+  chmod 0644 "${stage}/opencode/plugins/test-agent-rtk/index.mjs"
   chmod 0644 "${stage}/opencode/RTK-LICENSE"
   normalize_runtime_metadata "${stage}/opencode"
   archive_create_runtime_tar_gz "${output}" "${stage}" opencode
@@ -323,7 +323,7 @@ jq -n \
   --argjson jdkSize "$(file_size "${STAGING_DIR}/jdk.tar.gz")" \
   --argjson opencodeSize "$(file_size "${STAGING_DIR}/opencode.tar.gz")" \
   --argjson capabilitySize "$(file_size "${STAGING_DIR}/public-capabilities.tar.gz")" \
-  '{schemaVersion:2,version:$version,publishedAt:$publishedAt,platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"1.18.4",rtkVersion:"0.49.0",artifacts:[
+  '{schemaVersion:2,version:$version,publishedAt:$publishedAt,platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"2.0.18",rtkVersion:"0.49.0",artifacts:[
     {kind:"CLIENT_JAR",path:("releases/"+$version+"/test-agent-local-client.jar"),size:$clientSize,sha256:$clientSha,signaturePath:("releases/"+$version+"/test-agent-local-client.jar.sig")},
     {kind:"JDK",path:("releases/"+$version+"/jdk.tar.gz"),size:$jdkSize,sha256:$jdkSha,signaturePath:("releases/"+$version+"/jdk.tar.gz.sig")},
     {kind:"OPENCODE",path:("releases/"+$version+"/opencode.tar.gz"),size:$opencodeSize,sha256:$opencodeSha,signaturePath:("releases/"+$version+"/opencode.tar.gz.sig")},

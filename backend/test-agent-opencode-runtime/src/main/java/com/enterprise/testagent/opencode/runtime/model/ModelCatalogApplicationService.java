@@ -142,7 +142,7 @@ public class ModelCatalogApplicationService {
             Map<String, Object> patch = node.runtimeKind() == RuntimeKind.LOCAL_CLIENT
                     ? localClientProviderConfig()
                     : providerConfigPatch(ucid);
-            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), patch, traceId))
+            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/api/config", null, null, Map.of(), patch, traceId))
                     .block();
         } catch (Exception exception) {
             LOGGER.warn("event=model_provider_sync_failed traceId={} providerId={} error={}",

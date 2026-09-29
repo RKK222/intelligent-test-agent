@@ -187,12 +187,12 @@ ENV PIP_NO_INDEX=1
 # 企业 worker 只接收上游官方 baseline 程序；源码快照用于审计和 SDK 对照，不参与二进制构建。
 FROM ${GO_IMAGE} AS opencode-download
 
-ARG OPENCODE_VERSION=1.18.4
-ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
-ARG OPENCODE_ASSET_SIZE=59265643
-ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
-ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
-ARG OPENCODE_RELEASE_BASE_URL=https://github.com/anomalyco/opencode/releases/download
+ARG OPENCODE_VERSION=2.0.18
+ARG OPENCODE_ASSET_NAME=cli-linux-x64-baseline-2.0.18.tgz
+ARG OPENCODE_ASSET_SIZE=90140661
+ARG OPENCODE_ASSET_SHA256=548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd
+ARG OPENCODE_BINARY_SHA256=not-recorded
+ARG OPENCODE_RELEASE_BASE_URL=https://registry.npmjs.org/@opencode/cli-linux-x64-baseline/-
 ARG RTK_VERSION=0.49.0
 ARG RTK_ASSET_NAME=rtk-x86_64-unknown-linux-musl.tar.gz
 ARG RTK_ASSET_SIZE=4791180
@@ -205,7 +205,7 @@ ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb5
 ARG RTK_LICENSE_BASE_URL=https://raw.githubusercontent.com/rtk-ai/rtk
 
 RUN set -eux; \
-    asset_url="${OPENCODE_RELEASE_BASE_URL}/v${OPENCODE_VERSION}/${OPENCODE_ASSET_NAME}"; \
+    asset_url="${OPENCODE_RELEASE_BASE_URL}/${OPENCODE_ASSET_NAME}"; \
     chunk_size=16777216; \
     index=0; \
     start=0; \
@@ -228,12 +228,15 @@ RUN set -eux; \
     test "$(stat -c '%s' /tmp/opencode.tar.gz)" = "${OPENCODE_ASSET_SIZE}"; \
     printf '%s  %s\n' "${OPENCODE_ASSET_SHA256}" /tmp/opencode.tar.gz | sha256sum -c -; \
     mkdir -p /out; \
-    tar -xzf /tmp/opencode.tar.gz -C /out; \
+    mkdir -p /tmp/opencode-extract; \
+    tar -xzf /tmp/opencode.tar.gz -C /tmp/opencode-extract; \
+    if [ -f /tmp/opencode-extract/package/bin/opencode ]; then cp /tmp/opencode-extract/package/bin/opencode /out/opencode; \
+    else cp /tmp/opencode-extract/opencode /out/opencode; fi; \
     if [ "${OPENCODE_BINARY_SHA256}" != "not-recorded" ]; then \
       printf '%s  %s\n' "${OPENCODE_BINARY_SHA256}" /out/opencode | sha256sum -c -; \
     fi; \
     chmod +x /out/opencode; \
-    test "$(/out/opencode --version)" = "${OPENCODE_VERSION}"; \
+    test "$(/out/opencode --version)" = "opencode v${OPENCODE_VERSION}"; \
     rtk_url="${RTK_RELEASE_BASE_URL}/v${RTK_VERSION}/${RTK_ASSET_NAME}"; \
     curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 "${rtk_url}" -o /tmp/rtk.tar.gz; \
     test "$(stat -c '%s' /tmp/rtk.tar.gz)" = "${RTK_ASSET_SIZE}"; \
@@ -318,12 +321,12 @@ ARG DEBIAN_SECURITY_MIRROR=https://mirrors.ustc.edu.cn/debian-security
 # 同 python-runtime：bullseye-security 池文件已下架，移除 security 源并允许降级到主仓库版本。
 ARG DISABLE_SECURITY_REPO=true
 ARG NPM_REGISTRY=https://registry.npmmirror.com
-ARG OPENCODE_VERSION=1.18.4
-ARG OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
-ARG OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
-ARG OPENCODE_ASSET_SIZE=59265643
-ARG OPENCODE_ASSET_SHA256=4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc
-ARG OPENCODE_BINARY_SHA256=6ce6570e7db9a40e7bd3304ebdfff607920bde8cafd2eb5587bd7a26f89ba0b5
+ARG OPENCODE_VERSION=2.0.18
+ARG OPENCODE_RELEASE_COMMIT=cd9a14a6b688d4021bee381dfd39d2cef9c0f862
+ARG OPENCODE_ASSET_NAME=cli-linux-x64-baseline-2.0.18.tgz
+ARG OPENCODE_ASSET_SIZE=90140661
+ARG OPENCODE_ASSET_SHA256=548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd
+ARG OPENCODE_BINARY_SHA256=not-recorded
 ARG RTK_VERSION=0.49.0
 ARG RTK_ASSET_NAME=rtk-x86_64-unknown-linux-musl.tar.gz
 ARG RTK_ASSET_SIZE=4791180
@@ -404,6 +407,9 @@ COPY deploy/internal/opencode-observability-plugin.mjs ./opencode-observability-
 COPY deploy/internal/opencode-rtk-plugin.mjs ./opencode-rtk-plugin.mjs
 COPY deploy/internal/opencode-official-launcher.mjs ./bin/opencode
 RUN set -eux; \
+    mkdir -p ./opencode-observability-plugin ./opencode-rtk-plugin; \
+    cp ./opencode-observability-plugin.mjs ./opencode-observability-plugin/index.mjs; \
+    cp ./opencode-rtk-plugin.mjs ./opencode-rtk-plugin/index.mjs; \
     printf '%s\n' "${OPENCODE_VERSION}" > ./VERSION; \
     printf 'version=%s\nasset=%s\narchive_size=%s\narchive_sha256=%s\nbinary_sha256=%s\nrelease_commit=%s\nrtk_version=%s\nrtk_asset=%s\nrtk_archive_size=%s\nrtk_archive_sha256=%s\nrtk_license_sha256=%s\n' \
       "${OPENCODE_VERSION}" \
@@ -421,7 +427,7 @@ RUN set -eux; \
     ln -s /usr/local/lib/opencode/bin/opencode /usr/local/bin/opencode; \
     /usr/local/bin/opencode --version; \
     ./bin/rtk --version; \
-    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode-ai/plugin"), import("@opencode-ai/sdk"), import("effect"), import("zod")]); console.log("custom Tool and MCP client runtime ok")'; \
+    node --input-type=module -e 'await Promise.all([import("@modelcontextprotocol/sdk/client/index.js"), import("@opencode/plugin"), import("@opencode/client"), import("effect"), import("zod")]); console.log("custom Tool and MCP client runtime ok")'; \
     git --version; \
     ssh -V; \
     rg --version | head -n 1; \

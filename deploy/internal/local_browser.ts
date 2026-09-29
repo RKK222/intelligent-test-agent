@@ -9,7 +9,7 @@ import {
   type Locator,
   type Page,
 } from "playwright-core"
-import { tool, type ToolContext } from "@opencode-ai/plugin"
+import { tool, type ToolContext } from "./opencode-v2-tool-compat.mjs"
 
 const MAX_SESSIONS = 4
 const SESSION_IDLE_MS = 30 * 60_000

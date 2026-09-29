@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 const ENDPOINT_PATH = "/api/integration/v1/ui-executions"
 const CONFIG_ENDPOINT_PATH = "/api/internal/agent/opencode/ui-test-tool/config"

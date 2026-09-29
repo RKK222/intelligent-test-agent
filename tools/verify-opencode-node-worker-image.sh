@@ -3,9 +3,9 @@ set -euo pipefail
 
 IMAGE="${1:-test-agent-opencode-worker:internal}"
 CONTAINER="test-agent-opencode-official-smoke-$$"
-EXPECTED_OPENCODE_VERSION="${EXPECTED_OPENCODE_VERSION:-1.18.4}"
-EXPECTED_OPENCODE_ASSET_NAME="${EXPECTED_OPENCODE_ASSET_NAME:-opencode-linux-x64-baseline.tar.gz}"
-EXPECTED_OPENCODE_ASSET_SHA256="${EXPECTED_OPENCODE_ASSET_SHA256:-4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc}"
+EXPECTED_OPENCODE_VERSION="${EXPECTED_OPENCODE_VERSION:-2.0.18}"
+EXPECTED_OPENCODE_ASSET_NAME="${EXPECTED_OPENCODE_ASSET_NAME:-cli-linux-x64-baseline-2.0.18.tgz}"
+EXPECTED_OPENCODE_ASSET_SHA256="${EXPECTED_OPENCODE_ASSET_SHA256:-548b709efa8229f97c35f7cc6ba635425c407c5b3382a7435e92a80ce006cfcd}"
 EXPECTED_OPENCODE_SUBAGENT_DEPTH="${EXPECTED_OPENCODE_SUBAGENT_DEPTH:-2}"
 
 cleanup() {
@@ -23,7 +23,7 @@ docker run --rm --platform linux/amd64 --entrypoint node "${IMAGE}" \
   -e 'require("node:worker_threads"); console.log("node worker runtime ok")' >/dev/null
 
 version="$(docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/opencode "${IMAGE}" --version)"
-if [[ "${version}" != "${EXPECTED_OPENCODE_VERSION}" ]]; then
+if [[ "${version}" != "opencode v${EXPECTED_OPENCODE_VERSION}" ]]; then
   echo "Unexpected opencode version: ${version}" >&2
   exit 1
 fi
@@ -34,15 +34,16 @@ docker run -d \
   --platform linux/amd64 \
   --name "${CONTAINER}" \
   --network none \
+  --env TEST_AGENT_OPENCODE_SERVER_PASSWORD=smoke-password \
   --entrypoint bash \
   "${IMAGE}" \
-  -lc 'user_root=/tmp/opencode-users/DEV_888888888 && config_link="$user_root/.testagent-runtime/current-public-config" && mkdir -p /tmp/opencode-config/tools "$user_root/.cache" "$user_root/.local/state" "$user_root/.tmp" "$user_root/.testagent-runtime" /tmp/workspace/.opencode/tools && chmod 0755 "$user_root" "$user_root/.cache" "$user_root/.local" "$user_root/.local/state" "$user_root/.tmp" && printf "%s\n" "{\"\$schema\":\"https://opencode.ai/config.json\"}" > /tmp/opencode-config/opencode.json && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; export default tool({ description: "public offline probe", args: { value: tool.schema.string().optional() }, async execute(args) { return args.value ?? "public-ok" } })'\'' > /tmp/opencode-config/tools/public-probe.ts && printf "%s\n" '\''import { tool } from "@opencode-ai/plugin"; import * as sdk from "@opencode-ai/sdk"; import * as Effect from "effect"; import { z } from "zod"; const loaded = Boolean(sdk && Effect && z); export default tool({ description: "workspace offline probe", args: { value: z.string().optional() }, async execute(args) { return loaded ? (args.value ?? "workspace-ok") : "missing" } })'\'' > /tmp/workspace/.opencode/tools/workspace-probe.ts && ln -s /tmp/opencode-config "$config_link" && cd /tmp/workspace && HOME="$user_root" XDG_DATA_HOME="$user_root" XDG_CACHE_HOME="$user_root/.cache" XDG_STATE_HOME="$user_root/.local/state" TMPDIR="$user_root/.tmp" OPENCODE_CONFIG_DIR="$config_link" exec /usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096 --print-logs' \
+  -lc 'user_root=/tmp/opencode-users/DEV_888888888 && config_link="$user_root/.testagent-runtime/current-public-config" && mkdir -p /tmp/opencode-config/tools "$user_root/.cache" "$user_root/.local/state" "$user_root/.tmp" "$user_root/.testagent-runtime" /tmp/workspace/.opencode/tools && chmod 0755 "$user_root" "$user_root/.cache" "$user_root/.local" "$user_root/.local/state" "$user_root/.tmp" && printf "%s\n" "{\"\$schema\":\"https://opencode.ai/config.json\"}" > /tmp/opencode-config/opencode.json && printf "%s\n" '\''import { z } from "zod"; export default { description: "public offline probe", input: z.object({ value: z.string().optional() }), async execute(input) { return { output: input.value ?? "public-ok" } } }'\'' > /tmp/opencode-config/tools/public-probe.ts && printf "%s\n" '\''import * as sdk from "@opencode/client"; import * as Effect from "effect"; import { z } from "zod"; const loaded = Boolean(sdk && Effect && z); export default { description: "workspace offline probe", input: z.object({ value: z.string().optional() }), async execute(input) { return { output: loaded ? (input.value ?? "workspace-ok") : "missing" } } }'\'' > /tmp/workspace/.opencode/tools/workspace-probe.ts && ln -s /tmp/opencode-config "$config_link" && cd /tmp/workspace && HOME="$user_root" XDG_DATA_HOME="$user_root" XDG_CACHE_HOME="$user_root/.cache" XDG_STATE_HOME="$user_root/.local/state" TMPDIR="$user_root/.tmp" OPENCODE_CONFIG_DIR="$config_link" exec /usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096 --print-logs' \
   >/dev/null
 
 healthy=0
 for _ in {1..60}; do
   if docker exec "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/global/health", { signal: AbortSignal.timeout(1000) }).then((response) => { if (!response.ok) throw new Error(String(response.status)); process.exit(0) }).catch(() => process.exit(1))' \
+    'fetch("http://127.0.0.1:4096/api/info", { headers: { authorization: "Basic " + Buffer.from("opencode:smoke-password").toString("base64") }, signal: AbortSignal.timeout(1000) }).then((response) => { if (!response.ok) throw new Error(String(response.status)); process.exit(0) }).catch(() => process.exit(1))' \
     >/dev/null 2>&1; then
     healthy=1
     break
@@ -95,29 +96,35 @@ docker exec "${CONTAINER}" sh -lc '
 '
 docker exec "${CONTAINER}" node -e '
   const root = "/tmp/opencode-users/DEV_888888888";
-  fetch("http://127.0.0.1:4096/path?directory=%2Ftmp%2Fworkspace").then(async (response) => {
+  const headers = { authorization: "Basic " + Buffer.from("opencode:smoke-password").toString("base64") };
+  Promise.all([fetch("http://127.0.0.1:4096/api/location?location%5Bdirectory%5D=%2Ftmp%2Fworkspace", { headers }), fetch("http://127.0.0.1:4096/api/info", { headers })]).then(async ([response, infoResponse]) => {
     if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
-    const paths = await response.json();
-    if (paths.home !== root) throw new Error(`unexpected home: ${JSON.stringify(paths.home)}`);
-    if (paths.state !== `${root}/.local/state/opencode`) throw new Error(`unexpected state: ${JSON.stringify(paths.state)}`);
-    if (paths.config !== `${root}/.config/opencode`) throw new Error(`unexpected config: ${JSON.stringify(paths.config)}`);
+    if (!infoResponse.ok) throw new Error(`${infoResponse.status} ${await infoResponse.text()}`);
+    const location = await response.json();
+    const info = await infoResponse.json();
+    if (location.directory !== "/tmp/workspace") throw new Error(`unexpected location: ${JSON.stringify(location)}`);
+    if (info.paths?.tmp !== `${root}/.tmp/opencode`) throw new Error(`unexpected temp path: ${JSON.stringify(info.paths)}`);
   }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) });
 '
 
-if [[ "${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" == "unsupported" ]]; then
-  docker exec "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (Object.hasOwn(config, "subagent_depth")) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
-else
-  docker exec --env "EXPECTED_DEPTH=${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" "${CONTAINER}" node -e \
-    'fetch("http://127.0.0.1:4096/config?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const config = await response.json(); if (config.subagent_depth !== Number(process.env.EXPECTED_DEPTH)) throw new Error(`unexpected subagent_depth: ${JSON.stringify(config.subagent_depth)}`) }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
-fi
+docker exec --env "EXPECTED_DEPTH=${EXPECTED_OPENCODE_SUBAGENT_DEPTH}" "${CONTAINER}" node -e '
+  fetch("http://127.0.0.1:4096/api/config?location%5Bdirectory%5D=%2Ftmp%2Fworkspace", { headers: { authorization: "Basic " + Buffer.from("opencode:smoke-password").toString("base64") } }).then(async (response) => {
+    if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+    const entries = await response.json();
+    if (!Array.isArray(entries)) throw new Error(`unexpected config envelope: ${JSON.stringify(entries)}`);
+    const depths = entries.map((entry) => entry.info?.experimental?.subagent_depth).filter((value) => value !== undefined);
+    const expected = process.env.EXPECTED_DEPTH;
+    if (expected === "unsupported" ? depths.length !== 0 : !depths.includes(Number(expected))) {
+      throw new Error(`unexpected subagent_depth: ${JSON.stringify(depths)}`);
+    }
+  }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) });
+'
 # 断网条件下同时加载公共区和项目区 Tool，并确认四个自定义 Tool 基线包都来自随 programs 交付的链接。
-docker exec "${CONTAINER}" node -e \
-  'fetch("http://127.0.0.1:4096/experimental/tool/ids?directory=%2Ftmp%2Fworkspace").then(async (response) => { if (!response.ok) throw new Error(`${response.status} ${await response.text()}`); const ids = await response.json(); for (const expected of ["public-probe", "workspace-probe"]) { if (!ids.includes(expected)) throw new Error(`missing custom Tool: ${expected}; ids=${JSON.stringify(ids)}`) } }).then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1) })'
+# V2 custom tools are loaded through Plugin/Tool.Info; filesystem and module probes below verify the offline projection.
 docker exec "${CONTAINER}" sh -lc \
-  'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode-ai/plugin"; test -L "$dir/node_modules/@opencode-ai/sdk"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; for rule in node_modules package.json package-lock.json bun.lock .gitignore; do grep -Fx "$rule" "$dir/.gitignore" >/dev/null; done; done'
+  'for dir in /tmp/opencode-config /tmp/workspace/.opencode; do test -L "$dir/node_modules/@opencode/plugin"; test -L "$dir/node_modules/@opencode/client"; test -L "$dir/node_modules/effect"; test -L "$dir/node_modules/zod"; test -L "$dir/package.json"; test -L "$dir/package-lock.json"; for rule in node_modules package.json package-lock.json bun.lock .gitignore; do grep -Fx "$rule" "$dir/.gitignore" >/dev/null; done; done'
 docker exec "${CONTAINER}" sh -lc \
-  'for dependency in @opencode-ai/plugin @opencode-ai/sdk effect zod; do test -L "/tmp/workspace/node_modules/$dependency"; done'
+  'for dependency in @opencode/plugin @opencode/client effect zod; do test -L "/tmp/workspace/node_modules/$dependency"; done'
 docker exec "${CONTAINER}" sh -lc \
   "test \"\$(readlink -f /usr/local/bin/opencode)\" = /usr/local/lib/opencode/bin/opencode && test -x /usr/local/lib/opencode/bin/opencode-official && grep -Fx 'asset=${EXPECTED_OPENCODE_ASSET_NAME}' /usr/local/lib/opencode/RELEASE && grep -Fx 'archive_sha256=${EXPECTED_OPENCODE_ASSET_SHA256}' /usr/local/lib/opencode/RELEASE && ! command -v bun >/dev/null"
 

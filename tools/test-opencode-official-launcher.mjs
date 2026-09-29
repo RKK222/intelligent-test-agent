@@ -18,17 +18,17 @@ const execFileAsync = promisify(execFile)
 
 async function createRuntime(root) {
   await mkdir(join(root, "bin"), { recursive: true })
-  await mkdir(join(root, "node_modules", "@opencode-ai", "plugin"), { recursive: true })
-  await mkdir(join(root, "node_modules", "@opencode-ai", "sdk"), { recursive: true })
+  await mkdir(join(root, "node_modules", "@opencode", "plugin"), { recursive: true })
+  await mkdir(join(root, "node_modules", "@opencode", "client"), { recursive: true })
   await mkdir(join(root, "node_modules", "effect"), { recursive: true })
   await mkdir(join(root, "node_modules", "playwright-core"), { recursive: true })
   await mkdir(join(root, "node_modules", "zod"), { recursive: true })
   await writeFile(
-    join(root, "node_modules", "@opencode-ai", "plugin", "package.json"),
-    '{"name":"@opencode-ai/plugin","type":"module","exports":"./index.js"}\n',
+    join(root, "node_modules", "@opencode", "plugin", "package.json"),
+    '{"name":"@opencode/plugin","type":"module","exports":"./index.js"}\n',
   )
   await writeFile(
-    join(root, "node_modules", "@opencode-ai", "plugin", "index.js"),
+    join(root, "node_modules", "@opencode", "plugin", "index.js"),
     "export const loaded = true\n",
   )
   await writeFile(
@@ -45,21 +45,25 @@ async function createRuntime(root) {
     new URL("../deploy/internal/opencode-runtime.gitignore", import.meta.url),
     join(root, "opencode-runtime.gitignore"),
   )
-  await writeFile(join(root, "VERSION"), "1.18.4\n")
+  await writeFile(join(root, "VERSION"), "2.0.18\n")
   await writeFile(join(root, "opencode-observability-plugin.mjs"), "export default async () => ({})\n")
   await writeFile(join(root, "opencode-rtk-plugin.mjs"), "export default async () => ({})\n")
+  await mkdir(join(root, "opencode-observability-plugin"), { recursive: true })
+  await mkdir(join(root, "opencode-rtk-plugin"), { recursive: true })
+  await writeFile(join(root, "opencode-observability-plugin", "index.mjs"), "export default async () => ({})\n")
+  await writeFile(join(root, "opencode-rtk-plugin", "index.mjs"), "export default async () => ({})\n")
   await writeFile(join(root, "bin", "rtk"), "#!/bin/sh\nexit 0\n")
   await chmod(join(root, "bin", "rtk"), 0o755)
 }
 
 async function assertToolDependencyLinks(directory, runtimeRoot) {
   assert.equal(
-    await readlink(join(directory, "node_modules", "@opencode-ai", "plugin")),
-    join(runtimeRoot, "node_modules", "@opencode-ai", "plugin"),
+    await readlink(join(directory, "node_modules", "@opencode", "plugin")),
+    join(runtimeRoot, "node_modules", "@opencode", "plugin"),
   )
   assert.equal(
-    await readlink(join(directory, "node_modules", "@opencode-ai", "sdk")),
-    join(runtimeRoot, "node_modules", "@opencode-ai", "sdk"),
+    await readlink(join(directory, "node_modules", "@opencode", "client")),
+    join(runtimeRoot, "node_modules", "@opencode", "client"),
   )
   assert.equal(await readlink(join(directory, "node_modules", "effect")), join(runtimeRoot, "node_modules", "effect"))
   assert.equal(
@@ -111,7 +115,7 @@ test("keeps recursive project scanning out of user startup and prepares it throu
 
     const env = {
       HOME: home,
-      OPENCODE_CONFIG_CONTENT: '{"theme":"dark","subagent_depth":1}',
+      OPENCODE_CONFIG_CONTENT: '{"theme":"dark","subagent_depth":1,"experimental":{"portable_shell_scanner":true}}',
       OPENCODE_CONFIG_DIR: configDir,
       XDG_CONFIG_HOME: xdgConfigHome,
     }
@@ -122,8 +126,8 @@ test("keeps recursive project scanning out of user startup and prepares it throu
     assert.equal(prepared.OPENCODE_DISABLE_AUTOUPDATE, "true")
     assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
       theme: "dark",
-      plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`],
-      subagent_depth: 2,
+      plugins: [{ package: `file://${join(runtimeRoot, "opencode-observability-plugin")}` }],
+      experimental: { portable_shell_scanner: true, subagent_depth: 2 },
     })
 
     // 用户启动只处理固定配置目录；深层项目目录交给 worker 后台任务，避免阻塞每个用户进程。
@@ -146,7 +150,7 @@ test("keeps recursive project scanning out of user startup and prepares it throu
     await mkdir(nestedToolDirectory, { recursive: true })
     await writeFile(
       importProbe,
-      'import { loaded } from "@opencode-ai/plugin"; import { chromium } from "playwright-core"; console.log(loaded && chromium ? "IMPORT_OK" : "IMPORT_FAILED")\n',
+      'import { loaded } from "@opencode/plugin"; import { chromium } from "playwright-core"; console.log(loaded && chromium ? "IMPORT_OK" : "IMPORT_FAILED")\n',
     )
     assert.equal((await execFileAsync(process.execPath, [importProbe])).stdout, "IMPORT_OK\n")
 
@@ -398,7 +402,7 @@ test("does not inject unsupported subagent depth into the 1.17 rollback runtime"
 
     assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT), {
       theme: "dark",
-      plugin: [`file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`],
+      plugins: [{ package: `file://${join(runtimeRoot, "opencode-observability-plugin")}` }],
     })
   } finally {
     await rm(root, { force: true, recursive: true })
@@ -419,9 +423,9 @@ test("prepares the opt-in RTK runtime without changing the default-off path", as
     assert.equal(prepared.TEST_AGENT_RTK_BIN, join(runtimeRoot, "bin", "rtk"))
     assert.equal(prepared.RTK_TELEMETRY_DISABLED, "1")
     assert.equal(prepared.RTK_RECALL, "0")
-    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT).plugin, [
-      `file://${join(runtimeRoot, "opencode-observability-plugin.mjs")}`,
-      `file://${join(runtimeRoot, "opencode-rtk-plugin.mjs")}`,
+    assert.deepEqual(JSON.parse(prepared.OPENCODE_CONFIG_CONTENT).plugins, [
+      { package: `file://${join(runtimeRoot, "opencode-observability-plugin")}` },
+      { package: `file://${join(runtimeRoot, "opencode-rtk-plugin")}` },
     ])
   } finally {
     await rm(root, { force: true, recursive: true })

@@ -19,7 +19,7 @@
 
 - `index.ts` 的 `createBatchItemSession` 为每个批量条目幂等创建独立 Session；`CreateNightExecutionTaskPayload.batchContext` 为可选兼容字段，携带时调用方必须省略 `sessionId`。两条链路都复用现有用户 OpenCode 路由提示，不新增工作区文件 HTTP 代理。
 - `index.ts` 的通用记忆 client 固定访问 `/api/internal/platform/memory/v1`（管理端为 `/admin`），承载个人/团队治理、含 Session 标题/ID 的证据、Run usage、Skill 提案、双 profile 健康/设置和白名单；团队提案可选传本人 `sourceMemoryId`，修改请求透传 `expectedVersion`。浏览器不调用 memory-service、不读取他人原始聊天，也不新增 RunEvent。
-- Model/Provider 原生目录在运行配置声明非空 `enabled_providers` 时共用同一轮 config 请求，只按 Provider ID 过滤且不改变原生顺序；未配置或 config 读取失败时保留原生结果，请求完成后不长期缓存白名单。
+- Model/Provider 原生目录在 V2 中按 `enabled/activation` 排除禁用项；旧版运行配置声明非空 `enabled_providers` 时继续共用同一轮 config 请求，按 Provider ID 过滤且不改变原生顺序，请求结束后不长期缓存白名单。
 - 应用工作空间配置通过 `updateApplicationWorkspace` 部分更新 `workspaceName/enabled`，旧 `renameApplicationWorkspace` 保持兼容；`listApplicationWorkspaces/listWorkspaceVersions` 仅服务测试工作空间查询，不发送个人 TestAgent 路由头。`listRepositories(page, size, keyword?)` 复用配置管理分页 API，并仅在有值时编码发送关键字。自动化当前配置统一使用应用级 `automation-reference-repositories` API，`alias` 与分支、目录、描述一起保存，不再暴露模板版本激活方法。
 - `reconcileWorkspaceAutomationReferences(workspaceId)` 复用 Agent 配置文件 WebSocket 的 `agent-config.automation-reference.reconcile`，只传当前工作区身份并接收 `changed/warnings`。前端 API 不读取、解析或上传自动化 JSONC，也不接收应用、版本库、generation 或物理路径作为对账输入。
 - `openExperienceWorkspace()` 对任意已登录用户打开其 READY TestAgent 所在服务器的体验 Workspace；`commitExperienceWorkspace(workspaceId, commitMessage, files)` 只调用运行态 Workspace 本地提交接口，不复用个人 workspace publish，也不暴露 push 参数。

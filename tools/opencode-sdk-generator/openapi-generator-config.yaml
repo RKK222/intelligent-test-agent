@@ -19,3 +19,7 @@ typeMappings:
   AnyOf: Object
 importMappings:
   AnyOf: java.lang.Object
+# 上游 ProviderContext 的 number 常量枚举触发 7.24.0 的 BigDecimal.valueOf(BigDecimal)
+# 生成缺陷；该内部 provider 状态按原始 JSON 保留，不修改 OpenAPI 或生成后的 Java。
+schemaMappings:
+  Session.ProviderContext: java.lang.Object

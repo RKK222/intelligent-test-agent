@@ -87,7 +87,7 @@ printf '%s\n' \
   '  "launcherVersionMin": 1,' \
   '  "launcherVersionMax": 1,' \
   '  "protocolVersion": "local-opencode-client.v1",' \
-  '  "opencodeVersion": "1.18.4",' \
+  '  "opencodeVersion": "2.0.18",' \
   '  "artifacts": [' \
   "    {\"kind\": \"CLIENT_JAR\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar\", \"size\": ${client_jar_size}, \"sha256\": \"${client_jar_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/test-agent-local-client.jar.sig\"}," \
   "    {\"kind\": \"JDK\", \"path\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz\", \"size\": ${jdk_size}, \"sha256\": \"${jdk_sha}\", \"signaturePath\": \"releases/${LOCAL_CLIENT_VERSION}/jdk.tar.gz.sig\"}," \

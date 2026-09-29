@@ -536,7 +536,7 @@ public class SideQuestionStreamingApplicationService {
                         Mono.firstWithValue(remoteTerminal, recoveredTerminal),
                         deadline)
                 .cache();
-        // 必须先建立订阅，再发送 prompt_async，避免极快终态在订阅前丢失。
+        // 必须先建立订阅，再发送 prompt，避免极快终态在订阅前丢失。
         Disposable eagerSubscription = terminal.subscribe(ignored -> {
         }, ignored -> {
         });

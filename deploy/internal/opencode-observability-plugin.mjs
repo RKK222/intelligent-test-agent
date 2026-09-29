@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
+import { Plugin } from "@opencode/plugin"
 
 const SCHEMA_VERSION = "1.0"
 const DEFAULT_QUEUE_BYTES = 16 * 1024 * 1024
@@ -781,8 +782,66 @@ async function TestAgentObservabilityPlugin() {
   return createObservabilityPlugin().hooks
 }
 
-// OpenCode 1.18.x 的文件插件使用 V1 模块入口；稳定 id 避免 loader 回退到枚举全部命名导出的 legacy 模式。
-export default {
+/** V2 插件入口；V1 hooks 通过 promise API 的 domain hook/event 适配到同一采集实现。 */
+export default Plugin.define({
   id: "test-agent-opencode-observability",
-  server: TestAgentObservabilityPlugin,
-}
+  async setup(ctx) {
+    const observer = createObservabilityPlugin()
+    // V2 不再公开 V1 的 tool catalog API，受管插件通过原生 RPC 暴露当前真实注册工具。
+    const catalog = await ctx.rpc.register({
+      id: "testagent.runtime",
+      methods: {
+        tools: {
+          input: { type: "object", additionalProperties: false },
+          output: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                toolId: { type: "string" },
+                name: { type: "string" },
+                description: { type: "string" },
+                source: { type: "string" },
+              },
+              required: ["toolId", "name", "description", "source"],
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      events: {},
+    }, {
+      tools: async () => (await ctx.tool.list()).map((tool) => ({
+        toolId: tool.id,
+        name: tool.name,
+        description: tool.description,
+        source: tool.options?.namespace?.startsWith("mcp") ? "mcp" : "runtime",
+      })),
+    })
+    const toolBefore = await ctx.tool.hook("execute.before", async (event) => {
+      await observer.hooks["tool.execute.before"](event, { args: event.input })
+    })
+    const toolAfter = await ctx.tool.hook("execute.after", async (event) => {
+      await observer.hooks["tool.execute.after"](event, {
+        args: event.input,
+        output: event.status === "completed" ? event.result?.output : null,
+        error: event.status === "error" ? event.error : null,
+      })
+    })
+    const controller = new AbortController()
+    const eventTask = (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          await observer.hooks.event({ event: { ...event, properties: event.data ?? event.properties ?? {} } })
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) throw error
+      }
+    })()
+    return async () => {
+      controller.abort()
+      await Promise.allSettled([eventTask, toolBefore.dispose(), toolAfter.dispose(), catalog.dispose()])
+      await observer.flush()
+    }
+  },
+})

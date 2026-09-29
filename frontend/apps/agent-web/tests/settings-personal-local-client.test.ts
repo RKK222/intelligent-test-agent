@@ -18,7 +18,7 @@ const clientInstance: LocalClientInstance = {
   platform: "linux",
   architecture: "arm64",
   clientVersion: "20260820183000",
-  opencodeVersion: "1.18.4",
+  opencodeVersion: "2.0.18",
   online: true,
   connectionGeneration: 11,
   reportedAddresses: ["10.0.0.20"],

@@ -27,10 +27,10 @@ LOBEHUB_DEV_SCRIPT="${ROOT_DIR}/tools/lobehub-dev-services.sh"
 MEMORY_DEV_SCRIPT="${ROOT_DIR}/tools/memory-dev-services.sh"
 CLICKHOUSE_DEV_SCRIPT="${ROOT_DIR}/tools/clickhouse-dev-services.sh"
 EXPERIENCE_WORKSPACE_CONTENT_SCRIPT="${ROOT_DIR}/deploy/internal/ensure-experience-workspace-content.sh"
-OPENCODE_REQUIRED_VERSION="1.18.4"
-# 本地开发端与企业交付端使用同一固定版本。摘要来自 OpenCode v1.18.4 官方 darwin-arm64 release。
-OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256="04fb881b632b323c712dfda6dcbbc6fce736394f07ba76176e52d6665925d4e6"
-OPENCODE_DARWIN_ARM64_BINARY_SHA256="9449af91f517eacc2b0742fa93ae0da64fa6e5db7b714e30c62edea2a8de3f98"
+OPENCODE_REQUIRED_VERSION="2.0.18"
+# 本地开发端与企业交付端使用同一固定版本；V2 使用 npm 官方平台包并固定摘要。
+OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256="411a1816e41820922e75ef820103f7a5507abc6d4c828db648ece2127b10a3af"
+OPENCODE_DARWIN_ARM64_BINARY_SHA256="not-recorded"
 
 profile="test"
 env_file=""
@@ -111,8 +111,8 @@ Options:
 
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
-  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode 1.18.4 binary. When unset on macOS ARM64, download the
-                                     pinned official 1.18.4 asset once into .tmp/dev-services/dependencies.
+  TEST_AGENT_OPENCODE_BIN            Explicit OpenCode 2.0.18 binary. When unset on macOS ARM64, download the
+                                     pinned official V2 npm package once into .tmp/dev-services/dependencies.
                                      Other versions are rejected instead of silently changing runtime contracts.
   TEST_AGENT_OPENCODE_USE_SYSTEM_PROXY  auto|true|false. On macOS, auto reuses the static system HTTPS proxy for OpenCode only.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
@@ -621,18 +621,18 @@ sha256_file() {
   return 1
 }
 
-verify_opencode_1_18_4() {
+verify_opencode_v2() {
   local binary="$1" expected_binary_sha="${2:-}" actual_version actual_sha
   [[ -x "${binary}" ]] || {
     echo "OpenCode binary is not executable: ${binary}" >&2
     return 1
   }
-  actual_version="$("${binary}" --version 2>/dev/null | head -n 1 | tr -d '[:space:]')"
-  [[ "${actual_version#v}" == "${OPENCODE_REQUIRED_VERSION}" ]] || {
+  actual_version="$("${binary}" --version 2>/dev/null | head -n 1)"
+  [[ "${actual_version}" == "opencode v${OPENCODE_REQUIRED_VERSION}" ]] || {
     echo "OpenCode ${OPENCODE_REQUIRED_VERSION} is required, but ${binary} reports ${actual_version:-unknown}." >&2
     return 1
   }
-  if [[ -n "${expected_binary_sha}" ]]; then
+  if [[ -n "${expected_binary_sha}" && "${expected_binary_sha}" != "not-recorded" ]]; then
     actual_sha="$(sha256_file "${binary}")"
     [[ "${actual_sha}" == "${expected_binary_sha}" ]] || {
       echo "OpenCode binary SHA-256 mismatch: expected ${expected_binary_sha}, got ${actual_sha}." >&2
@@ -646,24 +646,24 @@ pinned_development_opencode_bin() {
   platform="$(uname -s | tr '[:upper:]' '[:lower:]')"
   architecture="$(uname -m)"
   if [[ "${platform}" != "darwin" || "${architecture}" != "arm64" ]]; then
-    echo "Automatic OpenCode provisioning only supports macOS ARM64; set TEST_AGENT_OPENCODE_BIN to an exact 1.18.4 binary." >&2
+    echo "Automatic OpenCode provisioning only supports macOS ARM64; set TEST_AGENT_OPENCODE_BIN to an exact 2.0.18 binary." >&2
     return 1
   fi
 
   runtime_dir="${LOG_DIR}/dependencies/opencode-${OPENCODE_REQUIRED_VERSION}/darwin-arm64"
   binary="${runtime_dir}/opencode"
-  archive="${runtime_dir}/opencode-darwin-arm64.zip"
-  if verify_opencode_1_18_4 "${binary}" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}" 2>/dev/null; then
+  archive="${runtime_dir}/cli-darwin-arm64-${OPENCODE_REQUIRED_VERSION}.tgz"
+  if verify_opencode_v2 "${binary}" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}" 2>/dev/null; then
     echo "${binary}"
     return
   fi
 
   require_command curl
-  require_command unzip
+  require_command tar
   mkdir -p "${runtime_dir}"
   archive_part="${archive}.part.$$"
   curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 \
-    "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_REQUIRED_VERSION}/opencode-darwin-arm64.zip" \
+    "https://registry.npmjs.org/@opencode/cli-darwin-arm64/-/cli-darwin-arm64-${OPENCODE_REQUIRED_VERSION}.tgz" \
     --output "${archive_part}"
   archive_sha="$(sha256_file "${archive_part}")"
   [[ "${archive_sha}" == "${OPENCODE_DARWIN_ARM64_ARCHIVE_SHA256}" ]] || {
@@ -673,9 +673,9 @@ pinned_development_opencode_bin() {
   }
   mv "${archive_part}" "${archive}"
   extract_dir="$(mktemp -d "${runtime_dir}/extract.XXXXXX")"
-  unzip -q "${archive}" -d "${extract_dir}"
-  verify_opencode_1_18_4 "${extract_dir}/opencode" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}"
-  install -m 0755 "${extract_dir}/opencode" "${binary}"
+  tar -xzf "${archive}" -C "${extract_dir}"
+  verify_opencode_v2 "${extract_dir}/package/bin/opencode" "${OPENCODE_DARWIN_ARM64_BINARY_SHA256}"
+  install -m 0755 "${extract_dir}/package/bin/opencode" "${binary}"
   rm -rf "${extract_dir}"
   echo "${binary}"
 }
@@ -696,7 +696,7 @@ raw_opencode_bin() {
 
 opencode_runtime_dependencies_complete() {
   local node_modules="$1" dependency
-  for dependency in "@opencode-ai/plugin" "@opencode-ai/sdk" "effect" "zod"; do
+  for dependency in "@opencode/plugin" "@opencode/client" "effect" "zod"; do
     [[ -e "${node_modules}/${dependency}" ]] || return 1
   done
 }
@@ -707,12 +707,12 @@ prepare_observability_opencode_runtime() {
   local official_bin runtime_root launcher_bin version dependency_source candidate
   official_bin="$(raw_opencode_bin)"
   [[ -n "${official_bin}" && -x "${official_bin}" ]] || return 1
-  verify_opencode_1_18_4 "${official_bin}"
+  verify_opencode_v2 "${official_bin}"
 
   # 已经是完整企业运行时 launcher 时直接复用，避免嵌套注入同一插件。
   runtime_root="$(cd "$(dirname "${official_bin}")/.." 2>/dev/null && pwd -P || true)"
   if [[ -n "${runtime_root}" \
-      && -f "${runtime_root}/opencode-observability-plugin.mjs" \
+      && -f "${runtime_root}/opencode-observability-plugin/index.mjs" \
       && -x "${runtime_root}/bin/opencode-official" ]]; then
     echo "${official_bin}"
     return
@@ -720,10 +720,14 @@ prepare_observability_opencode_runtime() {
 
   runtime_root="${LOG_DIR}/opencode-observability-runtime"
   launcher_bin="${runtime_root}/bin/opencode"
-  mkdir -p "${runtime_root}/bin"
+  mkdir -p "${runtime_root}/bin" "${runtime_root}/opencode-observability-plugin" "${runtime_root}/opencode-rtk-plugin"
   install -m 0755 "${ROOT_DIR}/deploy/internal/opencode-official-launcher.mjs" "${launcher_bin}"
   install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
     "${runtime_root}/opencode-observability-plugin.mjs"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
+    "${runtime_root}/opencode-observability-plugin/index.mjs"
+  install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
+    "${runtime_root}/opencode-rtk-plugin/index.mjs"
   install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package.json" \
     "${runtime_root}/package.json"
   install -m 0644 "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \

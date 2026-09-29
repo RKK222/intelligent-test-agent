@@ -184,7 +184,7 @@ class LocalClientUpdateTerminalTransactionPostgresqlIntegrationTest {
                             created_at, updated_at, last_connected_at
                         ) values (
                             :instanceId, :userId, '麒麟并发客户端', 'linux', 'arm64',
-                            '20260820190000', '1.18.4', '1', 'SELF_UPDATE_V1', true,
+                            '20260820190000', '2.0.18', '1', 'SELF_UPDATE_V1', true,
                             :createdAt, :updatedAt, :updatedAt
                         )
                 """)

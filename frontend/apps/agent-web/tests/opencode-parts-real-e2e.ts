@@ -50,6 +50,7 @@ export type NaturalAttemptOptions = {
 };
 
 export type NativeFixtureManifest = {
+  runtimeVersion?: "v1" | "v2";
   marker: string;
   kind: PartKind;
   remoteSessionId: string;
@@ -58,6 +59,14 @@ export type NativeFixtureManifest = {
   partId: string;
   directory: string;
   title: string;
+};
+
+export const V2_CONTENT_KINDS = ["text", "reasoning", "tool"] as const;
+export type V2ContentKind = (typeof V2_CONTENT_KINDS)[number];
+export type NativeV2ContentFixture = {
+  manifest: NativeFixtureManifest & { runtimeVersion: "v2"; kind: V2ContentKind };
+  userData: JsonRecord;
+  assistantData: JsonRecord;
 };
 
 export type NativePartFixture = {
@@ -206,6 +215,78 @@ export function buildNativePartFixture(input: {
     message: { id: messageId, sessionId: input.remoteSessionId, timeCreated: now, timeUpdated: now, data: messageData },
     part
   };
+}
+
+/** V2 把 assistant content 内联在 session_message.data；不再写 V1 的 part 表。 */
+export function buildNativeV2ContentFixture(input: {
+  kind: V2ContentKind;
+  marker: string;
+  remoteSessionId: string;
+  directory: string;
+  title: string;
+  now?: number;
+}): NativeV2ContentFixture {
+  assertFixtureOwnership(input);
+  const now = input.now ?? Date.now();
+  const parentMessageId = openCodeId("msg", now, 1);
+  const messageId = openCodeId("msg", now, 2);
+  const partId = `part_${messageId}_0`;
+  const content: JsonRecord = input.kind === "tool"
+    ? { type: "tool", id: partId, name: "read", state: { status: "completed", input: { filePath: `${input.marker}.txt` }, content: [{ type: "text", text: `NATIVE_TOOL_${input.marker}` }] }, time: { created: now, ran: now, completed: now } }
+    : input.kind === "reasoning"
+      ? { type: "reasoning", text: `NATIVE_REASONING_${input.marker}`, time: { created: now, completed: now } }
+      : { type: "text", text: `NATIVE_TEXT_${input.marker}` };
+  return {
+    manifest: { runtimeVersion: "v2", marker: input.marker, kind: input.kind, remoteSessionId: input.remoteSessionId,
+      messageId, parentMessageId, partId, directory: input.directory, title: input.title },
+    userData: { time: { created: now }, text: `Fixture prompt ${input.marker}` },
+    assistantData: { time: { created: now, completed: now }, agent: "build",
+      model: { providerID: "e2e-fixture-provider", id: "e2e-fixture-model" }, content: [content], finish: "stop" }
+  };
+}
+
+export function buildNativeV2FixtureSql(fixture: NativeV2ContentFixture): string {
+  const manifest = fixture.manifest;
+  assertFixtureOwnership(manifest);
+  if (manifest.partId !== `part_${manifest.messageId}_0` || !(V2_CONTENT_KINDS as readonly string[]).includes(manifest.kind)) {
+    throw new Error("V2 fixture content does not match manifest ownership");
+  }
+  const created = (fixture.userData.time as JsonRecord).created;
+  if (typeof created !== "number" || !Number.isSafeInteger(created)) throw new Error("V2 fixture time is invalid");
+  return [
+    ".timeout 5000",
+    "PRAGMA foreign_keys=ON;",
+    "BEGIN IMMEDIATE;",
+    "CREATE TEMP TABLE fixture_session_guard (value INTEGER NOT NULL CHECK(value=1));",
+    `INSERT INTO fixture_session_guard SELECT count(*) FROM session_v2 WHERE id=${sql(manifest.remoteSessionId)} AND title=${sql(manifest.title)} AND directory=${sql(manifest.directory)};`,
+    `INSERT INTO session_message (id,session_id,type,seq,time_created,time_updated,data) SELECT ${sql(manifest.parentMessageId)},${sql(manifest.remoteSessionId)},'user',COALESCE(MAX(seq),0)+1,${created},${created},${sql(JSON.stringify(fixture.userData))} FROM session_message WHERE session_id=${sql(manifest.remoteSessionId)};`,
+    `INSERT INTO session_message (id,session_id,type,seq,time_created,time_updated,data) SELECT ${sql(manifest.messageId)},${sql(manifest.remoteSessionId)},'assistant',COALESCE(MAX(seq),0)+1,${created},${created},${sql(JSON.stringify(fixture.assistantData))} FROM session_message WHERE session_id=${sql(manifest.remoteSessionId)};`,
+    "COMMIT;"
+  ].join("\n");
+}
+
+export async function executeNativeV2FixtureSql(database: VerifiedNativeDatabase, fixture: NativeV2ContentFixture): Promise<void> {
+  await runSqliteScript(verifiedDatabasePath(database), buildNativeV2FixtureSql(fixture));
+}
+
+export function buildNativeV2FixtureCleanupSql(manifest: NativeFixtureManifest): string {
+  assertFixtureOwnership(manifest);
+  if (manifest.runtimeVersion !== "v2") throw new Error("V2 cleanup requires a V2 manifest");
+  return [
+    ".timeout 5000",
+    "PRAGMA foreign_keys=ON;",
+    "BEGIN IMMEDIATE;",
+    "CREATE TEMP TABLE fixture_cleanup_guard (value INTEGER NOT NULL CHECK(value=1));",
+    `INSERT INTO fixture_cleanup_guard SELECT count(*) FROM session_v2 WHERE id=${sql(manifest.remoteSessionId)} AND title=${sql(manifest.title)} AND directory=${sql(manifest.directory)};`,
+    `DELETE FROM session_message WHERE session_id=${sql(manifest.remoteSessionId)} AND id IN (${sql(manifest.messageId)},${sql(manifest.parentMessageId)});`,
+    "CREATE TEMP TABLE fixture_residue_guard (value INTEGER NOT NULL CHECK(value=0));",
+    `INSERT INTO fixture_residue_guard SELECT count(*) FROM session_message WHERE id IN (${sql(manifest.messageId)},${sql(manifest.parentMessageId)});`,
+    "COMMIT;"
+  ].join("\n");
+}
+
+export async function executeNativeV2FixtureCleanupSql(database: VerifiedNativeDatabase, manifest: NativeFixtureManifest): Promise<void> {
+  await runSqliteScript(verifiedDatabasePath(database), buildNativeV2FixtureCleanupSql(manifest));
 }
 
 /** 生成由 sqlite3 CLI 原子执行的脚本；任一句失败时 CLI 会在连接关闭时回滚未提交事务。 */
@@ -507,6 +588,7 @@ function validateManifest(value: unknown): asserts value is NativeFixtureManifes
   if (!value || typeof value !== "object") throw new Error("native fixture manifest must be an object");
   const manifest = value as Partial<NativeFixtureManifest>;
   if (!PART_KINDS.includes(manifest.kind as PartKind)
+    || (manifest.runtimeVersion !== undefined && manifest.runtimeVersion !== "v1" && manifest.runtimeVersion !== "v2")
     || typeof manifest.marker !== "string" || typeof manifest.remoteSessionId !== "string"
     || typeof manifest.messageId !== "string" || typeof manifest.parentMessageId !== "string" || typeof manifest.partId !== "string"
     || typeof manifest.directory !== "string" || typeof manifest.title !== "string") {
@@ -515,7 +597,11 @@ function validateManifest(value: unknown): asserts value is NativeFixtureManifes
   assertFixtureOwnership(manifest as NativeFixtureManifest);
   if (!/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.messageId)
     || !/^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.parentMessageId)
-    || !/^prt_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.partId)) throw new Error("native fixture manifest IDs are invalid");
+    || (manifest.runtimeVersion === "v2"
+      ? manifest.partId !== `part_${manifest.messageId}_0` || !(V2_CONTENT_KINDS as readonly string[]).includes(manifest.kind as string)
+      : !/^prt_[0-9a-f]{12}[0-9A-Za-z]{14}$/.test(manifest.partId))) {
+    throw new Error("native fixture manifest IDs are invalid");
+  }
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -676,6 +762,30 @@ export function assertPartProjection(kind: PartKind, rawPart: unknown, platformM
   const expected = selectPartFields(kind, raw);
   assertProjection("platform messages", expected, findPlatformMessagePart(platformMessages, partId), kind);
   assertProjection("platform tree", expected, findTreeMessagePart(platformTree, messageId, partId), kind);
+}
+
+/** V2 的 content 只有三类；按冻结协议可表达的字段对照历史与 tree，不能沿用 V1 12 Part 矩阵。 */
+export function assertV2ContentProjection(kind: V2ContentKind, rawPart: unknown, platformMessages: unknown, platformTree: unknown): void {
+  const raw = recordValue(rawPart);
+  if (!raw) throw new Error(`${kind} V2 content must be an object`);
+  const partId = partIdentifier(raw);
+  const messageId = stringValue(raw.messageID) ?? stringValue(raw.messageId);
+  if (!partId || !messageId || raw.type !== kind) throw new Error(`${kind} V2 content identity is invalid`);
+  const fields = kind === "tool"
+    ? ["id", "sessionID", "messageID", "type", "name", "tool", "callID", "state.status", "state.output"]
+    : kind === "reasoning"
+      ? ["id", "sessionID", "messageID", "type", "text", "time.start", "time.end"]
+      : ["id", "sessionID", "messageID", "type", "text"];
+  const expected = fields.map((field) => readPath(raw, field));
+  for (const [layer, actual] of [
+    ["platform messages", findPlatformMessagePart(platformMessages, partId)],
+    ["platform tree", findTreeMessagePart(platformTree, messageId, partId)]
+  ] as const) {
+    if (!actual) throw new Error(`${kind} ${layer} V2 content is missing`);
+    if (!isDeepStrictEqual(fields.map((field) => readPath(actual, field)), expected)) {
+      throw new Error(`${kind} ${layer} V2 content differs from native projection`);
+    }
+  }
 }
 
 function assertProjection(layer: string, expected: JsonRecord, actualPart: JsonRecord | undefined, kind: PartKind): void {

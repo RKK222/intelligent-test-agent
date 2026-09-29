@@ -18,7 +18,7 @@ beforeAll(async () => {
   )
   await writeFixturePackage(
     nodeModules,
-    "@opencode-ai/plugin",
+    "@opencode/plugin",
     [
       "const chain = new Proxy(function () { return chain }, {",
       "  get() { return function () { return chain } },",

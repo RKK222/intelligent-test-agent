@@ -69,7 +69,7 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
                 instanceId.value(),
                 "20260820180000",
                 "1",
-                "1.18.4",
+                "2.0.18",
                 List.of("SELF_UPDATE_V1"),
                 Instant.parse("2026-08-20T10:00:00Z"));
         LocalClientFrame frame = frame(LocalClientFrameType.VERSION_CHECK, "req-version", payload);
@@ -88,7 +88,7 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
     @Test
     void blockedVersionCheckDoesNotDelayFileOrLifecycleResponseAcceptance() throws Exception {
         LocalClientPayloads.VersionCheck payload = new LocalClientPayloads.VersionCheck(
-                instanceId.value(), "20260820180000", "1", "1.18.4",
+                instanceId.value(), "20260820180000", "1", "2.0.18",
                 List.of("SELF_UPDATE_V1"), Instant.parse("2026-08-20T10:00:00Z"));
         CountDownLatch versionCheckEntered = new CountDownLatch(1);
         CountDownLatch releaseVersionCheck = new CountDownLatch(1);
@@ -156,7 +156,7 @@ class LocalClientConnectionWebSocketHandlerUpdateTest {
     @Test
     void legacyClientCannotEnterSelfUpdateProtocolOrMutateUpdateState() {
         LocalClientPayloads.VersionCheck payload = new LocalClientPayloads.VersionCheck(
-                instanceId.value(), "0.1.0", null, "1.18.4", List.of(), Instant.now());
+                instanceId.value(), "0.1.0", null, "2.0.18", List.of(), Instant.now());
 
         Sinks.One<String> closeSignal = Sinks.one();
         StepVerifier.create(handler.handleAuthenticated(

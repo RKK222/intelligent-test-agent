@@ -106,7 +106,7 @@ public class UserOpencodeProcessController {
     }
 
     /**
-     * 前端周期弱健康检查，只根据 Redis 快照定位本机 TestAgent 进程并直接访问 /global/health。
+     * 前端周期弱健康检查，只根据 Redis 快照定位本机 TestAgent 进程并直接访问 /api/info。
      */
     @GetMapping("/api/internal/agent/{agentId}/processes/me/health")
     public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessHealthResponse>> health(

@@ -3,7 +3,9 @@ set -euo pipefail
 
 OPENCODE_BASE_URL="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
 OPENCODE_BASE_URL="${OPENCODE_BASE_URL%/}"
-GENERATOR_VERSION="7.24.0"
+OPENCODE_SPEC_PATH="${OPENCODE_SPEC_PATH:-/openapi.json}"
+OPENCODE_SPEC_FILE="${OPENCODE_SPEC_FILE:-}"
+GENERATOR_VERSION="7.25.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
@@ -76,7 +78,7 @@ and a future \`OpencodeClientFacade\` wrapper.
 
 ## Source
 
-- OpenAPI source: \`${OPENCODE_BASE_URL}/doc\`
+- OpenAPI source: \`${OPENCODE_BASE_URL}${OPENCODE_SPEC_PATH}\`
 - Raw snapshot: \`pinned-opencode-spec.raw.json\`
 - Normalized snapshot: \`pinned-opencode-spec.json\`
 - Generator version: \`${GENERATOR_VERSION}\`
@@ -115,9 +117,17 @@ EOF
 
 require_command curl
 require_command jq
-require_command openapi-generator-cli
 require_command perl
 require_command rsync
+
+if command -v openapi-generator-cli >/dev/null 2>&1; then
+  OPENAPI_GENERATOR_COMMAND=(openapi-generator-cli)
+else
+  require_command npx
+  # OpenAPI Generator 7.25 修复 V2 union schema 的 Java webclient 生成问题；
+  # 使用固定 npx 版本保证本地和离线发布生成结果一致。
+  OPENAPI_GENERATOR_COMMAND=(npx --yes "@openapitools/openapi-generator-cli@${GENERATOR_VERSION}")
+fi
 
 RESOLVED_JAVA_HOME="$(resolve_java_home)"
 JAVA_BINARY="${RESOLVED_JAVA_HOME}/bin/java"
@@ -134,8 +144,14 @@ export PATH="${JAVA_HOME}/bin:${PATH}"
 
 mkdir -p "${SDK_DIR}"
 
-echo "Downloading opencode OpenAPI spec from ${OPENCODE_BASE_URL}/doc"
-curl -fsSL "${OPENCODE_BASE_URL}/doc" -o "${RAW_SPEC_FILE}"
+# 离线生成消费已冻结的原始契约，不能把 HTML 文档页或不同运行时版本混入 SDK。
+if [[ -n "${OPENCODE_SPEC_FILE}" ]]; then
+  cp "${OPENCODE_SPEC_FILE}" "${RAW_SPEC_FILE}"
+else
+  echo "Downloading opencode OpenAPI spec from ${OPENCODE_BASE_URL}${OPENCODE_SPEC_PATH}"
+  curl -fsSL "${OPENCODE_BASE_URL}${OPENCODE_SPEC_PATH}" -o "${RAW_SPEC_FILE}"
+fi
+jq -e '.openapi and (.paths | type == "object")' "${RAW_SPEC_FILE}" >/dev/null
 
 echo "Normalizing spec metadata"
 jq --arg baseUrl "${OPENCODE_BASE_URL}" '
@@ -159,7 +175,7 @@ GENERATED_DIR="${TMP_ROOT}/sdk"
 mkdir -p "${GENERATED_DIR}"
 
 echo "Generating Java SDK with OpenAPI Generator ${GENERATOR_VERSION}"
-openapi-generator-cli --openapitools "${OPENAPI_TOOLS_FILE}" generate \
+"${OPENAPI_GENERATOR_COMMAND[@]}" --openapitools "${OPENAPI_TOOLS_FILE}" generate \
   -i "${SPEC_FILE}" \
   -g java \
   -o "${GENERATED_DIR}" \

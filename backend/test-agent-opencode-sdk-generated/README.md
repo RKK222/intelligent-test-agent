@@ -1,6 +1,6 @@
 # test-agent-opencode-sdk-generated
 
-当前源码由 OpenCode 1.18.4 官方 `/doc` 使用 OpenAPI Generator 7.24.0 生成，并由 `tools/generate-opencode-java-sdk.sh` 自动同步到本模块。
+当前源码由 OpenCode 2.0.18 官方 `/doc` 使用 OpenAPI Generator 7.24.0 生成，并由 `tools/generate-opencode-java-sdk.sh` 自动同步到本模块。
 
 ## 工程定位
 

@@ -98,7 +98,7 @@ class LocalWorkspaceGitAccessInspectionHandlerTest {
                 "macos",
                 "aarch64",
                 "1.0.0",
-                "1.18.4",
+                "2.0.18",
                 "1",
                 supportsInspection ? List.of("WORKSPACE_GIT_ACCESS_V1") : List.of(),
                 false,

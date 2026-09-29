@@ -357,7 +357,7 @@ fi
 WINDOWS_RELEASE_DIR="${TEST_ROOT}/dist/local-opencode-client/releases/${WINDOWS_VERSION}"
 mkdir -p "${WINDOWS_RELEASE_DIR}"
 jq -n --arg version "${WINDOWS_VERSION}" \
-  '{schemaVersion:2,version:$version,publishedAt:"2026-08-20T07:30:46Z",platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"1.18.4",artifacts:[]}' \
+  '{schemaVersion:2,version:$version,publishedAt:"2026-08-20T07:30:46Z",platform:"windows",architecture:"x64",launcherVersionMin:1,launcherVersionMax:1,protocolVersion:"local-opencode-client.v1",opencodeVersion:"2.0.18",artifacts:[]}' \
   >"${WINDOWS_RELEASE_DIR}/manifest.json"
 openssl dgst -sha256 -sign "${TEST_ROOT}/signing-private.pem" \
   -out "${WINDOWS_RELEASE_DIR}/manifest.json.sig" "${WINDOWS_RELEASE_DIR}/manifest.json"

@@ -404,7 +404,7 @@ class LocalClientReleaseDownloaderTest {
         manifest.put("launcherVersionMin", 1);
         manifest.put("launcherVersionMax", 1);
         manifest.put("protocolVersion", "local-opencode-client.v1");
-        manifest.put("opencodeVersion", "1.18.4");
+        manifest.put("opencodeVersion", "2.0.18");
         var artifactArray = manifest.putArray("artifacts");
         for (ArtifactFixture artifact : artifacts) {
             var node = artifactArray.addObject();

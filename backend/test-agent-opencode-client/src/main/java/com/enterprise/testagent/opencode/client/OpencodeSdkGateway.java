@@ -41,7 +41,7 @@ public interface OpencodeSdkGateway {
             String traceId);
 
     /**
-     * 调用 prompt_async API，prompt parts 和运行态选择由 gateway 转成远端 JSON body。
+     * 调用 V2 prompt API，平台 parts 和运行态选择由 gateway 转成远端 JSON body。
      */
     Mono<OpencodeStartRunResult> startRun(
             ExecutionNode node,

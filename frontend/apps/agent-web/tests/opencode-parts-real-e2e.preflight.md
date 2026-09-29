@@ -1,5 +1,7 @@
 # OpenCode Part 真实 E2E 前置勘察
 
+> 本文是 OpenCode 1.17.7/V1 历史勘察，仅供 `natural-v1`、`fallback-v1` 回滚阶段对照。V2 2.0.18 的真实 E2E 使用 `/api/session/{id}/message`、`session_v2/session_message` 和 `natural`、`fallback` 阶段；冻结协议与差异见 `docs/deployment/opencode-v2-migration.md`。
+
 ## 勘察结论
 
 本文件记录 2026-07-11 在项目根目录使用 `.env.test`、Spring `test` profile 和 OpenCode `1.17.7` 完成的一次真实、可清理勘察。所有 ID 均来自标题前缀为 `e2e_part_preflight_` 的一次性资源；本文只保留 ID 前缀和 JSON 字段，不保留实际 ID、模型正文、Authorization、Cookie、内部代理密钥或其他用户会话内容。

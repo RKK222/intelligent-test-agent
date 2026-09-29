@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -180,6 +181,18 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void listAgentsUnwrapsV2LocationCatalogBeforeReturningPlatformAgents() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of(
+                        "location", Map.of("directory", "/tmp/demo"),
+                        "data", List.of(Map.of("id", "build", "name", "Build")))))));
+
+        assertThat(fixture.service.listAgents("wrk_1234567890abcdef", "trace_1234567890abcdef"))
+                .isEqualTo(List.of(Map.of("id", "build", "name", "Build")));
+    }
+
+    @Test
     void authenticatedLocalWorkspaceCatalogAddsOnlyOpaqueProtectedSelections() {
         UserId userId = new UserId("usr_protectedcatalog1234567890");
         WorkspaceId workspaceId = new WorkspaceId("wrk_protectedcatalog1234567890");
@@ -251,7 +264,7 @@ class OpencodeRuntimeApplicationServiceTest {
                         "protected:hub-agent", "hub-agent", "Hub Agent", "应用 Hub",
                         "sha256-hub", ProtectedAgentDefinitionResolver.CatalogSource.APPLICATION_HUB)));
         when(instances.findById(instanceId)).thenReturn(Optional.of(new LocalClientInstance(
-                instanceId, userId, "Mac 客户端", "macos", "aarch64", "1.0.0", "1.18.4", "1.0.0",
+                instanceId, userId, "Mac 客户端", "macos", "aarch64", "1.0.0", "2.0.18", "1.0.0",
                 List.of("PUBLIC_CAPABILITY_SYNC_V1"), true, null, null, null,
                 NOW, NOW, NOW, null)));
         when(capabilities.findInstanceState(instanceId)).thenReturn(Optional.of(
@@ -346,6 +359,37 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void sessionTodoRestoresLatestV2TodoWritePartWithoutLegacyTodoRoute() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.sessionMessages(any())).thenReturn(Mono.just(
+                new com.enterprise.testagent.opencode.client.OpencodeSessionMessagesResult(
+                        List.of(
+                                new com.enterprise.testagent.opencode.client.OpencodeSessionMessage(
+                                        Map.of("role", "assistant"),
+                                        List.of(Map.of(
+                                                "type", "tool",
+                                                "toolName", "todowrite",
+                                                "input", Map.of("todos", List.of(Map.of(
+                                                        "id", "todo_1",
+                                                        "content", "迁移 V2",
+                                                        "status", "in_progress"))))))),
+                        null,
+                        null)));
+
+        Object result = fixture.service.sessionTodo(
+                "ses_1234567890abcdef",
+                "trace_1234567890abcdef");
+
+        assertThat(result).isEqualTo(Map.of(
+                "data", List.of(Map.of(
+                        "id", "todo_1",
+                        "content", "迁移 V2",
+                        "status", "in_progress"))));
+        verify(fixture.facade).sessionMessages(any());
+        verify(fixture.facade, never()).runtime(any());
+    }
+
+    @Test
     void listProvidersUsesV2ProviderPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -384,7 +428,7 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/global/health");
+        assertThat(command.path()).isEqualTo("/api/info");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(Map.class);
     }
@@ -564,10 +608,13 @@ class OpencodeRuntimeApplicationServiceTest {
                         "trace_1234567890abcdef"))
                 .thenReturn(new UserOpencodeProcessAssignment(Fixture.userProcessNode(
                         "node_ocp_1234567890abcdef", "http://10.8.0.12:4096")));
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(List.of(Map.of(
-                        "name", "feature",
-                        "directory", "/tmp/demo/.worktrees/feature"))))));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            Object data = "/api/location".equals(command.path())
+                    ? Map.of("project", Map.of("id", "prj_demo"))
+                    : List.of(Map.of("name", "feature", "directory", "/tmp/demo/.worktrees/feature"));
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(data)));
+        });
 
         assertThatThrownBy(() -> fixture.service.withUser(
                         userId,
@@ -674,10 +721,10 @@ class OpencodeRuntimeApplicationServiceTest {
             OpencodeRuntimeCommand command = invocation.getArgument(0);
             return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
                 case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
-                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
-                        "parts", List.of(Map.of("type", "text", "text", "answer from context")));
+                case "GET /session/ses_side1234567890abcdef/message" -> Map.of("data", List.of(Map.of(
+                        "type", "assistant", "content", List.of(Map.of("type", "text", "text", "answer from context")))));
                 case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
-                default -> Map.of("unexpected", command.path());
+                default -> Map.of("accepted", true);
             })));
         });
 
@@ -691,9 +738,9 @@ class OpencodeRuntimeApplicationServiceTest {
         verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
                 command != null
                         && command.method().equals("POST")
-                        && command.path().endsWith("/message")
-                        && !((Map<?, ?>) command.body()).containsKey("tools")
-                        && SideQuestionPolicy.SYSTEM_PROMPT.equals(((Map<?, ?>) command.body()).get("system"))));
+                        && command.path().endsWith("/prompt")
+                        && String.valueOf(((Map<?, ?>) command.body()).get("text"))
+                                .startsWith(SideQuestionPolicy.SYSTEM_PROMPT)));
         verify(fixture.facade).runtime(org.mockito.ArgumentMatchers.argThat(command ->
                 command != null && command.method().equals("DELETE") && command.path().endsWith("ses_side1234567890abcdef")));
         verify(fixture.facade, never()).runtime(org.mockito.ArgumentMatchers.argThat(command -> command != null && command.path().endsWith("/summarize")));
@@ -714,10 +761,10 @@ class OpencodeRuntimeApplicationServiceTest {
             return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
                 case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
                 case "POST /session/ses_side1234567890abcdef/summarize" -> Map.of("ok", true);
-                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
-                        "parts", List.of(Map.of("type", "text", "text", "compacted answer")));
+                case "GET /session/ses_side1234567890abcdef/message" -> Map.of("data", List.of(Map.of(
+                        "type", "assistant", "content", List.of(Map.of("type", "text", "text", "compacted answer")))));
                 case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
-                default -> Map.of("unexpected", command.path());
+                default -> Map.of("accepted", true);
             })));
         });
 
@@ -745,10 +792,10 @@ class OpencodeRuntimeApplicationServiceTest {
             OpencodeRuntimeCommand command = invocation.getArgument(0);
             return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
                 case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
-                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
-                        "parts", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\\n<tool_call:abc>Bash\\ncommand=ls\\n</tool_calls:abc>")));
+                case "GET /session/ses_side1234567890abcdef/message" -> Map.of("data", List.of(Map.of(
+                        "type", "assistant", "content", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\\n<tool_call:abc>Bash\\ncommand=ls\\n</tool_calls:abc>")))));
                 case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
-                default -> Map.of("unexpected", command.path());
+                default -> Map.of("accepted", true);
             })));
         });
 
@@ -773,10 +820,10 @@ class OpencodeRuntimeApplicationServiceTest {
             OpencodeRuntimeCommand command = invocation.getArgument(0);
             return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(switch (command.method() + " " + command.path()) {
                 case "POST /session/ses_remote1234567890abcdef/fork" -> Map.of("id", "ses_side1234567890abcdef");
-                case "POST /session/ses_side1234567890abcdef/message" -> Map.of(
-                        "parts", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\n<tool_call:abc>Bash\ncommand=ls\n</tool_calls:abc>\n实际答案")));
+                case "GET /session/ses_side1234567890abcdef/message" -> Map.of("data", List.of(Map.of(
+                        "type", "assistant", "content", List.of(Map.of("type", "text", "text", "<tool_calls:abc>\n<tool_call:abc>Bash\ncommand=ls\n</tool_calls:abc>\n实际答案")))));
                 case "DELETE /session/ses_side1234567890abcdef" -> Map.of("deleted", true);
-                default -> Map.of("unexpected", command.path());
+                default -> Map.of("accepted", true);
             })));
         });
 
@@ -812,29 +859,39 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/global/config");
+        assertThat(command.path()).isEqualTo("/api/config");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
     }
 
     @Test
     void authorizeProviderOAuthUsesProviderOAuthPathAndBody() {
         Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("url", "https://auth.example")))));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            Object data = "GET".equals(command.method())
+                    ? Map.of("data", Map.of("methods", List.of(Map.of("id", "oauth_default", "type", "oauth"))))
+                    : Map.of("url", "https://auth.example");
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(data)));
+        });
 
         fixture.service.authorizeProviderOAuth("anthropic", Map.of("callbackUrl", "http://localhost/callback"), "trace_1234567890abcdef");
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("POST");
         assertThat(command.path()).isEqualTo("/provider/anthropic/oauth/authorize");
-        assertThat(command.body()).isEqualTo(Map.of("callbackUrl", "http://localhost/callback"));
+        assertThat(command.body()).isEqualTo(Map.of("methodID", "oauth_default"));
     }
 
     @Test
     void createWorktreeUsesExperimentalWorktreePath() {
         Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("path", "/tmp/demo/.worktrees/feature")))));
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            Object data = "/api/location".equals(command.path())
+                    ? Map.of("project", Map.of("id", "prj_demo"))
+                    : Map.of("directory", "/tmp/demo/.worktrees/feature");
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(data)));
+        });
 
         fixture.service.createWorktree(Map.of("workspaceId", "wrk_1234567890abcdef", "branch", "feature"), "trace_1234567890abcdef");
 
@@ -842,138 +899,33 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.method()).isEqualTo("POST");
         assertThat(command.path()).isEqualTo("/experimental/worktree");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
-        assertThat(command.body()).isEqualTo(Map.of("branch", "feature"));
+        assertThat(command.body()).isEqualTo(Map.of("projectID", "prj_demo", "branch", "feature"));
     }
 
     @Test
-    void shareSessionUsesRemoteSessionId() {
+    void shareSessionUsesPlatformCollaborationShareContract() {
         Fixture fixture = new Fixture();
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/abc")))));
 
-        fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef");
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
-        assertThat(command.directory()).isEqualTo("/tmp/demo");
-    }
-
-    @Test
-    void sessionRuntimeReusesRemoteSessionWhenBindingMatchesCurrentUserProcess() {
-        Fixture fixture = new Fixture();
-        ExecutionNode userNode = Fixture.node();
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenReturn(new UserOpencodeProcessAssignment(userNode));
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/abc")))));
-
-        fixture.service.withUser(
-                new UserId("usr_1234567890abcdef"),
-                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
-        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
-        verify(fixture.facade).sessionExists(any(OpencodeSessionExistsCommand.class));
-        verify(fixture.facade, never()).createSession(any());
-    }
-
-    @Test
-    void sessionRuntimeRebuildsRemoteSessionWhenBindingNodeDiffersFromCurrentUserProcess() {
-        Fixture fixture = new Fixture();
-        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenReturn(new UserOpencodeProcessAssignment(userNode));
-        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_userremote1234567890abcdef")));
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/user")))));
-
-        fixture.service.withUser(
-                new UserId("usr_1234567890abcdef"),
-                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.path()).isEqualTo("/session/ses_userremote1234567890abcdef/share");
-        assertThat(command.node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
-        AgentSessionBinding binding = fixture.bindingRepository
-                .findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode")
-                .orElseThrow();
-        assertThat(binding.remoteSessionId()).isEqualTo("ses_userremote1234567890abcdef");
-        assertThat(binding.executionNodeId()).isEqualTo(userNode.executionNodeId());
-        verify(fixture.facade).createSession(any(OpencodeCreateSessionCommand.class));
-    }
-
-    @Test
-    void sessionRuntimeRebuildsRemoteSessionWhenExistingBindingIsMissingRemotely() {
-        Fixture fixture = new Fixture();
-        ExecutionNode userNode = Fixture.node();
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenReturn(new UserOpencodeProcessAssignment(userNode));
-        when(fixture.facade.sessionExists(any())).thenReturn(Mono.just(false));
-        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_rebuilt1234567890abcdef")));
-        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
-                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/rebuilt")))));
-
-        fixture.service.withUser(
-                new UserId("usr_1234567890abcdef"),
-                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
-
-        OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.path()).isEqualTo("/session/ses_rebuilt1234567890abcdef/share");
-        AgentSessionBinding binding = fixture.bindingRepository
-                .findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode")
-                .orElseThrow();
-        assertThat(binding.remoteSessionId()).isEqualTo("ses_rebuilt1234567890abcdef");
-        verify(fixture.facade).createSession(any(OpencodeCreateSessionCommand.class));
-    }
-
-    @Test
-    void sessionRuntimePropagatesRemoteSessionValidationFailures() {
-        Fixture fixture = new Fixture();
-        ExecutionNode userNode = Fixture.node();
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenReturn(new UserOpencodeProcessAssignment(userNode));
-        when(fixture.facade.sessionExists(any())).thenReturn(Mono.error(new PlatformException(
-                ErrorCode.OPENCODE_UNAVAILABLE,
-                "opencode 服务不可用")));
-
-        assertThatThrownBy(() -> fixture.service.withUser(
-                        new UserId("usr_1234567890abcdef"),
-                        () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef")))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
-
-        verify(fixture.facade, never()).createSession(any());
+        assertThatThrownBy(() -> fixture.service.shareSession(
+                        "ses_1234567890abcdef", "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.API_GONE);
+                    assertThat(exception.getMessage()).contains("collaboration-share");
+                });
         verify(fixture.facade, never()).runtime(any());
     }
 
     @Test
-    void userRuntimeReturnsUnavailableWhenUserProcessIsNotReady() {
+    void unshareSessionUsesPlatformCollaborationShareContract() {
         Fixture fixture = new Fixture();
-        when(fixture.assignmentService.requireReadyProcess(
-                        new UserId("usr_1234567890abcdef"),
-                        "opencode",
-                        "trace_1234567890abcdef"))
-                .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "请先初始化 opencode 进程"));
 
-        assertThatThrownBy(() -> fixture.service.withUser(
-                        new UserId("usr_1234567890abcdef"),
-                        () -> fixture.service.listAgents("wrk_1234567890abcdef", "trace_1234567890abcdef")))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThatThrownBy(() -> fixture.service.unshareSession(
+                        "ses_1234567890abcdef", "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.API_GONE);
+                    assertThat(exception.getMessage()).contains("collaboration-share");
+                });
+        verify(fixture.facade, never()).runtime(any());
     }
 
     @Test
@@ -1007,6 +959,53 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void listQuestionsProjectsV2FormFieldsToPlatformQuestions() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("data", List.of(Map.of(
+                        "id", "frm_current",
+                        "sessionID", "ses_remote1234567890abcdef",
+                        "title", "选择部署环境",
+                        "fields", List.of(Map.of(
+                                "key", "environment",
+                                "type", "string",
+                                "title", "部署到哪里",
+                                "options", List.of(Map.of("value", "staging", "label", "测试环境")))))))))));
+
+        Object result = fixture.service.listQuestions("ses_1234567890abcdef", "trace_1234567890abcdef");
+
+        assertThat(result).isInstanceOf(Map.class);
+        Map<?, ?> envelope = (Map<?, ?>) result;
+        Map<?, ?> question = (Map<?, ?>) ((List<?>) envelope.get("data")).getFirst();
+        assertThat(question.get("requestId")).isEqualTo("frm_current");
+        Map<?, ?> item = (Map<?, ?>) ((List<?>) question.get("questions")).getFirst();
+        assertThat(item.get("questionId")).isEqualTo("environment");
+        assertThat(item.get("kind")).isEqualTo("single");
+        assertThat(item.get("text")).isEqualTo("部署到哪里");
+    }
+
+    @Test
+    void replyQuestionUsesV2FormFieldKeys() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
+            OpencodeRuntimeCommand command = invocation.getArgument(0);
+            if ("GET".equals(command.method())) {
+                return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(Map.of("data", Map.of(
+                        "id", "frm_current",
+                        "fields", List.of(Map.of("key", "environment", "type", "string")))))));
+            }
+            return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(Map.of("accepted", true))));
+        });
+
+        fixture.service.replyQuestion("ses_1234567890abcdef", "frm_current",
+                Map.of("answers", List.of("staging")), "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.body()).isEqualTo(Map.of("answer", Map.of("environment", "staging")));
+    }
+
+    @Test
     void listPermissionsFiltersEnvelopeItemsByBoundRemoteSession() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
@@ -1036,9 +1035,9 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/permission/req_1/reply");
+        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/permission/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
-        assertThat(command.body()).isEqualTo(Map.of("reply", "once"));
+        assertThat(command.body()).isEqualTo(Map.of("decision", "once"));
     }
 
     @Test
@@ -1047,7 +1046,7 @@ class OpencodeRuntimeApplicationServiceTest {
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
                 objectMapper.valueToTree(Map.of("accepted", true)))));
 
-        // 单选：前端发送扁平 [label]，应归一化为 [[label]]。
+        // V2 Form.Reply 使用按问题 key 编排的 answer map；旧扁平数组使用稳定的数字 key 兼容。
         fixture.service.replyQuestion(
                 "ses_1234567890abcdef",
                 "req_1",
@@ -1056,9 +1055,9 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("POST");
-        assertThat(command.path()).isEqualTo("/question/req_1/reply");
+        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/form/req_1/reply");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
-        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("confirm"))));
+        assertThat(command.body()).isEqualTo(Map.of("answer", Map.of("0", "confirm")));
         verify(fixture.runApplicationService).recordQuestionReplyAcknowledged(
                 new SessionId("ses_1234567890abcdef"),
                 "ses_remote1234567890abcdef",
@@ -1073,7 +1072,7 @@ class OpencodeRuntimeApplicationServiceTest {
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
                 objectMapper.valueToTree(Map.of("accepted", true)))));
 
-        // 多选：前端发送扁平 [l1, l2]（同一问题的多个 label），应整体包成 [[l1, l2]]。
+        // 多选旧数组保留每个位置，避免丢失 V2 表单返回所需的答案值。
         fixture.service.replyQuestion(
                 "ses_1234567890abcdef",
                 "req_1",
@@ -1081,7 +1080,7 @@ class OpencodeRuntimeApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("a", "b"))));
+        assertThat(command.body()).isEqualTo(Map.of("answer", Map.of("0", "a", "1", "b")));
     }
 
     @Test
@@ -1090,7 +1089,7 @@ class OpencodeRuntimeApplicationServiceTest {
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
                 objectMapper.valueToTree(Map.of("accepted", true)))));
 
-        // 前端对同一请求下的多个子问题一次性提交嵌套 [[q1], [q2]]，应原样透传不重复包装。
+        // 多个子问题使用数字 key 映射到各自的答案数组。
         fixture.service.replyQuestion(
                 "ses_1234567890abcdef",
                 "req_1",
@@ -1098,7 +1097,8 @@ class OpencodeRuntimeApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
-        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))));
+        assertThat(command.body()).isEqualTo(Map.of(
+                "answer", Map.of("0", List.of("沙箱"), "1", List.of("两个"))));
     }
 
     @Test
@@ -1202,8 +1202,8 @@ class OpencodeRuntimeApplicationServiceTest {
 
         private OpencodeRuntimeCommand captureCommand() {
             ArgumentCaptor<OpencodeRuntimeCommand> captor = ArgumentCaptor.forClass(OpencodeRuntimeCommand.class);
-            verify(facade).runtime(captor.capture());
-            return captor.getValue();
+            verify(facade, atLeastOnce()).runtime(captor.capture());
+            return captor.getAllValues().getLast();
         }
 
         private static Workspace workspace() {

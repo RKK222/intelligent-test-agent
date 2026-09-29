@@ -5,7 +5,7 @@
  * 查询当前应用、当前子条目下的存量案例，并返回可机器判定完整性的 JSON。
  */
 
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"

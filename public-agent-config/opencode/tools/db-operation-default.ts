@@ -8,7 +8,7 @@
  *       不经过任何后端代理，由 opencode 进程直接发起 HTTP 请求。
  */
 
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 /** 第三方数据库服务基础地址，按需修改 */
 const DB_SERVICE_BASE_URL_ENV = "TEST_AGENT_DB_SERVICE_BASE_URL"

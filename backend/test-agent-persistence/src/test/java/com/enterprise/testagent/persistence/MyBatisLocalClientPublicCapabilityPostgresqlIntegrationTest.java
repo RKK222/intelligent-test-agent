@@ -72,7 +72,7 @@ class MyBatisLocalClientPublicCapabilityPostgresqlIntegrationTest {
                             self_update_supported, created_at, updated_at, last_connected_at
                         ) values (
                             :instanceId, :userId, 'postgres-test', 'darwin', 'arm64',
-                            '0.1.0-dev', '1.18.4', '1', 'PUBLIC_CAPABILITY_SYNC_V1',
+                            '0.1.0-dev', '2.0.18', '1', 'PUBLIC_CAPABILITY_SYNC_V1',
                             false, :now, :now, :now
                         )
                         """)

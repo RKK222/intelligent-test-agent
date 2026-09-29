@@ -269,7 +269,7 @@ class LocalClientUpdateCoordinatorTest {
                         INSTANCE_ID,
                         7,
                         new LocalClientPayloads.VersionCheck(
-                                INSTANCE_ID.value(), "0.1.0", null, "1.18.4", List.of(), NOW),
+                                INSTANCE_ID.value(), "0.1.0", null, "2.0.18", List.of(), NOW),
                         "trace_legacy_version_check"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
@@ -302,7 +302,7 @@ class LocalClientUpdateCoordinatorTest {
                         INSTANCE_ID,
                         7,
                         new LocalClientPayloads.VersionCheck(
-                                INSTANCE_ID.value(), "20260823213628", "1", "1.18.4",
+                                INSTANCE_ID.value(), "20260823213628", "1", "2.0.18",
                                 List.of("SELF_UPDATE_V1"), NOW),
                         "trace_no_version_policy");
 
@@ -979,7 +979,7 @@ class LocalClientUpdateCoordinatorTest {
                         INSTANCE_ID,
                         8,
                         new LocalClientPayloads.VersionCheck(
-                                INSTANCE_ID.value(), attempt.currentVersion(), "1", "1.18.4",
+                                INSTANCE_ID.value(), attempt.currentVersion(), "1", "2.0.18",
                                 List.of("SELF_UPDATE_V1"), NOW),
                         "trace_after_rollback");
 
@@ -1176,7 +1176,7 @@ class LocalClientUpdateCoordinatorTest {
                 "linux",
                 "arm64",
                 version,
-                "1.18.4",
+                "2.0.18",
                 selfUpdateSupported ? "1" : null,
                 selfUpdateSupported ? List.of("SELF_UPDATE_V1") : List.of(),
                 selfUpdateSupported,

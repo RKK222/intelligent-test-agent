@@ -541,7 +541,7 @@ OPENCODE_ALLOWED_CORS=http://mimo.sdc.cs.icbc:9996,http://122.233.30.2:9996
 OPENCODE_MANAGER_HEARTBEAT_INTERVAL=5s
 OPENCODE_MANAGER_RECONNECT_INTERVAL=10s
 
-OPENCODE_VERSION=1.18.4
+OPENCODE_VERSION=2.0.18
 OPENCODE_RELEASE_COMMIT=49c69c5ed3ccf706b61b3febb43c8aaff7f8325e
 OPENCODE_ASSET_NAME=opencode-linux-x64-baseline.tar.gz
 OPENCODE_ASSET_SIZE=59265643
@@ -780,7 +780,7 @@ bash deploy-backend-node.sh
 
 worker runtime 为 `included` 时会同步替换 programs、OpenCode Manager 和 worker 镜像；为 `reuse` 时不携带这些大制品，部署前必须确认目标机安装指纹一致、现有 Manager/OpenCode/Codex 文件齐全且 worker 容器健康，否则立即停止。
 
-后台入口还会调用 `verify-opencode-tool-runtime.sh`：`included` 包先核对 `test-agent-programs.tar.gz`，解压后再核对 `/data/testagent/programs/opencode`；`reuse` 包直接核对现有安装目录。校验覆盖 runtime `package.json`、lockfile、全部固定直接依赖的包元数据和入口文件，尤其要求 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 同名同版本存在。缺包、空文件、未锁定或版本不符都会在替换 Java、加载镜像或重启 worker 前停止，禁止在企业内临时执行 `npm install` 补齐。
+后台入口还会调用 `verify-opencode-tool-runtime.sh`：`included` 包先核对 `test-agent-programs.tar.gz`，解压后再核对 `/data/testagent/programs/opencode`；`reuse` 包直接核对现有安装目录。校验覆盖 runtime `package.json`、lockfile、全部固定直接依赖的包元数据和入口文件，尤其要求 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 同名同版本存在。缺包、空文件、未锁定或版本不符都会在替换 Java、加载镜像或重启 worker 前停止，禁止在企业内临时执行 `npm install` 补齐。
 
 升级前应先停止 `.4`、`.114` 的旧 Java。`.4` 是固定首节点，入口会完整验证本机 Java、XXL Admin、
 worker、RSA 和身份文件，但把 peer 探测延后；随后 `.114` 会反查 `.4`，最后 `.2` 会同时检查两个
@@ -933,7 +933,7 @@ bash /tmp/deploy-internal-frontend.sh \
 
 ## 8. 公共配置和模型
 
-`opencode-models.json` 与公共 Agent 配置是两层不同输入。发布 ZIP 已固定携带 [opencode-models.json](opencode-models.json)，它使用 models.dev `api.json` 兼容结构，作为模型元数据快照放到后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`。OpenCode 1.18.4 的 `/api/model` 按其中 `release_date` 倒序返回；本次 `.4` 灰度使用的快照把 Qwen 排序日期设为 `2026-08-07`，高于 DeepSeek 的 `2026-08-06`，JSON 键顺序本身不参与排序。
+`opencode-models.json` 与公共 Agent 配置是两层不同输入。发布 ZIP 已固定携带 [opencode-models.json](opencode-models.json)，它使用 models.dev `api.json` 兼容结构，作为模型元数据快照放到后台，不能放到公共 Git 的 `opencode/` 目录，也不能只放 `.2`。OpenCode 2.0.18 的 `/api/model` 按其中 `release_date` 倒序返回；本次 `.4` 灰度使用的快照把 Qwen 排序日期设为 `2026-08-07`，高于 DeepSeek 的 `2026-08-06`，JSON 键顺序本身不参与排序。
 
 只有本轮发布范围明确包含模型清单变更时，才在 `.4` 和 `.114` 分别执行下面的替换；若执行已批准的 `.4` 单节点灰度，只在 `.4` 执行替换与 worker 重启，`.114` 仅记录现网 SHA 并保持文件和 worker 不变。本轮 Playwright 投影修复包不包含模型变更，`.4/.114` 只在部署前后执行
 `sha256sum /data/testagent/config/opencode-models.json` 并确认各自摘要没有变化，禁止执行下面的 `install` 和额外 worker 重启：
@@ -992,7 +992,7 @@ enterprise-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 | `qwen-prod` | `企业通义` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_QWEN_UPSTREAM_TOKEN` | 是 | `1` |
 | `deepseek-prod` | `企业 DeepSeek` | `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1` | `REPLACE_DEEPSEEK_UPSTREAM_TOKEN` | 是 | `2` |
 
-公共配置必须包含 `includeUsage=false`，避免 OpenCode 1.18.4 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
+公共配置必须包含 `includeUsage=false`，避免 OpenCode 2.0.18 默认添加企业内部接口不支持的 `stream_options.include_usage`。供应商地址、启用状态和上游 token 来自共享数据库：`qwen-prod`、`deepseek-prod` 均启用，`baseUrl` 为 `http://ai-code.sdc.icbc:9070/enterprise/jdt/model/api/openai/v1`。公共配置工作树位于各后台本机，因此数据库已经配置供应商并不等于另一台服务器已经初始化公共配置。
 
 `enterprise-qwen` / `enterprise-deepseek` 是 OpenCode provider key；`qwen-prod` / `deepseek-prod` 是数据库和 `X-Enterprise-Model-Provider` 使用的 Java 路由键，不能混用。企业上游的 `Authorization: Bearer <供应商关联 Token>` 虽可鉴权，但 `ucid` 不生效；只有 `Auth-Token: <供应商关联 Token>` 会让同一请求的 `ucid` 生效。所以上游 Token 只在共享数据库维护，并由 Java 固定以 `Auth-Token: <token>` 注入。OpenCode 到 Java 内部代理仍使用独立的 Bearer 代理 Key，该 Key 只校验 Java 代理调用方，不会转发为上游供应商鉴权。用户 UCID 由拥有该用户进程的 Java 从用户表读取并逐进程注入，不使用全局 UCID env 文件。
 
@@ -1003,7 +1003,7 @@ enterprise-deepseek/DeepSeek-V4-Flash-W8A8 -> deepseek-prod
 3. 在两台后台分别查询 refresh-status，必须都包含 `qwen-prod`、`deepseek-prod` 且 `tokenConfigured=true`；广播失败时逐台重启 Java 重新加载。
 4. 只重启 Java 不会让已经运行的用户 OpenCode 重新读取公共配置或重新注入 UCID，涉及进程配置时仍要重启对应用户进程。
 
-公共 `tools/*.ts` 随各服务器公共配置仓库更新，项目专用 Tool 位于工作区 `.opencode/tools/*.ts`。企业 programs 已离线内置 `@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`zod` 及传递依赖；仅更新 Tool 文件时，在每台目标服务器同步公共仓库后重启该节点相关用户 OpenCode 进程。Tool 新增基线外第三方 import 时，必须重新打完整企业包，并在每台后台同时更新 programs、worker 镜像和 worker，不能只向一台服务器复制 `node_modules`。
+公共 `tools/*.ts` 随各服务器公共配置仓库更新，项目专用 Tool 位于工作区 `.opencode/tools/*.ts`。企业 programs 已离线内置 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 及传递依赖；仅更新 Tool 文件时，在每台目标服务器同步公共仓库后重启该节点相关用户 OpenCode 进程。Tool 新增基线外第三方 import 时，必须重新打完整企业包，并在每台后台同时更新 programs、worker 镜像和 worker，不能只向一台服务器复制 `node_modules`。
 
 ## 9. 集群验收
 
@@ -1091,7 +1091,7 @@ docker exec test-agent-opencode-worker \
    不要用创建 Session/Run 的 POST 做断网演练。配置没有 `non_idempotent`，Nginx 不会在请求已经发往 primary 后重放非幂等请求；只有建立连接失败或超时才可能选择 backup。
 6. 运行管理中出现两个不同 `linuxServerId` 的 Java、manager 和容器，连接均在线。
 7. 从 `.4` curl `.114:8080/actuator/health`，从 `.114` curl `.4:8080/actuator/health`。
-8. 两个服务器都能初始化用户进程，动态端口的 `/global/health`、`/api/provider`、`/api/model` 正常。
+8. 两个服务器都能初始化用户进程，动态端口的 `/api/info`、`/api/provider`、`/api/model` 正常。
 9. 做两级调度验收：先让 `.114` 的进程总数低于 `.4`，直接向 `.4` 对一个未绑定用户调用初始化，确认 binding 落到 `.114` 且只有 `.114` manager 收到 start；反转负载后让新用户落到 `.4`；再次请求已有 binding 用户，确认仍留在原服务器。
 10. 分别用 Qwen 和 DeepSeek 验证普通正文、think/reasoning、工具调用、持续 SSE 和 `[DONE]`。
 11. 两台后台都确认 9070 直连；正式链路中没有监听 19070 的 relay。

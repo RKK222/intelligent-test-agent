@@ -19,11 +19,12 @@ public final class SideQuestionAnswerExtractor {
             return sanitize(text(response));
         }
         String partsText = extractPartsText(map.get("parts"));
+        if (partsText == null) partsText = extractPartsText(map.get("content"));
         if (partsText != null) {
             return sanitize(partsText);
         }
         for (String key : List.of("answer", "content", "text")) {
-            String value = text(map.get(key));
+            String value = map.get(key) instanceof String string ? text(string) : null;
             if (value != null) {
                 return sanitize(value);
             }
@@ -47,10 +48,12 @@ public final class SideQuestionAnswerExtractor {
                 continue;
             }
             Map<?, ?> info = message.get("info") instanceof Map<?, ?> value ? value : message;
-            if (!"assistant".equals(text(info.get("role")))) {
+            if (!"assistant".equals(text(info.get("role")))
+                    && !"assistant".equals(text(info.get("type")))) {
                 continue;
             }
             String candidate = sanitize(extractPartsText(message.get("parts")));
+            if (candidate == null) candidate = sanitize(extractPartsText(message.get("content")));
             // fork 会带入历史 assistant；最后一条若没有自然语言，必须保持空而不能回退到历史答案。
             answer = candidate;
         }

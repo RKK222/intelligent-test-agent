@@ -10638,7 +10638,7 @@ async function handleSend(prompt: string, attachments: ComposerAttachment[] = []
   const rawSubmitPrompt = prompt.trim() || displayPrompt;
   // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
   const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
-  // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
+  // prompt 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
   const parts = buildPromptParts(submitPrompt, implicitEditorTab, routedAttachments, extraPromptParts, implicitEditorSelection);
   if (chatContextStore.items.length > 0) {
     console.debug("workspace_context_send_prepared", {

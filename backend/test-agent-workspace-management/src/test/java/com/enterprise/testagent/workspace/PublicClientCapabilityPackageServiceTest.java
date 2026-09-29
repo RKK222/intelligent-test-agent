@@ -37,18 +37,18 @@ class PublicClientCapabilityPackageServiceTest {
         Files.createDirectories(config.resolve("tools"));
         Files.writeString(config.resolve("tools/demo.ts"), "import axios from 'axios'\nexport default axios\n");
         Files.writeString(config.resolve("tools/package.json"),
-                "{\"type\":\"module\",\"dependencies\":{\"@opencode-ai/plugin\":\"1.18.4\"}}");
+                "{\"type\":\"module\",\"dependencies\":{\"@opencode/plugin\":\"2.0.18\"}}");
 
         Path runtime = temporaryDirectory.resolve("runtime");
-        Path nodeModules = runtime.resolve("node_modules/@opencode-ai/plugin");
+        Path nodeModules = runtime.resolve("node_modules/@opencode/plugin");
         Files.createDirectories(nodeModules);
         Files.writeString(nodeModules.resolve("package.json"),
-                "{\"name\":\"@opencode-ai/plugin\",\"version\":\"1.18.4\"}");
+                "{\"name\":\"@opencode/plugin\",\"version\":\"2.0.18\"}");
         Files.writeString(nodeModules.resolve("index.js"), "export const tool = value => value\n");
         Path lock = runtime.resolve("package-lock.json");
         Files.writeString(lock,
-                "{\"lockfileVersion\":3,\"packages\":{\"\":{\"dependencies\":{\"@opencode-ai/plugin\":\"1.18.4\"}},"
-                        + "\"node_modules/@opencode-ai/plugin\":{\"version\":\"1.18.4\"}}}");
+                "{\"lockfileVersion\":3,\"packages\":{\"\":{\"dependencies\":{\"@opencode/plugin\":\"2.0.18\"}},"
+                        + "\"node_modules/@opencode/plugin\":{\"version\":\"2.0.18\"}}}");
 
         LocalClientPublicCapabilityRepository repository = mock(LocalClientPublicCapabilityRepository.class);
         GitWorkspaceService git = mock(GitWorkspaceService.class);

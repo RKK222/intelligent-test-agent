@@ -69,7 +69,7 @@ class LocalWorkspaceApplicationServiceTest {
                 "macos",
                 "aarch64",
                 "1.0.0",
-                "1.18.4",
+                "2.0.18",
                 "1.0.0",
                 List.of(),
                 false,
@@ -175,7 +175,7 @@ class LocalWorkspaceApplicationServiceTest {
         BackendProcessId backendProcessId = new BackendProcessId("bjp_reinstalled_client");
         LocalClientInstance newInstance = new LocalClientInstance(
                 newClientId, userId, "麒麟工作站", "linux", "arm64",
-                "20260825010000", "1.18.4", "1", List.of("SELF_UPDATE_V1"), true,
+                "20260825010000", "2.0.18", "1", List.of("SELF_UPDATE_V1"), true,
                 null, null, null, now, now, now, null);
         LocalClientConnectionRoute newRoute = new LocalClientConnectionRoute(
                 newClientId, userId, backendProcessId, 11, "127.0.0.1:4096", List.of("127.0.0.1"),

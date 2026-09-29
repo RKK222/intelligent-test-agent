@@ -1154,7 +1154,7 @@ public class PublicAgentConfigRolloutService
                             target.traceId()))
                     .map(AgentRuntimeResult::body)
                     .block(RUNTIME_TIMEOUT);
-            return tools != null && tools.isArray() && !tools.isEmpty();
+            return hasLoadedToolEntries(tools);
         }
         for (String rootPath : rootPaths) {
             if (!renewTargetLease(target)) {
@@ -1166,11 +1166,19 @@ public class PublicAgentConfigRolloutService
                             target.traceId()))
                     .map(AgentRuntimeResult::body)
                     .block(RUNTIME_TIMEOUT);
-            if (tools == null || !tools.isArray() || tools.isEmpty()) {
+            if (!hasLoadedToolEntries(tools)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** V2 受管插件 RPC 与 V1 原生 tool/ids 都投影为非空工具 ID 数组。 */
+    private boolean hasLoadedToolEntries(JsonNode response) {
+        if (response == null || response.isNull()) {
+            return false;
+        }
+        return response.isArray() && !response.isEmpty();
     }
 
     private boolean requiresSharedPublicConfig(PublicAgentConfigRolloutTarget target) {

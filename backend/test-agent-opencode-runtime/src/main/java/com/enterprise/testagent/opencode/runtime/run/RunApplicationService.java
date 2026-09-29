@@ -1356,7 +1356,7 @@ public class RunApplicationService {
                     commandArguments(input, promptParts),
                     traceId);
             renewLegacyScheduledDispatchClaim(scheduledClaim, source, running.runId());
-            // prompt_async/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
+            // prompt/command 的 HTTP 结果不是 Run 终态，后台调用异常需给 root 终态留出到达窗口。
             if (reservedRunId != null) {
                 // 重发 started 事件要求原生替代消息已经受理，因此固定 Run 路径等待 HTTP 接收结果。
                 var accepted = Mono.defer(() -> runtime.startRun(command)).block();
@@ -1913,7 +1913,7 @@ public class RunApplicationService {
 
     /**
      * 未完成 handoff 的 legacy Scheduled Run 在重投前精确探测远端稳定消息。
-     * UNKNOWN 必须停止本次恢复，避免 prompt_async 已受理但本地标记未落库时重复执行。
+     * UNKNOWN 必须停止本次恢复，避免 prompt 已受理但本地标记未落库时重复执行。
      */
     private RunDispatchAcceptance probeRecoveredLegacyScheduledDispatch(
             LegacyScheduledAnchorClaim claim,
@@ -2415,7 +2415,7 @@ public class RunApplicationService {
     }
 
     /**
-     * opencode prompt_async 会把 agent 写入 assistant message；不传时会触发 SQLite 非空约束失败。
+     * opencode prompt 会把 agent 写入 assistant message；不传时会触发 SQLite 非空约束失败。
      */
     private String resolveOpencodeAgent(StartRunInput input) {
         return Optional.ofNullable(input.agent())
@@ -2425,7 +2425,7 @@ public class RunApplicationService {
     }
 
     /**
-     * 将平台 prompt parts 转成 opencode prompt_async parts，缺少显式文本时保留 legacy prompt。
+     * 将平台 prompt parts 转成 opencode prompt parts，缺少显式文本时保留 legacy prompt。
      */
     private List<AgentPromptPart> toAgentPromptParts(StartRunInput input, Workspace workspace, RuntimeKind runtimeKind) {
         if (input.parts().isEmpty()) {
@@ -2590,7 +2590,7 @@ public class RunApplicationService {
         return AgentPromptPart.text("Reference: " + label + suffix);
     }
 
-    /** 构造 OpenCode 1.18.4 允许的完整 FileSource；平台 contextType/行号元数据不进入远端协议。 */
+    /** 构造 OpenCode 2.0.18 允许的完整 FileSource；平台 contextType/行号元数据不进入远端协议。 */
     private Map<String, Object> fileSource(StartRunInput.PromptPart part, String text) {
         String path = firstText(part.path(), part.name());
         if (path == null || text == null) {
@@ -3143,7 +3143,7 @@ public class RunApplicationService {
         if (statusResult == null || !statusResult.body().isObject()) {
             return Optional.empty();
         }
-        // OpenCode 1.18.4 的 status map 只保留 busy/retry；idle 会删除对应 session key。
+        // OpenCode 2.0.18 的 status map 只保留 busy/retry；idle 会删除对应 session key。
         return statusResult.body().has(remoteSessionId)
                 ? Optional.empty()
                 : Optional.of(latestAssistant);

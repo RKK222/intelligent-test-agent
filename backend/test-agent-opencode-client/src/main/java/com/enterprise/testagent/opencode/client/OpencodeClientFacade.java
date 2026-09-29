@@ -30,7 +30,7 @@ public interface OpencodeClientFacade {
     Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command);
 
     /**
-     * 向远端 opencode session 发送 prompt_async，启动一次平台 Run。
+     * 向远端 opencode session 发送 prompt，启动一次平台 Run。
      */
     Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command);
 

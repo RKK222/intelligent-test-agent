@@ -629,7 +629,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
             throw new IllegalArgumentException("OpenCode request path is invalid");
         }
         URI target = URI.create("http://127.0.0.1:" + status.opencodePort() + pathAndQuery);
-        // OpenCode 1.18.4 的本地 HTTP server 不支持 JDK HttpClient 的 h2c upgrade；POST 虽会执行，
+        // OpenCode 2.0.18 的本地 HTTP server 不支持 JDK HttpClient 的 h2c upgrade；POST 虽会执行，
         // 但响应流不会结束。这里显式锁定 HTTP/1.1，避免平台在正常创建远端会话后误报 504。
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(target)
@@ -1216,7 +1216,7 @@ final class LocalClientConnection implements AutoCloseable, LocalClientSelfUpdat
                 state.clientInstanceId(),
                 buildInfo.clientVersion(),
                 buildInfo.launcherVersion(),
-                "1.18.4",
+                "2.0.18",
                 buildInfo.capabilities(),
                 checkedAt);
     }

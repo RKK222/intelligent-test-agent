@@ -116,7 +116,7 @@ public class OpencodeAgentRuntime implements AgentRuntime {
     }
 
     /**
-     * OpenCode 1.18.4 的原生 command 请求没有 system 字段；用仅发送给 OpenCode 的内联文件 part
+     * OpenCode 2.0.18 的原生 command 请求没有 system 字段；用仅发送给 OpenCode 的内联文件 part
      * 承载本次平台 system 上下文，保持用户参数与平台持久化消息原文不变。
      */
     private List<OpencodePromptPart> commandParts(AgentStartRunCommand command) {

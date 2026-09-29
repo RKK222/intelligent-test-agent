@@ -251,7 +251,7 @@ func verifyPackagedRelease(resources string) (releaseManifest, string, error) {
 	if manifest.SchemaVersion != 2 || manifest.Version == "" || manifest.Platform != "windows" ||
 		manifest.Architecture != "x64" || manifest.LauncherVersionMin > launcherVersion ||
 		manifest.LauncherVersionMax < launcherVersion || manifest.ProtocolVersion != "local-opencode-client.v1" ||
-		manifest.OpencodeVersion != "1.18.4" {
+		manifest.OpencodeVersion != "2.0.18" {
 		return releaseManifest{}, "", errors.New("发布清单与 Win10 x64 启动器不兼容")
 	}
 	if err := verifyArtifactSet(resources, manifest, publicKey); err != nil {
@@ -364,8 +364,8 @@ func verifyRuntime(release, version string) error {
 		return errors.New("发布单元 JDK 不是 Java 21")
 	}
 	output, err = exec.Command(opencode, "--version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(output)) != "1.18.4" {
-		return errors.New("发布单元 OpenCode 版本不是 1.18.4")
+	if err != nil || strings.TrimSpace(string(output)) != "2.0.18" {
+		return errors.New("发布单元 OpenCode 版本不是 2.0.18")
 	}
 	command := exec.Command(java, "-jar", jar, "self-check", release, version)
 	command.Env = append(os.Environ(), "TEST_AGENT_LOCAL_CLIENT_CONFIG_DIR=", "TEST_AGENT_LOCAL_CLIENT_STATE_DIR=")
@@ -373,7 +373,7 @@ func verifyRuntime(release, version string) error {
 		return errors.New("候选客户端自检失败")
 	}
 	launcherEvent("INFO", "launcher_runtime_verification_completed", map[string]any{
-		"targetVersion": version, "javaMajor": 21, "opencodeVersion": "1.18.4",
+		"targetVersion": version, "javaMajor": 21, "opencodeVersion": "2.0.18",
 		"durationMs": time.Since(startedAt).Milliseconds(),
 	})
 	return nil
@@ -646,7 +646,7 @@ func verifyReleaseManifestDigest(release, expectedDigest string) error {
 	if json.Unmarshal(manifestBytes, &manifest) != nil || manifest.SchemaVersion != 2 ||
 		manifest.Version != filepath.Base(release) || manifest.Platform != "windows" || manifest.Architecture != "x64" ||
 		manifest.LauncherVersionMin > launcherVersion || manifest.LauncherVersionMax < launcherVersion ||
-		manifest.ProtocolVersion != "local-opencode-client.v1" || manifest.OpencodeVersion != "1.18.4" {
+		manifest.ProtocolVersion != "local-opencode-client.v1" || manifest.OpencodeVersion != "2.0.18" {
 		return errors.New("目标发布清单平台不兼容")
 	}
 	if err := verifyArtifactSet(release, manifest, publicKey); err != nil {

@@ -28,9 +28,38 @@ function testRuntime(fetchImpl, nowValues = []) {
   })
 }
 
-test("exports the OpenCode 1.18.x V1 server plugin entry", () => {
+test("exports the OpenCode V2 Plugin.define entry", () => {
   assert.equal(observabilityPluginModule.id, "test-agent-opencode-observability")
-  assert.equal(typeof observabilityPluginModule.server, "function")
+  assert.equal(typeof observabilityPluginModule.setup, "function")
+})
+
+test("V2 runtime RPC returns registered tools instead of plugin identities", async () => {
+  let registration
+  let disposed = false
+  const context = {
+    rpc: {
+      register: async (definition, handlers) => {
+        registration = { definition, handlers }
+        return { dispose: async () => { disposed = true } }
+      },
+    },
+    tool: {
+      list: async () => [{ id: "mcp_search", name: "search", description: "Search files", options: { namespace: "mcp.files" } }],
+      hook: async () => ({ dispose: async () => {} }),
+    },
+    event: {
+      subscribe: async function* ({ signal }) {
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, { once: true }))
+      },
+    },
+  }
+  const cleanup = await observabilityPluginModule.setup(context)
+  assert.equal(registration.definition.id, "testagent.runtime")
+  assert.deepEqual(await registration.handlers.tools({}), [{
+    toolId: "mcp_search", name: "search", description: "Search files", source: "mcp",
+  }])
+  await cleanup()
+  assert.equal(disposed, true)
 })
 
 test("correlates test-design skill before and after by callID without parsing title", async () => {
@@ -84,7 +113,7 @@ test("counts a protected MCP skill resource read from args.name without parsing 
   assert.deepEqual(facts.map((event) => event.callId), ["call-protected", "call-protected"])
 })
 
-test("uses the real OpenCode 1.18.4 messages transform output to bind context to its session", async () => {
+test("uses the real OpenCode 2.0.18 messages transform output to bind context to its session", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -100,7 +129,7 @@ test("uses the real OpenCode 1.18.4 messages transform output to bind context to
   assert.notEqual(requests[0].events[0].traceId, "unknown")
 })
 
-test("uses OpenCode 1.18.4 chat.message input.agent as the Trace agent name", async () => {
+test("uses OpenCode 2.0.18 chat.message input.agent as the Trace agent name", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -131,7 +160,7 @@ test("does not create an unknown Trace for process-level OpenCode events", async
   assert.equal(runtime.inspect().globalSequence, 0)
 })
 
-test("turns a real OpenCode 1.18.4 tool error part into one failed capability fact", async () => {
+test("turns a real OpenCode 2.0.18 tool error part into one failed capability fact", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -200,7 +229,7 @@ test("extracts message, call and step correlations from real OpenCode event part
   assert.equal(event.stepId, "step-1")
 })
 
-test("projects DSH-aligned turn step TTFT decode and cache-token metrics from OpenCode 1.18.4 events", async () => {
+test("projects DSH-aligned turn step TTFT decode and cache-token metrics from OpenCode 2.0.18 events", async () => {
   const requests = []
   let clock = 990
   const runtime = createObservabilityPlugin({
@@ -328,7 +357,7 @@ test("projects DSH-aligned turn step TTFT decode and cache-token metrics from Op
   })
 })
 
-test("counts an interrupted OpenCode 1.18.4 step without fabricating DSH wall time", async () => {
+test("counts an interrupted OpenCode 2.0.18 step without fabricating DSH wall time", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -375,7 +404,7 @@ test("counts an interrupted OpenCode 1.18.4 step without fabricating DSH wall ti
   })
 })
 
-test("records cancelled tool calls once from the real OpenCode 1.18.4 error part", async () => {
+test("records cancelled tool calls once from the real OpenCode 2.0.18 error part", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))
@@ -414,7 +443,7 @@ test("records cancelled tool calls once from the real OpenCode 1.18.4 error part
   assert.equal(terminal[0].payload.status, "CANCELLED")
 })
 
-test("marks compacted context and captures the published 1.18.4 compaction hook", async () => {
+test("marks compacted context and captures the published 2.0.18 compaction hook", async () => {
   const requests = []
   const runtime = testRuntime(async (_url, request) => {
     requests.push(JSON.parse(request.body))

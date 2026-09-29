@@ -231,7 +231,7 @@ class LocalClientPublicCapabilityCoordinatorTest {
 
     private static LocalClientInstance instance() {
         return new LocalClientInstance(
-                INSTANCE_ID, USER_ID, "Mac", "darwin", "arm64", "0.1.0", "1.18.4", "1",
+                INSTANCE_ID, USER_ID, "Mac", "darwin", "arm64", "0.1.0", "2.0.18", "1",
                 List.of(LocalClientPublicCapabilityCoordinator.PROTOCOL_CAPABILITY,
                         LocalClientPublicCapabilityCoordinator.PERSONAL_EDIT_CAPABILITY), false,
                 null, null, null, NOW.minusSeconds(60), NOW, NOW, null);

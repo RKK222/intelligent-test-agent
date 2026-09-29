@@ -1038,7 +1038,7 @@ async function selectTimelineEvent(event: DisplayEvent, revealRow = false) {
       <header class="trace-header">
         <div>
           <h1>Agent Trace</h1>
-          <p>服务端与本地端 OpenCode 1.18.4 集中轨迹</p>
+          <p>服务端与本地端 OpenCode V2 集中轨迹</p>
         </div>
         <div class="trace-header-actions">
           <span class="trace-user"><ShieldCheck :size="14" /> {{ authStore.currentUser?.username }}</span>

@@ -2,10 +2,12 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
-import com.example.opencode.sdk.model.AuthSet400Response;
-import com.example.opencode.sdk.model.BadRequestError;
-import com.example.opencode.sdk.model.Config;
-import com.example.opencode.sdk.model.ConfigProviders200Response;
+import com.example.opencode.sdk.model.AgentListLocationParameter;
+import com.example.opencode.sdk.model.ConfigEntry;
+import com.example.opencode.sdk.model.ConfigPatch;
+import com.example.opencode.sdk.model.ConfigShellOption;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -49,103 +51,17 @@ public class ConfigApi {
         this.apiClient = apiClient;
     }
 
-    public class ConfigGetRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public ConfigGetRequest() {}
-
-        public ConfigGetRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public ConfigGetRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public ConfigGetRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ConfigGetRequest request = (ConfigGetRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace);
-        }
-    }
-
     /**
      * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configGet request parameters as object
-     * @return Config
+     * Return configuration documents and discovery sources for the requested location, from lowest to highest priority.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return List&lt;ConfigEntry&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Config> configGet(ConfigGetRequest requestParameters) throws WebClientResponseException {
-        return this.configGet(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configGet request parameters as object
-     * @return ResponseEntity&lt;Config&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Config>> configGetWithHttpInfo(ConfigGetRequest requestParameters) throws WebClientResponseException {
-        return this.configGetWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configGet request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec configGetWithResponseSpec(ConfigGetRequest requestParameters) throws WebClientResponseException {
-        return this.configGetWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Config
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec configGetRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec configGetRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -155,8 +71,7 @@ public class ConfigApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -167,151 +82,64 @@ public class ConfigApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return apiClient.invokeAPI("/config", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<ConfigEntry> localVarReturnType = new ParameterizedTypeReference<ConfigEntry>() {};
+        return apiClient.invokeAPI("/api/config", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
      * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Config
+     * Return configuration documents and discovery sources for the requested location, from lowest to highest priority.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return List&lt;ConfigEntry&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Config> configGet(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return configGetRequestCreation(directory, workspace).bodyToMono(localVarReturnType);
+    public Flux<ConfigEntry> configGet(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ConfigEntry> localVarReturnType = new ParameterizedTypeReference<ConfigEntry>() {};
+        return configGetRequestCreation(location).bodyToFlux(localVarReturnType);
     }
 
     /**
      * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;Config&gt;
+     * Return configuration documents and discovery sources for the requested location, from lowest to highest priority.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return ResponseEntity&lt;List&lt;ConfigEntry&gt;&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Config>> configGetWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return configGetRequestCreation(directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<List<ConfigEntry>>> configGetWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<ConfigEntry> localVarReturnType = new ParameterizedTypeReference<ConfigEntry>() {};
+        return configGetRequestCreation(location).toEntityList(localVarReturnType);
     }
 
     /**
      * Get configuration
-     * Retrieve the current OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Get config info
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * Return configuration documents and discovery sources for the requested location, from lowest to highest priority.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec configGetWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return configGetRequestCreation(directory, workspace);
-    }
-
-    public class ConfigProvidersRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public ConfigProvidersRequest() {}
-
-        public ConfigProvidersRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public ConfigProvidersRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public ConfigProvidersRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ConfigProvidersRequest request = (ConfigProvidersRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace);
-        }
+    public ResponseSpec configGetWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return configGetRequestCreation(location);
     }
 
     /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configProviders request parameters as object
-     * @return ConfigProviders200Response
+     * List available shells
+     * Return shells available to terminal and agent execution.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return List&lt;ConfigShellOption&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ConfigProviders200Response> configProviders(ConfigProvidersRequest requestParameters) throws WebClientResponseException {
-        return this.configProviders(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configProviders request parameters as object
-     * @return ResponseEntity&lt;ConfigProviders200Response&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<ConfigProviders200Response>> configProvidersWithHttpInfo(ConfigProvidersRequest requestParameters) throws WebClientResponseException {
-        return this.configProvidersWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The configProviders request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec configProvidersWithResponseSpec(ConfigProvidersRequest requestParameters) throws WebClientResponseException {
-        return this.configProvidersWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ConfigProviders200Response
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec configProvidersRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec configShellsRequestCreation() throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -320,9 +148,6 @@ public class ConfigApi {
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
-
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -333,164 +158,66 @@ public class ConfigApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<ConfigProviders200Response> localVarReturnType = new ParameterizedTypeReference<ConfigProviders200Response>() {};
-        return apiClient.invokeAPI("/config/providers", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<ConfigShellOption> localVarReturnType = new ParameterizedTypeReference<ConfigShellOption>() {};
+        return apiClient.invokeAPI("/api/config/shell", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ConfigProviders200Response
+     * List available shells
+     * Return shells available to terminal and agent execution.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return List&lt;ConfigShellOption&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ConfigProviders200Response> configProviders(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<ConfigProviders200Response> localVarReturnType = new ParameterizedTypeReference<ConfigProviders200Response>() {};
-        return configProvidersRequestCreation(directory, workspace).bodyToMono(localVarReturnType);
+    public Flux<ConfigShellOption> configShells() throws WebClientResponseException {
+        ParameterizedTypeReference<ConfigShellOption> localVarReturnType = new ParameterizedTypeReference<ConfigShellOption>() {};
+        return configShellsRequestCreation().bodyToFlux(localVarReturnType);
     }
 
     /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;ConfigProviders200Response&gt;
+     * List available shells
+     * Return shells available to terminal and agent execution.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return ResponseEntity&lt;List&lt;ConfigShellOption&gt;&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<ConfigProviders200Response>> configProvidersWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<ConfigProviders200Response> localVarReturnType = new ParameterizedTypeReference<ConfigProviders200Response>() {};
-        return configProvidersRequestCreation(directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<List<ConfigShellOption>>> configShellsWithHttpInfo() throws WebClientResponseException {
+        ParameterizedTypeReference<ConfigShellOption> localVarReturnType = new ParameterizedTypeReference<ConfigShellOption>() {};
+        return configShellsRequestCreation().toEntityList(localVarReturnType);
     }
 
     /**
-     * List config providers
-     * Get a list of all configured AI providers and their default models.
-     * <p><b>200</b> - List of providers
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * List available shells
+     * Return shells available to terminal and agent execution.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec configProvidersWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return configProvidersRequestCreation(directory, workspace);
-    }
-
-    public class ConfigUpdateRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-        private @jakarta.annotation.Nullable Config config;
-
-        public ConfigUpdateRequest() {}
-
-        public ConfigUpdateRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable Config config) {
-            this.directory = directory;
-            this.workspace = workspace;
-            this.config = config;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public ConfigUpdateRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public ConfigUpdateRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable Config config() {
-            return this.config;
-        }
-        public ConfigUpdateRequest config(@jakarta.annotation.Nullable Config config) {
-            this.config = config;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            ConfigUpdateRequest request = (ConfigUpdateRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace()) &&
-                Objects.equals(this.config, request.config());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace, config);
-        }
+    public ResponseSpec configShellsWithResponseSpec() throws WebClientResponseException {
+        return configShellsRequestCreation();
     }
 
     /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The configUpdate request parameters as object
-     * @return Config
+     * Update global configuration
+     * Patch supported fields in the highest-precedence global configuration document.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param configPatch The configPatch parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Config> configUpdate(ConfigUpdateRequest requestParameters) throws WebClientResponseException {
-        return this.configUpdate(requestParameters.directory(), requestParameters.workspace(), requestParameters.config());
-    }
-
-    /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The configUpdate request parameters as object
-     * @return ResponseEntity&lt;Config&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Config>> configUpdateWithHttpInfo(ConfigUpdateRequest requestParameters) throws WebClientResponseException {
-        return this.configUpdateWithHttpInfo(requestParameters.directory(), requestParameters.workspace(), requestParameters.config());
-    }
-
-    /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The configUpdate request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec configUpdateWithResponseSpec(ConfigUpdateRequest requestParameters) throws WebClientResponseException {
-        return this.configUpdateWithResponseSpec(requestParameters.directory(), requestParameters.workspace(), requestParameters.config());
-    }
-
-
-    /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param config The config parameter
-     * @return Config
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec configUpdateRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable Config config) throws WebClientResponseException {
-        Object postBody = config;
+    private ResponseSpec experimentalConfigUpdateRequestCreation(@jakarta.annotation.Nonnull ConfigPatch configPatch) throws WebClientResponseException {
+        Object postBody = configPatch;
+        // verify the required parameter 'configPatch' is set
+        if (configPatch == null) {
+            throw new WebClientResponseException("Missing the required parameter 'configPatch' when calling experimentalConfigUpdate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
@@ -498,9 +225,6 @@ public class ConfigApi {
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
-
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -513,54 +237,49 @@ public class ConfigApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return apiClient.invokeAPI("/config", HttpMethod.PATCH, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/experimental/config", HttpMethod.PATCH, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param config The config parameter
-     * @return Config
+     * Update global configuration
+     * Patch supported fields in the highest-precedence global configuration document.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param configPatch The configPatch parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Config> configUpdate(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable Config config) throws WebClientResponseException {
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return configUpdateRequestCreation(directory, workspace, config).bodyToMono(localVarReturnType);
+    public Mono<Void> experimentalConfigUpdate(@jakarta.annotation.Nonnull ConfigPatch configPatch) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalConfigUpdateRequestCreation(configPatch).bodyToMono(localVarReturnType);
     }
 
     /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param config The config parameter
-     * @return ResponseEntity&lt;Config&gt;
+     * Update global configuration
+     * Patch supported fields in the highest-precedence global configuration document.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param configPatch The configPatch parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Config>> configUpdateWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable Config config) throws WebClientResponseException {
-        ParameterizedTypeReference<Config> localVarReturnType = new ParameterizedTypeReference<Config>() {};
-        return configUpdateRequestCreation(directory, workspace, config).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<Void>> experimentalConfigUpdateWithHttpInfo(@jakarta.annotation.Nonnull ConfigPatch configPatch) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalConfigUpdateRequestCreation(configPatch).toEntity(localVarReturnType);
     }
 
     /**
-     * Update configuration
-     * Update OpenCode configuration settings and preferences.
-     * <p><b>200</b> - Successfully updated config
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param config The config parameter
+     * Update global configuration
+     * Patch supported fields in the highest-precedence global configuration document.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param configPatch The configPatch parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec configUpdateWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable Config config) throws WebClientResponseException {
-        return configUpdateRequestCreation(directory, workspace, config);
+    public ResponseSpec experimentalConfigUpdateWithResponseSpec(@jakarta.annotation.Nonnull ConfigPatch configPatch) throws WebClientResponseException {
+        return experimentalConfigUpdateRequestCreation(configPatch);
     }
 }

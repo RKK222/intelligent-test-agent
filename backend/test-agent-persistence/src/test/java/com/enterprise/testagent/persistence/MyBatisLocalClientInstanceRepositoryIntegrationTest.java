@@ -157,7 +157,7 @@ class MyBatisLocalClientInstanceRepositoryIntegrationTest {
                 .param("platform", "darwin")
                 .param("architecture", "arm64")
                 .param("clientVersion", "0.1.0-dev")
-                .param("opencodeVersion", "1.18.4")
+                .param("opencodeVersion", "2.0.18")
                 .param("launcherVersion", "1")
                 .param("capabilities", "")
                 .param("selfUpdateSupported", false)
@@ -173,7 +173,7 @@ class MyBatisLocalClientInstanceRepositoryIntegrationTest {
                 "darwin",
                 "arm64",
                 "0.1.0-dev",
-                "1.18.4",
+                "2.0.18",
                 "1",
                 List.of(),
                 false,
@@ -301,7 +301,7 @@ class MyBatisLocalClientInstanceRepositoryIntegrationTest {
                 "darwin",
                 "arm64",
                 "0.1.0-dev",
-                "1.18.4",
+                "2.0.18",
                 "1",
                 List.of(),
                 false,

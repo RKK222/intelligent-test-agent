@@ -2,11 +2,19 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
-import com.example.opencode.sdk.model.AuthSet400Response;
-import com.example.opencode.sdk.model.BadRequestError;
-import com.example.opencode.sdk.model.PermissionNotFoundError;
-import com.example.opencode.sdk.model.PermissionReplyRequest;
-import com.example.opencode.sdk.model.PermissionRequest;
+import com.example.opencode.sdk.model.AgentListLocationParameter;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.PermissionRequestList200Response;
+import com.example.opencode.sdk.model.PermissionSavedList200Response;
+import com.example.opencode.sdk.model.SessionNotFoundErrorEncoded;
+import com.example.opencode.sdk.model.SessionPermissionCreate200Response;
+import com.example.opencode.sdk.model.SessionPermissionCreateRequest;
+import com.example.opencode.sdk.model.SessionPermissionGet200Response;
+import com.example.opencode.sdk.model.SessionPermissionGet404Response;
+import com.example.opencode.sdk.model.SessionPermissionList200Response;
+import com.example.opencode.sdk.model.SessionPermissionReplyRequest;
+import com.example.opencode.sdk.model.SessionUpdate404Response;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -50,103 +58,17 @@ public class PermissionApi {
         this.apiClient = apiClient;
     }
 
-    public class PermissionListRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public PermissionListRequest() {}
-
-        public PermissionListRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public PermissionListRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public PermissionListRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            PermissionListRequest request = (PermissionListRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace);
-        }
-    }
-
     /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The permissionList request parameters as object
-     * @return List&lt;PermissionRequest&gt;
+     * List pending permission requests
+     * Retrieve pending permission requests for a location.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return PermissionRequestList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Flux<PermissionRequest> permissionList(PermissionListRequest requestParameters) throws WebClientResponseException {
-        return this.permissionList(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The permissionList request parameters as object
-     * @return ResponseEntity&lt;List&lt;PermissionRequest&gt;&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<List<PermissionRequest>>> permissionListWithHttpInfo(PermissionListRequest requestParameters) throws WebClientResponseException {
-        return this.permissionListWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The permissionList request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec permissionListWithResponseSpec(PermissionListRequest requestParameters) throws WebClientResponseException {
-        return this.permissionListWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return List&lt;PermissionRequest&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec permissionListRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec permissionRequestListRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -156,8 +78,7 @@ public class PermissionApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -168,98 +89,237 @@ public class PermissionApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<PermissionRequest> localVarReturnType = new ParameterizedTypeReference<PermissionRequest>() {};
-        return apiClient.invokeAPI("/permission", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<PermissionRequestList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionRequestList200Response>() {};
+        return apiClient.invokeAPI("/api/permission/request", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return List&lt;PermissionRequest&gt;
+     * List pending permission requests
+     * Retrieve pending permission requests for a location.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return PermissionRequestList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Flux<PermissionRequest> permissionList(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<PermissionRequest> localVarReturnType = new ParameterizedTypeReference<PermissionRequest>() {};
-        return permissionListRequestCreation(directory, workspace).bodyToFlux(localVarReturnType);
+    public Mono<PermissionRequestList200Response> permissionRequestList(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<PermissionRequestList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionRequestList200Response>() {};
+        return permissionRequestListRequestCreation(location).bodyToMono(localVarReturnType);
     }
 
     /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;List&lt;PermissionRequest&gt;&gt;
+     * List pending permission requests
+     * Retrieve pending permission requests for a location.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return ResponseEntity&lt;PermissionRequestList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<List<PermissionRequest>>> permissionListWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<PermissionRequest> localVarReturnType = new ParameterizedTypeReference<PermissionRequest>() {};
-        return permissionListRequestCreation(directory, workspace).toEntityList(localVarReturnType);
+    public Mono<ResponseEntity<PermissionRequestList200Response>> permissionRequestListWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<PermissionRequestList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionRequestList200Response>() {};
+        return permissionRequestListRequestCreation(location).toEntity(localVarReturnType);
     }
 
     /**
-     * List pending permissions
-     * Get all pending permission requests across all sessions.
-     * <p><b>200</b> - List of pending permissions
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * List pending permission requests
+     * Retrieve pending permission requests for a location.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec permissionListWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return permissionListRequestCreation(directory, workspace);
+    public ResponseSpec permissionRequestListWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return permissionRequestListRequestCreation(location);
     }
 
-    public class PermissionReplyRequest {
-        private @jakarta.annotation.Nonnull String requestID;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-        private @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest;
+    /**
+     * List saved permissions
+     * Retrieve saved permissions, optionally filtered by project.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param projectID The projectID parameter
+     * @return PermissionSavedList200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec permissionSavedListRequestCreation(@jakarta.annotation.Nullable String projectID) throws WebClientResponseException {
+        Object postBody = null;
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
 
-        public PermissionReplyRequest() {}
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        public PermissionReplyRequest(@jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) {
-            this.requestID = requestID;
-            this.directory = directory;
-            this.workspace = workspace;
-            this.permissionReplyRequest = permissionReplyRequest;
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "projectID", projectID));
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<PermissionSavedList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionSavedList200Response>() {};
+        return apiClient.invokeAPI("/api/permission/saved", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * List saved permissions
+     * Retrieve saved permissions, optionally filtered by project.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param projectID The projectID parameter
+     * @return PermissionSavedList200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<PermissionSavedList200Response> permissionSavedList(@jakarta.annotation.Nullable String projectID) throws WebClientResponseException {
+        ParameterizedTypeReference<PermissionSavedList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionSavedList200Response>() {};
+        return permissionSavedListRequestCreation(projectID).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * List saved permissions
+     * Retrieve saved permissions, optionally filtered by project.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param projectID The projectID parameter
+     * @return ResponseEntity&lt;PermissionSavedList200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<PermissionSavedList200Response>> permissionSavedListWithHttpInfo(@jakarta.annotation.Nullable String projectID) throws WebClientResponseException {
+        ParameterizedTypeReference<PermissionSavedList200Response> localVarReturnType = new ParameterizedTypeReference<PermissionSavedList200Response>() {};
+        return permissionSavedListRequestCreation(projectID).toEntity(localVarReturnType);
+    }
+
+    /**
+     * List saved permissions
+     * Retrieve saved permissions, optionally filtered by project.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param projectID The projectID parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec permissionSavedListWithResponseSpec(@jakarta.annotation.Nullable String projectID) throws WebClientResponseException {
+        return permissionSavedListRequestCreation(projectID);
+    }
+
+    /**
+     * Remove saved permission
+     * Remove a saved permission by ID.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param id The id parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec permissionSavedRemoveRequestCreation(@jakarta.annotation.Nullable String id) throws WebClientResponseException {
+        Object postBody = null;
+        // verify the required parameter 'id' is set
+        if (id == null) {
+            throw new WebClientResponseException("Missing the required parameter 'id' when calling permissionSavedRemove", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("id", id);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/permission/saved/{id}", HttpMethod.DELETE, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Remove saved permission
+     * Remove a saved permission by ID.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param id The id parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<Void> permissionSavedRemove(@jakarta.annotation.Nullable String id) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return permissionSavedRemoveRequestCreation(id).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Remove saved permission
+     * Remove a saved permission by ID.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param id The id parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<Void>> permissionSavedRemoveWithHttpInfo(@jakarta.annotation.Nullable String id) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return permissionSavedRemoveRequestCreation(id).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Remove saved permission
+     * Remove a saved permission by ID.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param id The id parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec permissionSavedRemoveWithResponseSpec(@jakarta.annotation.Nullable String id) throws WebClientResponseException {
+        return permissionSavedRemoveRequestCreation(id);
+    }
+
+    public class SessionPermissionCreateRequest {
+        private @jakarta.annotation.Nonnull String sessionID;
+        private @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest;
+
+        public SessionPermissionCreateRequest() {}
+
+        public SessionPermissionCreateRequest(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) {
+            this.sessionID = sessionID;
+            this.sessionPermissionCreateRequest = sessionPermissionCreateRequest;
         }
 
-        public @jakarta.annotation.Nonnull String requestID() {
-            return this.requestID;
+        public @jakarta.annotation.Nonnull String sessionID() {
+            return this.sessionID;
         }
-        public PermissionReplyRequest requestID(@jakarta.annotation.Nonnull String requestID) {
-            this.requestID = requestID;
+        public SessionPermissionCreateRequest sessionID(@jakarta.annotation.Nonnull String sessionID) {
+            this.sessionID = sessionID;
             return this;
         }
 
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
+        public @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest() {
+            return this.sessionPermissionCreateRequest;
         }
-        public PermissionReplyRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public PermissionReplyRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest() {
-            return this.permissionReplyRequest;
-        }
-        public PermissionReplyRequest permissionReplyRequest(@jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) {
-            this.permissionReplyRequest = permissionReplyRequest;
+        public SessionPermissionCreateRequest sessionPermissionCreateRequest(@jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) {
+            this.sessionPermissionCreateRequest = sessionPermissionCreateRequest;
             return this;
         }
 
@@ -271,93 +331,94 @@ public class PermissionApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            PermissionReplyRequest request = (PermissionReplyRequest) o;
-            return Objects.equals(this.requestID, request.requestID()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace()) &&
-                Objects.equals(this.permissionReplyRequest, request.permissionReplyRequest());
+            SessionPermissionCreateRequest request = (SessionPermissionCreateRequest) o;
+            return Objects.equals(this.sessionID, request.sessionID()) &&
+                Objects.equals(this.sessionPermissionCreateRequest, request.sessionPermissionCreateRequest());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(requestID, directory, workspace, permissionReplyRequest);
+            return Objects.hash(sessionID, sessionPermissionCreateRequest);
         }
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestParameters The permissionReply request parameters as object
-     * @return Boolean
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The sessionPermissionCreate request parameters as object
+     * @return SessionPermissionCreate200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> permissionReply(PermissionReplyRequest requestParameters) throws WebClientResponseException {
-        return this.permissionReply(requestParameters.requestID(), requestParameters.directory(), requestParameters.workspace(), requestParameters.permissionReplyRequest());
+    public Mono<SessionPermissionCreate200Response> sessionPermissionCreate(SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionCreate(requestParameters.sessionID(), requestParameters.sessionPermissionCreateRequest());
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestParameters The permissionReply request parameters as object
-     * @return ResponseEntity&lt;Boolean&gt;
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The sessionPermissionCreate request parameters as object
+     * @return ResponseEntity&lt;SessionPermissionCreate200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Boolean>> permissionReplyWithHttpInfo(PermissionReplyRequest requestParameters) throws WebClientResponseException {
-        return this.permissionReplyWithHttpInfo(requestParameters.requestID(), requestParameters.directory(), requestParameters.workspace(), requestParameters.permissionReplyRequest());
+    public Mono<ResponseEntity<SessionPermissionCreate200Response>> sessionPermissionCreateWithHttpInfo(SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionCreateWithHttpInfo(requestParameters.sessionID(), requestParameters.sessionPermissionCreateRequest());
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestParameters The permissionReply request parameters as object
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param requestParameters The sessionPermissionCreate request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec permissionReplyWithResponseSpec(PermissionReplyRequest requestParameters) throws WebClientResponseException {
-        return this.permissionReplyWithResponseSpec(requestParameters.requestID(), requestParameters.directory(), requestParameters.workspace(), requestParameters.permissionReplyRequest());
+    public ResponseSpec sessionPermissionCreateWithResponseSpec(SessionPermissionCreateRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionCreateWithResponseSpec(requestParameters.sessionID(), requestParameters.sessionPermissionCreateRequest());
     }
 
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestID The requestID parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param permissionReplyRequest The permissionReplyRequest parameter
-     * @return Boolean
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param sessionPermissionCreateRequest The sessionPermissionCreateRequest parameter
+     * @return SessionPermissionCreate200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec permissionReplyRequestCreation(@jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) throws WebClientResponseException {
-        Object postBody = permissionReplyRequest;
-        // verify the required parameter 'requestID' is set
-        if (requestID == null) {
-            throw new WebClientResponseException("Missing the required parameter 'requestID' when calling permissionReply", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+    private ResponseSpec sessionPermissionCreateRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) throws WebClientResponseException {
+        Object postBody = sessionPermissionCreateRequest;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling sessionPermissionCreate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'sessionPermissionCreateRequest' is set
+        if (sessionPermissionCreateRequest == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionPermissionCreateRequest' when calling sessionPermissionCreate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
         }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
-        pathParams.put("requestID", requestID);
+        pathParams.put("sessionID", sessionID);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
-
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -370,60 +431,536 @@ public class PermissionApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return apiClient.invokeAPI("/permission/{requestID}/reply", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionCreate200Response>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestID The requestID parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param permissionReplyRequest The permissionReplyRequest parameter
-     * @return Boolean
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param sessionPermissionCreateRequest The sessionPermissionCreateRequest parameter
+     * @return SessionPermissionCreate200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> permissionReply(@jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return permissionReplyRequestCreation(requestID, directory, workspace, permissionReplyRequest).bodyToMono(localVarReturnType);
+    public Mono<SessionPermissionCreate200Response> sessionPermissionCreate(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionCreate200Response>() {};
+        return sessionPermissionCreateRequestCreation(sessionID, sessionPermissionCreateRequest).bodyToMono(localVarReturnType);
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestID The requestID parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param permissionReplyRequest The permissionReplyRequest parameter
-     * @return ResponseEntity&lt;Boolean&gt;
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param sessionPermissionCreateRequest The sessionPermissionCreateRequest parameter
+     * @return ResponseEntity&lt;SessionPermissionCreate200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Boolean>> permissionReplyWithHttpInfo(@jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return permissionReplyRequestCreation(requestID, directory, workspace, permissionReplyRequest).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<SessionPermissionCreate200Response>> sessionPermissionCreateWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionCreate200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionCreate200Response>() {};
+        return sessionPermissionCreateRequestCreation(sessionID, sessionPermissionCreateRequest).toEntity(localVarReturnType);
     }
 
     /**
-     * Respond to permission request
-     * Approve or deny a permission request from the AI assistant.
-     * <p><b>200</b> - Permission processed successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - PermissionNotFoundError
-     * @param requestID The requestID parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param permissionReplyRequest The permissionReplyRequest parameter
+     * Create permission request
+     * Evaluate and, when approval is required, create a permission request for a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param sessionPermissionCreateRequest The sessionPermissionCreateRequest parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec permissionReplyWithResponseSpec(@jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable PermissionReplyRequest permissionReplyRequest) throws WebClientResponseException {
-        return permissionReplyRequestCreation(requestID, directory, workspace, permissionReplyRequest);
+    public ResponseSpec sessionPermissionCreateWithResponseSpec(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull SessionPermissionCreateRequest sessionPermissionCreateRequest) throws WebClientResponseException {
+        return sessionPermissionCreateRequestCreation(sessionID, sessionPermissionCreateRequest);
+    }
+
+    public class SessionPermissionGetRequest {
+        private @jakarta.annotation.Nonnull String sessionID;
+        private @jakarta.annotation.Nullable String requestID;
+
+        public SessionPermissionGetRequest() {}
+
+        public SessionPermissionGetRequest(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String requestID) {
+            this.sessionID = sessionID;
+            this.requestID = requestID;
+        }
+
+        public @jakarta.annotation.Nonnull String sessionID() {
+            return this.sessionID;
+        }
+        public SessionPermissionGetRequest sessionID(@jakarta.annotation.Nonnull String sessionID) {
+            this.sessionID = sessionID;
+            return this;
+        }
+
+        public @jakarta.annotation.Nullable String requestID() {
+            return this.requestID;
+        }
+        public SessionPermissionGetRequest requestID(@jakarta.annotation.Nullable String requestID) {
+            this.requestID = requestID;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SessionPermissionGetRequest request = (SessionPermissionGetRequest) o;
+            return Objects.equals(this.sessionID, request.sessionID()) &&
+                Objects.equals(this.requestID, request.requestID());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(sessionID, requestID);
+        }
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionGet request parameters as object
+     * @return SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<SessionPermissionGet200Response> sessionPermissionGet(SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionGet(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionGet request parameters as object
+     * @return ResponseEntity&lt;SessionPermissionGet200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<SessionPermissionGet200Response>> sessionPermissionGetWithHttpInfo(SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionGetWithHttpInfo(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionGet request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec sessionPermissionGetWithResponseSpec(SessionPermissionGetRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionGetWithResponseSpec(requestParameters.sessionID(), requestParameters.requestID());
+    }
+
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec sessionPermissionGetRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String requestID) throws WebClientResponseException {
+        Object postBody = null;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling sessionPermissionGet", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'requestID' is set
+        if (requestID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'requestID' when calling sessionPermissionGet", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("sessionID", sessionID);
+        pathParams.put("requestID", requestID);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionGet200Response>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission/{requestID}", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return SessionPermissionGet200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<SessionPermissionGet200Response> sessionPermissionGet(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String requestID) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionGet200Response>() {};
+        return sessionPermissionGetRequestCreation(sessionID, requestID).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return ResponseEntity&lt;SessionPermissionGet200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<SessionPermissionGet200Response>> sessionPermissionGetWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String requestID) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionGet200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionGet200Response>() {};
+        return sessionPermissionGetRequestCreation(sessionID, requestID).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Get permission request
+     * Retrieve a pending permission request owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec sessionPermissionGetWithResponseSpec(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nullable String requestID) throws WebClientResponseException {
+        return sessionPermissionGetRequestCreation(sessionID, requestID);
+    }
+
+    /**
+     * List session permission requests
+     * Retrieve pending permission requests owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @return SessionPermissionList200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec sessionPermissionListRequestCreation(@jakarta.annotation.Nonnull String sessionID) throws WebClientResponseException {
+        Object postBody = null;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling sessionPermissionList", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("sessionID", sessionID);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = { };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<SessionPermissionList200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionList200Response>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * List session permission requests
+     * Retrieve pending permission requests owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @return SessionPermissionList200Response
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<SessionPermissionList200Response> sessionPermissionList(@jakarta.annotation.Nonnull String sessionID) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionList200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionList200Response>() {};
+        return sessionPermissionListRequestCreation(sessionID).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * List session permission requests
+     * Retrieve pending permission requests owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @return ResponseEntity&lt;SessionPermissionList200Response&gt;
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<SessionPermissionList200Response>> sessionPermissionListWithHttpInfo(@jakarta.annotation.Nonnull String sessionID) throws WebClientResponseException {
+        ParameterizedTypeReference<SessionPermissionList200Response> localVarReturnType = new ParameterizedTypeReference<SessionPermissionList200Response>() {};
+        return sessionPermissionListRequestCreation(sessionID).toEntity(localVarReturnType);
+    }
+
+    /**
+     * List session permission requests
+     * Retrieve pending permission requests owned by a session.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec sessionPermissionListWithResponseSpec(@jakarta.annotation.Nonnull String sessionID) throws WebClientResponseException {
+        return sessionPermissionListRequestCreation(sessionID);
+    }
+
+    public class SessionPermissionReplyRequest {
+        private @jakarta.annotation.Nonnull String sessionID;
+        private @jakarta.annotation.Nonnull String requestID;
+        private @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest;
+
+        public SessionPermissionReplyRequest() {}
+
+        public SessionPermissionReplyRequest(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) {
+            this.sessionID = sessionID;
+            this.requestID = requestID;
+            this.sessionPermissionReplyRequest = sessionPermissionReplyRequest;
+        }
+
+        public @jakarta.annotation.Nonnull String sessionID() {
+            return this.sessionID;
+        }
+        public SessionPermissionReplyRequest sessionID(@jakarta.annotation.Nonnull String sessionID) {
+            this.sessionID = sessionID;
+            return this;
+        }
+
+        public @jakarta.annotation.Nonnull String requestID() {
+            return this.requestID;
+        }
+        public SessionPermissionReplyRequest requestID(@jakarta.annotation.Nonnull String requestID) {
+            this.requestID = requestID;
+            return this;
+        }
+
+        public @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest() {
+            return this.sessionPermissionReplyRequest;
+        }
+        public SessionPermissionReplyRequest sessionPermissionReplyRequest(@jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) {
+            this.sessionPermissionReplyRequest = sessionPermissionReplyRequest;
+            return this;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SessionPermissionReplyRequest request = (SessionPermissionReplyRequest) o;
+            return Objects.equals(this.sessionID, request.sessionID()) &&
+                Objects.equals(this.requestID, request.requestID()) &&
+                Objects.equals(this.sessionPermissionReplyRequest, request.sessionPermissionReplyRequest());
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(sessionID, requestID, sessionPermissionReplyRequest);
+        }
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionReply request parameters as object
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<Void> sessionPermissionReply(SessionPermissionReplyRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionReply(requestParameters.sessionID(), requestParameters.requestID(), requestParameters.sessionPermissionReplyRequest());
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionReply request parameters as object
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<Void>> sessionPermissionReplyWithHttpInfo(SessionPermissionReplyRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionReplyWithHttpInfo(requestParameters.sessionID(), requestParameters.requestID(), requestParameters.sessionPermissionReplyRequest());
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param requestParameters The sessionPermissionReply request parameters as object
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec sessionPermissionReplyWithResponseSpec(SessionPermissionReplyRequest requestParameters) throws WebClientResponseException {
+        return this.sessionPermissionReplyWithResponseSpec(requestParameters.sessionID(), requestParameters.requestID(), requestParameters.sessionPermissionReplyRequest());
+    }
+
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @param sessionPermissionReplyRequest The sessionPermissionReplyRequest parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    private ResponseSpec sessionPermissionReplyRequestCreation(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) throws WebClientResponseException {
+        Object postBody = sessionPermissionReplyRequest;
+        // verify the required parameter 'sessionID' is set
+        if (sessionID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionID' when calling sessionPermissionReply", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'requestID' is set
+        if (requestID == null) {
+            throw new WebClientResponseException("Missing the required parameter 'requestID' when calling sessionPermissionReply", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'sessionPermissionReplyRequest' is set
+        if (sessionPermissionReplyRequest == null) {
+            throw new WebClientResponseException("Missing the required parameter 'sessionPermissionReplyRequest' when calling sessionPermissionReply", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // create path and map variables
+        final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("sessionID", sessionID);
+        pathParams.put("requestID", requestID);
+
+        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
+        final HttpHeaders headerParams = new HttpHeaders();
+        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
+        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
+
+        final String[] localVarAccepts = {
+            "application/json"
+        };
+        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
+        final String[] localVarContentTypes = {
+            "application/json"
+        };
+        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
+
+        String[] localVarAuthNames = new String[] {  };
+
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/session/{sessionID}/permission/{requestID}/reply", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @param sessionPermissionReplyRequest The sessionPermissionReplyRequest parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<Void> sessionPermissionReply(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return sessionPermissionReplyRequestCreation(sessionID, requestID, sessionPermissionReplyRequest).bodyToMono(localVarReturnType);
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @param sessionPermissionReplyRequest The sessionPermissionReplyRequest parameter
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public Mono<ResponseEntity<Void>> sessionPermissionReplyWithHttpInfo(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return sessionPermissionReplyRequestCreation(sessionID, requestID, sessionPermissionReplyRequest).toEntity(localVarReturnType);
+    }
+
+    /**
+     * Reply to pending permission request
+     * Respond to a pending permission request owned by a session.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * <p><b>404</b> - SessionNotFoundError | PermissionNotFoundError
+     * @param sessionID The sessionID parameter
+     * @param requestID The requestID parameter
+     * @param sessionPermissionReplyRequest The sessionPermissionReplyRequest parameter
+     * @return ResponseSpec
+     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
+     */
+    public ResponseSpec sessionPermissionReplyWithResponseSpec(@jakarta.annotation.Nonnull String sessionID, @jakarta.annotation.Nonnull String requestID, @jakarta.annotation.Nonnull SessionPermissionReplyRequest sessionPermissionReplyRequest) throws WebClientResponseException {
+        return sessionPermissionReplyRequestCreation(sessionID, requestID, sessionPermissionReplyRequest);
     }
 }

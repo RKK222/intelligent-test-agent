@@ -47,7 +47,7 @@ AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagen
 - 所有 Java 连接外部 `122.210.106.43:3306/xxl_job`，当前现场统一使用 `root` 账号和同一组纳管密码、XXL access token；JDBC 启用 `createDatabaseIfNotExist=true`，Flyway 负责后续表和基础任务初始化。真实密码只进入 `.4/.114` 敏感节点包，不写入仓库模板、文档或命令行。
 - 每个 Java 的 Admin 固定与同 JVM executor 配对，executor 注册地址复用平台 advertised host；同机多 Java 的 Admin/executor 端口必须唯一，所有 Admin 必须能访问所有 executor。前端 Nginx 把 `/xxl-job-admin/` 同源代理到各 Admin 子端口。
 - worker 读取 `/data/testagent/config/docker.env`。
-- 企业全局模型元数据以随包 [opencode-models.json](opencode-models.json) 为固定基线，安装到后台的 `/data/testagent/config/opencode-models.json`。OpenCode 1.18.4 的 `/api/model` 按 models.dev `release_date` 倒序返回，本快照把 Qwen 的排序日期锁定在 DeepSeek 之后，从而使 Qwen 优先；公共默认/小模型仍由 `opencode.jsonc` 独立配置。标准发布时两台文件 SHA 必须一致；经明确批准的灰度可只替换 `.4` 并重启该节点 worker，`.114` 保留现网文件并分别记录 SHA。worker 自动只读挂载并向全部用户进程设置 `OPENCODE_MODELS_PATH`；也可在 `docker.env` 用 `TEST_AGENT_OPENCODE_MODELS_FILE` 指定其它绝对路径。它不属于公共 Agent Git，不得包含供应商 token。宿主脚本和容器入口仍复用 [validate-opencode-models.sh](validate-opencode-models.sh) 校验 OpenCode 1.18.4 必填结构；Mac 封包另由 [verify-opencode-model-priority.sh](verify-opencode-model-priority.sh) 锁定本次快照的 Qwen/DeepSeek 优先级，避免改变 worker 指纹或阻断 `.114` 灰度旧快照。现场通过 `opencode-worker-docker.sh validate-models` 调用常规校验，宿主没有 `jq` 时使用待启动镜像内的同一校验器。该动作只读文件，失败时不会替换当前 worker。
+- 企业全局模型元数据以随包 [opencode-models.json](opencode-models.json) 为固定基线，安装到后台的 `/data/testagent/config/opencode-models.json`。OpenCode V2 的 `/api/model` 按 models.dev `release_date` 倒序返回，本快照把 Qwen 的排序日期锁定在 DeepSeek 之后，从而使 Qwen 优先；公共默认/小模型仍由 `opencode.jsonc` 独立配置。标准发布时两台文件 SHA 必须一致；经明确批准的灰度可只替换 `.4` 并重启该节点 worker，`.114` 保留现网文件并分别记录 SHA。worker 自动只读挂载并向全部用户进程设置 `OPENCODE_MODELS_PATH`；也可在 `docker.env` 用 `TEST_AGENT_OPENCODE_MODELS_FILE` 指定其它绝对路径。它不属于公共 Agent Git，不得包含供应商 token。宿主脚本和容器入口仍复用 [validate-opencode-models.sh](validate-opencode-models.sh) 校验 OpenCode 2.0.18 必填结构；Mac 封包另由 [verify-opencode-model-priority.sh](verify-opencode-model-priority.sh) 锁定本次快照的 Qwen/DeepSeek 优先级，避免改变 worker 指纹或阻断 `.114` 灰度旧快照。现场通过 `opencode-worker-docker.sh validate-models` 调用常规校验，宿主没有 `jq` 时使用待启动镜像内的同一校验器。该动作只读文件，失败时不会替换当前 worker。
 - Java 的 `SYS_DATA_ROOT_DIR` 必须与本机 worker 的 `TEST_AGENT_DATA_ROOT` 一致。
 - 每个稳定 `TEST_AGENT_LINUX_SERVER_ID` 只运行一个 worker，不配置人工 `containerId/managerId`。
 - 企业模型供应商地址和上游 token 由数据库及管理页面维护，不写入 `docker.env`。
@@ -422,7 +422,7 @@ deploy/internal/package-redis-offline.sh --zip-only --output-dir deploy/internal
 
 ## OpenCode worker 版本与回滚包
 
-当前 worker 固定 OpenCode `1.18.4` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
+当前 worker 固定 OpenCode `2.0.18` 官方 `opencode-linux-x64-baseline.tar.gz`。源码快照不参与程序构建，版本、release commit、asset 和两级 SHA 校验值由 `env.example` 与 Dockerfile 同时固定。标准构建会同时导出镜像 tar 和 `test-agent-programs.tar.gz`，两者必须成对升级。
 
 外网构建阶段下载 GitHub release、许可证和固定源码时，对 TLS 握手断连等瞬时网络错误执行有界重试；文件大小、SHA-256 和程序版本校验仍是最终准入条件。重试耗尽或任一校验不一致时必须终止构建，不能复用不完整分片或跳过供应链校验。
 
@@ -460,13 +460,13 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:1.17.8 \
 deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/dist-opencode-1.17.8
 ```
 
-回滚时先加载 1.17.8 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 移除 1.17.8 不支持的 `subagent_depth`，而 1.18.4 继续强制深度 2。完整差异和验证结论见 `docs/deployment/opencode-upgrade-1.18.4.md`。
+回滚时先加载 1.17.8 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 移除 1.17.8 不支持的 `subagent_depth`，而 2.0.18 继续强制深度 2。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
 
 ## 自定义 Tool 离线依赖
 
-`test-agent-programs.tar.gz` 已内置与 OpenCode `1.18.4` 锁定的自定义 Tool 基线：`@modelcontextprotocol/sdk`、`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`jsonc-parser`、`zod`、`playwright-core@1.61.0` 及其全部传递依赖；Playwright 只通过 CDP 操作麒麟系统已安装的企业 360 浏览器，不随包下载 Chromium。本地浏览器 Tool 使用 OpenCode/Bun 原生 WebSocket 实现 Playwright 公开 transport，不依赖用户系统 Node；`playwright-core` 随签名公共能力包落入用户私有目录，企业现场不得执行 npm。worker 中 Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。官方 OpenCode 仍会对每个配置目录执行依赖一致性检查，启动器不能依赖上游不存在的禁用环境变量。用户进程启动前会把 `playwright-core` 与其它固定 Tool 依赖一起非覆盖式链接到 XDG 全局配置、用户 HOME `.opencode`、公共配置、当前目录及共同祖先 `node_modules`；工作区树递归扫描改由每台 worker 唯一的后台维护循环承担。entrypoint 先启动 manager，manager 在连接 Java 前清除上一容器进程世代遗留的 PID state，避免旧用户 PID 复用成 manager/entrypoint 后被迟到停止命令误杀；Java 根据平台 binding 恢复应运行实例。维护循环首轮等待 60 秒，之后每轮只临时启动一个单次扫描 Node 进程，扫描结束立即释放内存和文件句柄；不再常驻 Node 递归文件监听器，避免大工作区放大 worker 资源。新建 `.opencode` 在下一轮扫描自动收敛，默认间隔 60 秒加本轮实际扫描耗时。扫描不跟随软链接，也不进入 `.git`、`node_modules` 和常见构建产物目录。共同祖先投影可让深层应用 workspace 的 `.opencode/tools` 按 Node 标准祖先规则解析随包模块；任何目标位置已有同名文件或目录时均保留现场版本。管理员自定义 package/lockfile 时必须自行保证离线依赖闭包完整，启动器不会覆盖现场 metadata。
+`test-agent-programs.tar.gz` 已内置与 OpenCode `2.0.18` 锁定的自定义 Tool 基线：`@modelcontextprotocol/sdk`、`@opencode/plugin`、`@opencode/client`、`effect`、`jsonc-parser`、`zod`、`playwright-core@1.61.0` 及其全部传递依赖；Playwright 只通过 CDP 操作麒麟系统已安装的企业 360 浏览器，不随包下载 Chromium。本地浏览器 Tool 使用 OpenCode/Bun 原生 WebSocket 实现 Playwright 公开 transport，不依赖用户系统 Node；`playwright-core` 随签名公共能力包落入用户私有目录，企业现场不得执行 npm。worker 中 Node 22 自带的 `fetch`、`URL`、`AbortController` 等标准 API 不需要额外包。官方 OpenCode 仍会对每个配置目录执行依赖一致性检查，启动器不能依赖上游不存在的禁用环境变量。用户进程启动前会把 `playwright-core` 与其它固定 Tool 依赖一起非覆盖式链接到 XDG 全局配置、用户 HOME `.opencode`、公共配置、当前目录及共同祖先 `node_modules`；工作区树递归扫描改由每台 worker 唯一的后台维护循环承担。entrypoint 先启动 manager，manager 在连接 Java 前清除上一容器进程世代遗留的 PID state，避免旧用户 PID 复用成 manager/entrypoint 后被迟到停止命令误杀；Java 根据平台 binding 恢复应运行实例。维护循环首轮等待 60 秒，之后每轮只临时启动一个单次扫描 Node 进程，扫描结束立即释放内存和文件句柄；不再常驻 Node 递归文件监听器，避免大工作区放大 worker 资源。新建 `.opencode` 在下一轮扫描自动收敛，默认间隔 60 秒加本轮实际扫描耗时。扫描不跟随软链接，也不进入 `.git`、`node_modules` 和常见构建产物目录。共同祖先投影可让深层应用 workspace 的 `.opencode/tools` 按 Node 标准祖先规则解析随包模块；任何目标位置已有同名文件或目录时均保留现场版本。管理员自定义 package/lockfile 时必须自行保证离线依赖闭包完整，启动器不会覆盖现场 metadata。
 
-标准后台部署脚本会调用 `verify-opencode-tool-runtime.sh`，在 `included` programs 解压前后以及 `reuse` 现场复用时核对 runtime manifest、lockfile、全部固定直接依赖的包元数据和入口文件；`@opencode-ai/plugin`、`@opencode-ai/sdk`、`effect`、`playwright-core`、`zod` 缺失、为空、未锁定或版本不符都会在服务变更前失败。专项校验可执行 `tools/verify-opencode-tool-runtime-deploy.sh`。
+标准后台部署脚本会调用 `verify-opencode-tool-runtime.sh`，在 `included` programs 解压前后以及 `reuse` 现场复用时核对 runtime manifest、lockfile、全部固定直接依赖的包元数据和入口文件；`@opencode/plugin`、`@opencode/client`、`effect`、`playwright-core`、`zod` 缺失、为空、未锁定或版本不符都会在服务变更前失败。专项校验可执行 `tools/verify-opencode-tool-runtime-deploy.sh`。
 
 运行依赖的 Git 忽略清单以 `deploy/internal/opencode-runtime.gitignore` 为单一来源，固定包含 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`。后台升级脚本会对已经初始化的标准公共配置目录幂等补齐缺失规则，不覆盖管理员已有规则；新增节点尚未 clone 公共仓库时不会提前创建目录，随后由 worker 后台维护器在创建 package/lockfile 链接前补齐同一清单。因此升级、扩容、重复启动或新建工作区后，这些运行文件不会让公共仓库误报本地变更，`agents/**`、`skills/**`、`tools/**` 和用户维护的 OpenCode 配置仍按原 Git 规则检测。忽略规则不会自动取消已经跟踪的文件，也不会删除任何未跟踪文件。
 
@@ -746,3 +746,10 @@ persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app J
 
 - [OPERATION-MANUAL.md](OPERATION-MANUAL.md) 转到单后台文档。
 - [README-two-backend-122-233-30-114.md](README-two-backend-122-233-30-114.md) 转到多后台文档。
+# OpenCode V2 发布基线
+
+当前发布包固定 OpenCode `2.0.18`（release commit
+`cd9a14a6b688d4021bee381dfd39d2cef9c0f862`），Linux worker 使用 npm
+`@opencode/cli-linux-x64-baseline` 平台包，运行时依赖使用
+`@opencode/client` 与 `@opencode/plugin`。V1 历史发布包仅作为独立回滚包，
+不会与 V2 runtime lockfile 混装。

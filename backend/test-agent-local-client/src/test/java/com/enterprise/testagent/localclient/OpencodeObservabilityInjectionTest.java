@@ -33,16 +33,17 @@ class OpencodeObservabilityInjectionTest {
                         temporaryDirectory.resolve("spool"), 1024 * 1024)) {
             OpencodeProcessSupervisor supervisor = new OpencodeProcessSupervisor(
                     configuration, stateStore, modelRelay, observabilityRelay);
-            String pluginUri = "file:///opt/test-agent/plugins/test-agent-observability.mjs";
+            String pluginUri = "file:///opt/test-agent/plugins/test-agent-observability/";
             String once = supervisor.withObservabilityPlugin(
                     "{\"plugin\":[\"file:///user/plugin.mjs\"],\"model\":\"keep-me\"}", pluginUri);
             String twice = supervisor.withObservabilityPlugin(once, pluginUri);
             var root = new ObjectMapper().readTree(twice);
 
             assertThat(root.path("model").asText()).isEqualTo("keep-me");
-            assertThat(StreamSupport.stream(root.path("plugin").spliterator(), false)
-                    .map(node -> node.asText()).toList())
+            assertThat(StreamSupport.stream(root.path("plugins").spliterator(), false)
+                    .map(node -> node.path("package").asText()).toList())
                     .containsExactly("file:///user/plugin.mjs", pluginUri);
+            assertThat(root.has("plugin")).isFalse();
             assertThat(observabilityRelay.localToken())
                     .isNotBlank()
                     .isNotEqualTo(modelRelay.localToken());

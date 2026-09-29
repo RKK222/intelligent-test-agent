@@ -40,7 +40,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunRuntimeSchedulingConfiguration`：owner lease 续租独占单线程调度器，其余恢复/到期/重试任务使用独立 4 线程维护调度器，避免阻塞 Boot 默认调度线程或饿死 5 秒续租。
 - `run.RunOwnerLeaseSupervisor`：统一维护本机 owner handle 的 5 秒续租信号；fencing 被其它 owner 取得时正常完成 `lost` 只停止旧订阅，Redis/运行态异常时以原错误终止 `lost`，让 Run 启动订阅和恢复订阅调度 30 秒安全收敛。
 - `run.RunMessageRecoveryService`：为 Run/Session HTTP 历史按 Redis → OpenCode → PostgreSQL 双摘要恢复，Session 上游没有可展示正文时再有界读取旧 `session_messages` 正文并标记 LEGACY；空 Redis/OpenCode 快照不截断兜底，排查入口可显式跳过离线服务器 OpenCode。结果携带完整度、可回放性和详情到期时间。Run 级 OpenCode 来源因果裁剪到目标轮，Session 级来源保持全量多轮，legacy SSE 兼容方法只输出目标轮 assistant。
-- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径继续使用 `/global/config`。
+- `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射；平台配置 GET 使用实例级 `/api/config` 读取包含 `OPENCODE_CONFIG_DIR` 的合并有效配置，Agent 标准 global config 兼容路径由 V2 路由适配层映射到 `/api/config`。
 - `protectedagent.*`：受保护 Hub Agent/Skill 的服务器执行边界；负责服务器隔离目录、短期文件 grant、stateless MCP 工具、Redis 远端 Session 目录映射和 `protected-opencode` directory 重写。它只通过既有本地文件 WSS 网关访问授权目录，不下载制品到客户端，不新增 HTTP 文件代理。
 - `internalmodel.observability.InternalModelObservabilityQueryService`：统一内部模型可观测查询的时间与分页上限，把五类 `outcomeGroup` 展开为稳定精确结果集合后交给领域仓储；兼容精确 `outcome` 查询，且精确条件优先。
 - `runtime.SideQuestionStreamingApplicationService` / `runtime.SideQuestionTerminalService`：以归档内部 Session 启动 `SIDE_QUESTION` Run；临时 fork 仅接收用户问题并禁用工具，通过本轮 assistant 事件流输出增量，消息快照补偿漏失终态，最后以事务 CAS 写唯一终态。

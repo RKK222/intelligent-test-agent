@@ -114,7 +114,7 @@ public record OpencodePromptPart(
     }
 
     /**
-     * 转换为 prompt_async 请求体 Map，只输出当前 part 类型允许的字段。
+     * 转换为 prompt 请求体 Map，只输出当前 part 类型允许的字段。
      */
     Map<String, Object> toRequestBody() {
         LinkedHashMap<String, Object> body = new LinkedHashMap<>();

@@ -2,15 +2,13 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
-import com.example.opencode.sdk.model.AuthSet400Response;
-import com.example.opencode.sdk.model.BadRequestError;
-import com.example.opencode.sdk.model.MCPStatus;
-import com.example.opencode.sdk.model.McpAddRequest;
-import com.example.opencode.sdk.model.McpAuthCallbackRequest;
-import com.example.opencode.sdk.model.McpAuthRemove200Response;
-import com.example.opencode.sdk.model.McpAuthStart200Response;
-import com.example.opencode.sdk.model.McpAuthStart400Response;
-import com.example.opencode.sdk.model.McpServerNotFoundError;
+import com.example.opencode.sdk.model.AgentListLocationParameter;
+import com.example.opencode.sdk.model.ExperimentalMcpAddRequest;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.McpList200Response;
+import com.example.opencode.sdk.model.McpResourceCatalog200Response;
+import com.example.opencode.sdk.model.McpServerNotFoundErrorEncoded;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -54,40 +52,40 @@ public class McpApi {
         this.apiClient = apiClient;
     }
 
-    public class McpAddRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-        private @jakarta.annotation.Nullable McpAddRequest mcpAddRequest;
+    public class ExperimentalMcpAddRequest {
+        private @jakarta.annotation.Nullable String server;
+        private @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
 
-        public McpAddRequest() {}
+        public ExperimentalMcpAddRequest() {}
 
-        public McpAddRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAddRequest mcpAddRequest) {
-            this.directory = directory;
-            this.workspace = workspace;
-            this.mcpAddRequest = mcpAddRequest;
+        public ExperimentalMcpAddRequest(@jakarta.annotation.Nullable String server, @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest, @jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.server = server;
+            this.experimentalMcpAddRequest = experimentalMcpAddRequest;
+            this.location = location;
         }
 
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
+        public @jakarta.annotation.Nullable String server() {
+            return this.server;
         }
-        public McpAddRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
+        public ExperimentalMcpAddRequest server(@jakarta.annotation.Nullable String server) {
+            this.server = server;
             return this;
         }
 
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
+        public @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest() {
+            return this.experimentalMcpAddRequest;
         }
-        public McpAddRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
+        public ExperimentalMcpAddRequest experimentalMcpAddRequest(@jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest) {
+            this.experimentalMcpAddRequest = experimentalMcpAddRequest;
             return this;
         }
 
-        public @jakarta.annotation.Nullable McpAddRequest mcpAddRequest() {
-            return this.mcpAddRequest;
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
+            return this.location;
         }
-        public McpAddRequest mcpAddRequest(@jakarta.annotation.Nullable McpAddRequest mcpAddRequest) {
-            this.mcpAddRequest = mcpAddRequest;
+        public ExperimentalMcpAddRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.location = location;
             return this;
         }
 
@@ -99,81 +97,91 @@ public class McpApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            McpAddRequest request = (McpAddRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace()) &&
-                Objects.equals(this.mcpAddRequest, request.mcpAddRequest());
+            ExperimentalMcpAddRequest request = (ExperimentalMcpAddRequest) o;
+            return Objects.equals(this.server, request.server()) &&
+                Objects.equals(this.experimentalMcpAddRequest, request.experimentalMcpAddRequest()) &&
+                Objects.equals(this.location, request.location());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(directory, workspace, mcpAddRequest);
+            return Objects.hash(server, experimentalMcpAddRequest, location);
         }
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The mcpAdd request parameters as object
-     * @return Map&lt;String, MCPStatus&gt;
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalMcpAdd request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Map<String, MCPStatus>> mcpAdd(McpAddRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAdd(requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAddRequest());
+    public Mono<Void> experimentalMcpAdd(ExperimentalMcpAddRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpAdd(requestParameters.server(), requestParameters.experimentalMcpAddRequest(), requestParameters.location());
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The mcpAdd request parameters as object
-     * @return ResponseEntity&lt;Map&lt;String, MCPStatus&gt;&gt;
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalMcpAdd request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Map<String, MCPStatus>>> mcpAddWithHttpInfo(McpAddRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAddWithHttpInfo(requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAddRequest());
+    public Mono<ResponseEntity<Void>> experimentalMcpAddWithHttpInfo(ExperimentalMcpAddRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpAddWithHttpInfo(requestParameters.server(), requestParameters.experimentalMcpAddRequest(), requestParameters.location());
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param requestParameters The mcpAdd request parameters as object
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param requestParameters The experimentalMcpAdd request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAddWithResponseSpec(McpAddRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAddWithResponseSpec(requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAddRequest());
+    public ResponseSpec experimentalMcpAddWithResponseSpec(ExperimentalMcpAddRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpAddWithResponseSpec(requestParameters.server(), requestParameters.experimentalMcpAddRequest(), requestParameters.location());
     }
 
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAddRequest The mcpAddRequest parameter
-     * @return Map&lt;String, MCPStatus&gt;
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param server The server parameter
+     * @param experimentalMcpAddRequest The experimentalMcpAddRequest parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec mcpAddRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAddRequest mcpAddRequest) throws WebClientResponseException {
-        Object postBody = mcpAddRequest;
+    private ResponseSpec experimentalMcpAddRequestCreation(@jakarta.annotation.Nullable String server, @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        Object postBody = experimentalMcpAddRequest;
+        // verify the required parameter 'server' is set
+        if (server == null) {
+            throw new WebClientResponseException("Missing the required parameter 'server' when calling experimentalMcpAdd", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
+        // verify the required parameter 'experimentalMcpAddRequest' is set
+        if (experimentalMcpAddRequest == null) {
+            throw new WebClientResponseException("Missing the required parameter 'experimentalMcpAddRequest' when calling experimentalMcpAdd", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
+
+        pathParams.put("server", server);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -186,91 +194,82 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return apiClient.invokeAPI("/mcp", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/experimental/mcp/{server}", HttpMethod.PUT, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAddRequest The mcpAddRequest parameter
-     * @return Map&lt;String, MCPStatus&gt;
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param server The server parameter
+     * @param experimentalMcpAddRequest The experimentalMcpAddRequest parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Map<String, MCPStatus>> mcpAdd(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAddRequest mcpAddRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return mcpAddRequestCreation(directory, workspace, mcpAddRequest).bodyToMono(localVarReturnType);
+    public Mono<Void> experimentalMcpAdd(@jakarta.annotation.Nullable String server, @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpAddRequestCreation(server, experimentalMcpAddRequest, location).bodyToMono(localVarReturnType);
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAddRequest The mcpAddRequest parameter
-     * @return ResponseEntity&lt;Map&lt;String, MCPStatus&gt;&gt;
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param server The server parameter
+     * @param experimentalMcpAddRequest The experimentalMcpAddRequest parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Map<String, MCPStatus>>> mcpAddWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAddRequest mcpAddRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return mcpAddRequestCreation(directory, workspace, mcpAddRequest).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<Void>> experimentalMcpAddWithHttpInfo(@jakarta.annotation.Nullable String server, @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpAddRequestCreation(server, experimentalMcpAddRequest, location).toEntity(localVarReturnType);
     }
 
     /**
      * Add MCP server
-     * Dynamically add a new Model Context Protocol (MCP) server to the system.
-     * <p><b>200</b> - MCP server added successfully
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAddRequest The mcpAddRequest parameter
+     * Add an MCP server at runtime or replace an existing one, connecting it immediately.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param server The server parameter
+     * @param experimentalMcpAddRequest The experimentalMcpAddRequest parameter
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAddWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAddRequest mcpAddRequest) throws WebClientResponseException {
-        return mcpAddRequestCreation(directory, workspace, mcpAddRequest);
+    public ResponseSpec experimentalMcpAddWithResponseSpec(@jakarta.annotation.Nullable String server, @jakarta.annotation.Nonnull ExperimentalMcpAddRequest experimentalMcpAddRequest, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return experimentalMcpAddRequestCreation(server, experimentalMcpAddRequest, location);
     }
 
-    public class McpAuthAuthenticateRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
+    public class ExperimentalMcpConnectRequest {
+        private @jakarta.annotation.Nonnull String server;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
 
-        public McpAuthAuthenticateRequest() {}
+        public ExperimentalMcpConnectRequest() {}
 
-        public McpAuthAuthenticateRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
+        public ExperimentalMcpConnectRequest(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.server = server;
+            this.location = location;
         }
 
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
+        public @jakarta.annotation.Nonnull String server() {
+            return this.server;
         }
-        public McpAuthAuthenticateRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
+        public ExperimentalMcpConnectRequest server(@jakarta.annotation.Nonnull String server) {
+            this.server = server;
             return this;
         }
 
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
+            return this.location;
         }
-        public McpAuthAuthenticateRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpAuthAuthenticateRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
+        public ExperimentalMcpConnectRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.location = location;
             return this;
         }
 
@@ -282,91 +281,89 @@ public class McpApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            McpAuthAuthenticateRequest request = (McpAuthAuthenticateRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
+            ExperimentalMcpConnectRequest request = (ExperimentalMcpConnectRequest) o;
+            return Objects.equals(this.server, request.server()) &&
+                Objects.equals(this.location, request.location());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(name, directory, workspace);
+            return Objects.hash(server, location);
         }
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthAuthenticate request parameters as object
-     * @return MCPStatus
+     * @param requestParameters The experimentalMcpConnect request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<MCPStatus> mcpAuthAuthenticate(McpAuthAuthenticateRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthAuthenticate(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public Mono<Void> experimentalMcpConnect(ExperimentalMcpConnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpConnect(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthAuthenticate request parameters as object
-     * @return ResponseEntity&lt;MCPStatus&gt;
+     * @param requestParameters The experimentalMcpConnect request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<MCPStatus>> mcpAuthAuthenticateWithHttpInfo(McpAuthAuthenticateRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthAuthenticateWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public Mono<ResponseEntity<Void>> experimentalMcpConnectWithHttpInfo(ExperimentalMcpConnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpConnectWithHttpInfo(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthAuthenticate request parameters as object
+     * @param requestParameters The experimentalMcpConnect request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthAuthenticateWithResponseSpec(McpAuthAuthenticateRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthAuthenticateWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public ResponseSpec experimentalMcpConnectWithResponseSpec(ExperimentalMcpConnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpConnectWithResponseSpec(requestParameters.server(), requestParameters.location());
     }
 
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return MCPStatus
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec mcpAuthAuthenticateRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec experimentalMcpConnectRequestCreation(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpAuthAuthenticate", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        // verify the required parameter 'server' is set
+        if (server == null) {
+            throw new WebClientResponseException("Missing the required parameter 'server' when calling experimentalMcpConnect", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
         }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
-        pathParams.put("name", name);
+        pathParams.put("server", server);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -377,104 +374,82 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return apiClient.invokeAPI("/mcp/{name}/auth/authenticate", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/experimental/mcp/{server}/connect", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return MCPStatus
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<MCPStatus> mcpAuthAuthenticate(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return mcpAuthAuthenticateRequestCreation(name, directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<Void> experimentalMcpConnect(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpConnectRequestCreation(server, location).bodyToMono(localVarReturnType);
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;MCPStatus&gt;
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<MCPStatus>> mcpAuthAuthenticateWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return mcpAuthAuthenticateRequestCreation(name, directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<Void>> experimentalMcpConnectWithHttpInfo(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpConnectRequestCreation(server, location).toEntity(localVarReturnType);
     }
 
     /**
-     * Authenticate MCP OAuth
-     * Start OAuth flow and wait for callback (opens browser).
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Connect MCP server
+     * Connect an MCP server at runtime, overriding a disabled configuration until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * @param server The server parameter
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthAuthenticateWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpAuthAuthenticateRequestCreation(name, directory, workspace);
+    public ResponseSpec experimentalMcpConnectWithResponseSpec(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return experimentalMcpConnectRequestCreation(server, location);
     }
 
-    public class McpAuthCallbackRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-        private @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest;
+    public class ExperimentalMcpDisconnectRequest {
+        private @jakarta.annotation.Nonnull String server;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
 
-        public McpAuthCallbackRequest() {}
+        public ExperimentalMcpDisconnectRequest() {}
 
-        public McpAuthCallbackRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
-            this.mcpAuthCallbackRequest = mcpAuthCallbackRequest;
+        public ExperimentalMcpDisconnectRequest(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.server = server;
+            this.location = location;
         }
 
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
+        public @jakarta.annotation.Nonnull String server() {
+            return this.server;
         }
-        public McpAuthCallbackRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
+        public ExperimentalMcpDisconnectRequest server(@jakarta.annotation.Nonnull String server) {
+            this.server = server;
             return this;
         }
 
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
+            return this.location;
         }
-        public McpAuthCallbackRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpAuthCallbackRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest() {
-            return this.mcpAuthCallbackRequest;
-        }
-        public McpAuthCallbackRequest mcpAuthCallbackRequest(@jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) {
-            this.mcpAuthCallbackRequest = mcpAuthCallbackRequest;
+        public ExperimentalMcpDisconnectRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.location = location;
             return this;
         }
 
@@ -486,292 +461,89 @@ public class McpApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            McpAuthCallbackRequest request = (McpAuthCallbackRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace()) &&
-                Objects.equals(this.mcpAuthCallbackRequest, request.mcpAuthCallbackRequest());
+            ExperimentalMcpDisconnectRequest request = (ExperimentalMcpDisconnectRequest) o;
+            return Objects.equals(this.server, request.server()) &&
+                Objects.equals(this.location, request.location());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(name, directory, workspace, mcpAuthCallbackRequest);
+            return Objects.hash(server, location);
         }
     }
 
     /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthCallback request parameters as object
-     * @return MCPStatus
+     * @param requestParameters The experimentalMcpDisconnect request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<MCPStatus> mcpAuthCallback(McpAuthCallbackRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthCallback(requestParameters.name(), requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAuthCallbackRequest());
+    public Mono<Void> experimentalMcpDisconnect(ExperimentalMcpDisconnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpDisconnect(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthCallback request parameters as object
-     * @return ResponseEntity&lt;MCPStatus&gt;
+     * @param requestParameters The experimentalMcpDisconnect request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<MCPStatus>> mcpAuthCallbackWithHttpInfo(McpAuthCallbackRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthCallbackWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAuthCallbackRequest());
+    public Mono<ResponseEntity<Void>> experimentalMcpDisconnectWithHttpInfo(ExperimentalMcpDisconnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpDisconnectWithHttpInfo(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthCallback request parameters as object
+     * @param requestParameters The experimentalMcpDisconnect request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthCallbackWithResponseSpec(McpAuthCallbackRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthCallbackWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace(), requestParameters.mcpAuthCallbackRequest());
+    public ResponseSpec experimentalMcpDisconnectWithResponseSpec(ExperimentalMcpDisconnectRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpDisconnectWithResponseSpec(requestParameters.server(), requestParameters.location());
     }
 
 
     /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAuthCallbackRequest The mcpAuthCallbackRequest parameter
-     * @return MCPStatus
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec mcpAuthCallbackRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) throws WebClientResponseException {
-        Object postBody = mcpAuthCallbackRequest;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpAuthCallback", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
-        }
-        // create path and map variables
-        final Map<String, Object> pathParams = new HashMap<String, Object>();
-
-        pathParams.put("name", name);
-
-        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
-        final HttpHeaders headerParams = new HttpHeaders();
-        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
-        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
-
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
-
-        final String[] localVarAccepts = {
-            "application/json"
-        };
-        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = {
-            "application/json"
-        };
-        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
-
-        String[] localVarAuthNames = new String[] {  };
-
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return apiClient.invokeAPI("/mcp/{name}/auth/callback", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
-    }
-
-    /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAuthCallbackRequest The mcpAuthCallbackRequest parameter
-     * @return MCPStatus
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<MCPStatus> mcpAuthCallback(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return mcpAuthCallbackRequestCreation(name, directory, workspace, mcpAuthCallbackRequest).bodyToMono(localVarReturnType);
-    }
-
-    /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAuthCallbackRequest The mcpAuthCallbackRequest parameter
-     * @return ResponseEntity&lt;MCPStatus&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<MCPStatus>> mcpAuthCallbackWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) throws WebClientResponseException {
-        ParameterizedTypeReference<MCPStatus> localVarReturnType = new ParameterizedTypeReference<MCPStatus>() {};
-        return mcpAuthCallbackRequestCreation(name, directory, workspace, mcpAuthCallbackRequest).toEntity(localVarReturnType);
-    }
-
-    /**
-     * Complete MCP OAuth
-     * Complete OAuth authentication for a Model Context Protocol (MCP) server using the authorization code.
-     * <p><b>200</b> - OAuth authentication completed
-     * <p><b>400</b> - BadRequest | InvalidRequestError
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @param mcpAuthCallbackRequest The mcpAuthCallbackRequest parameter
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpAuthCallbackWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace, @jakarta.annotation.Nullable McpAuthCallbackRequest mcpAuthCallbackRequest) throws WebClientResponseException {
-        return mcpAuthCallbackRequestCreation(name, directory, workspace, mcpAuthCallbackRequest);
-    }
-
-    public class McpAuthRemoveRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public McpAuthRemoveRequest() {}
-
-        public McpAuthRemoveRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
-        }
-        public McpAuthRemoveRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public McpAuthRemoveRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpAuthRemoveRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            McpAuthRemoveRequest request = (McpAuthRemoveRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(name, directory, workspace);
-        }
-    }
-
-    /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthRemove request parameters as object
-     * @return McpAuthRemove200Response
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<McpAuthRemove200Response> mcpAuthRemove(McpAuthRemoveRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthRemove(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthRemove request parameters as object
-     * @return ResponseEntity&lt;McpAuthRemove200Response&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<McpAuthRemove200Response>> mcpAuthRemoveWithHttpInfo(McpAuthRemoveRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthRemoveWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthRemove request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpAuthRemoveWithResponseSpec(McpAuthRemoveRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthRemoveWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return McpAuthRemove200Response
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec mcpAuthRemoveRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec experimentalMcpDisconnectRequestCreation(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpAuthRemove", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        // verify the required parameter 'server' is set
+        if (server == null) {
+            throw new WebClientResponseException("Missing the required parameter 'server' when calling experimentalMcpDisconnect", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
         }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
-        pathParams.put("name", name);
+        pathParams.put("server", server);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -782,94 +554,82 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<McpAuthRemove200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthRemove200Response>() {};
-        return apiClient.invokeAPI("/mcp/{name}/auth", HttpMethod.DELETE, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/experimental/mcp/{server}/disconnect", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return McpAuthRemove200Response
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<McpAuthRemove200Response> mcpAuthRemove(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<McpAuthRemove200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthRemove200Response>() {};
-        return mcpAuthRemoveRequestCreation(name, directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<Void> experimentalMcpDisconnect(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpDisconnectRequestCreation(server, location).bodyToMono(localVarReturnType);
     }
 
     /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;McpAuthRemove200Response&gt;
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<McpAuthRemove200Response>> mcpAuthRemoveWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<McpAuthRemove200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthRemove200Response>() {};
-        return mcpAuthRemoveRequestCreation(name, directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<Void>> experimentalMcpDisconnectWithHttpInfo(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpDisconnectRequestCreation(server, location).toEntity(localVarReturnType);
     }
 
     /**
-     * Remove MCP OAuth
-     * Remove OAuth credentials for an MCP server.
-     * <p><b>200</b> - OAuth credentials removed
-     * <p><b>400</b> - Bad request
+     * Disconnect MCP server
+     * Disconnect an MCP server at runtime, removing its tools until reconnected.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * @param server The server parameter
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthRemoveWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpAuthRemoveRequestCreation(name, directory, workspace);
+    public ResponseSpec experimentalMcpDisconnectWithResponseSpec(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return experimentalMcpDisconnectRequestCreation(server, location);
     }
 
-    public class McpAuthStartRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
+    public class ExperimentalMcpRemoveRequest {
+        private @jakarta.annotation.Nonnull String server;
+        private @jakarta.annotation.Nullable AgentListLocationParameter location;
 
-        public McpAuthStartRequest() {}
+        public ExperimentalMcpRemoveRequest() {}
 
-        public McpAuthStartRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
+        public ExperimentalMcpRemoveRequest(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.server = server;
+            this.location = location;
         }
 
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
+        public @jakarta.annotation.Nonnull String server() {
+            return this.server;
         }
-        public McpAuthStartRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
+        public ExperimentalMcpRemoveRequest server(@jakarta.annotation.Nonnull String server) {
+            this.server = server;
             return this;
         }
 
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
+        public @jakarta.annotation.Nullable AgentListLocationParameter location() {
+            return this.location;
         }
-        public McpAuthStartRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpAuthStartRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
+        public ExperimentalMcpRemoveRequest location(@jakarta.annotation.Nullable AgentListLocationParameter location) {
+            this.location = location;
             return this;
         }
 
@@ -881,91 +641,89 @@ public class McpApi {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            McpAuthStartRequest request = (McpAuthStartRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
+            ExperimentalMcpRemoveRequest request = (ExperimentalMcpRemoveRequest) o;
+            return Objects.equals(this.server, request.server()) &&
+                Objects.equals(this.location, request.location());
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(name, directory, workspace);
+            return Objects.hash(server, location);
         }
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthStart request parameters as object
-     * @return McpAuthStart200Response
+     * @param requestParameters The experimentalMcpRemove request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<McpAuthStart200Response> mcpAuthStart(McpAuthStartRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthStart(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public Mono<Void> experimentalMcpRemove(ExperimentalMcpRemoveRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpRemove(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthStart request parameters as object
-     * @return ResponseEntity&lt;McpAuthStart200Response&gt;
+     * @param requestParameters The experimentalMcpRemove request parameters as object
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<McpAuthStart200Response>> mcpAuthStartWithHttpInfo(McpAuthStartRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthStartWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public Mono<ResponseEntity<Void>> experimentalMcpRemoveWithHttpInfo(ExperimentalMcpRemoveRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpRemoveWithHttpInfo(requestParameters.server(), requestParameters.location());
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpAuthStart request parameters as object
+     * @param requestParameters The experimentalMcpRemove request parameters as object
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthStartWithResponseSpec(McpAuthStartRequest requestParameters) throws WebClientResponseException {
-        return this.mcpAuthStartWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
+    public ResponseSpec experimentalMcpRemoveWithResponseSpec(ExperimentalMcpRemoveRequest requestParameters) throws WebClientResponseException {
+        return this.experimentalMcpRemoveWithResponseSpec(requestParameters.server(), requestParameters.location());
     }
 
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return McpAuthStart200Response
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    private ResponseSpec mcpAuthStartRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec experimentalMcpRemoveRequestCreation(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpAuthStart", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
+        // verify the required parameter 'server' is set
+        if (server == null) {
+            throw new WebClientResponseException("Missing the required parameter 'server' when calling experimentalMcpRemove", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
         }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
 
-        pathParams.put("name", name);
+        pathParams.put("server", server);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -976,190 +734,79 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<McpAuthStart200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthStart200Response>() {};
-        return apiClient.invokeAPI("/mcp/{name}/auth", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return apiClient.invokeAPI("/api/experimental/mcp/{server}", HttpMethod.DELETE, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return McpAuthStart200Response
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<McpAuthStart200Response> mcpAuthStart(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<McpAuthStart200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthStart200Response>() {};
-        return mcpAuthStartRequestCreation(name, directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<Void> experimentalMcpRemove(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpRemoveRequestCreation(server, location).bodyToMono(localVarReturnType);
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;McpAuthStart200Response&gt;
+     * @param server The server parameter
+     * @param location The location parameter
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<McpAuthStart200Response>> mcpAuthStartWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<McpAuthStart200Response> localVarReturnType = new ParameterizedTypeReference<McpAuthStart200Response>() {};
-        return mcpAuthStartRequestCreation(name, directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<Void>> experimentalMcpRemoveWithHttpInfo(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<Void> localVarReturnType = new ParameterizedTypeReference<Void>() {};
+        return experimentalMcpRemoveRequestCreation(server, location).toEntity(localVarReturnType);
     }
 
     /**
-     * Start MCP OAuth
-     * Start OAuth authentication flow for a Model Context Protocol (MCP) server.
-     * <p><b>200</b> - OAuth flow started
-     * <p><b>400</b> - McpUnsupportedOAuthError | InvalidRequestError
+     * Remove MCP server
+     * Stop an MCP server and remove it from the runtime set until restart.
+     * <p><b>204</b> - &lt;No Content&gt;
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * @param server The server parameter
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpAuthStartWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpAuthStartRequestCreation(name, directory, workspace);
-    }
-
-    public class McpConnectRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public McpConnectRequest() {}
-
-        public McpConnectRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
-        }
-        public McpConnectRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public McpConnectRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpConnectRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            McpConnectRequest request = (McpConnectRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(name, directory, workspace);
-        }
+    public ResponseSpec experimentalMcpRemoveWithResponseSpec(@jakarta.annotation.Nonnull String server, @jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return experimentalMcpRemoveRequestCreation(server, location);
     }
 
     /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpConnect request parameters as object
-     * @return Boolean
+     * List MCP servers
+     * Retrieve configured MCP servers and their connection status.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return McpList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> mcpConnect(McpConnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpConnect(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpConnect request parameters as object
-     * @return ResponseEntity&lt;Boolean&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Boolean>> mcpConnectWithHttpInfo(McpConnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpConnectWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpConnect request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpConnectWithResponseSpec(McpConnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpConnectWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Boolean
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec mcpConnectRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec mcpListRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpConnect", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
-        }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
-
-        pathParams.put("name", name);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -1170,190 +817,75 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return apiClient.invokeAPI("/mcp/{name}/connect", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<McpList200Response> localVarReturnType = new ParameterizedTypeReference<McpList200Response>() {};
+        return apiClient.invokeAPI("/api/mcp", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Boolean
+     * List MCP servers
+     * Retrieve configured MCP servers and their connection status.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return McpList200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> mcpConnect(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return mcpConnectRequestCreation(name, directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<McpList200Response> mcpList(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<McpList200Response> localVarReturnType = new ParameterizedTypeReference<McpList200Response>() {};
+        return mcpListRequestCreation(location).bodyToMono(localVarReturnType);
     }
 
     /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;Boolean&gt;
+     * List MCP servers
+     * Retrieve configured MCP servers and their connection status.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return ResponseEntity&lt;McpList200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Boolean>> mcpConnectWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return mcpConnectRequestCreation(name, directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<McpList200Response>> mcpListWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<McpList200Response> localVarReturnType = new ParameterizedTypeReference<McpList200Response>() {};
+        return mcpListRequestCreation(location).toEntity(localVarReturnType);
     }
 
     /**
-     *
-     * Connect an MCP server.
-     * <p><b>200</b> - MCP server connected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * List MCP servers
+     * Retrieve configured MCP servers and their connection status.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpConnectWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpConnectRequestCreation(name, directory, workspace);
-    }
-
-    public class McpDisconnectRequest {
-        private @jakarta.annotation.Nonnull String name;
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public McpDisconnectRequest() {}
-
-        public McpDisconnectRequest(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.name = name;
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nonnull String name() {
-            return this.name;
-        }
-        public McpDisconnectRequest name(@jakarta.annotation.Nonnull String name) {
-            this.name = name;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public McpDisconnectRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpDisconnectRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            McpDisconnectRequest request = (McpDisconnectRequest) o;
-            return Objects.equals(this.name, request.name()) &&
-                Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(name, directory, workspace);
-        }
+    public ResponseSpec mcpListWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return mcpListRequestCreation(location);
     }
 
     /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpDisconnect request parameters as object
-     * @return Boolean
+     * List MCP resources
+     * Retrieve resources and resource templates from connected MCP servers.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return McpResourceCatalog200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> mcpDisconnect(McpDisconnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpDisconnect(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpDisconnect request parameters as object
-     * @return ResponseEntity&lt;Boolean&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Boolean>> mcpDisconnectWithHttpInfo(McpDisconnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpDisconnectWithHttpInfo(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param requestParameters The mcpDisconnect request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpDisconnectWithResponseSpec(McpDisconnectRequest requestParameters) throws WebClientResponseException {
-        return this.mcpDisconnectWithResponseSpec(requestParameters.name(), requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Boolean
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec mcpDisconnectRequestCreation(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec mcpResourceCatalogRequestCreation(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
         Object postBody = null;
-        // verify the required parameter 'name' is set
-        if (name == null) {
-            throw new WebClientResponseException("Missing the required parameter 'name' when calling mcpDisconnect", HttpStatus.BAD_REQUEST.value(), HttpStatus.BAD_REQUEST.getReasonPhrase(), null, null, null);
-        }
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
-
-        pathParams.put("name", name);
 
         final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
         final HttpHeaders headerParams = new HttpHeaders();
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
+        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", location.getDirectory()));
 
         final String[] localVarAccepts = {
             "application/json"
@@ -1364,223 +896,51 @@ public class McpApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return apiClient.invokeAPI("/mcp/{name}/disconnect", HttpMethod.POST, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<McpResourceCatalog200Response> localVarReturnType = new ParameterizedTypeReference<McpResourceCatalog200Response>() {};
+        return apiClient.invokeAPI("/api/mcp/resource", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Boolean
+     * List MCP resources
+     * Retrieve resources and resource templates from connected MCP servers.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return McpResourceCatalog200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Boolean> mcpDisconnect(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return mcpDisconnectRequestCreation(name, directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<McpResourceCatalog200Response> mcpResourceCatalog(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<McpResourceCatalog200Response> localVarReturnType = new ParameterizedTypeReference<McpResourceCatalog200Response>() {};
+        return mcpResourceCatalogRequestCreation(location).bodyToMono(localVarReturnType);
     }
 
     /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;Boolean&gt;
+     * List MCP resources
+     * Retrieve resources and resource templates from connected MCP servers.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
+     * @return ResponseEntity&lt;McpResourceCatalog200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Boolean>> mcpDisconnectWithHttpInfo(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Boolean> localVarReturnType = new ParameterizedTypeReference<Boolean>() {};
-        return mcpDisconnectRequestCreation(name, directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<McpResourceCatalog200Response>> mcpResourceCatalogWithHttpInfo(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        ParameterizedTypeReference<McpResourceCatalog200Response> localVarReturnType = new ParameterizedTypeReference<McpResourceCatalog200Response>() {};
+        return mcpResourceCatalogRequestCreation(location).toEntity(localVarReturnType);
     }
 
     /**
-     *
-     * Disconnect an MCP server.
-     * <p><b>200</b> - MCP server disconnected successfully
-     * <p><b>400</b> - Bad request
-     * <p><b>404</b> - McpServerNotFoundError
-     * @param name The name parameter
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * List MCP resources
+     * Retrieve resources and resource templates from connected MCP servers.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @param location The location parameter
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec mcpDisconnectWithResponseSpec(@jakarta.annotation.Nonnull String name, @jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpDisconnectRequestCreation(name, directory, workspace);
-    }
-
-    public class McpStatusRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public McpStatusRequest() {}
-
-        public McpStatusRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public McpStatusRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public McpStatusRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            McpStatusRequest request = (McpStatusRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace);
-        }
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The mcpStatus request parameters as object
-     * @return Map&lt;String, MCPStatus&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<Map<String, MCPStatus>> mcpStatus(McpStatusRequest requestParameters) throws WebClientResponseException {
-        return this.mcpStatus(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The mcpStatus request parameters as object
-     * @return ResponseEntity&lt;Map&lt;String, MCPStatus&gt;&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Map<String, MCPStatus>>> mcpStatusWithHttpInfo(McpStatusRequest requestParameters) throws WebClientResponseException {
-        return this.mcpStatusWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param requestParameters The mcpStatus request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpStatusWithResponseSpec(McpStatusRequest requestParameters) throws WebClientResponseException {
-        return this.mcpStatusWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Map&lt;String, MCPStatus&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec mcpStatusRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        Object postBody = null;
-        // create path and map variables
-        final Map<String, Object> pathParams = new HashMap<String, Object>();
-
-        final MultiValueMap<String, String> localVarQueryParams = new LinkedMultiValueMap<String, String>();
-        final HttpHeaders headerParams = new HttpHeaders();
-        final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
-        final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
-
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
-
-        final String[] localVarAccepts = {
-            "application/json"
-        };
-        final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
-        final String[] localVarContentTypes = { };
-        final MediaType localVarContentType = apiClient.selectHeaderContentType(localVarContentTypes);
-
-        String[] localVarAuthNames = new String[] {  };
-
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return apiClient.invokeAPI("/mcp", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Map&lt;String, MCPStatus&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<Map<String, MCPStatus>> mcpStatus(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return mcpStatusRequestCreation(directory, workspace).bodyToMono(localVarReturnType);
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;Map&lt;String, MCPStatus&gt;&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Map<String, MCPStatus>>> mcpStatusWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Map<String, MCPStatus>> localVarReturnType = new ParameterizedTypeReference<Map<String, MCPStatus>>() {};
-        return mcpStatusRequestCreation(directory, workspace).toEntity(localVarReturnType);
-    }
-
-    /**
-     * Get MCP status
-     * Get the status of all Model Context Protocol (MCP) servers.
-     * <p><b>200</b> - MCP server status
-     * <p><b>400</b> - Bad request
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec mcpStatusWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return mcpStatusRequestCreation(directory, workspace);
+    public ResponseSpec mcpResourceCatalogWithResponseSpec(@jakarta.annotation.Nullable AgentListLocationParameter location) throws WebClientResponseException {
+        return mcpResourceCatalogRequestCreation(location);
     }
 }

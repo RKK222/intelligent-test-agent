@@ -80,7 +80,7 @@ Key 或断开客户端；上报 IP/端口仅供状态展示。
 客户端重新建立实时连接时才恢复展示。
 
 同一包还承载 release catalog 发现、逐 manifest 独立验签和策略：catalog 本身不作为受签名信任事实；同步时强制
-manifest 的 OpenCode 版本为 `1.18.4`，接受 `linux/arm64` 与 `windows/x64`，并要求每个制品和签名路径位于对应
+manifest 的 OpenCode 版本为 `2.0.18`，接受 `linux/arm64` 与 `windows/x64`，并要求每个制品和签名路径位于对应
 `releases/{version}/` 前缀。全局目标版本与用户覆盖策略都只引用已同步的不可变 release；服务端投影、通知、rollout、
 PREPARED 复核和补偿发送均要求 release 平台/架构与实例一致，跨平台目标对该实例按“无可用目标”处理，不能下发或展示。
 有效策略优先用户覆盖。版本管理不保存或向浏览器返回签名私钥/原文制品。版本为北京时间 14 位

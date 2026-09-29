@@ -3,6 +3,7 @@ import {
   PART_KINDS,
   PART_SPECS,
   assertPartProjection,
+  assertV2ContentProjection,
   evidencePath,
   findPlatformMessagePart,
   findRawPart,
@@ -18,15 +19,20 @@ import {
   sanitizeTraceText,
   waitForCapturedPart,
   buildNativePartFixture,
+  buildNativeV2ContentFixture,
+  buildNativeV2FixtureSql,
   buildNativeFixtureSql,
   createNativeFixtureController,
   executeNativeFixtureSql,
+  executeNativeV2FixtureSql,
+  executeNativeV2FixtureCleanupSql,
   buildNativeFixtureCleanupSql,
   executeNativeFixtureCleanupSql,
   createTestVerifiedNativeDatabase,
   createNativeFixtureManifestStore,
   fixtureUiProbe
 } from "./opencode-parts-real-e2e";
+import { projectedNativeV2Parts } from "./opencode-v2-native";
 import { mkdtemp, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -557,6 +563,54 @@ describe("OpenCode 原生 SQLite fixture", () => {
       await expect(store.read()).rejects.toThrow(/corrupted/);
       await expect(store.clear()).rejects.toThrow(/corrupted/);
       expect(await readFile(store.path, "utf8")).toBe("{corrupt");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("OpenCode V2 session_message fixture", () => {
+  it.each(["text", "reasoning", "tool"] as const)("%s 仅写 V2 content，按 HTTP 投影核对平台历史与 tree", async (kind) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "native-v2-fixture-"));
+    const database = path.join(root, "opencode", "opencode.db");
+    await mkdir(path.dirname(database), { recursive: true });
+    const exec = promisify(execFile);
+    const fixture = buildNativeV2ContentFixture({
+      kind, marker: "e2e_part_fixture_v2", remoteSessionId: ownedNativeSessionId,
+      directory: "/owned/e2e_part_fixture_v2", title: "e2e-part-fixture-v2", now: 1_700_000_000_000
+    });
+    try {
+      await exec("sqlite3", [database, [
+        "PRAGMA foreign_keys=ON;",
+        "CREATE TABLE project (id text PRIMARY KEY);",
+        "CREATE TABLE session_v2 (id text PRIMARY KEY, project_id text NOT NULL, directory text NOT NULL, title text NOT NULL, FOREIGN KEY(project_id) REFERENCES project(id) ON DELETE CASCADE);",
+        "CREATE TABLE session_message (id text PRIMARY KEY, session_id text NOT NULL, type text NOT NULL, seq integer NOT NULL, time_created integer NOT NULL, time_updated integer NOT NULL, data text NOT NULL, UNIQUE(session_id,seq), FOREIGN KEY(session_id) REFERENCES session_v2(id) ON DELETE CASCADE);",
+        "INSERT INTO project(id) VALUES ('project_fixture');",
+        `INSERT INTO session_v2(id,project_id,directory,title) VALUES ('${ownedNativeSessionId}','project_fixture','/owned/e2e_part_fixture_v2','e2e-part-fixture-v2');`
+      ].join("\n")]);
+      const handle = await createTestVerifiedNativeDatabase(root, database);
+      const sql = buildNativeV2FixtureSql(fixture);
+      expect(sql).toContain("INSERT INTO session_message");
+      expect(sql).not.toContain("INSERT INTO part");
+      await executeNativeV2FixtureSql(handle, fixture);
+      const rows = await exec("sqlite3", ["-json", database, "SELECT id,type,seq,data FROM session_message ORDER BY seq;"]);
+      const parsed = JSON.parse(rows.stdout) as Array<{ id: string; type: string; seq: number; data: string }>;
+      expect(parsed.map((row) => row.type)).toEqual(["user", "assistant"]);
+      expect(parsed.map((row) => row.seq)).toEqual([1, 2]);
+      const assistant = { id: parsed[1]!.id, type: parsed[1]!.type, ...JSON.parse(parsed[1]!.data) };
+      const raw = projectedNativeV2Parts([assistant], ownedNativeSessionId)[0]!;
+      expect(raw.id).toBe(fixture.manifest.partId);
+      expect(raw.type).toBe(kind);
+      const history = { items: [{ parts: [raw] }] };
+      const tree = { messagesBySessionId: { [ownedNativeSessionId]: [{ messageID: fixture.manifest.messageId, part: raw }] } };
+      expect(() => assertV2ContentProjection(kind, raw, history, tree)).not.toThrow();
+      expect(() => assertV2ContentProjection(kind, raw, { items: [{ parts: [{ ...raw, type: "wrong" }] }] }, tree)).toThrow(/platform messages/);
+      const store = createNativeFixtureManifestStore(handle, `${kind}-v2.json`);
+      await store.write(fixture.manifest);
+      expect(await store.read()).toEqual(fixture.manifest);
+      await executeNativeV2FixtureCleanupSql(handle, fixture.manifest);
+      await store.clear(fixture.manifest);
+      expect((await exec("sqlite3", [database, "SELECT count(*) FROM session_message;"])).stdout.trim()).toBe("0");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

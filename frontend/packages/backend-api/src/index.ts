@@ -795,20 +795,20 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
   const agentConfigFileConnections = new Map<string, Promise<WorkspaceFileSocketClient>>();
   let agentSkillHubFileSocket: WorkspaceFileSocketClient | null = null;
   let agentSkillHubFileConnection: Promise<WorkspaceFileSocketClient> | null = null;
-  const runtimeProviderAllowlistRequests = new Map<string, Promise<Set<string> | undefined>>();
+  const runtimeProviderAllowlistRequests = new Map<string, Promise<((providerId: string) => boolean) | undefined>>();
 
   /**
    * 模型和 Provider 目录并发加载时复用同一轮 config 请求；请求结束即清理，配置热加载后可及时生效。
    * config 暂时不可用时保持原生目录兼容，不能让辅助过滤阻断整个模型选择器。
    */
-  function runtimeProviderAllowlist(workspaceId?: string): Promise<Set<string> | undefined> {
+  function runtimeProviderAllowlist(workspaceId?: string): Promise<((providerId: string) => boolean) | undefined> {
     const routeLinuxServerId = options.routeLinuxServerId?.()?.trim() ?? "";
     const key = `${routeLinuxServerId}\u0000${workspaceId ?? ""}`;
     const existing = runtimeProviderAllowlistRequests.get(key);
     if (existing) return existing;
 
     const pending = routedRequest<unknown>(`${opencodeRuntimeBase}/config${query({ workspaceId })}`).then(
-      providerAllowlistFromConfig,
+      providerFilterFromConfig,
       () => undefined
     );
     runtimeProviderAllowlistRequests.set(key, pending);
@@ -825,14 +825,17 @@ function createBackendApiClientInternal(options: BackendApiClientInternalOptions
       routedRequest<unknown>(path),
       runtimeProviderAllowlist(workspaceId)
     ]);
-    // OpenCode V2 的 Provider 目录包在 `{ all: [...] }` 中；统一解包后只应用平台白名单，保留原生顺序。
+    // V2 目录带 location/data envelope，并以 model.enabled/provider.activation 声明原生可用性。
+    // 旧版 {all:[...]} 与平台 enabled_providers 继续兼容回滚包。
     const payload = record(value)?.data ?? value;
     const all = record(payload)?.all;
-    const items = listFromRuntimeEnvelope(Array.isArray(all) ? all : payload);
+    const items = listFromRuntimeEnvelope(Array.isArray(all) ? all : payload).filter((item) =>
+      path.includes("/models") ? item.enabled !== false : item.activation !== "disabled"
+    );
     if (!allowlist) return items;
     return items.filter((item) => {
       const providerId = runtimeCatalogProviderId(item);
-      return providerId !== undefined && allowlist.has(providerId);
+      return providerId !== undefined && allowlist(providerId);
     });
   }
 
@@ -4348,15 +4351,46 @@ async function runtimeList(path: string, request: RequestFn, init?: ExtraRequest
   return listFromRuntimeEnvelope(await request<unknown>(path, init));
 }
 
-function providerAllowlistFromConfig(value: unknown): Set<string> | undefined {
+function providerFilterFromConfig(value: unknown): ((providerId: string) => boolean) | undefined {
   const config = record(value);
   const raw = config?.enabled_providers ?? config?.enabledProviders;
-  if (!Array.isArray(raw)) return undefined;
-  const providerIds = raw
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return providerIds.length > 0 ? new Set(providerIds) : undefined;
+  if (Array.isArray(raw)) {
+    const providerIds = raw
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const allowed = new Set(providerIds);
+    return allowed.size > 0 ? (providerId) => allowed.has(providerId) : undefined;
+  }
+
+  if (!Array.isArray(value)) return undefined;
+  // V2 按 document 逆序合并策略，再取最后一条匹配项；与上游 provider policy 的优先级保持一致。
+  const policies = value
+    .map(record)
+    .filter((entry) => entry?.type === "document")
+    .reverse()
+    .flatMap((entry) => {
+      const experimental = record(record(entry?.info)?.experimental);
+      return Array.isArray(experimental?.policies) ? experimental.policies : [];
+    })
+    .map(record)
+    .filter((policy) => policy?.action === "provider.use"
+      && typeof policy.resource === "string"
+      && (policy.effect === "allow" || policy.effect === "deny"));
+  if (policies.length === 0) return undefined;
+  return (providerId) => {
+    const matched = policies.slice().reverse().find((policy) => providerPolicyMatches(providerId, String(policy?.resource)));
+    return matched?.effect !== "deny";
+  };
+}
+
+function providerPolicyMatches(providerId: string, resource: string): boolean {
+  const pattern = resource.replaceAll("\\", "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  const normalized = providerId.replaceAll("\\", "/");
+  return new RegExp(`^${pattern}$`, "s").test(normalized);
 }
 
 function runtimeCatalogProviderId(value: Record<string, unknown>): string | undefined {
@@ -4400,10 +4434,15 @@ function toAgentInfo(value: Record<string, unknown>): AgentInfo {
 
 function toModelInfo(value: Record<string, unknown>): ModelInfo {
   const id = text(value.id) ?? text(value.modelId) ?? text(value.modelID) ?? "unknown";
-  const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : undefined;
+  const variants = Array.isArray(value.variants)
+    ? value.variants.map((item) => typeof item === "string" ? item : text(record(item)?.id)).filter((item): item is string => Boolean(item))
+    : undefined;
   const limit = record(value.limit);
   const capabilities = record(value.capabilities);
   const inputCapabilities = record(capabilities?.input);
+  const inputFormats = Array.isArray(capabilities?.input)
+    ? new Set(capabilities.input.filter((item): item is string => typeof item === "string"))
+    : undefined;
   return compactObject({
     id,
     providerId: text(value.providerId) ?? text(value.providerID) ?? text(record(value.provider)?.id),
@@ -4415,14 +4454,15 @@ function toModelInfo(value: Record<string, unknown>): ModelInfo {
     variants,
     capabilities: capabilities
       ? compactObject({
-          attachment: typeof capabilities.attachment === "boolean" ? capabilities.attachment : undefined,
-          input: inputCapabilities
+          attachment: typeof capabilities.attachment === "boolean" ? capabilities.attachment
+            : inputFormats ? ["audio", "image", "video", "pdf"].some((format) => inputFormats.has(format)) : undefined,
+          input: inputCapabilities || inputFormats
             ? compactObject({
-                text: typeof inputCapabilities.text === "boolean" ? inputCapabilities.text : undefined,
-                audio: typeof inputCapabilities.audio === "boolean" ? inputCapabilities.audio : undefined,
-                image: typeof inputCapabilities.image === "boolean" ? inputCapabilities.image : undefined,
-                video: typeof inputCapabilities.video === "boolean" ? inputCapabilities.video : undefined,
-                pdf: typeof inputCapabilities.pdf === "boolean" ? inputCapabilities.pdf : undefined
+                text: typeof inputCapabilities?.text === "boolean" ? inputCapabilities.text : inputFormats?.has("text"),
+                audio: typeof inputCapabilities?.audio === "boolean" ? inputCapabilities.audio : inputFormats?.has("audio"),
+                image: typeof inputCapabilities?.image === "boolean" ? inputCapabilities.image : inputFormats?.has("image"),
+                video: typeof inputCapabilities?.video === "boolean" ? inputCapabilities.video : inputFormats?.has("video"),
+                pdf: typeof inputCapabilities?.pdf === "boolean" ? inputCapabilities.pdf : inputFormats?.has("pdf")
               })
             : undefined
         })

@@ -93,7 +93,7 @@ class ModelCatalogApplicationServiceTest {
 
         assertThat(runtime.command).isNotNull();
         assertThat(runtime.command.method()).isEqualTo("PATCH");
-        assertThat(runtime.command.path()).isEqualTo("/global/config");
+        assertThat(runtime.command.path()).isEqualTo("/api/config");
         assertThat(runtime.command.body()).asString()
                 .contains("enterprise-openai")
                 .contains("DeepSeek-V4-Flash-W8A8")

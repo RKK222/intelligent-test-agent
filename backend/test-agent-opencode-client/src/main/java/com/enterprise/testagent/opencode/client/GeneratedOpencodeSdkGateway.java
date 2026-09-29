@@ -1,23 +1,20 @@
 package com.enterprise.testagent.opencode.client;
 
 import com.example.opencode.sdk.ApiClient;
-import com.example.opencode.sdk.api.EventApi;
-import com.example.opencode.sdk.api.GlobalApi;
-import com.example.opencode.sdk.api.SessionApi;
-import com.example.opencode.sdk.api.SessionsApi;
-import com.example.opencode.sdk.model.SnapshotFileDiff;
 import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -40,6 +37,8 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GeneratedOpencodeSdkGateway.class);
     private static final int OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE = 16 * 1024 * 1024;
+    private static final Pattern PROVIDER_OAUTH_CALLBACK =
+            Pattern.compile("^/provider/([^/]+)/oauth/callback$");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<OpencodeWebClientTransport> transports;
@@ -57,9 +56,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      */
     @Override
     public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        return new GlobalApi(apiClient)
-                .globalHealth()
+        return invokeJson(node, "GET", "/api/info", Map.of(), null, Map.of(), traceId)
                 .map(ignored -> new OpencodeHealthResult(true, node.baseUrl()));
     }
 
@@ -73,31 +70,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String title,
             String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
-        };
-        Map<String, Object> pathParams = new HashMap<>();
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
-        Map<String, Object> request = title == null ? Map.of() : Map.of("title", title);
-        HttpHeaders headerParams = new HttpHeaders();
-        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
-        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
-        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
-        MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
-        return apiClient.invokeAPI(
-                        "/session",
-                        HttpMethod.POST,
-                        pathParams,
-                        queryParams,
-                        request,
-                        headerParams,
-                        cookieParams,
-                        formParams,
-                        accepts,
-                        contentType,
-                        new String[]{},
-                        returnType)
-                .bodyToMono(returnType)
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        if (optionalText(title) != null) request.put("title", title);
+        request.put("location", Map.of("directory", directory));
+        return invokeJson(node, "POST", "/api/session", Map.of(), request, Map.of(), traceId)
                 .map(body -> new OpencodeCreateSessionResult(extractSessionId(body)));
     }
 
@@ -106,9 +82,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      */
     @Override
     public Mono<Boolean> sessionExists(ExecutionNode node, String opencodeSessionId, String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        return new SessionsApi(apiClient)
-                .v2SessionGet(opencodeSessionId)
+        return invokeJson(node, "GET", "/api/session/" + opencodeSessionId, Map.of(), null, Map.of(), traceId)
                 .thenReturn(true);
     }
 
@@ -122,14 +96,19 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String directory,
             String workspace,
             String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        return new SessionApi(apiClient)
-                .sessionAbort(opencodeSessionId, directory, optionalText(workspace))
-                .map(cancelled -> new OpencodeCancelResult(Boolean.TRUE.equals(cancelled)));
+        return invokeJson(
+                        node,
+                        "POST",
+                        "/api/session/" + opencodeSessionId + "/interrupt",
+                        Map.of(),
+                        null,
+                        Map.of("resume", "false"),
+                        traceId)
+                .map(cancelled -> new OpencodeCancelResult(true));
     }
 
     /**
-     * 通过 prompt_async 启动 opencode 运行，使用稳定 JSON Map 隔离 generated union DTO 差异。
+     * 通过 V2 prompt 请求启动 opencode 运行，使用稳定 JSON Map 隔离 generated union DTO 差异。
      */
     @Override
     public Mono<OpencodeStartRunResult> startRun(
@@ -147,11 +126,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String variant,
             Map<String, Boolean> tools,
             String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        // prompt_async 的 parts 是 union schema；用稳定 JSON Map 避免 generated DTO 对 file/source 字段的类型遮蔽。
-        Map<String, Object> request = promptAsyncRequest(
+        // V2 prompt 将文本、文件和 agent 引用拆成独立字段；这里集中完成平台 part 转换。
+        Map<String, Object> request = promptRequest(
                 parts, messageId, agent, system, modelProviderId, modelId, variant, tools, prompt);
-        logPromptAsyncRequestPrepared(
+        logPromptRequestPrepared(
                 node,
                 opencodeSessionId,
                 directory,
@@ -163,31 +141,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 variant,
                 traceId,
                 request);
-        ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
-        };
-        Map<String, Object> pathParams = new HashMap<>();
-        pathParams.put("sessionID", opencodeSessionId);
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
-        HttpHeaders headerParams = new HttpHeaders();
-        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
-        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
-        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
-        MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
-        return apiClient.invokeAPI(
-                        "/session/{sessionID}/prompt_async",
-                        HttpMethod.POST,
-                        pathParams,
-                        queryParams,
+        return selectSessionRuntime(node, opencodeSessionId, agent, modelProviderId, modelId, variant, traceId)
+                .then(invokeJson(
+                        node,
+                        "POST",
+                        "/api/session/" + opencodeSessionId + "/prompt",
+                        Map.of(),
                         request,
-                        headerParams,
-                        cookieParams,
-                        formParams,
-                        accepts,
-                        contentType,
-                        new String[]{},
-                        returnType)
-                .bodyToMono(returnType)
-                .doOnSuccess(ignored -> logPromptAsyncRequestAccepted(
+                        Map.of(),
+                        traceId))
+                .doOnSuccess(ignored -> logPromptRequestAccepted(
                         node,
                         opencodeSessionId,
                         messageId,
@@ -246,48 +209,42 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String modelId,
             String variant,
             String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
         LinkedHashMap<String, Object> request = new LinkedHashMap<>();
-        request.put("command", command);
-        request.put("arguments", arguments == null ? "" : arguments);
-        String optionalMessageId = optionalText(messageId);
-        if (optionalMessageId != null) {
-            request.put("messageID", optionalMessageId);
-        }
+        request.put("name", command);
+        request.put("text", arguments == null ? "" : arguments);
         String optionalAgent = optionalText(agent);
         if (optionalAgent != null) {
-            request.put("agent", optionalAgent);
-        }
-        String optionalModelProvider = optionalText(modelProviderId);
-        String optionalModelId = optionalText(modelId);
-        if (optionalModelProvider != null && optionalModelId != null) {
-            request.put("model", optionalModelProvider + "/" + optionalModelId);
-        }
-        String optionalVariant = optionalText(variant);
-        if (optionalVariant != null) {
-            request.put("variant", optionalVariant);
+            request.put("agents", List.of(Map.of("name", optionalAgent)));
         }
         List<Map<String, Object>> fileParts = parts == null
                 ? List.of()
                 : parts.stream()
                         .filter(part -> "file".equals(part.type()))
-                        .map(OpencodePromptPart::toRequestBody)
+                        .map(part -> {
+                            Map<String, Object> file = new LinkedHashMap<>();
+                            file.put("uri", part.url());
+                            file.put("name", part.filename() == null ? "attachment" : part.filename());
+                            return file;
+                        })
                         .toList();
         if (!fileParts.isEmpty()) {
-            request.put("parts", fileParts);
+            request.put("files", fileParts);
         }
+        ApiClient apiClient = apiClient(node, traceId);
         ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
         pathParams.put("sessionID", opencodeSessionId);
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        // V2 session 已绑定创建时的 location，固定上下文操作不再重复发送目录 query。
+        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         HttpHeaders headerParams = new HttpHeaders();
         MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
         MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
         List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
         MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
-        return apiClient.invokeAPI(
-                        "/session/{sessionID}/command",
+        return selectSessionRuntime(node, opencodeSessionId, agent, modelProviderId, modelId, variant, traceId)
+                .then(apiClient.invokeAPI(
+                        "/api/session/" + opencodeSessionId + "/command",
                         HttpMethod.POST,
                         pathParams,
                         queryParams,
@@ -298,15 +255,37 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         accepts,
                         contentType,
                         new String[]{},
-                        returnType)
-                .bodyToMono(returnType)
+                        returnType).bodyToMono(returnType))
                 .thenReturn(new OpencodeStartRunResult(true));
     }
 
-    /**
-     * 构造 prompt_async 请求体，只写入调用方显式传入的可选运行态选择字段。
-     */
-    private Map<String, Object> promptAsyncRequest(
+    /** V2 prompt/command 不接受旧 model/agent 字段，先在固定 session 上选择运行上下文。 */
+    private Mono<Void> selectSessionRuntime(
+            ExecutionNode node,
+            String sessionId,
+            String agent,
+            String providerId,
+            String modelId,
+            String variant,
+            String traceId) {
+        Mono<Void> selected = Mono.empty();
+        if (optionalText(agent) != null) {
+            selected = selected.then(invokeJson(node, "POST", "/api/session/" + sessionId + "/agent",
+                    Map.of(), Map.of("agent", agent), Map.of(), traceId)).then();
+        }
+        if (optionalText(providerId) != null && optionalText(modelId) != null) {
+            LinkedHashMap<String, Object> model = new LinkedHashMap<>();
+            model.put("providerID", providerId);
+            model.put("id", modelId);
+            if (optionalText(variant) != null) model.put("variant", variant);
+            selected = selected.then(invokeJson(node, "POST", "/api/session/" + sessionId + "/model",
+                    Map.of(), Map.of("model", model), Map.of(), traceId)).then();
+        }
+        return selected;
+    }
+
+    /** 构造 V2 prompt 请求体，保留平台附件和 agent 语义。 */
+    private Map<String, Object> promptRequest(
             List<OpencodePromptPart> parts,
             String messageId,
             String agent,
@@ -318,42 +297,40 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String prompt) {
         LinkedHashMap<String, Object> request = new LinkedHashMap<>();
         String optionalMessageId = optionalText(messageId);
-        if (optionalMessageId != null) {
-            request.put("messageID", optionalMessageId);
+        if (optionalMessageId != null) request.put("id", optionalMessageId);
+        String text = (parts == null || parts.isEmpty())
+                ? prompt
+                : parts.stream().filter(part -> "text".equals(part.type())).map(OpencodePromptPart::text).reduce("", (a, b) -> a + b);
+        request.put("text", text == null ? "" : text);
+        List<Map<String, Object>> files = parts == null ? List.of() : parts.stream()
+                .filter(part -> "file".equals(part.type()))
+                .map(part -> {
+                    LinkedHashMap<String, Object> file = new LinkedHashMap<>();
+                    file.put("uri", part.url());
+                    if (optionalText(part.filename()) != null) file.put("name", part.filename());
+                    return Map.copyOf(file);
+                }).toList();
+        if (!files.isEmpty()) request.put("files", files);
+        List<Map<String, Object>> agents = new ArrayList<>();
+        if (optionalText(agent) != null) agents.add(Map.of("name", agent));
+        if (parts != null) parts.stream().filter(part -> "agent".equals(part.type()))
+                .forEach(part -> agents.add(Map.of("name", part.name())));
+        if (!agents.isEmpty()) request.put("agents", agents);
+        LinkedHashMap<String, Object> metadata = new LinkedHashMap<>();
+        if (optionalText(system) != null) metadata.put("system", system);
+        if (optionalText(modelProviderId) != null && optionalText(modelId) != null) {
+            metadata.put("model", modelProviderId + "/" + modelId);
         }
-        String optionalAgent = optionalText(agent);
-        if (optionalAgent != null) {
-            request.put("agent", optionalAgent);
-        }
-        String optionalSystem = optionalText(system);
-        if (optionalSystem != null) {
-            request.put("system", optionalSystem);
-        }
-        String optionalModelProvider = optionalText(modelProviderId);
-        String optionalModelId = optionalText(modelId);
-        if (optionalModelProvider != null && optionalModelId != null) {
-            request.put("model", Map.of("providerID", optionalModelProvider, "modelID", optionalModelId));
-        }
-        String optionalVariant = optionalText(variant);
-        if (optionalVariant != null) {
-            request.put("variant", optionalVariant);
-        }
-        if (tools != null && !tools.isEmpty()) {
-            request.put("tools", Map.copyOf(tools));
-        }
-        List<Map<String, Object>> requestParts = (parts == null || parts.isEmpty()
-                ? List.of(OpencodePromptPart.text(prompt))
-                : parts).stream()
-                .map(OpencodePromptPart::toRequestBody)
-                .toList();
-        request.put("parts", requestParts);
+        if (optionalText(variant) != null) metadata.put("variant", variant);
+        if (tools != null && !tools.isEmpty()) metadata.put("tools", Map.copyOf(tools));
+        if (!metadata.isEmpty()) request.put("metadata", metadata);
         return Map.copyOf(request);
     }
 
     /**
-     * 记录发给 opencode prompt_async 的结构摘要，避免正文、data URL 和 source.text 原文进入日志。
+     * 记录发给 opencode prompt 的结构摘要，避免正文、data URL 和 source.text 原文进入日志。
      */
-    private void logPromptAsyncRequestPrepared(
+    private void logPromptRequestPrepared(
             ExecutionNode node,
             String opencodeSessionId,
             String directory,
@@ -366,7 +343,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String traceId,
             Map<String, Object> request) {
         LOGGER.info(
-                "opencode_prompt_async_request_prepared traceId={} nodeId={} baseUrl={} sessionId={} directoryPresent={} workspacePresent={} messageId={} agent={} modelProviderId={} modelId={} variant={} partsCount={} partsSummary={}",
+                "opencode_prompt_request_prepared traceId={} nodeId={} baseUrl={} sessionId={} directoryPresent={} workspacePresent={} messageId={} agent={} modelProviderId={} modelId={} variant={} partsCount={} partsSummary={}",
                 traceId,
                 node.executionNodeId().value(),
                 node.baseUrl(),
@@ -378,40 +355,40 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 optionalText(modelProviderId),
                 optionalText(modelId),
                 optionalText(variant),
-                promptAsyncParts(request).size(),
-                summarizePromptAsyncRequest(request));
+                promptParts(request).size(),
+                summarizePromptRequest(request));
     }
 
     /**
-     * 记录 opencode 已接受 prompt_async 请求，便于和后续 global/event 中的 user message parts 对照。
+     * 记录 opencode 已接受 prompt 请求，便于和后续 global/event 中的 user message parts 对照。
      */
-    private void logPromptAsyncRequestAccepted(
+    private void logPromptRequestAccepted(
             ExecutionNode node,
             String opencodeSessionId,
             String messageId,
             String traceId,
             Map<String, Object> request) {
         LOGGER.info(
-                "opencode_prompt_async_request_accepted traceId={} nodeId={} baseUrl={} sessionId={} messageId={} partsCount={} partsSummary={}",
+                "opencode_prompt_request_accepted traceId={} nodeId={} baseUrl={} sessionId={} messageId={} partsCount={} partsSummary={}",
                 traceId,
                 node.executionNodeId().value(),
                 node.baseUrl(),
                 opencodeSessionId,
                 optionalText(messageId),
-                promptAsyncParts(request).size(),
-                summarizePromptAsyncRequest(request));
+                promptParts(request).size(),
+                summarizePromptRequest(request));
     }
 
     /**
-     * 提取 prompt_async parts 的脱敏摘要，保留 type/mime/filename/source 范围用于核对原生附件形态。
+     * 提取 prompt parts 的脱敏摘要，保留 type/mime/filename/source 范围用于核对原生附件形态。
      */
-    static List<Map<String, Object>> summarizePromptAsyncRequest(Map<String, Object> request) {
-        return promptAsyncParts(request).stream()
+    static List<Map<String, Object>> summarizePromptRequest(Map<String, Object> request) {
+        return promptParts(request).stream()
                 .map(GeneratedOpencodeSdkGateway::summarizePromptPart)
                 .toList();
     }
 
-    private static List<Map<String, Object>> promptAsyncParts(Map<String, Object> request) {
+    private static List<Map<String, Object>> promptParts(Map<String, Object> request) {
         Object rawParts = request == null ? null : request.get("parts");
         if (!(rawParts instanceof List<?> list)) {
             return List.of();
@@ -519,10 +496,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      */
     @Override
     public Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        return new EventApi(apiClient)
-                .eventSubscribeWithResponseSpec(directory, optionalText(workspace))
-                .bodyToFlux(JsonNode.class);
+        return invokeEventStream(node, traceId);
     }
 
     /**
@@ -535,13 +509,26 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
-        Mono<ResponseEntity<Flux<JsonNode>>> response = new EventApi(apiClient)
-                .eventSubscribeWithResponseSpec(directory, optionalText(workspace))
+        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {};
+        Mono<ResponseEntity<Flux<JsonNode>>> response = apiClient.invokeAPI(
+                        "/api/event", HttpMethod.GET, Map.of(), new LinkedMultiValueMap<>(), null,
+                        new HttpHeaders(), new LinkedMultiValueMap<>(), new LinkedMultiValueMap<>(),
+                        List.of(MediaType.TEXT_EVENT_STREAM), MediaType.APPLICATION_JSON, new String[]{}, returnType)
                 .toEntityFlux(JsonNode.class)
                 .cache();
         return new OpencodeEventStream(
                 response.then(),
                 response.flatMapMany(ResponseEntity::getBody));
+    }
+
+    private Flux<JsonNode> invokeEventStream(ExecutionNode node, String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {};
+        return apiClient.invokeAPI(
+                        "/api/event", HttpMethod.GET, Map.of(), new LinkedMultiValueMap<>(), null,
+                        new HttpHeaders(), new LinkedMultiValueMap<>(), new LinkedMultiValueMap<>(),
+                        List.of(MediaType.TEXT_EVENT_STREAM), MediaType.APPLICATION_JSON, new String[]{}, returnType)
+                .bodyToFlux(returnType);
     }
 
     /**
@@ -555,11 +542,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String messageId,
             String traceId) {
-        ApiClient apiClient = apiClient(node, traceId);
-        return new SessionApi(apiClient)
-                .sessionDiff(opencodeSessionId, directory, optionalText(workspace), optionalText(messageId))
-                .map(this::toDiffFile)
-                .collectList()
+        Map<String, String> query = optionalText(messageId) == null ? Map.of() : Map.of("to", messageId);
+        return invokeJson(node, "GET", "/api/session/" + opencodeSessionId + "/diff", Map.of(), null, query, traceId)
+                .map(this::toDiffFiles)
                 .map(OpencodeDiffResult::new);
     }
 
@@ -577,21 +562,21 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
         // generated SessionApi 的参数包装类遮蔽了 model.SessionRevertRequest，这里直接构造稳定 JSON 请求体。
-        Map<String, Object> request = optionalText(partId) == null
-                ? Map.of("messageID", messageId)
-                : Map.of("messageID", messageId, "partID", optionalText(partId));
+        // V2 的 revert/stage 以 messageID 和 files 控制范围；partID 只保留在平台审计上下文中。
+        Map<String, Object> request = Map.of("messageID", messageId);
         ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
         pathParams.put("sessionID", opencodeSessionId);
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        // V2 session 已绑定创建时的 location，固定上下文操作不再重复发送目录 query。
+        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         HttpHeaders headerParams = new HttpHeaders();
         MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
         MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
         List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
         MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
         return apiClient.invokeAPI(
-                        "/session/{sessionID}/revert",
+                        "/api/session/" + opencodeSessionId + "/revert/stage",
                         HttpMethod.POST,
                         pathParams,
                         queryParams,
@@ -620,10 +605,11 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         };
         Map<String, Object> pathParams = new HashMap<>();
         pathParams.put("sessionID", opencodeSessionId);
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        // V2 session 已绑定创建时的 location，固定上下文操作不再重复发送目录 query。
+        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         return apiClient.invokeAPI(
-                        "/session/{sessionID}/unrevert",
-                        HttpMethod.POST,
+                        "/api/session/" + opencodeSessionId + "/revert",
+                        HttpMethod.DELETE,
                         pathParams,
                         queryParams,
                         null,
@@ -651,12 +637,44 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             Map<String, String> query,
             Object body,
             String traceId) {
+        if ("GET".equals(method) && "/vcs/status".equals(path)) {
+            // V2 将分支信息和文件状态拆成两个接口；平台的 status 仍同时提供两者。
+            return Mono.zip(
+                            runtime(node, method, "/api/vcs", directory, workspace, Map.of(), null, traceId),
+                            runtime(node, method, "/api/vcs/status", directory, workspace, Map.of(), null, traceId))
+                    .map(pair -> new OpencodeRuntimeResult(projectVcsStatus(pair.getT1().body(), pair.getT2().body())));
+        }
         ApiClient apiClient = apiClient(node, traceId);
         ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
-        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
-        query.forEach((name, value) -> {
+        String v2Path = OpencodeV2RouteMapper.map(path);
+        Map<String, String> runtimeQuery = query == null ? Map.of() : new LinkedHashMap<>(query);
+        boolean toolCatalog = "/experimental/tool".equals(path) || "/experimental/tool/ids".equals(path);
+        if ("/file/content".equals(path) && runtimeQuery.containsKey("path")) {
+            v2Path = "/api/fs/read/" + runtimeQuery.remove("path");
+        }
+        if (toolCatalog) {
+            // V2 RPC 返回注册工具目录；当前协议没有 V1 的 provider/model 专项过滤。
+            runtimeQuery.remove("provider");
+            runtimeQuery.remove("model");
+        }
+        Matcher oauthCallback = PROVIDER_OAUTH_CALLBACK.matcher(path == null ? "" : path);
+        if (oauthCallback.matches() && body instanceof Map<?, ?> rawBody) {
+            String attemptId = firstText(rawBody, "attemptID", "attemptId", "id");
+            if (attemptId != null) {
+                v2Path = "/api/integration/" + oauthCallback.group(1)
+                        + "/connect/oauth/" + attemptId + "/complete";
+            }
+        }
+        if (v2Path.endsWith("/diff") && runtimeQuery.containsKey("messageID")) {
+            runtimeQuery.putIfAbsent("to", runtimeQuery.remove("messageID"));
+        }
+        Object v2Body = toolCatalog ? Map.of("input", Map.of())
+                : noBodyEndpoint(v2Path, method) ? null : normalizeRuntimeBody(v2Path, body);
+        HttpMethod v2Method = toolCatalog ? HttpMethod.POST : HttpMethod.valueOf(method);
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, v2Path, directory);
+        runtimeQuery.forEach((name, value) -> {
             if (value != null && !value.isBlank()) {
                 queryParams.putAll(apiClient.parameterToMultiValueMap(null, name, value));
             }
@@ -667,11 +685,11 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
         MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
         return apiClient.invokeAPI(
-                        path,
-                        HttpMethod.valueOf(method),
+                        v2Path,
+                        v2Method,
                         pathParams,
                         queryParams,
-                        body,
+                        v2Body,
                         headerParams,
                         cookieParams,
                         formParams,
@@ -681,7 +699,182 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         returnType)
                 .bodyToMono(returnType)
                 .defaultIfEmpty(objectMapper.createObjectNode().put("accepted", true))
+                .map(result -> toolCatalog ? projectRuntimeToolCatalog(path, result) : projectRuntimeResponse(path, result))
                 .map(OpencodeRuntimeResult::new);
+    }
+
+    /** V2 的 location envelope 与平台旧运行态 DTO 在 client 边界归一化。 */
+    private JsonNode projectRuntimeResponse(String path, JsonNode result) {
+        if ("/mcp".equals(path) && result.path("data").isArray()) {
+            var projected = objectMapper.createObjectNode();
+            result.path("data").forEach(server -> {
+                String name = server.path("name").asText("");
+                if (name.isBlank()) return;
+                var status = objectMapper.createObjectNode();
+                status.put("name", name);
+                status.put("status", server.path("status").path("status").asText("unknown"));
+                if (server.path("status").path("error").isTextual()) {
+                    status.set("error", server.path("status").path("error"));
+                }
+                projected.set(name, status);
+            });
+            return projected;
+        }
+        if ("/experimental/resource".equals(path) && result.path("data").isObject()) {
+            var resources = objectMapper.createArrayNode();
+            JsonNode catalog = result.path("data");
+            if (catalog.path("resources").isArray()) {
+                catalog.path("resources").forEach(resources::add);
+            }
+            if (catalog.path("templates").isArray()) {
+                catalog.path("templates").forEach(template -> {
+                    var projected = template.deepCopy();
+                    if (projected instanceof com.fasterxml.jackson.databind.node.ObjectNode object) {
+                        object.put("type", "template");
+                        object.set("uri", template.path("uriTemplate"));
+                    }
+                    resources.add(projected);
+                });
+            }
+            return resources;
+        }
+        if ("/lsp".equals(path) && result.isArray()) {
+            // /api/config 是配置清单，不含 LSP 进程实时健康；不能把任意配置误报为 ready。
+            var projected = objectMapper.createObjectNode();
+            projected.put("status", "unknown");
+            result.forEach(entry -> {
+                if (entry.path("type").asText().equals("document")
+                        && entry.path("info").path("lsp").isBoolean()
+                        && !entry.path("info").path("lsp").asBoolean()) {
+                    projected.put("status", "disabled");
+                }
+            });
+            return projected;
+        }
+        return result;
+    }
+
+    private JsonNode projectVcsStatus(JsonNode info, JsonNode fileStatus) {
+        var projected = objectMapper.createObjectNode();
+        projected.put("status", "ready");
+        JsonNode branch = info.path("data").path("branch");
+        if (branch.path("current").isTextual()) projected.set("branch", branch.path("current"));
+        if (branch.path("default").isTextual()) projected.set("defaultBranch", branch.path("default"));
+        projected.set("files", fileStatus.path("data").isArray()
+                ? fileStatus.path("data") : objectMapper.createArrayNode());
+        return projected;
+    }
+
+    /** V2 插件 RPC 输出恢复旧平台 tool / tool-id 数组，不把 RPC envelope 暴露给前端。 */
+    private JsonNode projectRuntimeToolCatalog(String path, JsonNode result) {
+        JsonNode tools = result.path("output");
+        if (!tools.isArray()) throw new IllegalStateException("OpenCode V2 tool catalog RPC returned no output array");
+        if (!"/experimental/tool/ids".equals(path)) return tools;
+        var ids = objectMapper.createArrayNode();
+        tools.forEach(tool -> {
+            JsonNode id = tool.path("toolId");
+            if (id.isTextual()) ids.add(id.asText());
+        });
+        return ids;
+    }
+
+    private Object normalizeRuntimeBody(String v2Path, Object body) {
+        if (!(body instanceof Map<?, ?> raw)) {
+            return body;
+        }
+        LinkedHashMap<String, Object> source = new LinkedHashMap<>();
+        raw.forEach((key, value) -> {
+            if (key instanceof String name && value != null) source.put(name, value);
+        });
+        if (v2Path.matches("/api/integration/[^/]+/connect/oauth/[^/]+/complete")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            copyIfPresent(source, normalized, "code");
+            return normalized;
+        }
+        if (v2Path.endsWith("/command")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            String name = firstText(source, "name", "command");
+            String text = firstText(source, "text", "arguments");
+            if (name != null) normalized.put("name", name);
+            normalized.put("text", text == null ? "" : text);
+            copyIfPresent(source, normalized, "files", "agents", "skills", "delivery");
+            return normalized;
+        }
+        if (v2Path.endsWith("/compact")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            copyIfPresent(source, normalized, "id", "delivery");
+            return normalized;
+        }
+        if (v2Path.endsWith("/fork")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            String before = firstText(source, "before", "messageID", "messageId");
+            if (before != null) normalized.put("before", before);
+            return normalized;
+        }
+        if (v2Path.endsWith("/revert/stage")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            String messageId = firstText(source, "messageID", "messageId", "id");
+            if (messageId != null) normalized.put("messageID", messageId);
+            copyIfPresent(source, normalized, "files");
+            return normalized;
+        }
+        if (v2Path.matches(".*/permission/[^/]+/reply$")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            String decision = firstText(source, "decision", "reply");
+            if (decision != null) normalized.put("decision", decision);
+            copyIfPresent(source, normalized, "message");
+            return normalized;
+        }
+        if (v2Path.matches(".*/form/[^/]+/reply$")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            Object answer = source.get("answer");
+            if (answer instanceof Map<?, ?>) {
+                normalized.put("answer", answer);
+            } else if (source.get("answers") instanceof List<?> answers) {
+                // V1 answers are ordered arrays; V2 forms are keyed by field key. Numeric
+                // keys remain a deterministic compatibility projection when the caller has
+                // not supplied the V2 field-key map.
+                LinkedHashMap<String, Object> keyed = new LinkedHashMap<>();
+                for (int i = 0; i < answers.size(); i++) keyed.put(Integer.toString(i), answers.get(i));
+                normalized.put("answer", keyed);
+            }
+            return normalized;
+        }
+        if (v2Path.endsWith("/shell")) {
+            LinkedHashMap<String, Object> normalized = new LinkedHashMap<>();
+            String command = firstText(source, "command", "text");
+            if (command != null) normalized.put("command", command);
+            copyIfPresent(source, normalized, "id");
+            return normalized;
+        }
+        return body;
+    }
+
+    /** V2 的取消、拒绝和重载路由无请求体，旧平台空对象不得进入严格 schema。 */
+    private boolean noBodyEndpoint(String path, String method) {
+        if ("POST".equals(method)) {
+            return path.equals("/api/location/reload")
+                    || path.matches("/api/session/[^/]+/interrupt")
+                    || path.matches("/api/experimental/mcp/[^/]+/(connect|disconnect)");
+        }
+        if ("DELETE".equals(method)) {
+            return path.matches("/api/session/[^/]+")
+                    || path.matches("/api/session/[^/]+/revert")
+                    || path.matches("/api/session/[^/]+/form/[^/]+");
+        }
+        return false;
+    }
+
+    private static String firstText(Map<?, ?> source, String... keys) {
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value instanceof String text && !text.isBlank()) return text;
+        }
+        return null;
+    }
+
+    private static void copyIfPresent(Map<String, Object> source, Map<String, Object> target, String... keys) {
+        for (String key : keys) if (source.containsKey(key)) target.put(key, source.get(key));
     }
 
     /**
@@ -696,13 +889,14 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String cursor,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
-        ParameterizedTypeReference<Map<String, Object>> returnType = new ParameterizedTypeReference<>() {
+        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
         pathParams.put("sessionID", opencodeSessionId);
         MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         queryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
-        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "before", optionalText(cursor)));
+        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "order", order));
+        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", optionalText(cursor)));
         HttpHeaders headerParams = new HttpHeaders();
         MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
         MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
@@ -710,7 +904,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         MediaType contentType = apiClient.selectHeaderContentType(new String[]{});
         // generated Message/Part union 会把 user 误收窄成 assistant，使用同一 generated ApiClient 读取稳定原始 JSON。
         return apiClient.invokeAPI(
-                        "/session/{sessionID}/message",
+                        "/api/session/" + opencodeSessionId + "/message",
                         HttpMethod.GET,
                         pathParams,
                         queryParams,
@@ -722,17 +916,56 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         contentType,
                         new String[]{},
                         returnType)
-                .toEntityList(returnType)
-                .map(response -> toSessionMessagesResult(response, order));
+                .toEntity(returnType)
+                .map(response -> toSessionMessagesResult(response, order, opencodeSessionId));
     }
 
     /**
      * 为每次 gateway 调用创建带 baseUrl 和 traceId header 的 generated ApiClient。
      */
     private ApiClient apiClient(ExecutionNode node, String traceId) {
-        return new ApiClient(webClient(node, traceId))
+        ApiClient client = new ApiClient(webClient(node, traceId))
                 .setBasePath(node.baseUrl())
                 .addDefaultHeader(TraceConstants.TRACE_ID_HEADER, traceId);
+        String password = System.getProperty(
+                "test.agent.opencode.server.password",
+                System.getenv("TEST_AGENT_OPENCODE_SERVER_PASSWORD"));
+        if (password != null && !password.isBlank()) {
+            String credentials = Base64.getEncoder().encodeToString(("opencode:" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            client.addDefaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + credentials);
+        }
+        return client;
+    }
+
+    /** V2 协议统一使用原始 JSON，避免 generated union DTO 将业务语义收窄。 */
+    private Mono<JsonNode> invokeJson(
+            ExecutionNode node,
+            String method,
+            String path,
+            Map<String, Object> pathParams,
+            Object body,
+            Map<String, String> query,
+            String traceId) {
+        ApiClient client = apiClient(node, traceId);
+        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
+        query.forEach((name, value) -> {
+            if (value != null && !value.isBlank()) queryParams.putAll(client.parameterToMultiValueMap(null, name, value));
+        });
+        return client.invokeAPI(
+                        path,
+                        HttpMethod.valueOf(method),
+                        pathParams == null ? Map.of() : pathParams,
+                        queryParams,
+                        body,
+                        new HttpHeaders(),
+                        new LinkedMultiValueMap<>(),
+                        new LinkedMultiValueMap<>(),
+                        client.selectHeaderAccept(new String[]{"application/json"}),
+                        client.selectHeaderContentType(body == null ? new String[]{} : new String[]{"application/json"}),
+                        new String[]{},
+                        new ParameterizedTypeReference<JsonNode>() {})
+                .bodyToMono(new ParameterizedTypeReference<JsonNode>() {})
+                .defaultIfEmpty(objectMapper.createObjectNode());
     }
 
     /**
@@ -753,89 +986,172 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     /**
      * 组装 opencode 约定的 directory/workspace query，workspace 为空时不传。
      */
-    private MultiValueMap<String, String> queryParams(ApiClient apiClient, String directory, String workspace) {
+    private MultiValueMap<String, String> queryParams(ApiClient apiClient, String v2Path, String directory) {
         MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
-        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        String optionalWorkspace = optionalText(workspace);
-        if (optionalWorkspace != null) {
-            queryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", optionalWorkspace));
+        // V2 的 location-scoped endpoint 使用 deepObject；只有 session 列表保留
+        // OpenCode 自身定义的 directory 参数，避免把 workspace/directory 透传到严格 schema。
+        if ("/api/session".equals(v2Path) && optionalText(directory) != null) {
+            queryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
+        } else if (supportsLocationQuery(v2Path) && optionalText(directory) != null) {
+            queryParams.putAll(apiClient.parameterToMultiValueMap(null, "location[directory]", directory));
         }
         return queryParams;
+    }
+
+    private boolean supportsLocationQuery(String path) {
+        return path.equals("/api/location")
+                || path.equals("/api/agent")
+                || path.startsWith("/api/agent/")
+                || path.equals("/api/plugin")
+                || path.startsWith("/api/plugin/")
+                || path.startsWith("/api/rpc/")
+                || path.equals("/api/model")
+                || path.equals("/api/model/default")
+                || path.equals("/api/provider")
+                || path.startsWith("/api/provider/")
+                || path.equals("/api/integration")
+                || path.startsWith("/api/integration/")
+                || path.equals("/api/mcp")
+                || path.startsWith("/api/experimental/mcp/")
+                || path.equals("/api/mcp/resource")
+                || path.equals("/api/form")
+                || path.equals("/api/permission/request")
+                || path.startsWith("/api/fs/read/")
+                || path.equals("/api/fs/list")
+                || path.equals("/api/fs/find")
+                || path.equals("/api/experimental/fs/write")
+                || path.equals("/api/command")
+                || path.equals("/api/skill")
+                || path.startsWith("/api/pty")
+                || path.startsWith("/api/shell")
+                || path.equals("/api/reference")
+                || path.equals("/api/vcs")
+                || path.equals("/api/vcs/base")
+                || path.equals("/api/vcs/status")
+                || path.equals("/api/vcs/branch")
+                || path.equals("/api/vcs/diff")
+                || path.equals("/api/config");
     }
 
     /**
      * 从 create session JSON 响应中提取远端 session id，缺失时让 facade 转换为平台错误。
      */
     private String extractSessionId(JsonNode body) {
-        if (body == null || body.path("id").asText().isBlank()) {
+        JsonNode candidate = body == null ? null : body.path("id");
+        if (candidate == null || !candidate.isTextual() || candidate.asText().isBlank()) {
+            // V2 的创建接口返回 {"data":{"id":"ses_..."}}；兼容同版本
+            // 部分部署仍返回顶层 id，避免把合法 session 误报为协议错误。
+            candidate = body == null ? null : body.path("data").path("id");
+        }
+        if (candidate == null || !candidate.isTextual() || candidate.asText().isBlank()) {
             throw new IllegalStateException("opencode create session response missing id");
         }
-        return body.path("id").asText();
+        return candidate.asText();
     }
 
     /**
      * 将 generated Diff 文件转换为平台 DTO，并为缺省状态提供 modified 默认值。
      */
-    private OpencodeDiffFile toDiffFile(SnapshotFileDiff diff) {
-        String status = diff.getStatus() == null ? "modified" : diff.getStatus().getValue();
-        return new OpencodeDiffFile(
-                diff.getFile(),
-                diff.getPatch(),
-                toLong(diff.getAdditions()),
-                toLong(diff.getDeletions()),
-                status);
+    private List<OpencodeDiffFile> toDiffFiles(JsonNode body) {
+        JsonNode data = body != null && body.has("data") ? body.get("data") : body;
+        if (data == null || !data.isArray()) return List.of();
+        List<OpencodeDiffFile> files = new ArrayList<>();
+        data.forEach(item -> files.add(new OpencodeDiffFile(
+                item.path("file").asText("unknown"),
+                item.path("patch").asText(""),
+                item.path("additions").asLong(0),
+                item.path("deletions").asLong(0),
+                item.path("status").asText("modified"))));
+        return List.copyOf(files);
     }
 
     /**
      * 将标准 session message envelope 转换为平台结果，并按调用方要求调整顺序。
      */
     private OpencodeSessionMessagesResult toSessionMessagesResult(
-            ResponseEntity<List<Map<String, Object>>> response,
-            String order) {
+            ResponseEntity<JsonNode> response,
+            String order,
+            String sessionId) {
         List<OpencodeSessionMessage> messages = new ArrayList<>();
-        for (Map<String, Object> envelope : response.getBody() == null ? List.<Map<String, Object>>of() : response.getBody()) {
-            Map<String, Object> info = stringObjectMap(envelope.get("info"));
-            if (info.isEmpty()) {
-                continue;
-            }
-            messages.add(toSessionMessage(info, envelope.get("parts")));
+        JsonNode payload = response.getBody();
+        JsonNode data = payload != null && payload.isArray() ? payload : payload == null ? null : payload.path("data");
+        if (data != null && data.isArray()) {
+            data.forEach(envelope -> {
+                JsonNode infoNode = envelope != null && envelope.has("info") ? envelope.path("info") : envelope;
+                Map<String, Object> info = objectMap(infoNode);
+                String v2Type = stringValue(info.get("type"));
+                if (v2Type != null && !"user".equals(v2Type) && !"assistant".equals(v2Type)) {
+                    return;
+                }
+                Object rawParts = objectValue(envelope, "parts");
+                messages.add(toSessionMessage(info, rawParts, sessionId));
+            });
         }
         if ("desc".equalsIgnoreCase(order)) {
             Collections.reverse(messages);
         }
         return new OpencodeSessionMessagesResult(
                 List.copyOf(messages),
-                null,
-                optionalText(response.getHeaders().getFirst("X-Next-Cursor")));
+                payload != null && payload.isObject() && payload.has("cursor")
+                        ? textValue(payload.path("cursor").path("previous")) : null,
+                payload != null && payload.isObject() && payload.has("cursor")
+                        ? textValue(payload.path("cursor").path("next"))
+                        : response.getHeaders().getFirst("X-Next-Cursor"));
     }
 
     /**
      * 规范化单条 session message，补充 messageID/messageId 和 role 兼容字段。
      */
-    private OpencodeSessionMessage toSessionMessage(Map<String, Object> raw, Object rawParts) {
+    private OpencodeSessionMessage toSessionMessage(Map<String, Object> raw, Object rawParts, String sessionId) {
         LinkedHashMap<String, Object> normalized = new LinkedHashMap<>(raw);
         String messageId = stringValue(raw.get("id"));
+        String v2Type = stringValue(raw.get("type"));
+        if ("user".equals(v2Type) || "assistant".equals(v2Type)) {
+            normalized.put("role", v2Type);
+        }
+        normalized.putIfAbsent("sessionID", sessionId);
         if (messageId != null) {
             normalized.putIfAbsent("messageID", messageId);
             normalized.putIfAbsent("messageId", messageId);
         }
-        return new OpencodeSessionMessage(
-                immutableWithoutNulls(normalized),
-                partsFromList(rawParts, messageId));
+        Object projectedParts = rawParts;
+        if (projectedParts == null && "assistant".equals(v2Type)) {
+            projectedParts = raw.get("content");
+        }
+        if (projectedParts == null && "user".equals(v2Type)) {
+            List<Map<String, Object>> userParts = new ArrayList<>();
+            String text = stringValue(raw.get("text"));
+            if (text != null) userParts.add(Map.of("type", "text", "text", text));
+            if (raw.get("files") instanceof List<?> files) {
+                for (Object file : files) {
+                    if (file instanceof Map<?, ?> map) {
+                        LinkedHashMap<String, Object> part = new LinkedHashMap<>(stringObjectMap(map));
+                        part.put("type", "file");
+                        userParts.add(part);
+                    }
+                }
+            }
+            projectedParts = userParts;
+        }
+        return new OpencodeSessionMessage(immutableWithoutNulls(normalized),
+                partsFromList(projectedParts, sessionId, messageId));
     }
 
     /**
      * 从 opencode message envelope 中抽取 part 列表，非列表内容按空列表处理。
      */
-    private List<Map<String, Object>> partsFromList(Object rawParts, String messageId) {
+    private List<Map<String, Object>> partsFromList(Object rawParts, String sessionId, String messageId) {
         if (!(rawParts instanceof List<?> list)) {
             return List.of();
         }
-        return list.stream()
-                .filter(item -> item instanceof Map<?, ?>)
-                .filter(item -> !OpencodePromptPart.isInternalRunContextPart((Map<?, ?>) item))
-                .map(item -> normalizePart((Map<?, ?>) item, messageId))
-                .toList();
+        List<Map<String, Object>> identified = new ArrayList<>(list.size());
+        for (int index = 0; index < list.size(); index++) {
+            Object item = list.get(index);
+            if (item instanceof Map<?, ?> raw && !OpencodePromptPart.isInternalRunContextPart(raw)) {
+                identified.add(OpencodeV2ContentAdapter.project(raw, sessionId, messageId, index));
+            }
+        }
+        return identified;
     }
 
     /**
@@ -854,31 +1170,18 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return Map.copyOf(result);
     }
 
-    /**
-     * 规范化 message part，补齐大小写兼容 ID 字段和工具名 alias。
-     */
-    private Map<String, Object> normalizePart(Map<?, ?> rawPart, String messageId) {
-        LinkedHashMap<String, Object> part = new LinkedHashMap<>();
-        rawPart.forEach((key, value) -> {
-            if (key instanceof String name) {
-                part.put(name, value);
-            }
-        });
-        if (messageId != null) {
-            part.putIfAbsent("messageID", messageId);
-            part.putIfAbsent("messageId", messageId);
-        }
-        String partId = stringValue(part.get("id"));
-        if (partId != null) {
-            part.putIfAbsent("partID", partId);
-            part.putIfAbsent("partId", partId);
-        }
-        Object name = part.get("name");
-        if (name instanceof String toolName && "tool".equals(part.get("type"))) {
-            part.putIfAbsent("tool", toolName);
-            part.putIfAbsent("toolName", toolName);
-        }
-        return immutableWithoutNulls(part);
+    private Map<String, Object> objectMap(JsonNode value) {
+        if (value == null || !value.isObject()) return Map.of();
+        return stringObjectMap(objectMapper.convertValue(value, Map.class));
+    }
+
+    private Object objectValue(JsonNode value, String field) {
+        if (value == null || !value.isObject() || !value.has(field)) return null;
+        return objectMapper.convertValue(value.get(field), Object.class);
+    }
+
+    private String textValue(JsonNode value) {
+        return value == null || value.isNull() || value.asText().isBlank() ? null : value.asText();
     }
 
     /**
@@ -899,13 +1202,6 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             }
         });
         return Map.copyOf(result);
-    }
-
-    /**
-     * 将 generated BigDecimal 计数字段转为 long；缺失计数按 0 处理。
-     */
-    private long toLong(BigDecimal value) {
-        return value == null ? 0 : value.longValue();
     }
 
     /**

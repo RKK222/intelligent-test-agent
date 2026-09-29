@@ -6,7 +6,7 @@ package com.enterprise.testagent.opencode.runtime.process;
 public interface OpencodeWeakHealthHttpClient {
 
     /**
-     * 访问 opencode server 的 /global/health；baseUrl 不包含具体 path。
+     * 访问 OpenCode V2 server 的 /api/info；baseUrl 不包含具体 path。
      */
     OpencodeWeakHealthHttpResult check(String baseUrl, String traceId);
 }

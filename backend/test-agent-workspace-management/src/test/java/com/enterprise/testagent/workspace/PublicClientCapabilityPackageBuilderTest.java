@@ -79,7 +79,7 @@ class PublicClientCapabilityPackageBuilderTest {
     @Test
     void rejectsNativeExtensionInPortableDependency() throws Exception {
         Fixture fixture = fixture();
-        Files.write(fixture.nodeModules().resolve("@opencode-ai/plugin/native.node"), new byte[] {1, 2, 3});
+        Files.write(fixture.nodeModules().resolve("@opencode/plugin/native.node"), new byte[] {1, 2, 3});
         var builder = new PublicClientCapabilityPackageBuilder(objectMapper);
 
         assertThatThrownBy(() -> builder.build(
@@ -94,7 +94,7 @@ class PublicClientCapabilityPackageBuilderTest {
         Fixture fixture = fixture();
         var builder = new PublicClientCapabilityPackageBuilder(objectMapper);
         Files.writeString(fixture.config().resolve("tools/demo.ts"), """
-                import { tool } from '@opencode-ai/plugin'
+                import { tool } from '@opencode/plugin'
                 const example = '目标 URL，如 http://192.168.1.100:8080/health'
                 export default tool({ description: example })
                 """);
@@ -103,7 +103,7 @@ class PublicClientCapabilityPackageBuilderTest {
                 .isNotEmpty();
 
         Files.writeString(fixture.config().resolve("tools/demo.ts"), """
-                import { tool } from '@opencode-ai/plugin'
+                import { tool } from '@opencode/plugin'
                 const serverUrl = 'http://192.168.1.100:8080/internal'
                 export default tool({ serverUrl })
                 """);
@@ -138,20 +138,20 @@ class PublicClientCapabilityPackageBuilderTest {
         Files.writeString(config.resolve("agents/AGENTS.md"), "excluded");
         Files.writeString(config.resolve("skills/demo/SKILL.md"), "---\nname: demo\n---\ndemo\n");
         Files.writeString(config.resolve("tools/demo.ts"),
-                "import { tool } from '@opencode-ai/plugin'\nexport default tool({})\n");
+                "import { tool } from '@opencode/plugin'\nexport default tool({})\n");
         Files.writeString(config.resolve("tools/package.json"),
-                "{\"type\":\"module\",\"dependencies\":{\"@opencode-ai/plugin\":\"1.18.4\"}}");
+                "{\"type\":\"module\",\"dependencies\":{\"@opencode/plugin\":\"2.0.18\"}}");
         Files.writeString(config.resolve("opencode.jsonc"), "{\"provider\":\"secret\"}");
 
         Path nodeModules = temporary.resolve("runtime/node_modules");
-        Files.createDirectories(nodeModules.resolve("@opencode-ai/plugin"));
-        Files.writeString(nodeModules.resolve("@opencode-ai/plugin/package.json"),
-                "{\"name\":\"@opencode-ai/plugin\",\"version\":\"1.18.4\"}");
-        Files.writeString(nodeModules.resolve("@opencode-ai/plugin/index.js"), "export const tool = value => value\n");
+        Files.createDirectories(nodeModules.resolve("@opencode/plugin"));
+        Files.writeString(nodeModules.resolve("@opencode/plugin/package.json"),
+                "{\"name\":\"@opencode/plugin\",\"version\":\"2.0.18\"}");
+        Files.writeString(nodeModules.resolve("@opencode/plugin/index.js"), "export const tool = value => value\n");
         Path lock = temporary.resolve("runtime/package-lock.json");
         Files.writeString(lock,
-                "{\"lockfileVersion\":3,\"packages\":{\"\":{\"dependencies\":{\"@opencode-ai/plugin\":\"1.18.4\"}},"
-                        + "\"node_modules/@opencode-ai/plugin\":{\"version\":\"1.18.4\"}}}");
+                "{\"lockfileVersion\":3,\"packages\":{\"\":{\"dependencies\":{\"@opencode/plugin\":\"2.0.18\"}},"
+                        + "\"node_modules/@opencode/plugin\":{\"version\":\"2.0.18\"}}}");
         return new Fixture(config, lock, nodeModules);
     }
 

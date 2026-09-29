@@ -11,7 +11,7 @@ and a future `OpencodeClientFacade` wrapper.
 
 ## Source
 
-- OpenAPI source: `http://127.0.0.1:4096/doc`
+- OpenAPI source: `http://127.0.0.1:4096/openapi.json`
 - Raw snapshot: `pinned-opencode-spec.raw.json`
 - Normalized snapshot: `pinned-opencode-spec.json`
 - Generator version: `7.24.0`

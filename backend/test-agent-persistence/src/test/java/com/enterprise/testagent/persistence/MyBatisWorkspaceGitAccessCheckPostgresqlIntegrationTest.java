@@ -175,7 +175,7 @@ class MyBatisWorkspaceGitAccessCheckPostgresqlIntegrationTest {
                             client_version, opencode_version, launcher_version, self_update_capabilities,
                             self_update_supported, created_at, updated_at, last_connected_at)
                         values ('lci_git_access', :userId, 'Git巡检客户端', 'macos', 'aarch64',
-                                '20260823190000', '1.18.4', '1', 'WORKSPACE_GIT_ACCESS_V1', false, :now, :now, :now)
+                                '20260823190000', '2.0.18', '1', 'WORKSPACE_GIT_ACCESS_V1', false, :now, :now, :now)
                         """).param("userId", USER_ID.value()).param("now", now).update();
         jdbc.sql("""
                         insert into local_client_workspaces(

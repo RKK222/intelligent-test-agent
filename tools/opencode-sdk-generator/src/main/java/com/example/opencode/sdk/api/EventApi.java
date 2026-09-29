@@ -2,7 +2,9 @@ package com.example.opencode.sdk.api;
 
 import com.example.opencode.sdk.ApiClient;
 
-import com.example.opencode.sdk.model.Event;
+import com.example.opencode.sdk.model.EventSubscribe200Response;
+import com.example.opencode.sdk.model.InvalidRequestErrorEncoded;
+import com.example.opencode.sdk.model.UnauthorizedErrorEncoded;
 
 import java.util.HashMap;
 import java.util.List;
@@ -46,99 +48,16 @@ public class EventApi {
         this.apiClient = apiClient;
     }
 
-    public class EventSubscribeRequest {
-        private @jakarta.annotation.Nullable String directory;
-        private @jakarta.annotation.Nullable String workspace;
-
-        public EventSubscribeRequest() {}
-
-        public EventSubscribeRequest(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) {
-            this.directory = directory;
-            this.workspace = workspace;
-        }
-
-        public @jakarta.annotation.Nullable String directory() {
-            return this.directory;
-        }
-        public EventSubscribeRequest directory(@jakarta.annotation.Nullable String directory) {
-            this.directory = directory;
-            return this;
-        }
-
-        public @jakarta.annotation.Nullable String workspace() {
-            return this.workspace;
-        }
-        public EventSubscribeRequest workspace(@jakarta.annotation.Nullable String workspace) {
-            this.workspace = workspace;
-            return this;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            EventSubscribeRequest request = (EventSubscribeRequest) o;
-            return Objects.equals(this.directory, request.directory()) &&
-                Objects.equals(this.workspace, request.workspace());
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(directory, workspace);
-        }
-    }
-
     /**
      * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param requestParameters The eventSubscribe request parameters as object
-     * @return Event
+     * Subscribe to native events and plugin RPC events across all server locations. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return EventSubscribe200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Event> eventSubscribe(EventSubscribeRequest requestParameters) throws WebClientResponseException {
-        return this.eventSubscribe(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param requestParameters The eventSubscribe request parameters as object
-     * @return ResponseEntity&lt;Event&gt;
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public Mono<ResponseEntity<Event>> eventSubscribeWithHttpInfo(EventSubscribeRequest requestParameters) throws WebClientResponseException {
-        return this.eventSubscribeWithHttpInfo(requestParameters.directory(), requestParameters.workspace());
-    }
-
-    /**
-     * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param requestParameters The eventSubscribe request parameters as object
-     * @return ResponseSpec
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    public ResponseSpec eventSubscribeWithResponseSpec(EventSubscribeRequest requestParameters) throws WebClientResponseException {
-        return this.eventSubscribeWithResponseSpec(requestParameters.directory(), requestParameters.workspace());
-    }
-
-
-    /**
-     * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Event
-     * @throws WebClientResponseException if an error occurs while attempting to invoke the API
-     */
-    private ResponseSpec eventSubscribeRequestCreation(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
+    private ResponseSpec eventSubscribeRequestCreation() throws WebClientResponseException {
         Object postBody = null;
         // create path and map variables
         final Map<String, Object> pathParams = new HashMap<String, Object>();
@@ -148,11 +67,8 @@ public class EventApi {
         final MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<String, String>();
         final MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<String, Object>();
 
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
-        localVarQueryParams.putAll(apiClient.parameterToMultiValueMap(null, "workspace", workspace));
-
         final String[] localVarAccepts = {
-            "text/event-stream"
+            "text/event-stream", "application/json"
         };
         final List<MediaType> localVarAccept = apiClient.selectHeaderAccept(localVarAccepts);
         final String[] localVarContentTypes = { };
@@ -160,48 +76,48 @@ public class EventApi {
 
         String[] localVarAuthNames = new String[] {  };
 
-        ParameterizedTypeReference<Event> localVarReturnType = new ParameterizedTypeReference<Event>() {};
-        return apiClient.invokeAPI("/event", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
+        ParameterizedTypeReference<EventSubscribe200Response> localVarReturnType = new ParameterizedTypeReference<EventSubscribe200Response>() {};
+        return apiClient.invokeAPI("/api/event", HttpMethod.GET, pathParams, localVarQueryParams, postBody, headerParams, cookieParams, formParams, localVarAccept, localVarContentType, localVarAuthNames, localVarReturnType);
     }
 
     /**
      * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return Event
+     * Subscribe to native events and plugin RPC events across all server locations. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return EventSubscribe200Response
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<Event> eventSubscribe(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Event> localVarReturnType = new ParameterizedTypeReference<Event>() {};
-        return eventSubscribeRequestCreation(directory, workspace).bodyToMono(localVarReturnType);
+    public Mono<EventSubscribe200Response> eventSubscribe() throws WebClientResponseException {
+        ParameterizedTypeReference<EventSubscribe200Response> localVarReturnType = new ParameterizedTypeReference<EventSubscribe200Response>() {};
+        return eventSubscribeRequestCreation().bodyToMono(localVarReturnType);
     }
 
     /**
      * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
-     * @return ResponseEntity&lt;Event&gt;
+     * Subscribe to native events and plugin RPC events across all server locations. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
+     * @return ResponseEntity&lt;EventSubscribe200Response&gt;
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public Mono<ResponseEntity<Event>> eventSubscribeWithHttpInfo(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        ParameterizedTypeReference<Event> localVarReturnType = new ParameterizedTypeReference<Event>() {};
-        return eventSubscribeRequestCreation(directory, workspace).toEntity(localVarReturnType);
+    public Mono<ResponseEntity<EventSubscribe200Response>> eventSubscribeWithHttpInfo() throws WebClientResponseException {
+        ParameterizedTypeReference<EventSubscribe200Response> localVarReturnType = new ParameterizedTypeReference<EventSubscribe200Response>() {};
+        return eventSubscribeRequestCreation().toEntity(localVarReturnType);
     }
 
     /**
      * Subscribe to events
-     * Get events
-     * <p><b>200</b> - Event stream
-     * @param directory The directory parameter
-     * @param workspace The workspace parameter
+     * Subscribe to native events and plugin RPC events across all server locations. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.
+     * <p><b>200</b> - Success
+     * <p><b>400</b> - InvalidRequestError
+     * <p><b>401</b> - UnauthorizedError
      * @return ResponseSpec
      * @throws WebClientResponseException if an error occurs while attempting to invoke the API
      */
-    public ResponseSpec eventSubscribeWithResponseSpec(@jakarta.annotation.Nullable String directory, @jakarta.annotation.Nullable String workspace) throws WebClientResponseException {
-        return eventSubscribeRequestCreation(directory, workspace);
+    public ResponseSpec eventSubscribeWithResponseSpec() throws WebClientResponseException {
+        return eventSubscribeRequestCreation();
     }
 }

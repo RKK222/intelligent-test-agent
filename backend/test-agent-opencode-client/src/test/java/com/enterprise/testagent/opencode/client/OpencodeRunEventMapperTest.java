@@ -21,6 +21,78 @@ class OpencodeRunEventMapperTest {
     private final OpencodeRunEventMapper mapper = new OpencodeRunEventMapper(objectMapper, () -> NOW);
 
     @Test
+    void mapsV2EventEnvelopeDataAndExecutionSuccess() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_v2","type":"session.execution.succeeded","created":1710000000,"data":{"sessionID":"ses_root","messageID":"msg_1"},"location":{"directory":"/tmp/demo"}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.SESSION_STATUS, RunEventType.RUN_SUCCEEDED);
+        assertThat(drafts.getFirst().payload())
+                .containsEntry("sessionID", "ses_root")
+                .containsEntry("messageID", "msg_1")
+                .containsEntry("rawEventId", "evt_v2");
+    }
+
+    @Test
+    void mapsV2FormEventsToStableQuestionPayload() throws Exception {
+        RunEventDraft asked = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_form","type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_root","title":"部署环境","fields":[{"key":"environment","type":"string","title":"选择环境","options":[{"value":"staging","label":"测试环境"}]}]}}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+        RunEventDraft replied = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_reply","type":"form.replied","data":{"id":"frm_1","sessionID":"ses_root","answer":{"environment":"staging"}}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+
+        assertThat(asked.type()).isEqualTo(RunEventType.QUESTION_ASKED);
+        assertThat(asked.payload()).containsEntry("requestId", "frm_1");
+        Map<?, ?> question = (Map<?, ?>) ((List<?>) asked.payload().get("questions")).getFirst();
+        assertThat(question.get("questionId")).isEqualTo("environment");
+        assertThat(question.get("kind")).isEqualTo("single");
+        assertThat(replied.type()).isEqualTo(RunEventType.QUESTION_REPLIED);
+        assertThat(replied.payload()).containsEntry("requestId", "frm_1")
+                .containsEntry("answers", List.of(List.of("staging")));
+    }
+
+    @Test
+    void mapsV2PermissionResourcesToPlatformPatterns() throws Exception {
+        RunEventDraft asked = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_permission","type":"permission.asked","data":{"id":"per_1","sessionID":"ses_root","action":"bash","resources":["git status"],"message":"允许执行吗"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+
+        assertThat(asked.type()).isEqualTo(RunEventType.PERMISSION_ASKED);
+        assertThat(asked.payload()).containsEntry("patterns", List.of("git status"))
+                .containsEntry("description", "允许执行吗");
+    }
+
+    @Test
+    void mapsV2TextDeltaAndContentSnapshotToStableMessageParts() throws Exception {
+        RunEventDraft delta = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_delta","type":"session.text.delta","data":{"sessionID":"ses_root","assistantMessageID":"msg_assistant","ordinal":0,"delta":"你好"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+        List<RunEventDraft> snapshot = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_content","type":"session.message.content.updated","data":{"sessionID":"ses_root","messageID":"msg_assistant","content":[{"type":"text","text":"你好"},{"type":"tool","id":"call_1","name":"todowrite","state":{"status":"completed","input":{"todos":[]},"content":[{"type":"text","text":"ok"}]}}]}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope());
+
+        assertThat(delta.type()).isEqualTo(RunEventType.MESSAGE_PART_DELTA);
+        assertThat(delta.payload()).containsEntry("messageID", "msg_assistant")
+                .containsEntry("partID", "part_msg_assistant_0")
+                .containsEntry("text", "你好");
+        assertThat(snapshot).extracting(RunEventDraft::type).containsExactly(
+                RunEventType.MESSAGE_UPDATED, RunEventType.MESSAGE_PART_UPDATED, RunEventType.MESSAGE_PART_UPDATED);
+        Map<?, ?> textPart = (Map<?, ?>) snapshot.get(1).payload().get("part");
+        Map<?, ?> toolPart = (Map<?, ?>) snapshot.get(2).payload().get("part");
+        assertThat(textPart.get("id")).isEqualTo("part_msg_assistant_0");
+        assertThat(toolPart.get("toolName")).isEqualTo("todowrite");
+        assertThat(toolPart.get("callID")).isEqualTo("call_1");
+        assertThat(((Map<?, ?>) toolPart.get("state")).get("output")).isEqualTo("ok");
+        assertThat(snapshot.get(1).payload()).containsEntry("rawEventId", "evt_content#part-0");
+    }
+
+    @Test
     void identifiesOnlyReservedInternalRunContextPartEvents() throws Exception {
         assertThat(mapper.isInternalRunContextEvent(objectMapper.readTree("""
                 {"type":"message.part.updated","properties":{"part":{"type":"file","mime":"text/plain","filename":".testagent-run-context.txt","url":"data:text/plain;charset=utf-8;base64,PGNvbnRleHQgLz4="}}}

@@ -25,6 +25,12 @@ POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:-15432}
 DATABASE_CONTAINER=${DATABASE_CONTAINER:-test-agent-postgres}
 PROJECT_NAME=${PROJECT_NAME:-intelligent-test-agent-jenkins}
 WORKER_PROJECT_NAME=${WORKER_PROJECT_NAME:-intelligent-test-agent-jenkins-opencode}
+BACKEND_CONTAINER_NAME=${BACKEND_CONTAINER_NAME:-test-agent-jenkins-backend}
+FRONTEND_CONTAINER_NAME=${FRONTEND_CONTAINER_NAME:-test-agent-jenkins-frontend}
+VERIFY_NAMESPACE=${VERIFY_NAMESPACE:-test_agent_jenkins_verify}
+ISOLATED_ACCEPTANCE=${ISOLATED_ACCEPTANCE:-false}
+ISOLATED_REDIS_PORT=${ISOLATED_REDIS_PORT:-16380}
+ISOLATED_REDIS_CONTAINER_NAME=${ISOLATED_REDIS_CONTAINER_NAME:-test-agent-v2-redis}
 WORKER_IMAGE_REPOSITORY=${WORKER_IMAGE_REPOSITORY:-test-agent-opencode-worker}
 WORKER_CONTAINER_NAME=${WORKER_CONTAINER_NAME:-test-agent-jenkins-opencode-worker}
 WORKER_PORT_START=${WORKER_PORT_START:-4096}
@@ -159,6 +165,30 @@ validate_tcp_port() {
     }
 }
 
+validate_isolated_acceptance() {
+    [[ "${ISOLATED_ACCEPTANCE}" == true ]] || return 0
+    # 独立验收必须与 release 的物理数据、密钥、Compose 项目和监听端口分开。
+    [[ "${RELEASE_ROOT}" == /data2/deploy/intelligent-test-agent/v2-acceptance/releases &&
+       "${SHARED_ROOT}" == /data2/deploy/intelligent-test-agent/v2-acceptance/shared &&
+       "${ENV_FILE}" == "${SHARED_ROOT}/runtime.env" &&
+       "${RUNTIME_DATA_SOURCE}" == /data2/deploy/intelligent-test-agent/v2-acceptance/data &&
+       "${PROJECT_NAME}" == intelligent-test-agent-v2 &&
+       "${WORKER_PROJECT_NAME}" == intelligent-test-agent-v2-opencode &&
+       "${BACKEND_CONTAINER_NAME}" == test-agent-v2-backend &&
+       "${FRONTEND_CONTAINER_NAME}" == test-agent-v2-frontend &&
+       "${WORKER_CONTAINER_NAME}" == test-agent-v2-opencode-worker &&
+       "${BACKEND_PORT}" == 18182 && "${FRONTEND_PORT}" == 3100 &&
+       "${WORKER_PORT_START}" == 4296 && "${WORKER_PORT_END}" == 4305 &&
+       "${ISOLATED_REDIS_PORT}" == 16380 ]] || {
+        echo 'Isolated V2 acceptance paths, projects or ports differ from the dedicated contract.' >&2
+        return 1
+    }
+    [[ "$(runtime_env_value TEST_AGENT_TEST_DB_NAME)" == testagent_v2_acceptance ]] || {
+        echo 'Isolated V2 acceptance must use its cloned database.' >&2
+        return 1
+    }
+}
+
 validate_timeout() {
     local value=$1
     [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
@@ -217,6 +247,7 @@ validate_host() {
         return 1
     }
     validate_secret_file
+    validate_isolated_acceptance
     echo '    - database runtime data root'
     source_db_name=$(runtime_env_value TEST_AGENT_TEST_DB_NAME)
     configured_data_root=$(database_linux_data_root "${source_db_name}")
@@ -228,10 +259,12 @@ validate_host() {
         echo "Runtime data source is missing or is a symbolic link: ${RUNTIME_DATA_SOURCE}" >&2
         return 1
     }
-    [[ -x "${HOST_CONTROL}" ]] || {
-        echo "Fixed host control helper is not installed: ${HOST_CONTROL}" >&2
-        return 1
-    }
+    if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
+        [[ -x "${HOST_CONTROL}" ]] || {
+            echo "Fixed host control helper is not installed: ${HOST_CONTROL}" >&2
+            return 1
+        }
+    fi
     for item in "${RELEASE_ROOT}" "${LOG_ROOT}" "${SHARED_ROOT}" "${MAVEN_CACHE_DIR}" "${PNPM_STORE_DIR}" "${COREPACK_CACHE_DIR}"; do
         [[ -d "${item}" && -w "${item}" ]] || {
             echo "Jenkins directory is missing or not writable: ${item}" >&2
@@ -242,8 +275,10 @@ validate_host() {
     timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker info >/dev/null
     echo "    - runtime image ${JAVA_RUNTIME_IMAGE}"
     timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" docker run --rm "${JAVA_RUNTIME_IMAGE}" sh -euc 'command -v java >/dev/null; command -v git >/dev/null'
-    echo "    - fixed host control ${HOST_CONTROL}"
-    timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" sudo "${HOST_CONTROL}" status
+    if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
+        echo "    - fixed host control ${HOST_CONTROL}"
+        timeout --foreground "${HOST_CHECK_TIMEOUT_SECONDS}s" sudo "${HOST_CONTROL}" status
+    fi
 }
 
 maven_run() {
@@ -374,7 +409,7 @@ write_worker_stack() {
     local output=$1 worker_image=$2
     python3 - "${output}" "${RUNTIME_DATA_SOURCE}" \
         "${RUNTIME_DATA_ROOT}" "${WORKER_CONTAINER_NAME}" "${worker_image}" "${BACKEND_PORT}" \
-        "${WORKER_PORT_START}" "${WORKER_PORT_END}" <<'PY'
+        "${WORKER_PORT_START}" "${WORKER_PORT_END}" "${WORKER_PROJECT_NAME}" <<'PY'
 import json
 import sys
 
@@ -387,10 +422,11 @@ import sys
     backend_port,
     worker_port_start,
     worker_port_end,
+    worker_project_name,
 ) = sys.argv[1:]
 
 stack = {
-    "name": "intelligent-test-agent-jenkins-opencode",
+    "name": worker_project_name,
     "services": {
         "opencode-worker": {
             "image": worker_image,
@@ -415,6 +451,7 @@ stack = {
                 "OPENCODE_ALLOWED_CORS": "",
                 "OPENCODE_MANAGER_HEARTBEAT_INTERVAL": "5s",
                 "OPENCODE_MANAGER_RECONNECT_INTERVAL": "10s",
+                "TEST_AGENT_OPENCODE_SERVER_PASSWORD": "${TEST_AGENT_OPENCODE_SERVER_PASSWORD:?TEST_AGENT_OPENCODE_SERVER_PASSWORD is required}",
             },
             "volumes": [f"{runtime_data_source}:{runtime_data_root}:rw"],
             "healthcheck": {
@@ -448,7 +485,9 @@ write_stack() {
     python3 - "${output}" "${release_dir}" "${ENV_FILE}" "${RUNTIME_DATA_SOURCE}" \
         "${RUNTIME_DATA_ROOT}" "${SHARED_ROOT}" "${FRONTEND_BIND_ADDRESS}" "${FRONTEND_PORT}" \
         "${JAVA_RUNTIME_IMAGE}" "${NGINX_IMAGE}" "${BACKEND_PORT}" "${RUNTIME_SERVICE_HOST}" \
-        "${xxl_job_mysql_url}" "${XXL_JOB_ADMIN_PORT}" "${XXL_JOB_EXECUTOR_PORT}" <<'PY'
+        "${xxl_job_mysql_url}" "${XXL_JOB_ADMIN_PORT}" "${XXL_JOB_EXECUTOR_PORT}" \
+        "${PROJECT_NAME}" "${BACKEND_CONTAINER_NAME}" "${FRONTEND_CONTAINER_NAME}" \
+        "${ISOLATED_ACCEPTANCE}" "${ISOLATED_REDIS_PORT}" "${ISOLATED_REDIS_CONTAINER_NAME}" <<'PY'
 import json
 import sys
 
@@ -468,14 +507,20 @@ import sys
     xxl_job_mysql_url,
     xxl_job_admin_port,
     xxl_job_executor_port,
+    project_name,
+    backend_container_name,
+    frontend_container_name,
+    isolated_acceptance,
+    isolated_redis_port,
+    isolated_redis_container_name,
 ) = sys.argv[1:]
 
 stack = {
-    "name": "intelligent-test-agent-jenkins",
+    "name": project_name,
     "services": {
         "backend": {
             "image": java_image,
-            "container_name": "test-agent-jenkins-backend",
+            "container_name": backend_container_name,
             "network_mode": "host",
             "user": "1000:1000",
             "working_dir": "/release/source/backend",
@@ -521,7 +566,7 @@ stack = {
         },
         "frontend": {
             "image": nginx_image,
-            "container_name": "test-agent-jenkins-frontend",
+            "container_name": frontend_container_name,
             "ports": [f"{frontend_bind_address}:{frontend_port}:80"],
             "extra_hosts": ["host.docker.internal:host-gateway"],
             "volumes": [
@@ -532,6 +577,26 @@ stack = {
         },
     },
 }
+
+if isolated_acceptance == "true":
+    # V2 验收与 release 分别使用 Redis、数据库副本和物理数据根；Compose 不触碰 release 的容器或端口。
+    stack["services"]["backend"]["environment"].update({
+        "TEST_AGENT_REDIS_HOST": "127.0.0.1",
+        "TEST_AGENT_REDIS_PORT": isolated_redis_port,
+        "TEST_AGENT_XXL_JOB_ENABLED": "false",
+    })
+    stack["services"]["redis"] = {
+        "image": "redis:7.4.9-alpine",
+        "container_name": isolated_redis_container_name,
+        "ports": [f"127.0.0.1:{isolated_redis_port}:6379"],
+        "volumes": [
+            f"{shared_root}/redis.conf:/usr/local/etc/redis/redis.conf:ro",
+            f"{project_name}-redis-data:/data:rw",
+        ],
+        "command": ["redis-server", "/usr/local/etc/redis/redis.conf"],
+        "restart": "unless-stopped",
+    }
+    stack["volumes"] = {f"{project_name}-redis-data": {}}
 
 with open(output, "w", encoding="utf-8") as target:
     json.dump(stack, target, ensure_ascii=True, indent=2)
@@ -736,10 +801,10 @@ verify_database_upgrade() {
     build_number=${tag#release-}
     build_number=${build_number%%-*}
     [[ "${build_number}" =~ ^[1-9][0-9]*$ ]] || return 1
-    db_name="test_agent_jenkins_verify_${build_number}"
-    network_name="test-agent-jenkins-verify-${build_number}"
-    redis_name="test-agent-jenkins-verify-redis-${build_number}"
-    backend_name="test-agent-jenkins-verify-backend-${build_number}"
+    db_name="${VERIFY_NAMESPACE}_${build_number}"
+    network_name="${VERIFY_NAMESPACE//_/-}-${build_number}"
+    redis_name="${VERIFY_NAMESPACE//_/-}-redis-${build_number}"
+    backend_name="${VERIFY_NAMESPACE//_/-}-backend-${build_number}"
     verify_root="${release_dir}/database-upgrade-verification"
     mkdir -p "${verify_root}/data" "${verify_root}/backend-logs"
 
@@ -793,8 +858,9 @@ verify_database_upgrade() {
         --env "TEST_AGENT_TEST_DB_NAME=${db_name}" \
         --env "TEST_AGENT_REDIS_HOST=${redis_name}" \
         --env TEST_AGENT_REDIS_PORT=6379 \
+        --env TEST_AGENT_REDIS_PASSWORD= \
         --env TEST_AGENT_START_OPENCODE_MANAGER=false \
-        --env TEST_AGENT_OPENCODE_BASE_URL=http://host.docker.internal:4096 \
+        --env "TEST_AGENT_OPENCODE_BASE_URL=http://host.docker.internal:${WORKER_PORT_START}" \
         --env TEST_AGENT_XXL_JOB_ENABLED=false \
         --env TEST_AGENT_ANALYTICS_CLICKHOUSE_ENABLED=false \
         --env TEST_AGENT_ANALYTICS_CLICKHOUSE_BACKFILL_ENABLED=false \
@@ -842,8 +908,8 @@ verify_deployment() {
     local tag=$1 attempt backend_ready=false frontend_ready=false xxl_admin_ready=false xxl_admin_proxy_ready=false
     local xxl_executor_ready=false worker_ready=false manager_ready=false
     validate_tag "${tag}"
-    [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]]
-    [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]]
+    [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
+    [[ "$(docker inspect -f '{{.State.Running}}' "${FRONTEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
     [[ "$(docker inspect -f '{{.State.Running}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" == true ]]
     for attempt in $(seq 1 120); do
         if curl -fsS --connect-timeout 2 --max-time 5 \
@@ -852,7 +918,7 @@ verify_deployment() {
             backend_ready=true
             break
         fi
-        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]] || break
         sleep 2
     done
     [[ "${backend_ready}" == true ]] || {
@@ -864,13 +930,15 @@ verify_deployment() {
             frontend_ready=true
             break
         fi
-        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-frontend 2>/dev/null || true)" == true ]] || break
+        [[ "$(docker inspect -f '{{.State.Running}}' "${FRONTEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]] || break
         sleep 2
     done
     [[ "${frontend_ready}" == true ]] || {
         echo "Frontend did not become ready within the deployment window." >&2
         return 1
     }
+    # 独立 V2 验收不启动 XXL，避免与 release 的调度实例共用 MySQL 和 executor。
+    if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
     # 主上下文 readiness 不包含独立 Servlet 子上下文；必须单独等待 XXL Admin，防止端口冲突被误报为发布成功。
     for attempt in $(seq 1 120); do
         if curl -fsS --connect-timeout 2 --max-time 5 \
@@ -879,7 +947,7 @@ verify_deployment() {
             xxl_admin_ready=true
             break
         fi
-        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]] || break
         sleep 2
     done
     [[ "${xxl_admin_ready}" == true ]] || {
@@ -909,13 +977,14 @@ PY
             xxl_executor_ready=true
             break
         fi
-        [[ "$(docker inspect -f '{{.State.Running}}' test-agent-jenkins-backend 2>/dev/null || true)" == true ]] || break
+        [[ "$(docker inspect -f '{{.State.Running}}' "${BACKEND_CONTAINER_NAME}" 2>/dev/null || true)" == true ]] || break
         sleep 2
     done
     [[ "${xxl_executor_ready}" == true ]] || {
         echo "XXL executor did not open its configured port within the deployment window." >&2
         return 1
     }
+    fi
     for attempt in $(seq 1 120); do
         if [[ "$(docker inspect -f '{{.State.Health.Status}}' "${WORKER_CONTAINER_NAME}" 2>/dev/null || true)" == healthy ]]; then
             worker_ready=true
@@ -956,7 +1025,9 @@ deploy_release() {
         echo "Legacy release does not contain a worker stack and no managed OpenCode worker is running." >&2
         return 1
     fi
-    sudo "${HOST_CONTROL}" stop-legacy
+    if [[ "${ISOLATED_ACCEPTANCE}" != true ]]; then
+        sudo "${HOST_CONTROL}" stop-legacy
+    fi
     docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
         -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans
     verify_deployment "${tag}"
@@ -983,7 +1054,7 @@ collect_logs() {
     docker logs --tail 500 "${WORKER_CONTAINER_NAME}" 2>&1 \
         | sed -E 's#((PASSWORD|TOKEN|SECRET|AUTHORIZATION)[=:][[:space:]]*)[^[:space:]]+#\1***REDACTED***#Ig' \
         >"${output_dir}/opencode-worker.log" || true
-    docker ps --filter 'name=test-agent-jenkins-' \
+    docker ps --filter "name=${BACKEND_CONTAINER_NAME}" --filter "name=${FRONTEND_CONTAINER_NAME}" \
         --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' \
         >"${output_dir}/containers.tsv" || true
 }

@@ -1,7 +1,7 @@
 ---
 name: bdsp-job-scheduler
 description: 调度 BDSP 大数据作业组或单作业。支持统一认证号、JC2/JC4/JC6 环境、应用、作业组、作业名、调度日期的手工参数或 Excel 批量输入，并通过随技能提供的授权捕获组件调用调度 API。用户提出“作业组调度、调度作业组、触发作业组、作业调度、单作业调度、作业发报”等需求时使用。
-compatibility: opencode 1.18.4+
+compatibility: opencode 2.0.18+
 metadata:
   domain: bdsp-testing
   language: zh-CN

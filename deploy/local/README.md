@@ -1,8 +1,34 @@
 # 本地 Jenkins 发布
 
 本目录负责 `192.168.8.100` 测试机的 Jenkins 发布。它不替代 `deploy/internal/` 的企业离线包，也不修改企业
-`backend.env`、`docker.env` 或节点拓扑。目标分支固定为 `release`，Jenkins 地址为
-`http://192.168.8.100:18081`，任务名固定为 `intelligent-test-agent-release`。
+`backend.env`、`docker.env` 或节点拓扑。日常发布目标分支固定为 `release`，Jenkins 地址为
+`http://192.168.8.100:18081`，任务名固定为 `intelligent-test-agent-release`。OpenCode V2 专用验收任务见下文，
+不得修改日常任务的分支或 `3000` 端口。
+
+## OpenCode V2 独立验收
+
+`Jenkinsfile.opencode-v2` 仅检出 `codex/opencode-v2-migration`，用于专用任务
+`intelligent-test-agent-opencode-v2`。任务在 Jenkins 中配置为“Pipeline script from SCM”，沿用已有 GitLab
+只读凭据 `intelligent-test-agent-git-ssh`，脚本路径设为 `Jenkinsfile.opencode-v2`；不得复制或改写
+`intelligent-test-agent-release` 任务。首次运行时，`jenkins-opencode-v2-bootstrap.sh` 从 release 测试数据创建
+独立数据库、运行数据副本和密钥；脚本只接受专用任务名，遇到未标记的已有目标数据时停止。
+
+| 资源 | V2 验收值 | release 保持原值 |
+|---|---|---|
+| Web / 后端 | `192.168.8.100:3100` / `:18182` | `:3000` / `:18082` |
+| PostgreSQL | `testagent_v2_acceptance`，从 `testagent_dev` 一次性逻辑复制 | `testagent_dev` |
+| 数据根 | 宿主 `/data2/deploy/intelligent-test-agent/v2-acceptance/data`，容器内 `/data/.testagent` | 宿主 `/data/.testagent` |
+| Redis | 独立 `test-agent-v2-redis`，宿主 loopback `16380` | 原测试实例 |
+| Worker | `test-agent-v2-opencode-worker`，端口池 `4296-4305` | `test-agent-jenkins-opencode-worker`，端口池 `4096-4105` |
+| Compose / 发布目录 | `intelligent-test-agent-v2*` / `v2-acceptance/releases` | `intelligent-test-agent-jenkins*` / `releases` |
+
+专用任务也使用同一发布脚本和不可变标签，但 `ISOLATED_ACCEPTANCE=true` 会校验所有隔离路径与端口，跳过
+release 的 `stop-legacy`，并禁用独立实例里的 XXL 调度器。一次性数据库克隆只供 V2 验收使用；V2 Flyway
+只能写该副本。两个流水线不得并发操作同一个 V2 任务，缓存可以共享。专用任务的 `ROLLBACK` 只能选择其自身
+`v2-acceptance/releases` 中已存在且验证通过的标签；回滚 V1 之前须先在这个独立栈制备兼容 V1 的不可变制品并
+验证数据库向后兼容，不能使用日常 release 的目录或覆盖 `3000`。验收完成后核对
+`http://192.168.8.100:18182/actuator/health/readiness`、`http://192.168.8.100:3100/`、专用 worker
+健康状态及 Jenkins 构建结果。
 
 ## 复用边界
 

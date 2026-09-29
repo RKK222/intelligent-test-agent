@@ -131,10 +131,15 @@ cp "${ROOT_DIR}/deploy/internal/opencode-node-runtime.package-lock.json" \
   "${PROGRAMS_RUNTIME}/package-lock.json"
 cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
   "${PROGRAMS_RUNTIME}/opencode-observability-plugin.mjs"
+mkdir -p "${PROGRAMS_RUNTIME}/opencode-observability-plugin" "${PROGRAMS_RUNTIME}/opencode-rtk-plugin"
+cp "${ROOT_DIR}/deploy/internal/opencode-observability-plugin.mjs" \
+  "${PROGRAMS_RUNTIME}/opencode-observability-plugin/index.mjs"
+cp "${ROOT_DIR}/deploy/internal/opencode-rtk-plugin.mjs" \
+  "${PROGRAMS_RUNTIME}/opencode-rtk-plugin/index.mjs"
 for dependency_entry in \
   '@modelcontextprotocol/sdk|1.29.0|dist/esm/server/mcp.js' \
-  '@opencode-ai/plugin|1.18.4|dist/index.js' \
-  '@opencode-ai/sdk|1.18.4|dist/index.js' \
+  '@opencode/plugin|2.0.18|dist/index.js' \
+  '@opencode/client|2.0.18|dist/index.js' \
   'effect|4.0.0-beta.83|dist/index.js' \
   'jsonc-parser|3.3.1|lib/esm/main.js' \
   'zod|4.1.8|index.js'; do
@@ -210,7 +215,7 @@ BAD_TOOL_RELEASE_ROOT="${TMP_ROOT}/bad-tool-release-root"
 BAD_TOOL_RELEASE_ARCHIVE="${TMP_ROOT}/test-agent-bad-tool-runtime-release.zip"
 cp -R "${PROGRAMS_ROOT}" "${BAD_TOOL_RUNTIME_ROOT}"
 cp -R "${RELEASE_ROOT}" "${BAD_TOOL_RELEASE_ROOT}"
-rm -f "${BAD_TOOL_RUNTIME_ROOT}/programs/opencode/node_modules/@opencode-ai/plugin/package.json"
+rm -f "${BAD_TOOL_RUNTIME_ROOT}/programs/opencode/node_modules/@opencode/plugin/package.json"
 tar -C "${BAD_TOOL_RUNTIME_ROOT}" -czf \
   "${BAD_TOOL_RELEASE_ROOT}/dist/test-agent-programs.tar.gz" programs
 (cd "${BAD_TOOL_RELEASE_ROOT}" && zip -qr "${BAD_TOOL_RELEASE_ARCHIVE}" .)
@@ -221,7 +226,7 @@ if bad_tool_output="$(bash "${DEPLOY_SCRIPT}" backend \
   --release-archive "${BAD_TOOL_RELEASE_ARCHIVE}" \
   --backend-host 122.233.30.4 \
   --validate-only 2>&1)"; then
-  echo 'Validation unexpectedly accepted programs without @opencode-ai/plugin' >&2
+  echo 'Validation unexpectedly accepted programs without @opencode/plugin' >&2
   exit 1
 fi
 grep -Fq 'missing required Tool runtime dependencies' <<<"${bad_tool_output}"

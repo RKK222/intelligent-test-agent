@@ -87,7 +87,7 @@ jq -e --arg version "${VERSION}" \
   "${EVIDENCE}" >/dev/null
 jq -e --arg version "${VERSION}" \
   '.version == $version and .platform == "windows" and .architecture == "x64" and
-   .protocolVersion == "local-opencode-client.v1" and .opencodeVersion == "1.18.4"' \
+   .protocolVersion == "local-opencode-client.v1" and .opencodeVersion == "2.0.18"' \
   "${RELEASE_DIR}/manifest.json" >/dev/null
 openssl dgst -sha256 -verify "${TEST_ROOT}/signing-public.pem" \
   -signature "${RELEASE_DIR}/manifest.json.sig" "${RELEASE_DIR}/manifest.json" >/dev/null

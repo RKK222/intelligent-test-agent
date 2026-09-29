@@ -1,4 +1,4 @@
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 /** 模型只能读取当前问题签发的审阅范围，文件正文始终走平台文件 WebSocket。 */
 export default tool({

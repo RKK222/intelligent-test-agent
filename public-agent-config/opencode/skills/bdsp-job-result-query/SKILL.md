@@ -1,7 +1,7 @@
 ---
 name: bdsp-job-result-query
 description: 查询 BDSP 大数据作业组或单作业执行结果并导出 Excel。根据 JC2/JC4/JC6 自动选择 GaussDB 配置，支持直接参数或 Excel 批量输入，使用随包 JDBC 驱动查询并按环境生成 .xls 结果。用户提出“作业组执行结果查询、作业调度查询、作业执行明细、批量查询大数据作业结果”等需求时使用。
-compatibility: opencode 1.18.4+
+compatibility: opencode 2.0.18+
 metadata:
   domain: bdsp-testing
   language: zh-CN

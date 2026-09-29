@@ -1,4 +1,4 @@
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 const TCDS_BASE_URL_ENV = "TCDS_BASE_URL"
 const DEFAULT_TCDS_BASE_URL = "http://tcds-prod.sdc.icbc"

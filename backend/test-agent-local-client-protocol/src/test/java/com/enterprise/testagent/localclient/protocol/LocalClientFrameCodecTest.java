@@ -44,7 +44,7 @@ class LocalClientFrameCodecTest {
                 "linux",
                 "arm64",
                 "20260820153045",
-                "1.18.4",
+                "2.0.18",
                 List.of(),
                 "UC-001",
                 "1",
@@ -75,7 +75,7 @@ class LocalClientFrameCodecTest {
                 "traceId":"trace-legacy","connectionGeneration":null,"payload":{\
                 "clientKey":"tack_v1_secret","clientInstanceId":"lci_legacy","clientName":"legacy",\
                 "platform":"linux","architecture":"arm64","clientVersion":"0.1.0",\
-                "opencodeVersion":"1.18.4","reportedAddresses":[]}}
+                "opencodeVersion":"2.0.18","reportedAddresses":[]}}
                 """;
 
         LocalClientPayloads.Register decoded = codec.payload(
@@ -93,7 +93,7 @@ class LocalClientFrameCodecTest {
                 "traceId":"trace-legacy","connectionGeneration":null,"payload":{\
                 "clientKey":"tack_v1_secret","clientInstanceId":"lci_legacy","clientName":"legacy",\
                 "platform":"linux","architecture":"arm64","clientVersion":"0.1.0",\
-                "opencodeVersion":"1.18.4","reportedAddresses":[]}}
+                "opencodeVersion":"2.0.18","reportedAddresses":[]}}
                 """;
         LocalClientFrame legacyFrame = codec.decode(legacy);
         LocalClientPayloads.Register legacyPayload = codec.payload(legacyFrame, LocalClientPayloads.Register.class);
@@ -102,7 +102,7 @@ class LocalClientFrameCodecTest {
 
         LocalClientPayloads.Register modernPayload = new LocalClientPayloads.Register(
                 "tack_v1_secret", "lci_modern", "modern", "linux", "arm64",
-                "20260820120000", "1.18.4", List.of(), null, "1", List.of("SELF_UPDATE_V1"));
+                "20260820120000", "2.0.18", List.of(), null, "1", List.of("SELF_UPDATE_V1"));
         assertThat(LocalClientPayloads.isStrictLegacyRegister(codec.payload(modernPayload), modernPayload)).isFalse();
     }
 

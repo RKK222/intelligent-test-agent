@@ -3,6 +3,7 @@ import { access, readFile, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { assistantMessagesAfter, getNativeV2Session, listNativeV2Messages, nativeV2AuthHeaders, nativeV2SessionDirectory } from "./opencode-v2-native";
 
 import {
   apiDelete,
@@ -276,11 +277,8 @@ test.describe("phase 11 real service integration", () => {
         (message) => message.runId === source.runId && message.role?.toUpperCase() === "USER"
       );
       if (!sourceUser?.remoteMessageId) throw new Error("Source Run has no recoverable remote user boundary");
-      const beforeNative = await listNativeMessages(opencodeBaseUrl, remoteSessionId, workspace.physicalRootPath);
-      const oldAssistantIds = beforeNative
-        .filter((message) => message.info?.role === "assistant" && message.info.parentID === sourceUser.remoteMessageId)
-        .map((message) => message.info?.id)
-        .filter((id): id is string => Boolean(id));
+      const beforeNative = await listNativeV2Messages(opencodeBaseUrl, remoteSessionId);
+      const oldAssistantIds = assistantMessagesAfter(beforeNative, sourceUser.remoteMessageId).map((message) => message.id);
       expect(oldAssistantIds.length).toBeGreaterThan(0);
       const resendContext = await apiPost<{ contextToken: string }>(
         `/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/run-context`,
@@ -303,17 +301,14 @@ test.describe("phase 11 real service integration", () => {
       expect(replacementEvents.some((event) => event.type === "run.resend.started")).toBe(true);
       expect(replacementEvents.some((event) => event.type === "run.succeeded")).toBe(true);
 
-      const afterNative = await listNativeMessages(opencodeBaseUrl, remoteSessionId, workspace.physicalRootPath);
-      const nativeIds = new Set(afterNative.map((message) => message.info?.id).filter(Boolean));
+      const afterNative = await listNativeV2Messages(opencodeBaseUrl, remoteSessionId);
+      const nativeIds = new Set(afterNative.map((message) => message.id));
       expect(nativeIds.has(sourceUser.remoteMessageId)).toBe(false);
       expect(oldAssistantIds.every((id) => !nativeIds.has(id))).toBe(true);
-      const replacementUser = afterNative.find(
-        (message) => message.info?.role === "user" && message.info?.id !== sourceUser.remoteMessageId
-      );
-      if (!replacementUser?.info?.id) throw new Error("Replacement native user message was not found");
-      const replacementAnswer = afterNative
-        .filter((message) => message.info?.role === "assistant" && message.info.parentID === replacementUser.info?.id)
-        .flatMap((message) => message.parts ?? [])
+      const replacementUser = afterNative.filter((message) => message.type === "user").at(-1);
+      if (!replacementUser?.id) throw new Error("Replacement native user message was not found");
+      const replacementAnswer = assistantMessagesAfter(afterNative, replacementUser.id)
+        .flatMap((message) => message.content ?? [])
         .filter((part) => part.type === "text")
         .map((part) => String(part.text ?? ""))
         .join("\n");
@@ -471,19 +466,6 @@ type ManagedWorkspaceFixture = {
 
 type CapturedRunEvent = { seq: number; type: string; payload: Record<string, unknown> };
 type PlatformRealMessage = { role?: string; runId?: string; remoteMessageId?: string };
-type NativeRealMessage = {
-  info?: { id?: string; role?: string; parentID?: string };
-  parts?: Array<{ type?: string; text?: string }>;
-};
-
-async function listNativeMessages(baseUrl: string, remoteSessionId: string, directory: string): Promise<NativeRealMessage[]> {
-  const url = new URL(`/session/${encodeURIComponent(remoteSessionId)}/message`, `${stripTrailingSlash(baseUrl)}/`);
-  url.searchParams.set("directory", directory);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Native OpenCode messages failed with HTTP ${response.status}`);
-  return (await response.json()) as NativeRealMessage[];
-}
-
 /** 真实 E2E 只通过平台 RunEvent SSE 收集旁路可见事件，不接触生产浏览器外的 OpenCode 事件流。 */
 function captureRunEventsUntilTerminal(runId: string): { finished: Promise<CapturedRunEvent[]> } {
   const controller = new AbortController();
@@ -558,7 +540,7 @@ async function observeNewNativeSessionIds(
 }
 
 async function listNativeSessionIds(databasePath: string): Promise<string[]> {
-  const { stdout } = await promisify(execFile)("sqlite3", ["-readonly", databasePath, "select id from session;"]);
+  const { stdout } = await promisify(execFile)("sqlite3", ["-readonly", databasePath, "select id from session_v2;"]);
   return stdout.split("\n").map((value) => value.trim()).filter(Boolean);
 }
 
@@ -617,13 +599,16 @@ async function expectPathAbsent(candidate: string): Promise<void> {
 }
 
 async function deleteNativeSession(baseUrl: string, remoteSessionId: string, workspaceRoot: string): Promise<void> {
-  const url = new URL(`/session/${encodeURIComponent(remoteSessionId)}`, `${stripTrailingSlash(baseUrl)}/`);
-  url.searchParams.set("directory", workspaceRoot);
-  const deleted = await fetch(url, { method: "DELETE" });
+  const url = new URL(`/api/session/${encodeURIComponent(remoteSessionId)}`, `${stripTrailingSlash(baseUrl)}/`);
+  const nativeSession = await getNativeV2Session(baseUrl, remoteSessionId);
+  if (nativeV2SessionDirectory(nativeSession) !== workspaceRoot) {
+    throw new Error("OpenCode V2 session location does not match owned workspace");
+  }
+  const deleted = await fetch(url, { method: "DELETE", headers: nativeV2AuthHeaders() });
   if (!deleted.ok) {
     throw new Error(`Native OpenCode session delete failed with HTTP ${deleted.status}`);
   }
-  const probe = await fetch(url, { method: "GET" });
+  const probe = await fetch(url, { method: "GET", headers: nativeV2AuthHeaders() });
   if (probe.status !== 404) {
     throw new Error(`Native OpenCode session still exists after delete: HTTP ${probe.status}`);
   }

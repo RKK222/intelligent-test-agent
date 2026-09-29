@@ -88,7 +88,7 @@ class LocalClientConnectionAuthenticationRateLimitTest {
                 "linux",
                 "arm64",
                 "20260820120000",
-                "1.18.4",
+                "2.0.18",
                 List.of(),
                 "UC-001",
                 "1",

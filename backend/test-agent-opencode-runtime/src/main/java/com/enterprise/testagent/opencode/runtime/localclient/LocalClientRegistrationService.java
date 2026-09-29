@@ -87,8 +87,8 @@ public class LocalClientRegistrationService {
         String platform = normalizePlatform(payload.platform());
         String architecture = normalizeArchitecture(payload.architecture());
         requireSupportedPlatform(platform, architecture);
-        if (!"1.18.4".equals(payload.opencodeVersion())) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "客户端必须使用 OpenCode 1.18.4");
+        if (!"2.0.18".equals(payload.opencodeVersion())) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "客户端必须使用 OpenCode 2.0.18");
         }
         String clientName = requireText(payload.clientName(), "clientName", 255);
         String clientVersion = requireText(payload.clientVersion(), "clientVersion", 64);

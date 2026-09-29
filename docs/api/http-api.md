@@ -28,6 +28,15 @@
 8. 多 Java 同源部署允许前端在需要用户绑定服务器的请求上携带可选 `X-Test-Agent-Linux-Server-Id`。该头只是 Nginx 静态白名单的首跳性能提示，不参与鉴权，不替代数据库 binding、Session 归属、运行上下文或后端公共路由判断。
 9. 超级管理员问题排查使用独立 `X-Support-Access-Grant` 请求头；该短期值不进入 URL、浏览器持久化、原始报文观察副本或普通用户路由头。跨域部署的 CORS 预检允许该头。
 
+### OpenCode V2 原生代理边界
+
+OpenCode worker 固定使用 V2 `/api` 路由。平台 runtime API 仍输出稳定的平台 DTO，
+由 `OpencodeV2RouteMapper` 将历史内部操作映射到 `/api/info`、`/api/session/*`、
+`/api/fs/*`、`/api/vcs/*`、`/api/config` 等 V2 路径；前端不直接访问 worker。
+V2 原生没有 session share 路由，旧 runtime `/session/{id}/share` 入口返回
+`API_GONE`，分享设置统一使用
+`/api/internal/platform/opencode-runtime/sessions/{id}/collaboration-share`。
+
 ### 用户绑定服务器首跳提示
 
 页面首次 `GET /api/internal/agent/opencode/processes/me` 不携带路由提示，按 Nginx 默认 upstream 进入任意 Java；若用户尚无 ACTIVE binding，入口 Java 会按 Redis 集群快照把该请求单次转发到进程总数最少且可初始化的服务器。响应包含非空 `linuxServerId` 后，前端只在当前页面内存保存该值；刷新、退出或切换登录用户都会清空，禁止写入 localStorage/sessionStorage。随后以下请求由 `backend-api` 的 routed request 或 fetch SSE 携带 `X-Test-Agent-Linux-Server-Id`：
@@ -149,7 +158,7 @@ Base URL：`/api/internal/agent/{agentId}/processes/me`，当前 `agentId` 只�
 | 方法 | 路径 | 用途 | 请求体 | 响应 |
 |---|---|---|---|---|
 | `GET` | `/` | 查询当前用户 opencode 进程强健康状态，不自动启动。 | 无 | `UserOpencodeProcessResponse` |
-| `GET` | `/health?linuxServerId=&containerId=&port=` | 前端周期弱健康检查；只按 Redis 快照定位目标进程并直接调用 opencode `/global/health`，不读写数据库、不触发 manager 强健康检查。 | 无 | `UserOpencodeProcessHealthResponse` |
+| `GET` | `/health?linuxServerId=&containerId=&port=` | 前端周期弱健康检查；只按 Redis 快照定位目标进程并直接调用 OpenCode V2 `/api/info`，不读写数据库、不触发 manager 强健康检查。 | 无 | `UserOpencodeProcessHealthResponse` |
 | `POST` | `/initialize` | 初始化或重建当前用户 opencode 进程；启动前自动选择同服有效公共个人配置，`SUPER_ADMIN` 进程健康检查成功后再幂等准备并自动加载本人公共个人 worktree。 | 可空；可传 `{ "operationId": "opi_..." }` 开启进度记录。 | `UserOpencodeProcessResponse` |
 | `POST` | `/restart` | 重启当前用户 ACTIVE 进程；后端检测到活动 Run 时要求二次确认，并在确认后先取消全部活动 Run。 | `{ "confirmRunning": false | true }`；缺省 false。 | `UserOpencodeProcessResponse`；未确认冲突见本节后文。 |
 | `GET` | `/initialize-operations/{operationId}` | 只读查询当前用户发起的初始化进度；不触发 manager health/start，不写 RunEvent。 | 无 | `OpencodeProcessStartOperationResponse` |
@@ -408,7 +417,7 @@ Base URL：`/api/internal/platform/workspace-management/agent-config`。该能�
 
 公共 `update`、`update-and-push`、`publish` 的同步广播携带内部 `rolloutId`。发布端在远端 push 或任何工作树修改前先写 `PREPARING` 任务、发起人用户 ID、是否已确认恢复共享运行副本以及持久化服务器清单（包含发布瞬间离线的已登记服务器），远端提交确认后激活为 `DRAINING`，形成后端禁发硬闸门；一旦该任务建立，广播失败、服务器离线或 Java 重启都只会保留 `PENDING/DRAINING` 并由定时补偿继续处理，不允许以失败状态提前开闸。发布请求不再认领或执行本服务器同步，只在远端事实和 rollout 激活确认后发送低延迟广播并返回；本机与其它服务器均由广播消费者或默认每 5 秒运行的数据库补偿程序认领，因此 Git 同步、进程登记和旧 Session 排空不会占用发布 HTTP 请求。每台服务器使用发起人的已存 SSH 凭据把本机共享运行仓库 checkout/reset 到目标 commit，并尝试把同一 commit 原生合入本机所有当前稳定命名的有效公共个人 worktree；日期型或手工命名的历史 worktree 保留磁盘和数据库记录，但不再挂载、登记发布补偿或形成永久 `PENDING`，已存在的相应补偿任务会转为 `ABANDONED/WORKTREE_NO_LONGER_REUSABLE`。个人 worktree 的冲突只登记补偿任务。只有取得本服务器 manager 的实时进程清单、把已有 opencode 进程及其用户快照写入目标表后，才确认该服务器同步完成。凭据只在目标 Java 从数据库读取并解密，不进入广播 payload。前端在活动期每 2 秒轮询 `GET /public/rollout`，所有重复刷新入口禁用；终态保留各服务器同步/排空计数、个人 worktree 计数与 `lastError`。每个服务器明细还以 additive 可选字段 `pendingTargets` 返回最多 200 个未进入 `DISPOSED/ABANDONED` 的目标，包含 `targetId/userId/username/containerId/port/processPid/processStartedAt/status/retryCount/nextRetryAt/lastError/forceStop/updatedAt`，按强制停止优先、下次重试时间和创建时间排序；不返回统一认证号、Session 内容或凭据。前端据此定位卡住用户，并按目标已有 `containerId + port` 复用运行管理停止 API，不新增专用停止入口。
 
-所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过处理、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，普通配置对这个用户专属进程调用一次 `POST /global/dispose`；PUBLIC 的 `opencode/tool[s]/**/*.js|ts` 或 APPLICATION 的 `.opencode/tool[s]/**/*.js|ts` 发布则复用 `OpencodeProcessStopService`、`OpencodeProcessStartupService` 和启动后 health 确认受管重启该进程，PUBLIC 额外恢复共享配置指针，APPLICATION 不触碰公共指针。受管重启后必须观察到 manager 新进程代次，并对目标关联过的每个 workspace 请求 `GET /experimental/tool/ids`；只有非空数组才确认 Tool 目录可被新进程导入。新代次未观察到、目录空或非法响应都保留目标，由默认每 5 秒的同一持久化 worker 巡检补偿。单个目标失败只累计本人 `retryCount/lastError`，worker 继续处理同批其他用户；该用户收敛后立即恢复发送，不等待其他用户。manager 已明确确认普通目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在刷新完成前只阻止该用户发送。
+所有服务器确认后，每台 Java 的固定延迟任务只认领 `target.linuxServerId=本机 linuxServerId` 的一条目标；租约 token 隔离过期 worker，发布端可以统一插表，但不能替其他服务器执行。公共发布登记本机全部存量进程；应用发布只登记已经成功同步相关个人 worktree 的用户进程；个人拉取范围只登记发起用户当前服务器上的本人进程。目标 Java 先用本机 manager 快照确认端口仍存在，再经本机 opencode 逐一对该进程历史绑定的所有 Workspace 目录调用 `GET /session/status`；任一目录出现 `busy/retry`、未知状态或非法响应都跳过处理、累计 `retryCount` 并按退避持续重试。全部目录明确空闲后，普通配置对这个用户专属进程调用一次 `POST /global/dispose`；PUBLIC 的 `opencode/tool[s]/**/*.js|ts` 或 APPLICATION 的 `.opencode/tool[s]/**/*.js|ts` 发布则复用 `OpencodeProcessStopService`、`OpencodeProcessStartupService` 和启动后 health 确认受管重启该进程，PUBLIC 额外恢复共享配置指针，APPLICATION 不触碰公共指针。受管重启后必须观察到 manager 新进程代次，并对目标关联过的每个 workspace 请求 `GET /api/plugin`；只有非空数组才确认 Tool 目录可被新进程导入。新代次未观察到、目录空或非法响应都保留目标，由默认每 5 秒的同一持久化 worker 巡检补偿。单个目标失败只累计本人 `retryCount/lastError`，worker 继续处理同批其他用户；该用户收敛后立即恢复发送，不等待其他用户。manager 已明确确认普通目标进程不存在时按已释放处理；manager 清单不可用时继续重试。全部目标结束后主 rollout 原子变为 `COMPLETED`；公共范围同一时刻只允许一个活动任务，应用范围按应用版本 ID 各自只允许一个活动任务，个人拉取范围不进入这两类唯一锁。已完成应用 rollout 后续补偿产生的用户目标仍由同一 target worker 处理，并在刷新完成前只阻止该用户发送。
 
 公共 `publish` 在 worktree 所属 Java 执行任何 Git 修改前，复用现有路由聚合在线服务器的只读共享仓库状态。发现 dirty 返回 `409 CONFLICT`，远端检查不可用返回 `503 OPENCODE_UNAVAILABLE`；个人已完成提交保留。旧 `update-and-push` 同样检查其它服务器，但允许本机共享修改进入其既有提交流程；其 `discardLocalChanges` 不授权放弃其它服务器修改。预检不能锁住外部文件写入，也不替代持久化成员清单；离线成员恢复及预检后的变化继续由后台租约 worker 检查。
 
@@ -2452,13 +2461,13 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 工作区个人 Git、应用级 Agent 配置 Git 和版本工作区文件操作同样按当前用户 ACTIVE opencode binding 路由到目标 Java；公共配置聚合与服务器列表留在当前 Java，避免把跨服务器操作落到错误磁盘。
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/global/health` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/api/info` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/internal/agent/{agentId}/processes/me` | 查询当前用户绑定的 opencode 进程状态。 |
 | `GET` | `/api/internal/agent/{agentId}/processes/me/message-gate` | 只读查询当前用户公共配置发布消息闸门；不按 binding 路由，不探测 manager/opencode。 |
-| `GET` | `/api/internal/agent/{agentId}/processes/me/health?linuxServerId=&containerId=&port=` | 前端弱健康轮询；只按参数和 Redis 快照检查 opencode `/global/health`，不读写数据库。 |
+| `GET` | `/api/internal/agent/{agentId}/processes/me/health?linuxServerId=&containerId=&port=` | 前端弱健康轮询；只按参数和 Redis 快照检查 OpenCode V2 `/api/info`，不读写数据库。 |
 | `POST` | `/api/internal/agent/{agentId}/processes/me/initialize` | 为当前用户初始化或重建 opencode 进程。 |
 | `POST` | `/api/internal/agent/{agentId}/processes/me/restart` | 重启当前用户服务端 OpenCode；ACTIVE 进程按原流程停止后重启，超管显式关闭留下的 INACTIVE binding 先恢复后重启；活动 Run 需二次确认。 |
 | `DELETE` | `/api/internal/agent/{agentId}/processes/me/binding` | 清除当前用户的 opencode 进程绑定，便于本地 opencode 场景下用户主动放弃指向已下线 Linux 服务器的脏绑定，让后续状态 / Run 链路回退到 `execution_nodes` 中的固定节点。 |
@@ -2507,7 +2516,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 启动参数读取通用参数并按用户生成 `sessionPath={OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`、`OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config`；Java 先把固定链接指向 `OPENCODE_PUBLIC_CONFIG_DIR`，再下发 manager。manager 在合并调用方环境后强制派生 `HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME`、`XDG_STATE_HOME`、`TMPDIR` 和 `OPENCODE_CONFIG_DIR`，并在 fork 前创建或校验普通 `0755` 用户目录。缺失、空白、目录冲突、无法创建或无法安全建立软链接时返回平台错误，不回退环境变量、代码默认路径或复制配置。
 - 初始化先按当前候选中进程数最少且有空闲端口的容器选择目标 manager；目标 manager 在所在服务器检查本次显式 `configPath` 必须解析为已存在且非空的目录。缺失、为空、非目录或不可读时返回 `FAILED + errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和实际检查路径，不会启动 opencode server，Java 将该结果映射为同码平台错误。
 - 若 manager 本地 state 已托管目标端口且健康，并且存量 `configPath` 与本次显式路径一致，`start` 命令按幂等成功处理，后端继续补齐用户进程绑定、进程快照和兼容 `execution_nodes` 投影；路径不同则拒绝冒充本次启动，要求平台停止后重启；state 不健康仍返回统一 opencode 错误。
-- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server `/global/health` 和 `/global/config` healthy；仅 manager 返回 `STARTED` 不算成功。启动确认期间只有 OpenCode HTTP 暂未就绪会在窗口内重试，manager 超时或网关错误立即失败；最终失败候选会收敛为 `STOPPED/UNHEALTHY/FAILED`，不会长期残留 `STARTING`。普通状态轮询遇到瞬时 HTTP 或 manager 异常时返回 `STALE` 且不覆盖数据库稳定状态。
+- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server `/api/info` 和 `/global/config` healthy；仅 manager 返回 `STARTED` 不算成功。启动确认期间只有 OpenCode HTTP 暂未就绪会在窗口内重试，manager 超时或网关错误立即失败；最终失败候选会收敛为 `STOPPED/UNHEALTHY/FAILED`，不会长期残留 `STARTING`。普通状态轮询遇到瞬时 HTTP 或 manager 异常时返回 `STALE` 且不覆盖数据库稳定状态。
 - 初始化成功后会同步写入用户进程绑定、进程快照、Redis heartbeat，以及兼容旧运行链路的 `execution_nodes` 投影。
 
 `DELETE` 行为：
@@ -3139,7 +3148,7 @@ Base URL：`/api/internal/platform/opencode-runtime/night-execution`。除下文
 }
 ```
 
-Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt/command HTTP 请求完成。后台 `prompt_async` 或 `/session/{sessionID}/command` 的调用完成异常只是候选失败：平台保留 300ms 根终态裁决窗口，窗口内由 root session 的 `idle` / `session.error` 派生的 `run.succeeded` / `run.failed` 获胜；窗口结束仍无 root 终态且 Run 仍为运行态时，才通过同一 RunEvent 链路追加一次安全的 `run.failed`。真正的事件流中断继续使用运行态丢失与 owner 恢复规则。前端不应把创建 Run 接口的等待时间当作智能体执行超时。
+Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt/command HTTP 请求完成。后台 `prompt` 或 `/session/{sessionID}/command` 的调用完成异常只是候选失败：平台保留 300ms 根终态裁决窗口，窗口内由 root session 的 `idle` / `session.error` 派生的 `run.succeeded` / `run.failed` 获胜；窗口结束仍无 root 终态且 Run 仍为运行态时，才通过同一 RunEvent 链路追加一次安全的 `run.failed`。真正的事件流中断继续使用运行态丢失与 owner 恢复规则。前端不应把创建 Run 接口的等待时间当作智能体执行超时。
 
 携带有效 `contextToken` 时，`ConversationRunContextResolver` 在 Run 产生数据库副作用前完成 Redis 校验，并以完整进程快照调用公共状态服务 `querySnapshot` 动态探测；该路径不按 processId 查询数据库，稳定 `RUNNING` 为 0 次 Repository SELECT、0 次数据库写入，只有状态、PID 或服务地址确有变化时写一次。探测返回 `STALE` 时拒绝本次 Run 但保留 token；只有明确返回 `NOT_STARTED` 时才按 processId 失效相关上下文。`RunApplicationService` 随后直接复用 Session、Workspace、ExecutionNode 和可空 AgentSessionBinding 快照，已有远端 session 的其余控制面查询仍为 0 次 PostgreSQL SELECT。
 
@@ -3173,7 +3182,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 }
 ```
 
-`command` / `arguments` 为可选字段。提供 `command` 时，平台仍先创建并持久化 Run、订阅 RunEvent，再由后端后台调用 opencode 原生 `/session/{sessionID}/command`；创建 Run 接口不会等待技能执行完成。这样 slash 技能与普通 prompt 共用 active-run 恢复、SSE 实时输出、终态裁决和取消语义。未提供 `command` 时继续使用 `prompt_async`。两种调用的 HTTP 完成异常都不能覆盖已经到达的 root 终态，也不能依赖第三方英文错误文案判断是否延迟裁决。
+`command` / `arguments` 为可选字段。提供 `command` 时，平台仍先创建并持久化 Run、订阅 RunEvent，再由后端后台调用 opencode 原生 `/session/{sessionID}/command`；创建 Run 接口不会等待技能执行完成。这样 slash 技能与普通 prompt 共用 active-run 恢复、SSE 实时输出、终态裁决和取消语义。未提供 `command` 时继续使用 `prompt`。两种调用的 HTTP 完成异常都不能覆盖已经到达的 root 终态，也不能依赖第三方英文错误文案判断是否延迟裁决。
 
 兼容要求：
 
@@ -3182,11 +3191,11 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - `messageId` 同时是本轮远端 USER dispatch 锚点。`LEGACY_FULL` 优先沿用显式旧值并原样透传，缺失时由当前 agent runtime 生成；`REDIS_SUMMARY` 始终由 runtime 为新 Run 自动生成。opencode 自动 ID 固定为与 1.18.4 `MessageID.ascending()` 字典序兼容的 `msg_[0-9a-f]{12}[0-9A-Za-z]{14}`，不能使用随机 UUID，否则后续 user ID 可能小于上一轮 assistant 并被远端误判为已经回复。同一生成值传给 agent command、写入平台 USER `remoteMessageId`，并复用于 root scope、Redis manifest 和持久化锚点；锚点来源不一致时 Run 级投影 fail-closed，不按“最后一条 user”猜测。其它 agent 未覆盖 runtime 工厂时仍保持原有 `msg_` + 32 位十六进制 UUID。
 - `clientRequestId` 由浏览器为一次发送生成；若 `contextToken` 失效，前端重新签发上下文并只重试一次，重试必须复用同一个 `clientRequestId`。服务端只以已成功写入 PostgreSQL 的唯一 Run 锚点确认幂等成功；Redis 中已声明但尚无锚点的 crash-window manifest 不会作为成功响应返回，短保护期后由恢复扫描清理。
 - 前端 HTTP 与 RunEvent SSE 原始报文观察副本在进入页面缓存前统一递归脱敏 `contextToken`，后端 API/Service 日志与错误详情也必须脱敏；`clientRequestId` 不是密钥，但不得被用来替代鉴权或 token 绑定校验。
-- `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
+- `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。没有内联内容或 URL 的普通工作区上下文会把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType/deliveryMode` 是平台请求与历史展示使用的可选来源元数据，当前用于工作区选区、上传附件展示和原生/工具投递分流，旧客户端和旧后端可忽略新增字段；它们不会原样写入 OpenCode `FilePartInput.source`。只有内联文本且能同时提供 `text/type/path` 时才生成完整远端 `FileSource`，路径型 `file://`/URL 附件省略该可选字段。
 - 聊天上传附件固定提交 `source.contextType="workspace_attachment"`、工作区相对 `path`、原始 `name` 和 `mimeType`，不提交 `content` 或 `data:` URL。文本/代码统一声明 `mimeType="text/plain"` 并设置 `source.deliveryMode="native"`；图片、PDF、音频和视频仅在当前模型 `/api/model` 的 `capabilities.input` 对应模态为 `true` 时设置 native。后端对 native 附件校验路径仍位于当前 Workspace 后转为不带 source 的 `file://` part，避免 OpenCode 把缺少 `text` 的 source 判为非法；其余 Excel、Office、压缩包、未知二进制或模型不支持媒体转换成包含文件名、MIME 和精确工作区相对路径的 text part，平台内部附件标记在转换为 OpenCode `TextPartInput` 时移除。目标运行时为 `LOCAL_CLIENT` 时忽略 native 标记，本轮附件全部按工作区相对路径投递：本地工作区在用户机器上，服务端 JVM 不能把客户端盘符或 UNC 路径解析成客户端可用的 `file://` 地址，内联正文又会占用本地隧道有限的请求体额度，路径由客户端 OpenCode 用自己的 Read 工具读取（图片和 PDF 仍由该工具按原生附件投递给模型）。提供 `command` 时，降级附件清单还会追加到 `arguments`，确保 OpenCode `/command` 的 file-only parts 约束不会丢失本轮附件路径。附件原始 file part 和平台来源元数据继续写入平台用户消息 `partsJson`，供实时和历史 Timeline 展示附件 chip。
 - `model` 使用 `providerId/modelId` 字符串格式；Java 端只解析并透传给 opencode，不再读取数据库模型目录做校验、默认模型回退或 `/global/config` provider 同步。前端模型和供应商下拉始终以 opencode 配置文件的 `/api/model`、`/api/provider` 原生结果为准。
-- Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
+- Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt` 请求体。
 
 有效 `contextToken` 的启动流程复用完整进程、执行节点和可空 binding 快照；公共 `querySnapshot` 复用统一 manager health 映射，但不先查询进程 Repository。稳定 `RUNNING` 只刷新 Redis heartbeat，状态、PID 或服务地址变化时最多写一次；`STALE` 拒绝本次 Run 但不删除 token，`NOT_STARTED` 才失效该进程关联的上下文。未携带 token 的兼容路径仍先校验当前认证用户是否已有 `READY` opencode 进程，未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run；其余 binding 兼容与匿名固定节点路由保持不变。
 Run 进入成功、失败或取消终态后，后端会从 agent 标准 session messages 的最新页沿 `before` cursor 向前查找本轮稳定 USER 锚点，单页 100、最多 20 页，只把该 user 以及 `parentID/parentId` 直接指向它的 assistant 纳入当前 Run。锚点未到达、来源冲突、重复 cursor、页数超限或旧 Run 时间窗内不唯一时不写任何消息；不得边分页边把当前 `runId` 赋给全会话。选择成功后只 upsert 本轮 assistant 可见 text、完整 parts，并把本轮最后一条 assistant 的 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。已经错误归属的历史消息不在读取或刷新时修复。
@@ -3483,18 +3492,18 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/providers?workspaceId=` | 读取当前 workspace 的 Provider 只读列表。 |
 | `GET` | `/api/internal/platform/opencode-runtime/commands?workspaceId=` | 读取可执行命令列表。 |
 | `GET` | `/api/internal/platform/opencode-runtime/references?workspaceId=` | 读取可引用上下文目录。 |
-| `GET` | `/api/internal/platform/opencode-runtime/status?workspaceId=` | 读取 opencode runtime 健康状态，后端映射到 opencode `/global/health`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/status?workspaceId=` | 读取 opencode runtime 健康状态，后端映射到 OpenCode V2 `/api/info`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/fs/list?workspaceId=&path=` | 通过 opencode runtime 列目录。 |
 | `GET` | `/api/internal/platform/opencode-runtime/fs/find?workspaceId=&query=` | 通过 opencode runtime 查找文件。 |
 | `GET` | `/api/internal/platform/opencode-runtime/fs/read?workspaceId=&path=` | 通过 opencode runtime 读文件内容。 |
-| `GET` | `/api/internal/platform/opencode-runtime/vcs/status?workspaceId=` | 读取 VCS 状态。 |
+| `GET` | `/api/internal/platform/opencode-runtime/vcs/status?workspaceId=` | 合并 V2 `/api/vcs` 分支与 `/api/vcs/status` 文件列表，返回 `status/branch/defaultBranch/files[]`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/vcs/diff?workspaceId=&mode=working\|git\|branch&context=` | 读取 VCS Diff。 |
-| `GET` | `/api/internal/platform/opencode-runtime/lsp/status?workspaceId=` | 读取 LSP 状态。 |
-| `GET` | `/api/internal/platform/opencode-runtime/mcp/status?workspaceId=` | 读取 MCP 状态。 |
-| `GET` | `/api/internal/platform/opencode-runtime/mcp/resources?workspaceId=` | 读取 MCP resource 目录，后端映射到 opencode `/experimental/resource`。 |
-| `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
-| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 读取 opencode 实例级合并有效配置，后端映射 `/config`；响应包含 `OPENCODE_CONFIG_DIR` 中的 `enabled_providers`，仅供原生 Model/Provider 目录按 Provider ID 过滤。 |
-| `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 更新 opencode global config，body 透传给 runtime。 |
+| `GET` | `/api/internal/platform/opencode-runtime/lsp/status?workspaceId=` | V2 无实时 LSP 状态接口；配置明确 `lsp:false` 时返回 `disabled`，否则返回 `unknown`，不把配置存在误报为就绪。 |
+| `GET` | `/api/internal/platform/opencode-runtime/mcp/status?workspaceId=` | 将 V2 `/api/mcp` 的 `data[]` 转为按 server name 索引的 `{status,error?}` 状态表。 |
+| `GET` | `/api/internal/platform/opencode-runtime/mcp/resources?workspaceId=` | 将 V2 `/api/mcp/resource` 的 `resources[]/templates[]` 转为资源数组；模板带 `type:"template"` 和 `uri`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 从受管插件 RPC 返回当前注册工具目录；指定 provider/model 时返回 `toolId/name/description/source`，未指定时返回 tool ID 列表。V2 暂无按模型过滤的等价接口。 |
+| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | V2 返回 `/api/config` 的配置来源条目数组；旧 `enabled_providers` 被 OpenCode V2 规范化为 `experimental.policies`，目录以原生策略及 `model.enabled/provider.activation` 决定可用项。 |
+| `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | V2 仅支持更新 `shell` 字段；其它字段返回 `API_GONE`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前用户全部 Session 空闲时调用，运行中或与其它重载竞态时返回 `CONFLICT`，由后端用户级闸门原子复核；闸门覆盖主 Run、宠物/手册旁路问答和 legacy sideQuestion/command/shell，并以 token 定时续租覆盖 OpenCode 超时重试上限。该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
 | `GET` | `/api/internal/platform/opencode-runtime/provider/auth?workspaceId=` | 查询 provider auth 状态。 |
 | `POST` | `/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/authorize` | 发起 provider OAuth。 |
@@ -3806,7 +3815,7 @@ prompt、回答或错误，也不实施配额。
 `ModelCapabilityProbeServiceTest`、`ModelGatewayForwardingServiceTest`、`ModelGatewayControllerTest`、
 `MyBatisModelGatewayRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发测试。
 
-OpenCode 1.18.4 的 `/api/model`、`/api/provider` 即使配置了 `enabled_providers` 仍可能返回 Zen；平台不得据此重新引入数据库模型目录，而是通过上述实例级配置 GET 读取合并后的 Provider 白名单，再由前端按 Provider ID 同时过滤两个原生目录且不改变各自的原生顺序。`enabled_providers` 只表达启用范围，不表达展示优先级。虽然旧版 Provider 配置 schema 接受模型 `release_date`，但 1.18.4 的 v1→v2 配置迁移不传递该字段，平台实际使用的 `/api/model` 会把这类本地配置模型的 `time.released` 保持为 `0`，因此不得依赖 JSONC `release_date` 调整“上新推荐”。白名单限制的是企业 Provider，不限制这些 Provider 内的模型数量。
+冻结的 OpenCode V2 2.0.18 会把公共 JSONC 中的 `provider/enabled_providers/small_model` 规范化为 `providers/experimental.policies/agents.title.model`；`GET /api/config` 返回这些来源条目而非旧合并对象。配置重载完成后，原生 `/api/model` 和 `/api/provider` 会按策略收敛到启用供应商，前端再排除 `model.enabled=false` 与 `provider.activation=disabled`，并保持原生目录顺序。旧模型配置的 `release_date` 不迁移为 V2 `time.released`，因此不得据此调整“上新推荐”；白名单只限制供应商，不限制其模型数量。
 
 opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
 
@@ -3899,7 +3908,7 @@ Session 运行态接口：
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/children` | 查询远端 opencode session children。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo` | 查询 Todo 列表。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo` | 查询 Todo 列表。V2 从最近的 `todowrite` 工具消息恢复快照。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff?messageId=` | 查询 session/message 级 Diff。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort` | 中止当前 session 执行。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork` | fork session。 |
@@ -4717,3 +4726,9 @@ TraceWeave 超时或超限均失败关闭。DEV/PROD 查询先固定实际 `vers
 内部精确路径 `/team/export-shards/inspect`、`/build`、`/delete-revoked-artifact` 和 `/receive/ws` 只对通用 Bearer 过滤器豁免，随后分别使用现有 XXL 内部控制 Token或一次性 WebSocket ticket 完成专用鉴权；相邻及子路径不继承豁免，也不接受用户 JWT 直接调用。它们用于权威源节点预检、过滤 shard 传输及团队撤权后的协调节点产物清理。源节点每 worktree 最多两个、全局最多四个并发；明细先原子领取数据库租约。至少一个 worktree 成功即生成 ZIP；失败 worktree、`NO_WORKTREE` 和敏感排除项记录在 `manifest.json`。角色降级、负责人失效或任一团队成员移除后，后续团队请求会实时复核并作废任务；成员移除还会主动取消关联任务并通知协调节点删除产物，协调节点离线时由每分钟清理轮询兜底。
 
 通用错误为 `UNAUTHENTICATED/FORBIDDEN/NOT_FOUND/VALIDATION_ERROR/CONFLICT/GIT_UNAVAILABLE/INTERNAL_ERROR`，均使用统一 `ApiErrorResponse` 且不返回物理路径、凭据、内部 Token 或 Git stderr。团队名单、代码、文件、导出和下载操作统一先写 `TEAM_OVERSIGHT` 审计；文件路径和 User-Agent 在数据库仅保存 SHA-256。兼容性：`targetUserId` 与 `membershipState` 都是可选增补。不传 `targetUserId` 时路径、范围参数和原有字段保持不变；旧客户端忽略新增字段。不新增 RunEvent，也不改变文件 WebSocket 协议。对应测试为 `RoleCapabilitiesTest`、`TeamWorkspaceControllerAuthorizationTest`、`MyBatisTeamWorkspaceMemberFilterIntegrationTest`、`SystemAdminTeamRepositoryIntegrationTest`、`SystemAdminTeamPostgresqlIntegrationTest`、`GitWorkspaceServiceRealGitTest`、`WorkspaceFileWebSocketHandlerTest` 和前端角色能力/构建测试。
+\n+# OpenCode V2 代理协议说明
+
+平台内部 OpenCode 代理继续使用稳定的 `/api/internal/...` 入口。运行时 client
+模块把这些入口映射到 OpenCode V2 `/api` 路由；V2 健康信息使用 `/api/info`，
+session prompt 使用 `/api/session/{sessionID}/prompt`，异步事件使用
+`/api/event`。V2 generated DTO 仅存在于 client 模块，业务和前端 DTO 不变。

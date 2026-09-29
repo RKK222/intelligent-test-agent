@@ -1,6 +1,6 @@
 # test-agent-local-client
 
-Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 Windows 10 1809（build 17763）x64。负责 WSS 反向连接、OpenCode 1.18.4 进程监管、本地文件 RPC、工作区原生选择、
+Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 Windows 10 1809（build 17763）x64。负责 WSS 反向连接、OpenCode 2.0.18 进程监管、本地文件 RPC、工作区原生选择、
 整客户端自更新和公共 Agent/Skill/Tool 完整能力包激活。客户端不直接访问平台数据库，也不把本地 OpenCode 请求
 回退到服务器运行时。
 
@@ -99,7 +99,7 @@ Mac/麒麟/Windows 普通用户侧 Java 21 客户端。Windows 交付下界为 W
   256 KiB 分片；已写入分片的重复回包幂等忽略，未来序号乱序、截断和摘要不一致均失败。断线重连从完整包起点恢复，
   不做增量覆盖。
 - Agent/Skill-only 变化调用 `/global/dispose`；Tool 或依赖变化重启本地 OpenCode。激活后同时检查进程健康和
-  `/agent`、`/command`、`/experimental/tool/ids`，失败自动回切并重启恢复。
+  `/agent`、`/command`、`/api/plugin`，失败自动回切并重启恢复。
 - 受管 OpenCode 启动时固定注入 `npm_config_offline=true` 和 `OPENCODE_DISABLE_MODELS_FETCH=true`。OpenCode 即使同时扫描
   用户全局目录、旧配置目录和当前受管目录，内部依赖检查也只能使用本机缓存或完整能力包，禁止访问公网 registry/models.dev；
   缺失的非受管依赖会快速失败，不能阻塞 Tool/插件目录加载。签名公共能力包仍必须携带完整依赖闭包，真正缺失的受管依赖继续

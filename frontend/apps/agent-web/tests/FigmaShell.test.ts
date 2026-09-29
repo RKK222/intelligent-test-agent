@@ -1606,7 +1606,7 @@ describe("FigmaShell", () => {
           platform: "darwin",
           architecture: "arm64",
           clientVersion: "0.1.0",
-          opencodeVersion: "1.18.4",
+          opencodeVersion: "2.0.18",
           connectionGeneration: 1,
           reportedAddresses: ["127.0.0.1"],
           port: 4098,

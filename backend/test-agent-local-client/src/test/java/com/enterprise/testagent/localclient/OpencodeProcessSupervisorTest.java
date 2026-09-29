@@ -78,11 +78,11 @@ class OpencodeProcessSupervisorTest {
     void catalogValidationUsesExplicitControlledDirectory() {
         Path directory = temporaryDirectory.resolve("health check");
 
-        URI uri = OpencodeProcessSupervisor.catalogUri(4106, "/experimental/tool/ids", directory);
+        URI uri = OpencodeProcessSupervisor.catalogUri(4106, "/api/config", directory);
 
-        assertThat(uri.getPath()).isEqualTo("/experimental/tool/ids");
+        assertThat(uri.getPath()).isEqualTo("/api/config");
         assertThat(URLDecoder.decode(uri.getRawQuery(), StandardCharsets.UTF_8))
-                .isEqualTo("directory=" + directory.toAbsolutePath().normalize());
+                .isEqualTo("location[directory]=" + directory.toAbsolutePath().normalize());
         assertThat(uri.getRawQuery()).contains("health+check");
     }
 
@@ -137,7 +137,7 @@ class OpencodeProcessSupervisorTest {
         long missingPid = 999_999_999L;
         assumeTrue(ProcessHandle.of(missingPid).isEmpty());
         HttpServer unrelated = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        unrelated.createContext("/global/health", exchange -> {
+        unrelated.createContext("/api/info", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });

@@ -1,4 +1,4 @@
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 
 const DB_SERVICE_BASE_URL_ENV = "TEST_AGENT_DB_SERVICE_BASE_URL"
 const DEFAULT_DB_SERVICE_BASE_URL = "http://interface.sdc.cs.icbc/contract-api"

@@ -18914,3 +18914,26 @@
 
 - 仅前端交互、现有只读目录请求调度及文档/测试变化；没有新增部署节点、API、事件、数据库、Flyway、后端鉴权路径或环境配置，也未修改 OpenCode 上游源码。
 - 当前改动尚未部署至 100；既有 Jenkins #67 的真实模型/文件验收只覆盖此前部署版本，不能代替本次性能改动的远端验收。
+
+## 2026-09-29 - OpenCode 2.0.18 迁移与独立验收分支
+
+### Why
+
+- OpenCode V2 的 `/api`、事件 envelope、插件 ABI 和运行时配置与 1.18.4 不兼容；用户要求在独立目录和分支完成全面改造，并在共享测试机使用新端口隔离验收。
+
+### What
+
+- 在 `codex/opencode-v2-migration` 的独立 worktree 中固定官方 `2.0.18`/上游 commit，重新生成 Java SDK，集中映射 V2 路由和 DTO，迁移 RunEvent、健康检查、平台目录、原生客户端、插件、工具、Worker 与发布脚本。保留平台 HTTP/RunEvent 的前端契约；V2 无原生 session share 时由平台协作分享维持能力。
+- 新增专用 `Jenkinsfile.opencode-v2` 与受控初始化脚本，使用 `3100/18182`、独立数据库、物理数据根、Redis、Worker 端口和 Compose 项目；日常 `release` 的 `3000/18082` 流水线保持原样。
+- 同步后端/前端/公共配置 README、API 与事件文档、部署说明及测试 fixture；未修改 OpenCode 只读源码或 `.env.local`。
+
+### How
+
+- 从冻结 V2 OpenAPI 执行 `tools/generate-opencode-java-sdk.sh`，未手改 generated SDK；本地原生 V2 服务器已验证健康、目录、文件、VCS、session/shell/fork/revert/compact/interrupt 等路由。
+- Java 相关 reactor 测试 1007 项通过；前端全量测试、类型检查与构建在本会话前序验证通过，本轮 backend-api 定向 129 项通过；launcher、Observability、RTK、工具依赖、开发脚本、Jenkins 契约与文档检查通过。隔离应用/Worker Compose 模板在本地解析通过。
+- Apple Silicon 上的 linux/amd64 Worker 跨架构镜像构建在官方 Bun 二进制版本检查时因 QEMU 缺少 AVX 崩溃；这不是目标 x86 服务器的运行结论，仍需 Jenkins 原生构建、镜像检验和全链路验收。
+- 提交前回顾全部 `.agents/session-log*.md` 的近期记录，未发现本次暂存范围覆盖其他提交者成果或残留合并标记。
+
+### Result
+
+- 本分支本地代码与构建检查通过；共享测试机专用任务、真实模型 Run、V1 回滚包与原生 x86 Worker 尚未验收，不能据此宣布迁移完成。涉及 OpenCode 内部 API/事件、部署/运行配置及兼容性；无新增数据库 migration 或独立部署节点，不改变平台公开 RunEvent wire format。

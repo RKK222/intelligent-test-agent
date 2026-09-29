@@ -119,8 +119,8 @@ public class LocalClientReleaseCatalogClient {
         if (manifest.schemaVersion() != 2 || !expectedVersion.equals(manifest.version())) {
             throw invalid("客户端发布清单版本与 catalog 不一致");
         }
-        if (!"1.18.4".equals(manifest.opencodeVersion())) {
-            throw invalid("客户端发布清单 OpenCode 版本必须为 1.18.4");
+        if (!"2.0.18".equals(manifest.opencodeVersion())) {
+            throw invalid("客户端发布清单 OpenCode 版本必须为 2.0.18");
         }
         if (manifest.artifacts() == null) {
             throw invalid("客户端发布清单缺少制品");

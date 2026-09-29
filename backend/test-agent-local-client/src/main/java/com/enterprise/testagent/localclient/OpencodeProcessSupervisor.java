@@ -21,6 +21,7 @@ import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,6 +52,8 @@ final class OpencodeProcessSupervisor {
     private volatile boolean managedModelRestartRequired;
     private volatile boolean managedRtkEnabled;
     private volatile boolean managedRtkRestartRequired;
+    /** 本地 V2 server 的 loopback Basic Auth 密码，与当前受管进程同生命周期。 */
+    private volatile String opencodeServerPassword;
 
     OpencodeProcessSupervisor(
             LocalClientConfiguration configuration,
@@ -281,11 +284,13 @@ final class OpencodeProcessSupervisor {
             return started;
         }
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.1:" + current.opencodePort() + "/global/dispose"))
+            HttpRequest.Builder reloadBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + current.opencodePort() + "/api/location/reload"))
                     .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.noBody())
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.noBody());
+            String reloadAuth = basicAuthHeader();
+            if (reloadAuth != null) reloadBuilder.header("Authorization", reloadAuth);
+            HttpRequest request = reloadBuilder.build();
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 LOGGER.warn("local_opencode_public_capability_reload_failed mode=dispose status={} durationMs={}",
@@ -323,9 +328,9 @@ final class OpencodeProcessSupervisor {
             return false;
         }
         // Tool 首次装载会初始化完整配置，先给它独立的冷启动窗口；后续 Agent/Skill 查询复用同一实例。
-        return catalogAvailable(current.opencodePort(), "/experimental/tool/ids")
-                && catalogAvailable(current.opencodePort(), "/agent")
-                && catalogAvailable(current.opencodePort(), "/command");
+        return catalogAvailable(current.opencodePort(), "/api/config")
+                && catalogAvailable(current.opencodePort(), "/api/agent")
+                && catalogAvailable(current.opencodePort(), "/api/command");
     }
 
     private boolean catalogAvailable(int port, String path) {
@@ -334,11 +339,13 @@ final class OpencodeProcessSupervisor {
             Path validationDirectory = configuration.opencodeDataDirectory()
                     .resolve("public-capability-healthcheck").toAbsolutePath().normalize();
             Files.createDirectories(validationDirectory);
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder catalogBuilder = HttpRequest.newBuilder()
                     .uri(catalogUri(port, path, validationDirectory))
                     .timeout(CATALOG_TIMEOUT)
-                    .GET()
-                    .build();
+                    .GET();
+            String catalogAuth = basicAuthHeader();
+            if (catalogAuth != null) catalogBuilder.header("Authorization", catalogAuth);
+            HttpRequest request = catalogBuilder.build();
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());
             boolean available = response.statusCode() >= 200 && response.statusCode() < 300;
             LOGGER.info("local_opencode_catalog_check path={} status={} available={} durationMs={}",
@@ -361,12 +368,12 @@ final class OpencodeProcessSupervisor {
     static URI catalogUri(int port, String path, Path validationDirectory) {
         String encodedDirectory = URLEncoder.encode(
                 validationDirectory.toAbsolutePath().normalize().toString(), StandardCharsets.UTF_8);
-        return URI.create("http://127.0.0.1:" + port + path + "?directory=" + encodedDirectory);
+        return URI.create("http://127.0.0.1:" + port + path + "?location%5Bdirectory%5D=" + encodedDirectory);
     }
 
     static HttpClient loopbackHttpClient() {
         return HttpClient.newBuilder()
-                // OpenCode 1.18.4 的明文 loopback 目录接口不完整支持 JDK h2c upgrade，固定 HTTP/1.1。
+                // OpenCode 2.0.18 的明文 loopback 目录接口不完整支持 JDK h2c upgrade，固定 HTTP/1.1。
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(1))
                 .build();
@@ -395,6 +402,10 @@ final class OpencodeProcessSupervisor {
                     "--port", Integer.toString(port),
                     "--print-logs");
             builder.environment().put("XDG_DATA_HOME", configuration.opencodeDataDirectory().toString());
+            String serverPassword = System.getenv("TEST_AGENT_OPENCODE_SERVER_PASSWORD");
+            if (serverPassword == null || serverPassword.isBlank()) serverPassword = UUID.randomUUID().toString();
+            opencodeServerPassword = serverPassword;
+            builder.environment().put("OPENCODE_PASSWORD", serverPassword);
             builder.environment().put("OPENCODE_CONFIG_DIR", configDirectory.toString());
             enforceOfflineRuntime(builder.environment());
             builder.environment().put("TEST_AGENT_INTERNAL_PROXY_BASE_URL", modelRelay.baseUrl());
@@ -413,9 +424,9 @@ final class OpencodeProcessSupervisor {
             if (observabilityRelay != null) {
                 String generation = "lcg_" + UUID.randomUUID().toString().replace("-", "");
                 Path plugin = executable.getParent().getParent()
-                        .resolve("plugins/test-agent-observability.mjs")
+                        .resolve("plugins/test-agent-observability")
                         .toAbsolutePath().normalize();
-                if (!Files.isRegularFile(plugin)) {
+                if (!Files.isRegularFile(plugin.resolve("index.mjs"))) {
                     throw new IllegalStateException("OpenCode observability plugin is missing");
                 }
                 builder.environment().put(
@@ -496,13 +507,26 @@ final class OpencodeProcessSupervisor {
             ObjectNode root = inherited == null || inherited.isBlank()
                     ? mapper.createObjectNode()
                     : (ObjectNode) mapper.readTree(inherited);
-            ArrayNode plugins = root.withArray("plugin");
+            ArrayNode plugins = root.withArray("plugins");
+            // V1 配置中的字符串插件仅在读入时迁移，写回统一使用 V2 {package} tuple。
+            if (root.has("plugin")) {
+                for (var legacy : root.withArray("plugin")) {
+                    if (legacy.isTextual()) {
+                        ObjectNode entry = mapper.createObjectNode();
+                        entry.put("package", legacy.asText());
+                        plugins.add(entry);
+                    }
+                }
+                root.remove("plugin");
+            }
             boolean present = false;
             for (var plugin : plugins) {
-                present |= pluginUri.equals(plugin.asText());
+                present |= pluginUri.equals(plugin.isTextual() ? plugin.asText() : plugin.path("package").asText());
             }
             if (!present) {
-                plugins.add(pluginUri);
+                ObjectNode entry = mapper.createObjectNode();
+                entry.put("package", pluginUri);
+                plugins.add(entry);
             }
             return mapper.writeValueAsString(root);
         } catch (Exception exception) {
@@ -521,14 +545,14 @@ final class OpencodeProcessSupervisor {
         Path runtimeRoot = executable.toAbsolutePath().normalize().getParent() == null
                 ? executable.toAbsolutePath().normalize()
                 : executable.toAbsolutePath().normalize().getParent().getParent();
-        Path plugin = runtimeRoot.resolve("plugins/test-agent-rtk.mjs").normalize();
+        Path plugin = runtimeRoot.resolve("plugins/test-agent-rtk").normalize();
         String executableName = executable.getFileName() == null
                 ? ""
                 : executable.getFileName().toString().toLowerCase(Locale.ROOT);
         Path binary = executable.toAbsolutePath().normalize().getParent()
                 .resolve(executableName.endsWith(".exe") ? "rtk.exe" : "rtk")
                 .normalize();
-        if (!Files.isRegularFile(plugin) || !Files.isExecutable(binary)) {
+        if (!Files.isRegularFile(plugin.resolve("index.mjs")) || !Files.isExecutable(binary)) {
             throw new IllegalStateException("OpenCode RTK runtime is missing");
         }
         environment.put("TEST_AGENT_RTK_BIN", binary.toString());
@@ -692,16 +716,25 @@ final class OpencodeProcessSupervisor {
 
     private boolean healthy(int port) {
         try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("http://127.0.0.1:" + port + "/global/health"))
+            HttpRequest.Builder healthBuilder = HttpRequest.newBuilder()
+                    .uri(URI.create("http://127.0.0.1:" + port + "/api/info"))
                     .timeout(Duration.ofSeconds(1))
-                    .GET()
-                    .build();
+                    .GET();
+            String healthAuth = basicAuthHeader();
+            if (healthAuth != null) healthBuilder.header("Authorization", healthAuth);
+            HttpRequest request = healthBuilder.build();
             int status = httpClient.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
             return status >= 200 && status < 300;
         } catch (Exception exception) {
             return false;
         }
+    }
+
+    private String basicAuthHeader() {
+        String password = opencodeServerPassword;
+        if (password == null || password.isBlank()) return null;
+        return "Basic " + Base64.getEncoder().encodeToString(
+                ("opencode:" + password).getBytes(StandardCharsets.UTF_8));
     }
 
     private Path requireExecutable() {

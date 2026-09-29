@@ -39,7 +39,7 @@ final class LocalClientRegistrationFrames {
                 platform(),
                 architecture(),
                 buildInfo.clientVersion(),
-                "1.18.4",
+                "2.0.18",
                 reportedAddresses(),
                 credentials.unifiedAuthId(),
                 buildInfo.launcherVersion(),

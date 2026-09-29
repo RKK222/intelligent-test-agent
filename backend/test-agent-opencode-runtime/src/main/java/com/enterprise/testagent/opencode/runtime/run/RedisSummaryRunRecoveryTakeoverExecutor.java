@@ -31,7 +31,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
-/** 实际恢复已接收 Run 的 OpenCode SSE 订阅；任何路径都不会调用 startRun/prompt_async。 */
+/** 实际恢复已接收 Run 的 OpenCode SSE 订阅；任何路径都不会调用 startRun/prompt。 */
 @Component
 @Order(0)
 public class RedisSummaryRunRecoveryTakeoverExecutor implements RunRecoveryTakeoverExecutor {

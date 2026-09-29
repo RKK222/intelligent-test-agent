@@ -124,7 +124,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     /**
-     * 通过 opencode prompt_async 启动 Run，generated 请求体只在 gateway 内构造。
+     * 通过 opencode prompt 启动 Run，generated 请求体只在 gateway 内构造。
      */
     @Override
     public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {

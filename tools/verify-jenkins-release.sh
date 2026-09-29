@@ -5,9 +5,11 @@ root_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 release_script="${root_dir}/deploy/local/jenkins-release.sh"
 host_control="${root_dir}/deploy/local/jenkins-host-control.sh"
 jenkinsfile="${root_dir}/Jenkinsfile"
+v2_jenkinsfile="${root_dir}/Jenkinsfile.opencode-v2"
+v2_bootstrap="${root_dir}/deploy/local/jenkins-opencode-v2-bootstrap.sh"
 sudoers_file="${root_dir}/deploy/local/jenkins-sudoers"
 
-bash -n "${release_script}" "${host_control}"
+bash -n "${release_script}" "${host_control}" "${v2_bootstrap}"
 "${release_script}" validate-tag release-1-deadbeef
 if "${release_script}" validate-tag release-0-deadbeef >/dev/null 2>&1; then
     echo 'validate-tag accepted build number zero.' >&2
@@ -112,5 +114,18 @@ fi
 grep -Fq 'sudo "${HOST_CONTROL}" stop-legacy' "${release_script}"
 grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control status' "${sudoers_file}"
 grep -Fxq 'jenkins ALL=(root) NOPASSWD: /usr/local/sbin/test-agent-jenkins-host-control stop-legacy' "${sudoers_file}"
+
+# 专用 V2 任务必须显式检出独立分支并使用独立资源；原 release 任务的固定入口保持原样。
+grep -Fq "branches: [[name: '*/codex/opencode-v2-migration']]" "${v2_jenkinsfile}"
+grep -Fq "FRONTEND_PORT = '3100'" "${v2_jenkinsfile}"
+grep -Fq "BACKEND_PORT = '18182'" "${v2_jenkinsfile}"
+grep -Fq "ISOLATED_ACCEPTANCE = 'true'" "${v2_jenkinsfile}"
+grep -Fq "RUNTIME_DATA_SOURCE = '/data2/deploy/intelligent-test-agent/v2-acceptance/data'" "${v2_jenkinsfile}"
+grep -Fq 'jenkins-opencode-v2-bootstrap.sh' "${v2_jenkinsfile}"
+grep -Fq '"${ISOLATED_ACCEPTANCE}" != true' "${release_script}"
+grep -Fq 'Isolated V2 acceptance must use its cloned database.' "${release_script}"
+grep -Fq 'TEST_AGENT_REDIS_PASSWORD=' "${release_script}"
+grep -Fq '[[ "${JOB_NAME:-}" == "intelligent-test-agent-opencode-v2" ]]' "${v2_bootstrap}"
+grep -Fq 'testagent_v2_acceptance' "${v2_bootstrap}"
 
 echo 'Jenkins release contract verification passed.'

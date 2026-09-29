@@ -11,7 +11,7 @@
  * 返回：接口返回 {code,data,msg}；code=0 展示 data 内容，code!=0 展示 msg 信息。
  */
 
-import { tool } from "@opencode-ai/plugin"
+import { tool } from "./tool-compat"
 import { existsSync } from "node:fs"
 import path from "node:path"
 
