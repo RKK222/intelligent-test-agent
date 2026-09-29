@@ -34,6 +34,10 @@ V2 镜像构建后，专用任务会启动一个无网络、无挂载、无端�
 这使不可变 release 制备和数据库升级期间镜像持续被 Docker 引用；`post` 阶段按当前 release 标签删除该容器。
 它不属于运行栈，也不影响日常 `release` 任务。
 
+正式 `up` 前，专用任务还会按 Compose 项目和 `16380` 发布端口检查并清理上一次失败留下的 V2 Redis
+容器。只有容器名或 Compose 项目明确属于 `intelligent-test-agent-v2` 时才允许回收；如果端口由其它容器或
+宿主进程占用，脚本会输出占用者并失败关闭，不会停止 release 栈或未知进程。
+
 ## 复用边界
 
 - 后端继续使用根 Maven reactor、`test-agent-app` 可执行 JAR 和现有 Flyway migration；前端继续使用

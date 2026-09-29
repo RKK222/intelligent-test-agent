@@ -190,6 +190,36 @@ validate_isolated_acceptance() {
     }
 }
 
+cleanup_isolated_redis_port() {
+    [[ "${ISOLATED_ACCEPTANCE}" == true ]] || return 0
+    local container_id container_name compose_project compose_service found_container=false
+    # docker compose 可能在上一次失败后留下一个与当前清单不同名的容器；按端口和 Compose 项目精确回收，避免误碰 release 栈。
+    while IFS= read -r container_id; do
+        [[ -n "${container_id}" ]] || continue
+        found_container=true
+        container_name=$(docker inspect --format '{{.Name}}' "${container_id}" 2>/dev/null || true)
+        compose_project=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "${container_id}" 2>/dev/null || true)
+        compose_service=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' "${container_id}" 2>/dev/null || true)
+        if [[ "${container_name}" == "/${ISOLATED_REDIS_CONTAINER_NAME}" ||
+              "${compose_project}" == "${PROJECT_NAME}" ||
+              ("${compose_project}" == "${PROJECT_NAME}"* && "${compose_service}" == redis) ]]; then
+            echo "Removing stale isolated Redis container: ${container_name#\/} (project=${compose_project:-unknown})"
+            docker rm --force "${container_id}" >/dev/null 2>&1 || true
+        else
+            echo "Isolated Redis port ${ISOLATED_REDIS_PORT} is held by unrelated container ${container_name#\/} (project=${compose_project:-unknown}, service=${compose_service:-unknown}); refusing to remove it." >&2
+            return 1
+        fi
+    done < <(docker ps -aq --filter "publish=${ISOLATED_REDIS_PORT}" 2>/dev/null || true)
+
+    [[ "${found_container}" == true ]] && return 0
+    # 没有 Docker 容器时保留宿主进程的诊断，并拒绝静默覆盖未知监听者。
+    if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :${ISOLATED_REDIS_PORT} )" 2>/dev/null | tail -n +2 | grep -q LISTEN; then
+        echo "Isolated Redis port ${ISOLATED_REDIS_PORT} is held by a host process; refusing to stop an unrelated process." >&2
+        ss -ltnp "( sport = :${ISOLATED_REDIS_PORT} )" 2>/dev/null || true
+        return 1
+    fi
+}
+
 validate_timeout() {
     local value=$1
     [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
@@ -1063,6 +1093,7 @@ deploy_release() {
         for stale_container in "${BACKEND_CONTAINER_NAME}" "${FRONTEND_CONTAINER_NAME}" "${ISOLATED_REDIS_CONTAINER_NAME}"; do
             docker rm --force "${stale_container}" >/dev/null 2>&1 || true
         done
+        cleanup_isolated_redis_port
     fi
     docker compose --env-file "${ENV_FILE}" -p "${PROJECT_NAME}" \
         -f "${release_dir}/stack.json" up -d --force-recreate --remove-orphans

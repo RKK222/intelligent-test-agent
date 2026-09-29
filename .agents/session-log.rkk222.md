@@ -18943,3 +18943,27 @@
 ### Result
 
 - 本分支本地代码与构建检查通过；Jenkins #1 因大小写差异失败，#2 因 V2 受控停止退出码差异失败，#3 因构建后镜像标签消失而未发布，仍需以修正后的专用流水线重新验证。真实模型 Run、V1 回滚包与完整发布尚未验收，不能据此宣布迁移完成。涉及 OpenCode 内部 API/事件、部署/运行配置及兼容性；无新增数据库 migration 或独立部署节点，不改变平台公开 RunEvent wire format。
+
+## 2026-09-29 - V2 验收 Redis 残留端口 fail-closed 清理
+
+### Why
+
+- Jenkins #5 已通过后端、前端、Worker 镜像、不可变发布包和克隆数据库升级，但正式 Compose 启动仍因
+  `127.0.0.1:16380` 被占用失败；#4 的固定容器清理没有覆盖实际端口持有者。
+
+### What
+
+- `jenkins-release.sh` 新增 `cleanup_isolated_redis_port`：按 Docker 发布端口定位残留容器，只回收固定 V2 容器名或
+  `intelligent-test-agent-v2` Compose 项目，未知容器和宿主进程占用时输出诊断并 fail-closed。
+- Jenkins 发布契约、V2 部署 README 和迁移说明同步记录该隔离边界；release 的 3000/18082 栈不参与清理。
+
+### How
+
+- `bash -n deploy/local/jenkins-release.sh`、`tools/verify-jenkins-release.sh` 和 `git diff --check` 通过。
+- Jenkins #5 重新确认检出 `1b61a4009`，在发布阶段复现端口占用；后端 `3000/18082` 和前端 `3100` 仍可访问，未影响
+  release。下一步应以本次 fail-closed 诊断为依据确认端口持有者，再通过专用任务重试，不直接删除未知资源。
+
+### Result
+
+- 迁移代码和构建链路仍保持可复现；V2 正式发布暂未完成，真实模型 Run、平台 SSE、回滚和完整账号 E2E 仍未验收。
+- 本次无数据库结构、Flyway、公开 API 或 RunEvent wire 变化；未修改 OpenCode 只读源码、`.env.local` 或 release 栈。

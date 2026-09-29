@@ -84,6 +84,9 @@ command、compact、interrupt、diff 和 `/api/event` smoke；V1 发布包继续
 最终 `SUCCESS`、实际 URL、原生 V2 smoke 和平台 RunEvent/历史对照为准，
 仅本地测试通过不能视为部署完成。
 
+隔离栈正式启动前会按 `16380` 端口和 Compose 项目清理可确认属于 V2 的残留 Redis 容器；发现其它容器或宿主进程
+占用时会 fail-closed 并保留占用诊断，不会为了发布停止 release 服务或未知进程。
+
 本地 `tools/dev-phase11-real-e2e.sh`、`tools/dev-runnable-loop-check.sh` 和
 `tools/verify-opencode-user-process-scenarios.sh` 共用
 OpenCode V2 `/api/info` 就绪探针；
