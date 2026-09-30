@@ -423,6 +423,9 @@ public class OpencodeRunEventMapper {
     /** V2 permission/form 事件保持平台既有 RunEvent payload 字段，前端无需识别原生 DTO。 */
     private void normalizeV2Interaction(String rawType, Map<String, Object> payload) {
         if ("permission.asked".equals(rawType)) {
+            // 平台旧事件把权限类型放在 permission；保留别名供其它 RunEvent 消费方读取。
+            Object action = payload.get("action");
+            if (action instanceof String) payload.putIfAbsent("permission", action);
             Object resources = payload.get("resources");
             if (resources instanceof List<?>) payload.putIfAbsent("patterns", resources);
             Object message = payload.get("message");

@@ -221,6 +221,16 @@ Compose 重建和 readiness/CORS/部署清单校验；远端平台 API 已验证
 目录凭据脱敏修复仍需在下一次 Jenkins 发布中复验；本机 Docker worker 仍因 ARM
 模拟器无法完成镜像 smoke。
 
+2026-10-01 的本地补充验收将 V2 权限 `action` 投影回 V1 RunEvent 的 `permission`
+别名，并用 V1/V2 对照测试固定权限请求与文字增量的核心字段。client 至 runtime 的
+Maven 测试、前端 282 项定向 Vitest、7 个权限/提问/历史/compact 浏览器场景、
+Jenkins 发布脚本静态门禁，以及麒麟 ARM64、Windows 本地客户端打包与自动回滚
+脚本均通过。浏览器场景的首个用例第一次停在工作台加载页并超时，重试通过，随后
+单独关闭重试再跑也通过；这不是首次运行全绿的证据。更新后的本地后端包已从
+独立工作树重启，`18182` readiness 为 `UP`，`3100` 首页与登录 CORS 预检均为 200，
+manager WebSocket 已连接。`admin/admin` 对本地登录仍返回 401；当前没有可用的
+登录 Token，因此不能把这些 mock 浏览器用例当作本次提交的真实平台 Run/SSE 验收。
+
 本次本地 ARM Mac 还尝试了 `deploy/internal/package-release.sh --opencode-only`。
 Docker 构建使用清单中固定的 OpenCode、Codex 资源摘要；下载阶段改为单文件下载
 后再执行长度和 SHA-256 校验，避免 CDN 并发 Range 返回短分片。构建在 amd64

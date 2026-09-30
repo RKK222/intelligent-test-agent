@@ -19535,3 +19535,25 @@
 
 - Java 历史分页遵守 V2 不混传游标和排序的协议；本地隔离 V2 服务已运行新后端包，原生交互矩阵得到更完整的可重复证据。平台外部 DTO、RunEvent wire、数据库、Flyway 和 generated SDK 均未修改。
 - 本机 ARM Docker 缺少目标 Worker 镜像；先前 `package-release.sh --opencode-only` 在 amd64 QEMU 执行 Bun `--version` 时因模拟 CPU 不支持 AVX 崩溃。原生 Linux amd64 镜像 smoke、当前提交的隔离 Jenkins 和完整 V1 回滚仍需目标环境验收；`admin/admin` 对平台/Jenkins 返回 401，不能据此宣称登录或远端发布成功。
+
+## 2026-10-01 - 固定 V1/V2 RunEvent 兼容字段并复验本地部署
+
+### Why
+
+- V2 permission 事件原生使用 `action`，平台旧 RunEvent 消费方读取 `permission`；现有前端虽能回退，但平台事件契约不应要求所有消费者理解 V2 原生字段。
+
+### What
+
+- client 事件适配层为 V2 `permission.asked` 保留旧 `permission` 别名；V1/V2 对照测试验证权限请求与文字增量的核心 RunEvent 类型和字段一致。
+- 同步 client README、RunEvent API 文档与 V2 部署验证记录；没有修改前端 wire 格式、generated SDK、数据库或 Flyway。
+
+### How
+
+- JDK 25 下 `mvn -pl test-agent-opencode-client -am -Dtest=OpencodeRunEventMapperTest -Dsurefire.failIfNoSpecifiedTests=false test -q` 和 `mvn -pl test-agent-opencode-runtime -am test -q` 通过；默认 JDK 17 不支持本项目 Java 21 target，已按本地启动规范显式选择 JDK 25。
+- 前端 5 个定向 Vitest 文件共 282 项通过；7 个 Playwright mock 场景最终通过，其中首次进入工作台超时重试通过，随后该用例关闭重试单跑通过。`tools/verify-jenkins-release.sh`、麒麟本地客户端 package/update 和 Windows package 脚本、文档门禁、`git diff --check` 通过。
+- 用固定测试 PostgreSQL 的隔离 V2 env 重建后端并从当前 worktree 重启 `18182/3100`；readiness、首页和登录 CORS 预检均通过，manager WebSocket 已连接。提交前回顾全部 `.agents/session-log*.md` 近期条目，未覆盖其它开发者成果。
+
+### Result
+
+- 旧 RunEvent 权限类型字段继续可读，本机独立 V2 栈运行更新后的后端包。
+- `admin/admin` 的本地平台登录仍为 401；当前提交的真实平台 Run/SSE、Linux amd64 Worker 镜像、隔离 Jenkins 和完整 V1 回滚仍未验收，不能宣称全面迁移已经发布完成。

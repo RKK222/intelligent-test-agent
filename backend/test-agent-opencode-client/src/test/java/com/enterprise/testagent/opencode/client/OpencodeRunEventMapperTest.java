@@ -83,7 +83,40 @@ class OpencodeRunEventMapperTest {
 
         assertThat(asked.type()).isEqualTo(RunEventType.PERMISSION_ASKED);
         assertThat(asked.payload()).containsEntry("patterns", List.of("git status"))
+                .containsEntry("permission", "bash")
                 .containsEntry("description", "允许执行吗");
+    }
+
+    @Test
+    void v2PermissionKeepsV1RunEventPayloadContract() throws Exception {
+        RunEventDraft v1 = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_v1","type":"permission.asked","properties":{"id":"per_1","sessionID":"ses_root","permission":"bash","patterns":["git status"],"description":"允许执行吗"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+        RunEventDraft v2 = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_v2","type":"permission.asked","data":{"id":"per_1","sessionID":"ses_root","action":"bash","resources":["git status"],"message":"允许执行吗"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+
+        assertThat(v2.type()).isEqualTo(v1.type());
+        for (String key : List.of("id", "sessionID", "sessionId", "permission", "patterns", "description")) {
+            assertThat(v2.payload().get(key)).as("RunEvent payload field %s", key)
+                    .isEqualTo(v1.payload().get(key));
+        }
+    }
+
+    @Test
+    void v2TextDeltaKeepsV1RunEventPayloadContract() throws Exception {
+        RunEventDraft v1 = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_v1","type":"message.part.delta","properties":{"sessionID":"ses_root","messageID":"msg_assistant","partID":"part_msg_assistant_0","delta":"你好"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+        RunEventDraft v2 = mapper.toDrafts(objectMapper.readTree("""
+                {"id":"evt_v2","type":"session.text.delta","data":{"sessionID":"ses_root","assistantMessageID":"msg_assistant","ordinal":0,"delta":"你好"}}
+                """), RUN_ID, "trace_1234567890abcdef", rootScope()).getFirst();
+
+        assertThat(v2.type()).isEqualTo(v1.type());
+        for (String key : List.of("sessionID", "sessionId", "messageID", "messageId", "partID", "partId", "text")) {
+            assertThat(v2.payload().get(key)).as("RunEvent payload field %s", key)
+                    .isEqualTo(v1.payload().get(key));
+        }
     }
 
     @Test
