@@ -57,6 +57,8 @@ class RedisSummaryRunRecoveryTakeoverExecutorTest {
         when(runtime.streamRunEvents(any())).thenReturn(Flux.just(new RunEventDraft(
                 RUN_ID, RunEventType.RUN_SUCCEEDED, "trace_takeover", NOW, Map.of("status", "SUCCEEDED"))));
         RunEventAppender appender = mock(RunEventAppender.class);
+        when(appender.appendAccepted(any(RunEventDraft.class), eq(RunStorageMode.REDIS_SUMMARY), eq(lease)))
+                .thenReturn(true);
         RunTerminalProjectionService terminal = mock(RunTerminalProjectionService.class);
         RunOwnerLeaseSupervisor supervisor = new RunOwnerLeaseSupervisor(
                 store, Clock.fixed(NOW, ZoneOffset.UTC));
@@ -73,7 +75,7 @@ class RedisSummaryRunRecoveryTakeoverExecutorTest {
 
         assertThat(executor.resumeAcceptedRun(manifest(), lease, "trace_takeover")).isTrue();
 
-        verify(appender, org.mockito.Mockito.timeout(2_000)).append(
+        verify(appender, org.mockito.Mockito.timeout(2_000)).appendAccepted(
                 any(RunEventDraft.class), eq(RunStorageMode.REDIS_SUMMARY), eq(lease));
         verify(terminal, org.mockito.Mockito.timeout(2_000)).project(
                 eq(RUN_ID), eq(RunStatus.SUCCEEDED), eq("RECOVERY_REMOTE_ROOT"),

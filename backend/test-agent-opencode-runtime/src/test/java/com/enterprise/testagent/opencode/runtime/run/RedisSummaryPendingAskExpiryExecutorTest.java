@@ -2,6 +2,7 @@ package com.enterprise.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -61,6 +62,8 @@ class RedisSummaryPendingAskExpiryExecutorTest {
         when(ownership.lease()).thenReturn(lease);
         when(runtimes.require("opencode")).thenReturn(runtime);
         when(runtime.cancelSession(any())).thenReturn(Mono.just(new AgentCancelResult(true)));
+        when(appender.appendAccepted(any(RunEventDraft.class), eq(RunStorageMode.REDIS_SUMMARY), eq(lease)))
+                .thenReturn(true);
         RedisSummaryPendingAskExpiryExecutor executor = new RedisSummaryPendingAskExpiryExecutor(
                 store, runtimes, nodes, leases, appender, projection,
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -69,10 +72,10 @@ class RedisSummaryPendingAskExpiryExecutorTest {
 
         verify(leases, times(2)).requireOwned(ownership);
         ArgumentCaptor<RunEventDraft> event = ArgumentCaptor.forClass(RunEventDraft.class);
-        verify(appender).append(
+        verify(appender).appendAccepted(
                 event.capture(),
-                org.mockito.Mockito.eq(RunStorageMode.REDIS_SUMMARY),
-                org.mockito.Mockito.eq(lease));
+                eq(RunStorageMode.REDIS_SUMMARY),
+                eq(lease));
         assertThat(event.getValue().type()).isEqualTo(com.enterprise.testagent.domain.event.RunEventType.RUN_CANCELLED);
         assertThat(event.getValue().payload()).containsEntry("reason", "PENDING_ASK_EXPIRED");
         verify(projection).project(

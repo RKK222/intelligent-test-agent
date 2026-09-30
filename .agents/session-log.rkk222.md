@@ -19220,3 +19220,27 @@
 
 - 下一次隔离发布可等待测试机 Docker 冷缓存恢复最多 180 秒，同时仍会对失去响应的主机 fail-closed；代码构建和真实脱敏复验待新提交发布后完成。
 - 未新增数据库/Flyway、HTTP 路径或事件 wire 类型，未修改 `.env.local`、OpenCode 只读源码和原 `release` 工作区。
+
+## 2026-09-30 - 完成 V2 隔离发布和模块级回归收口
+
+### Why
+
+- 需要把 V2 迁移在独立工作树的最终代码发布到隔离 Jenkins 栈，并确认前一轮发现的凭据脱敏、长等待交互、取消终态仲裁和生命周期兼容行为在真实服务链路中可用。
+- 全量 runtime 测试还暴露两处测试断言仍验证旧的 `RunEventAppender.append`；实现已按取消终态仲裁切换到 `appendAccepted`，需要同步测试契约后再提交。
+
+### What
+
+- Jenkins 专用任务 `intelligent-test-agent-opencode-v2` 的 #26 已成功构建并发布 `ba3ba46f`，隔离端口、数据库和 release 根目录均独立于现有 `release` 栈。
+- 真实 API/SSE 回归覆盖目录脱敏、普通 Run、消息持久化、Diff/Todo、取消及迟到终态、compact、工具子 Agent、question 事件回复、revert/unrevert；另外确认 V2 revert 必须使用原生 `remoteMessageId`，平台 `messageId` 不作为远端消息 ID 透传。
+- 修正 `RedisSummaryPendingAskExpiryExecutorTest` 与 `RedisSummaryRunRecoveryTakeoverExecutorTest`，为 `appendAccepted` 补充接受返回值 stub 并验证新入口。
+
+### How
+
+- 隔离栈验证：模型、Provider、配置接口均返回 200 且禁止字段计数为 0；Run/SSE、取消、compact、tool/subagent、question、revert/unrevert 脚本均以专用工作区创建临时资源并完成归档清理。
+- 本地验证：JDK 21 下 `test-agent-opencode-runtime` 全量测试通过（1009 项），`test-agent-api` 全量测试通过；client 全量测试 86 项通过；observability/RTK 插件 Node 测试分别 24/3 项通过；前端 backend-api 与 real-e2e 定向测试 268 项通过，agent-web typecheck 通过；生成 SDK、部署脚本、运行时 gitignore 和工具部署校验通过。
+- `tools/verify-opencode-process-deployment.sh` 未在本机执行成功，原因是本次按用户要求未触碰原 8080 本地服务；远端 Jenkins #26 已完成 worker/启动器/发布校验。
+
+### Result
+
+- V2 迁移的独立分支已在真实隔离栈完成发布和关键运行链路验收，原 `release` 工作树未混入本任务改动；本次测试断言修正只影响回归测试，不改变运行时行为。
+- 未新增数据库表或 Flyway migration，平台 HTTP/SSE DTO 继续保持兼容；未修改 generated SDK、OpenCode 只读源码或环境文件。浏览器保存密码安全提示阻止了 Chrome UI 登录验收，本机缺少内部 worker 镜像，因此这两项仍以 Jenkins 发布验证和 API/E2E 结果作为证据。
