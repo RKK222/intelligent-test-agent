@@ -444,14 +444,15 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 更新 opencode 全局配置，body 只做空值兜底，字段兼容由 opencode runtime 负责。
+     * V2 仅允许通过实验接口更新 shell；Provider 和模型配置必须走受控配置发布。
      */
     public Object updateConfig(String workspaceId, Map<String, Object> body, String traceId) {
         Map<String, Object> requested = safeBody(body);
-        if (!requested.keySet().stream().allMatch("shell"::equals)) {
+        if (requested.size() != 1 || !requested.containsKey("shell")
+                || (requested.get("shell") != null && !(requested.get("shell") instanceof String))) {
             throw new PlatformException(ErrorCode.API_GONE, "OpenCode V2 只支持通过 config API 更新 shell 字段");
         }
-        return patch(workspaceLocation(workspaceId, traceId), "/api/config", requested, traceId);
+        return patch(workspaceLocation(workspaceId, traceId), "/api/experimental/config", requested, traceId);
     }
 
     /**
@@ -1052,14 +1053,6 @@ public class OpencodeRuntimeApplicationService {
      */
     private Object get(AgentRuntimeTargetResolver.RuntimeTarget location, String path, Map<String, String> query, String traceId) {
         return call(location, "GET", path, query, null, traceId);
-    }
-
-    /**
-     * 当前模型列表由平台托管时，先把 provider 配置尽力写入 opencode runtime。
-     */
-    private void syncProviderConfig(String workspaceId, String traceId) {
-        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
-        modelCatalogService.syncProviderConfig(location.runtime(), location.node(), traceId);
     }
 
     /**

@@ -91,8 +91,9 @@ OpenCode 不健康时仍返回状态，便于执行重启。主动撤销后凭�
 平台模型 key 永不下发。客户端启动 loopback 模型中继，并给 OpenCode 注入随机本地 token；后台只签发
 绑定用户、客户端实例、generation 和持有 Java 的短 TTL grant。断连、换代、轮换或撤销都会使 grant
 立即失效。声明 `MANAGED_MODEL_CONFIG_V1` 时，企业来源以 `OPENCODE_PUBLIC_CONFIG_DIR/opencode.jsonc` 的
-`model/small_model/enabled_providers/provider` 为配置事实源；OpenCode provider 名称与 Java 路由 ID 通过
-`options.headers.X-Enterprise-Model-Provider` 显式映射，且只有能在 `InternalModelProviderRegistry` 同代快照中解析到
+V2 `providers` 和最后匹配的 `experimental.policies.provider.use`（同时兼容旧 V1
+`model/small_model/enabled_providers/provider`）为配置事实源；OpenCode provider 名称与 Java 路由 ID 通过
+V2 `headers.X-Enterprise-Model-Provider` 或 V1 `options.headers.X-Enterprise-Model-Provider` 显式映射，且只有能在 `InternalModelProviderRegistry` 同代快照中解析到
 已启用供应商和 Token 的条目才下发。服务端把地址、API key 改写为 loopback 环境变量，只保留安全超时参数和路由头，
 不会下发公共配置中的 UCID、服务器地址或密钥。UCID 由模型代理按 grant 所属用户重新解析并覆盖。
 

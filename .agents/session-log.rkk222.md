@@ -19489,3 +19489,26 @@
 
 - V2 标准样例中的 Codex MCP 会以原生工具名供模型调用；本机 mock MCP 的发现、调用、结果回传得到原生证据。
 - 企业 Codex 0.145.0 二进制和 Linux amd64 Worker 镜像仍需隔离 Jenkins 发布验收；`admin/admin` 对 Jenkins 与平台均返回 401，不能据此宣称远端完成。
+
+## 2026-10-01 - 修正 V2 公共模型配置与运行时同步边界
+
+### Why
+
+- 冻结的 OpenCode 2.0.18 原生 `/api/config` 只返回配置来源，旧的 Provider/模型动态 PATCH 收到 404；公共样例还沿用 V1 `provider/enabled_providers/small_model`，不能作为 V2 交付格式。
+
+### What
+
+- 公共 JSONC 改为 V2 `providers`、`experimental.policies`、`agents.title.model` 和 V2 模型字段；发布校验与 MCP 原生探针读取同一份样例。
+- 移除 Run 与模型目录里的旧 Provider PATCH；平台配置 PATCH 仅允许 `shell` 并映射到 `/api/experimental/config`。本地客户端握手仍保持 `MANAGED_MODEL_CONFIG_V1`，由后端从 V2 公共配置过滤有效路由、脱敏并转换，旧 V1 公共配置在过渡期也能读取。
+- 同步 runtime 模块、HTTP/事件、本地客户端架构和 V2 部署文档；增加 V2 策略最后匹配及 V1 公共配置兼容测试。
+
+### How
+
+- 使用冻结 Darwin 2.0.18 CLI 的临时 HOME/端口和假模型验证配置加载、`/api/experimental/config` shell PATCH、Provider 路由头及 MCP 工具从目录到模型调用闭环。
+- 聚焦 Maven 测试、runtime 模块全量 Maven 测试、完整后端重新打包与隔离本地重启通过；前端 `3100` 和后端 readiness `18182` 返回 200。模型清单校验、开发脚本校验、文档校验、Node 语法及 `git diff --check` 通过。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；未覆盖其他提交者的会话日志或其它 bug 修复，未修改 `release` 工作树、`.env.local`、generated SDK 或 OpenCode 源码。
+
+### Result
+
+- V2 模型/Provider 从受控公共配置加载；不存在的写接口不再吞掉 Run 前的配置同步失败。既有客户端仍收到不含上游 Token、UCID、服务器地址的 loopback 握手载荷。
+- 平台对前端的 RunEvent 和模型 DTO 未变化；配置 PATCH 的可写范围收窄，未涉及数据库/Flyway。隔离 Jenkins 最新 Linux amd64 与企业 Codex 验收仍需有效账号；`admin/admin` 已被登录页拒绝。

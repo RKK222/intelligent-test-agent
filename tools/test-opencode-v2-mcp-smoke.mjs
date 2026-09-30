@@ -140,6 +140,8 @@ async function startModelProbe(traceFile) {
       const toolResultHasMarker = JSON.stringify(toolMessages).includes("TESTAGENT_MCP_OK");
       appendModelTrace(traceFile, {
         tools: names,
+        routeProvider: request.headers["x-enterprise-model-provider"],
+        requestPath: request.url,
         toolResultHasMarker,
         messages: Array.isArray(payload.messages)
           ? payload.messages.map((message) => ({
@@ -207,35 +209,19 @@ try {
   await writeFile(traceFile, "");
   await writeFile(modelTraceFile, "");
   modelProbe = await startModelProbe(modelTraceFile);
-  await writeFile(join(configDir, "opencode.jsonc"), JSON.stringify({
-    model: "local/mock",
-    providers: {
-      local: {
-        name: "TestAgent MCP probe",
-        package: "aisdk:@ai-sdk/openai-compatible",
-        settings: { baseURL: `http://127.0.0.1:${modelProbe.port}/v1`, apiKey: "probe" },
-        models: {
-          mock: {
-            name: "TestAgent MCP probe",
-            capabilities: { tools: true, input: ["text"], output: ["text"] },
-            limit: { context: 32768, output: 1024 },
-          },
-        },
-      },
+  // 使用交付样例本身验证 provider/model/policy 配置，测试专用模型和 MCP 端点只存在于临时目录。
+  const publicConfig = JSON.parse(await readFile(
+    new URL("../deploy/internal/opencode.jsonc.example", import.meta.url), "utf8"));
+  publicConfig.mcp.servers = {
+    testagent_probe: {
+      type: "local",
+      command: [process.execPath, mcpScript],
+      disabled: false,
+      codemode: false,
     },
-    mcp: {
-      timeout: { startup: 30_000, catalog: 30_000, execution: 30_000 },
-      servers: {
-        testagent_probe: {
-          type: "local",
-          command: [process.execPath, mcpScript],
-          disabled: false,
-          codemode: false,
-        },
-      },
-    },
-    agents: { build: { permissions: [{ action: "*", resource: "*", effect: "allow" }] } },
-  }));
+  };
+  publicConfig.agents.build = { permissions: [{ action: "*", resource: "*", effect: "allow" }] };
+  await writeFile(join(configDir, "opencode.jsonc"), JSON.stringify(publicConfig));
   server = spawn(resolve(cli), ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: workspace,
     // 避免继承操作者的模型密钥、插件配置和平台运行环境。
@@ -246,8 +232,12 @@ try {
       HOME: home,
       XDG_CONFIG_HOME: join(root, "xdg-config"),
       OPENCODE_CONFIG_DIR: configDir,
+      OPENCODE_MODELS_PATH: resolve(new URL("../deploy/internal/opencode-models.json", import.meta.url).pathname),
       OPENCODE_DISABLE_AUTOUPDATE: "true",
       OPENCODE_PASSWORD: password,
+      TEST_AGENT_INTERNAL_PROXY_BASE_URL: `http://127.0.0.1:${modelProbe.port}/v1`,
+      TEST_AGENT_INTERNAL_PROXY_API_KEY: "testagent-probe",
+      ENTERPRISE_UCID: "testagent-probe",
     },
     stdio: "ignore",
   });
@@ -268,6 +258,15 @@ try {
   }
   if (!info) throw new Error("OpenCode V2 /api/info readiness timed out");
   assert.equal(info?.version, "2.0.18", "frozen CLI version");
+  const patchResponse = await fetch(`${base}/api/experimental/config`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ shell: null }),
+  });
+  assert.equal(patchResponse.status, 204, "V2 shell config PATCH");
   const query = new URLSearchParams({ "location[directory]": workspace });
   let mcp;
   while (Date.now() < deadline) {
@@ -319,6 +318,8 @@ try {
   const modelResultTrace = (await readFile(modelTraceFile, "utf8")).trim().split("\n").filter(Boolean)
     .map((line) => JSON.parse(line));
   assert.ok(modelResultTrace.some((entry) => entry.toolResultHasMarker), "MCP result reached the model");
+  assert.ok(modelResultTrace.some((entry) => entry.routeProvider === "deepseek-prod"),
+    "V2 provider headers reached the model proxy");
   process.stdout.write(JSON.stringify({
     version: info.version,
     status: probe.status.status,

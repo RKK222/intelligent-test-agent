@@ -92,27 +92,31 @@ if [[ -n "${public_config_file}" ]]; then
           | ($parts | length) > 1
             and ($catalog[0][$parts[0]].models[($parts[1:] | join("/"))] | type == "object")
         );
-    type == "object"
-    and (.provider | type == "object" and length > 0)
+    . as $config
+    | type == "object"
+    and (.providers | type == "object" and length > 0)
     and ref_exists(.model)
-    and ref_exists(.small_model)
+    and ref_exists(.agents.title.model)
+    and ([.experimental.policies[] | select(.action == "provider.use" and .resource == "*" and .effect == "deny")] | length == 1)
     and all(
-      .provider | to_entries[];
+      .providers | to_entries[];
       .key as $provider_id
       | .value as $provider
       | ($catalog[0][$provider_id] | type == "object")
-        and (($provider.npm // null) == ($catalog[0][$provider_id].npm // null))
+        and ($provider.package == ("aisdk:" + $catalog[0][$provider_id].npm))
+        and ($provider.headers."X-Enterprise-Model-Provider" | type == "string" and length > 0)
+        and ([$config.experimental.policies[] | select(.action == "provider.use" and .resource == $provider_id and .effect == "allow")] | length == 1)
         and ($provider.models | type == "object" and length > 0)
         and all(
           $provider.models | to_entries[];
           .key as $model_id
           | .value as $model
           | ($catalog[0][$provider_id].models[$model_id] | type == "object")
-            and (($model.id // $model_id) == $catalog[0][$provider_id].models[$model_id].id)
-            and ($model.reasoning == $catalog[0][$provider_id].models[$model_id].reasoning)
-            and ($model.temperature == $catalog[0][$provider_id].models[$model_id].temperature)
-            and ($model.tool_call == $catalog[0][$provider_id].models[$model_id].tool_call)
-            and ($model.interleaved == $catalog[0][$provider_id].models[$model_id].interleaved)
+            and (($model.modelID // $model_id) == $catalog[0][$provider_id].models[$model_id].id)
+            and ($model.capabilities.tools == $catalog[0][$provider_id].models[$model_id].tool_call)
+            and ($model.capabilities.input == $catalog[0][$provider_id].models[$model_id].modalities.input)
+            and ($model.capabilities.output == $catalog[0][$provider_id].models[$model_id].modalities.output)
+            and ($model.compatibility.reasoningField == $catalog[0][$provider_id].models[$model_id].interleaved.field)
             and ($model.limit.context == $catalog[0][$provider_id].models[$model_id].limit.context)
             and ($model.limit.output == $catalog[0][$provider_id].models[$model_id].limit.output)
         )

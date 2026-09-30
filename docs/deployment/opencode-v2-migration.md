@@ -76,8 +76,14 @@ V2 `session.diff` 的可选定位参数是 `from`、`to`、`context`，其中 `f
 `lastRemoteMessageId` 当作 V2 Diff 锚点。旧内部调用仍传 `messageID/messageId` 时，网关
 会在边界归一化为 `from`，避免把旧查询名发给 2.0.18。
 V2 `/api/config` 是配置来源数组，不再返回旧 `enabled_providers` 合并对象；
-冻结的 2.0.18 会把受控旧配置里的 `provider/enabled_providers/small_model`
-规范化为 V2 `providers`、`experimental.policies` 和 title agent model。
+交付样例直接使用 V2 `providers`、`experimental.policies` 和 `agents.title.model`。
+`LocalClientManagedModelConfigService` 从 V2 公共配置提取已放行且具备有效 Java 路由的供应商，
+只在既有 `MANAGED_MODEL_CONFIG_V1` 握手边界转换为旧客户端可用的 loopback 配置；
+当前现场公共 Git 若仍是 V1 格式，转换器也继续兼容读取。
+V2 没有可写的 Provider/model HTTP PATCH；旧 `/api/config` 同步代码已移除，
+平台配置 PATCH 只接受 shell 并映射到 `/api/experimental/config`。
+Provider/模型由公共配置发布和 `/api/location/reload` 生效；回滚 V1 平台前须把独立公共配置
+恢复到与归档 V1 release 对应的 Git 快照，不能让 V1 进程读取 V2-only JSONC。
 原生 `/api/model` 与 `/api/provider` 在配置重载完成后按这些策略收敛，
 平台目录还按归一化的 `provider.use` 策略和 `enabled/activation` 字段过滤，
 避免原生目录热加载尚未完成时短暂显示被禁止的 Provider。启动器把递归深度写在

@@ -1110,7 +1110,8 @@ grant；服务端完成的 Run 不自动切换到服务端实例或其它本地�
 
 客户端在 `REGISTER.capabilities` 声明 `MANAGED_MODEL_CONFIG_V1` 后，服务端可在 `REGISTERED` 的可选
 `managedModelConfig` 字段下发当前内部 provider 的 OpenCode 配置。载荷只允许
-`model/small_model/enabled_providers/provider`；provider 使用 `{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}`、
+`model/small_model/enabled_providers/provider`（这是兼容握手载荷，不是 V2 公共文件格式）；服务端从 V2
+`providers` 及最后匹配的 `provider.use` 策略生成它。provider 使用 `{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}`、
 `{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}` 和受控 provider header，不含平台 URL、上游密钥、Client key 或用户身份。
 客户端在处理后续自动启动命令前完成校验与内存配置；配置变化且本地 OpenCode 已运行时先安全重启。未声明能力的旧客户端
 继续收到原 `REGISTERED` JSON，不得依赖未知字段容错。

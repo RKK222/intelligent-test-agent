@@ -1763,7 +1763,7 @@ class RunApplicationServiceTest {
     }
 
     @Test
-    void internalModelSourceSyncsProviderConfigWithCurrentUserId() {
+    void internalModelSourceStartsWithoutRuntimeProviderPatch() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         UserId userId = new UserId("usr_1234567890abcdef");
         ExecutionNode assignedNode = userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
@@ -1782,11 +1782,6 @@ class RunApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
-        org.mockito.Mockito.verify(modelCatalog, org.mockito.Mockito.never()).syncProviderConfig(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.eq(assignedNode),
-                org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"),
-                org.mockito.ArgumentMatchers.eq(userId));
     }
 
     @Test

@@ -2462,7 +2462,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 工作区个人 Git、应用级 Agent 配置 Git 和版本工作区文件操作同样按当前用户 ACTIVE opencode binding 路由到目标 Java；公共配置聚合与服务器列表留在当前 Java，避免把跨服务器操作落到错误磁盘。
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/api/info` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`，并保留绑定的 `linuxServerId/port`；若能解析到目标服务器当前在线 Java 的可访问 host，则返回 `serviceAddress={currentHost}:{端口}`，否则 `serviceAddress=null`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和未携带有效会话运行上下文的兼容 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/api/info` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -2517,7 +2517,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 启动参数读取通用参数并按用户生成 `sessionPath={OPENCODE_SESSION_DIR}/users/{unifiedAuthId}`、`OPENCODE_CONFIG_DIR={sessionPath}/.testagent-runtime/current-public-config`；Java 先把固定链接指向 `OPENCODE_PUBLIC_CONFIG_DIR`，再下发 manager。manager 在合并调用方环境后强制派生 `HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME`、`XDG_STATE_HOME`、`TMPDIR` 和 `OPENCODE_CONFIG_DIR`，并在 fork 前创建或校验普通 `0755` 用户目录。缺失、空白、目录冲突、无法创建或无法安全建立软链接时返回平台错误，不回退环境变量、代码默认路径或复制配置。
 - 初始化先按当前候选中进程数最少且有空闲端口的容器选择目标 manager；目标 manager 在所在服务器检查本次显式 `configPath` 必须解析为已存在且非空的目录。缺失、为空、非目录或不可读时返回 `FAILED + errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和实际检查路径，不会启动 opencode server，Java 将该结果映射为同码平台错误。
 - 若 manager 本地 state 已托管目标端口且健康，并且存量 `configPath` 与本次显式路径一致，`start` 命令按幂等成功处理，后端继续补齐用户进程绑定、进程快照和兼容 `execution_nodes` 投影；路径不同则拒绝冒充本次启动，要求平台停止后重启；state 不健康仍返回统一 opencode 错误。
-- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server `/api/info` 和 `/global/config` healthy；仅 manager 返回 `STARTED` 不算成功。启动确认期间只有 OpenCode HTTP 暂未就绪会在窗口内重试，manager 超时或网关错误立即失败；最终失败候选会收敛为 `STOPPED/UNHEALTHY/FAILED`，不会长期残留 `STARTING`。普通状态轮询遇到瞬时 HTTP 或 manager 异常时返回 `STALE` 且不覆盖数据库稳定状态。
+- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server `/api/info` healthy；仅 manager 返回 `STARTED` 不算成功。启动确认期间只有 OpenCode `/api/info` 暂未就绪会在窗口内重试，manager 超时或网关错误立即失败；最终失败候选会收敛为 `STOPPED/UNHEALTHY/FAILED`，不会长期残留 `STARTING`。普通状态轮询遇到瞬时 HTTP 或 manager 异常时返回 `STALE` 且不覆盖数据库稳定状态。
 - 初始化成功后会同步写入用户进程绑定、进程快照、Redis heartbeat，以及兼容旧运行链路的 `execution_nodes` 投影。
 
 `DELETE` 行为：
@@ -3503,8 +3503,8 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/status?workspaceId=` | 将 V2 `/api/mcp` 的 `data[]` 转为按 server name 索引的 `{status,error?}` 状态表。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/resources?workspaceId=` | 将 V2 `/api/mcp/resource` 的 `resources[]/templates[]` 转为资源数组；模板带 `type:"template"` 和 `uri`。 |
 | `GET` | `/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=&provider=&model=` | 从受管插件 RPC 返回当前注册工具目录；指定 provider/model 时返回 `toolId/name/description/source`，未指定时返回 tool ID 列表。V2 暂无按模型过滤的等价接口。 |
-| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | V2 返回 `/api/config` 的配置来源条目数组；旧 `enabled_providers` 被 OpenCode V2 规范化为 `experimental.policies`，目录以原生策略及 `model.enabled/provider.activation` 决定可用项。 |
-| `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | V2 仅支持更新 `shell` 字段；其它字段返回 `API_GONE`。 |
+| `GET` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | V2 返回 `/api/config` 的配置来源条目数组；Provider 白名单由公共 JSONC 的 `experimental.policies` 决定，目录再按 `model.enabled/provider.activation` 过滤。 |
+| `PATCH` | `/api/internal/platform/opencode-runtime/config?workspaceId=` | 仅接受 `{"shell":"/path/to/shell"}` 或 `{"shell":null}`，调用 V2 `/api/experimental/config`；其它字段返回 `API_GONE`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/global/dispose` | 触发当前用户 opencode 进程释放缓存的 workspace Instance；后续请求重新 bootstrap 并读取磁盘配置。引用 JSONC、Agent 定义或 Skill 入口保存只在当前用户全部 Session 空闲时调用，运行中或与其它重载竞态时返回 `CONFLICT`，由后端用户级闸门原子复核；闸门覆盖主 Run、宠物/手册旁路问答和 legacy sideQuestion/command/shell，并以 token 定时续租覆盖 OpenCode 超时重试上限。该接口不会重启进程，也不能补充进程启动时缺失的环境变量。 |
 | `GET` | `/api/internal/platform/opencode-runtime/provider/auth?workspaceId=` | 查询 provider auth 状态。 |
 | `POST` | `/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/authorize` | 发起 provider OAuth。 |
@@ -3817,96 +3817,25 @@ prompt、回答或错误，也不实施配额。
 `ModelCapabilityProbeServiceTest`、`ModelGatewayForwardingServiceTest`、`ModelGatewayControllerTest`、
 `MyBatisModelGatewayRepositoryIntegrationTest` 和 PostgreSQL Testcontainers 并发测试。
 
-冻结的 OpenCode V2 2.0.18 会把公共 JSONC 中的 `provider/enabled_providers/small_model` 规范化为 `providers/experimental.policies/agents.title.model`；`GET /api/config` 返回这些来源条目而非旧合并对象。配置重载完成后，原生 `/api/model` 和 `/api/provider` 会按策略收敛到启用供应商，前端再排除 `model.enabled=false` 与 `provider.activation=disabled`，并保持原生目录顺序。旧模型配置的 `release_date` 不迁移为 V2 `time.released`，因此不得据此调整“上新推荐”；白名单只限制供应商，不限制其模型数量。
+公共 `opencode.jsonc` 按冻结的 OpenCode V2 2.0.18 原生格式维护：`providers` 定义代理和模型，
+`experimental.policies` 按顺序先拒绝全部再放行企业 Provider，`agents.title.model` 指定标题模型；
+完整且可执行的配置见 [opencode.jsonc.example](../../deploy/internal/opencode.jsonc.example)。
+`GET /api/config` 返回配置来源条目而非合并对象。配置重载后，原生 `/api/model` 和 `/api/provider`
+按策略收敛到启用供应商，前端再排除 `model.enabled=false` 与 `provider.activation=disabled`，
+并保持原生目录顺序。Provider/模型不能通过 V2 HTTP 动态 PATCH；受控公共配置发布后使用
+`/api/location/reload`，新增进程在启动时加载配置，平台 `PATCH .../config` 仅支持 `shell`，
+映射到 `/api/experimental/config`。旧模型配置的 `release_date` 不迁移为 V2 `time.released`，
+不得据此调整“上新推荐”；白名单只限制供应商，不限制其模型数量。
 
-opencode 公共配置样例（企业单后端部署可直接使用 `deploy/internal/opencode.jsonc.example`）：
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
-  "small_model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
-  "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
-  "provider": {
-    "enterprise-qwen": {
-      "name": "企业通义",
-      "npm": "@ai-sdk/openai-compatible",
-      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
-      "env": ["TEST_AGENT_INTERNAL_PROXY_API_KEY", "TEST_AGENT_INTERNAL_PROXY_BASE_URL", "ENTERPRISE_UCID"],
-      "options": {
-        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
-        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
-        "includeUsage": false,
-        "timeout": false,
-        "headerTimeout": 150000,
-        "chunkTimeout": 120000,
-        "headers": {
-          "X-Enterprise-Model-Provider": "qwen-prod",
-          "ucid": "{env:ENTERPRISE_UCID}"
-        }
-      },
-      "models": {
-        "Qwen3.6-27B": {
-          "name": "Qwen3.6 27B",
-          "id": "Qwen3.6-27B",
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "interleaved": { "field": "reasoning_content" },
-          "limit": { "context": 200000, "output": 8192 }
-        }
-      }
-    },
-    "enterprise-deepseek": {
-      "name": "企业 DeepSeek",
-      "npm": "@ai-sdk/openai-compatible",
-      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
-      "env": ["TEST_AGENT_INTERNAL_PROXY_API_KEY", "TEST_AGENT_INTERNAL_PROXY_BASE_URL", "ENTERPRISE_UCID"],
-      "options": {
-        "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
-        "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
-        "includeUsage": false,
-        "timeout": false,
-        "headerTimeout": 30000,
-        "chunkTimeout": 120000,
-        "headers": {
-          "X-Enterprise-Model-Provider": "deepseek-prod",
-          "ucid": "{env:ENTERPRISE_UCID}"
-        }
-      },
-      "models": {
-        "DeepSeek-V4-Flash-W8A8": {
-          "name": "DeepSeek V4 Flash W8A8",
-          "id": "DeepSeek-V4-Flash-W8A8",
-          "reasoning": true,
-          "tool_call": true,
-          "temperature": true,
-          "interleaved": { "field": "reasoning_content" },
-          "limit": { "context": 262144, "output": 8192 }
-        }
-      }
-    }
-  },
-  "mcp": {
-    "timeout": { "startup": 30000, "catalog": 30000, "execution": 600000 },
-    "servers": {
-      "code_analysis": {
-        "type": "local",
-        "command": ["/data/testagent/programs/codex/bin/test-agent-codex-mcp"],
-        "environment": {
-          "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
-          "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
-          "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
-        },
-        "disabled": false,
-        "codemode": false
-      }
-    }
-  }
-}
-```
-
-`provider` 下的 `enterprise-qwen` / `enterprise-deepseek` 是 opencode 原生 provider key，决定前端模型标识；`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库 `internal_model_providers.provider_id` 完全一致。默认模型和小模型均为 DeepSeek，Qwen/DeepSeek 上下文分别为 `200000`/`262144`；`code_analysis` 使用 Java 路由键 `deepseek-prod`，其上下文必须与 DeepSeek 的 `262144` 一致。`includeUsage=false` 用于避免 opencode 1.18.4 默认向不支持 `stream_options.include_usage` 的企业内部接口追加该参数。上游 Token 只保存在 `internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 opencode 配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。全局 models.dev 元数据使用随包 `deploy/internal/opencode-models.json`，不得把其中的元数据职责与公共 JSONC 的代理、鉴权职责混合。
+`providers.enterprise-qwen` / `providers.enterprise-deepseek` 是 OpenCode 原生 provider key，决定前端模型标识；
+`X-Enterprise-Model-Provider` 的 `qwen-prod` / `deepseek-prod` 是 Java 内部代理路由键，必须与数据库
+`internal_model_providers.provider_id` 完全一致。默认模型和标题模型均为 DeepSeek，Qwen/DeepSeek
+上下文分别为 `200000`/`262144`；`code_analysis` 使用 Java 路由键 `deepseek-prod`，其上下文必须
+与 DeepSeek 的 `262144` 一致。`includeUsage=false` 保留给不支持
+`stream_options.include_usage` 的企业内部接口。上游 Token 只保存在
+`internal_model_tokens.token_value` 并由 `internal_model_providers.token_id` 关联，不得写入 OpenCode
+配置、`backend.env` 或 `docker.env`；旧 `internal_model_proxy_settings` 只为滚动升级兼容保留。
+全局 models.dev 元数据使用随包 `deploy/internal/opencode-models.json`，不承担公共 JSONC 的代理和鉴权职责。
 
 Session 运行态接口：
 

@@ -540,7 +540,7 @@ enterprise-qwen/Qwen3.6-27B
 enterprise-deepseek/DeepSeek-V4-Flash-W8A8
 ```
 
-默认模型和小模型均为 DeepSeek；DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`。样例已经包含 `code_analysis` MCP，其模型为 `DeepSeek-V4-Flash-W8A8`、Java 路由键为 `deepseek-prod`、上下文为 `262144`。
+默认模型和标题模型均为 DeepSeek；DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`。V2 样例已经包含 `code_analysis` MCP，其模型为 `DeepSeek-V4-Flash-W8A8`、Java 路由键为 `deepseek-prod`、上下文为 `262144`。
 
 数据库供应商路由固定为：
 

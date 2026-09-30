@@ -967,7 +967,7 @@ test-agent-backend-122-233-30-4
 test-agent-backend-122-233-30-114
 ```
 
-两个服务器使用同一版本的 [opencode.jsonc.example](opencode.jsonc.example)：默认模型和小模型均为 `enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`；完整样例已包含 `code_analysis` MCP，MCP 上下文同样为 `262144`。
+两个服务器使用同一版本的 [opencode.jsonc.example](opencode.jsonc.example)：默认模型和标题模型均为 `enterprise-deepseek/DeepSeek-V4-Flash-W8A8`，DeepSeek 上下文为 `262144`，Qwen 上下文为 `200000`；完整 V2 样例已包含 `code_analysis` MCP，MCP 上下文同样为 `262144`。
 
 在任意一台已收到交付包的后台导出完整 JSONC，分别粘贴到两个 `linuxServerId` 的公共配置编辑器；两个节点内容必须一致：
 

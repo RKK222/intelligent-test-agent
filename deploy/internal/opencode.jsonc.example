@@ -1,38 +1,43 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
-  "small_model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8",
-  "enabled_providers": ["enterprise-qwen", "enterprise-deepseek"],
-  "provider": {
+  "agents": {
+    "title": { "model": "enterprise-deepseek/DeepSeek-V4-Flash-W8A8" }
+  },
+  "experimental": {
+    "policies": [
+      { "action": "provider.use", "resource": "*", "effect": "deny" },
+      { "action": "provider.use", "resource": "enterprise-qwen", "effect": "allow" },
+      { "action": "provider.use", "resource": "enterprise-deepseek", "effect": "allow" }
+    ]
+  },
+  "providers": {
     "enterprise-qwen": {
       "name": "企业通义",
-      "npm": "@ai-sdk/openai-compatible",
-      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "package": "aisdk:@ai-sdk/openai-compatible",
       "env": [
         "TEST_AGENT_INTERNAL_PROXY_API_KEY",
         "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
         "ENTERPRISE_UCID"
       ],
-      "options": {
+      "settings": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "includeUsage": false,
         "timeout": false,
         "headerTimeout": 150000,
-        "chunkTimeout": 120000,
-        "headers": {
-          "X-Enterprise-Model-Provider": "qwen-prod",
-          "ucid": "{env:ENTERPRISE_UCID}"
-        }
+        "chunkTimeout": 120000
+      },
+      "headers": {
+        "X-Enterprise-Model-Provider": "qwen-prod",
+        "ucid": "{env:ENTERPRISE_UCID}"
       },
       "models": {
         "Qwen3.6-27B": {
           "name": "Qwen3.6 27B",
-          "id": "Qwen3.6-27B",
-          "reasoning": true,
-          "interleaved": { "field": "reasoning_content" },
-          "tool_call": true,
-          "temperature": true,
+          "modelID": "Qwen3.6-27B",
+          "compatibility": { "reasoningField": "reasoning_content" },
+          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
           "limit": {
             "context": 200000,
             "output": 8192
@@ -42,33 +47,30 @@
     },
     "enterprise-deepseek": {
       "name": "企业 DeepSeek",
-      "npm": "@ai-sdk/openai-compatible",
-      "api": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
+      "package": "aisdk:@ai-sdk/openai-compatible",
       "env": [
         "TEST_AGENT_INTERNAL_PROXY_API_KEY",
         "TEST_AGENT_INTERNAL_PROXY_BASE_URL",
         "ENTERPRISE_UCID"
       ],
-      "options": {
+      "settings": {
         "baseURL": "{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}",
         "apiKey": "{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}",
         "includeUsage": false,
         "timeout": false,
         "headerTimeout": 30000,
-        "chunkTimeout": 120000,
-        "headers": {
-          "X-Enterprise-Model-Provider": "deepseek-prod",
-          "ucid": "{env:ENTERPRISE_UCID}"
-        }
+        "chunkTimeout": 120000
+      },
+      "headers": {
+        "X-Enterprise-Model-Provider": "deepseek-prod",
+        "ucid": "{env:ENTERPRISE_UCID}"
       },
       "models": {
         "DeepSeek-V4-Flash-W8A8": {
           "name": "DeepSeek V4 Flash W8A8",
-          "id": "DeepSeek-V4-Flash-W8A8",
-          "reasoning": true,
-          "interleaved": { "field": "reasoning_content" },
-          "tool_call": true,
-          "temperature": true,
+          "modelID": "DeepSeek-V4-Flash-W8A8",
+          "compatibility": { "reasoningField": "reasoning_content" },
+          "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
           "limit": {
             "context": 262144,
             "output": 8192

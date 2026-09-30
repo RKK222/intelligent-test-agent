@@ -1,14 +1,7 @@
 package com.enterprise.testagent.opencode.runtime.model;
 
-import com.enterprise.testagent.agent.runtime.AgentRuntime;
-import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
 import com.enterprise.testagent.domain.model.AiModelConfig;
 import com.enterprise.testagent.domain.model.AiModelConfigRepository;
-import com.enterprise.testagent.domain.node.ExecutionNode;
-import com.enterprise.testagent.domain.runtime.RuntimeKind;
-import com.enterprise.testagent.domain.user.User;
-import com.enterprise.testagent.domain.user.UserId;
-import com.enterprise.testagent.domain.user.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -30,7 +23,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 /**
- * 模型目录应用服务：外网读取 OpenAI-compatible /models，内网读取 ai_model_configs 表，并尽力同步 opencode provider 配置。
+ * 模型目录应用服务：外网读取 OpenAI-compatible /models，内网读取 ai_model_configs 表。
  */
 @Service
 public class ModelCatalogApplicationService {
@@ -39,36 +32,19 @@ public class ModelCatalogApplicationService {
     private final ModelCatalogProperties properties;
     private final AiModelConfigRepository modelConfigRepository;
     private final ObjectMapper objectMapper;
-    private final UserRepository userRepository;
     private final HttpClient httpClient;
 
     /**
-     * 注入配置、模型配置仓储、JSON 工具和用户仓储；internal 模式同步 provider 时需要按当前用户解析 UCID。
+     * 注入配置、模型配置仓储和 JSON 工具；V2 Provider 由受控配置文件加载。
      */
     @Autowired
     public ModelCatalogApplicationService(
-            ModelCatalogProperties properties,
-            AiModelConfigRepository modelConfigRepository,
-            ObjectMapper objectMapper,
-            UserRepository userRepository) {
-        this.properties = Objects.requireNonNull(properties, "properties must not be null");
-        this.modelConfigRepository = Objects.requireNonNull(modelConfigRepository, "modelConfigRepository must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    }
-
-    /**
-     * 测试兼容构造；没有用户仓储时 internal provider 同步不会写入用户级 UCID。
-     */
-    ModelCatalogApplicationService(
             ModelCatalogProperties properties,
             AiModelConfigRepository modelConfigRepository,
             ObjectMapper objectMapper) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.modelConfigRepository = Objects.requireNonNull(modelConfigRepository, "modelConfigRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.userRepository = null;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
@@ -120,60 +96,6 @@ public class ModelCatalogApplicationService {
         payload.put("name", provider.getName());
         payload.put("status", "configured");
         return List.of(payload);
-    }
-
-    /**
-     * 尽力把当前 provider 定义写入 opencode 配置；失败只记录日志，保留原 Run 错误路径。
-     */
-    public void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId) {
-        syncProviderConfig(runtime, node, traceId, null);
-    }
-
-    /**
-     * 尽力把当前 provider 定义写入 opencode 配置；internal 模式会把当前用户统一认证号写入 provider headers。
-     */
-    public void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId, UserId userId) {
-        if (!managedSourceEnabled()) {
-            return;
-        }
-        String ucid = resolveCurrentUcid(userId);
-        logInternalUcidHeader(traceId, userId, ucid);
-        try {
-            Map<String, Object> patch = node.runtimeKind() == RuntimeKind.LOCAL_CLIENT
-                    ? localClientProviderConfig()
-                    : providerConfigPatch(ucid);
-            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/api/config", null, null, Map.of(), patch, traceId))
-                    .block();
-        } catch (Exception exception) {
-            LOGGER.warn("event=model_provider_sync_failed traceId={} providerId={} error={}",
-                    traceId,
-                    properties.activeProvider().getProviderId(),
-                    exception.getClass().getSimpleName());
-        }
-    }
-
-    private String resolveCurrentUcid(UserId userId) {
-        if (!internalSourceEnabled() || userId == null || userRepository == null) {
-            return null;
-        }
-        return userRepository.findByUserId(userId)
-                .map(User::unifiedAuthId)
-                .filter(value -> value != null && !value.isBlank())
-                .orElse(null);
-    }
-
-    private void logInternalUcidHeader(String traceId, UserId userId, String ucid) {
-        if (!internalSourceEnabled()) {
-            return;
-        }
-        // UCID 是企业内模型 API 的路由标识，按当前项目约定允许明文记录；认证 token 仍不得写入日志。
-        LOGGER.info("event=model_provider_ucid_header_resolved traceId={} providerId={} userId={} ucidHeaderName={} ucid={} ucidPresent={}",
-                traceId,
-                properties.getInternal().getProviderId(),
-                userId == null ? "" : userId.value(),
-                properties.getInternal().getUcidHeaderName(),
-                ucid == null ? "" : ucid,
-                ucid != null && !ucid.isBlank());
     }
 
     private void seedInternalModels() {
@@ -284,50 +206,6 @@ public class ModelCatalogApplicationService {
         return payload;
     }
 
-    private Map<String, Object> providerConfigPatch(String ucid) {
-        ModelCatalogProperties.Provider provider = properties.activeProvider();
-        Map<String, Object> models = new LinkedHashMap<>();
-        if ("internal".equals(properties.getSource())) {
-            for (AiModelConfig model : internalModels()) {
-                models.put(model.modelId(), toOpenCodeModelConfig(model));
-            }
-        } else {
-            for (Map<String, Object> model : externalModels()) {
-                String modelId = String.valueOf(model.get("id"));
-                models.put(modelId, toOpenCodeModelConfig(modelId, String.valueOf(model.getOrDefault("name", modelId))));
-            }
-        }
-        Map<String, Object> options = new LinkedHashMap<>();
-        options.put("baseURL", stripTrailingSlash(provider.getBaseUrl()));
-        Map<String, String> headers = new LinkedHashMap<>();
-        if ("internal".equals(properties.getSource())) {
-            headers.put("environment", "test");
-            if (ucid != null && !ucid.isBlank()) {
-                headers.put(properties.getInternal().getUcidHeaderName(), ucid);
-            }
-        }
-        String apiKey = resolveApiKey(provider);
-        String envRef = "{env:" + provider.getApiKeyEnv() + "}";
-        if ("bearer".equals(provider.getAuthMode()) && apiKey != null && !apiKey.isBlank()) {
-            options.put("apiKey", apiKey);
-        }
-        if ("auth-token".equals(provider.getAuthMode())) {
-            headers.put("Auth-Token", apiKey == null || apiKey.isBlank() ? envRef : apiKey);
-        }
-        if (!headers.isEmpty()) {
-            options.put("headers", headers);
-        }
-        return Map.of(
-                "model", provider.getProviderId() + "/" + provider.getDefaultModel(),
-                "provider", Map.of(provider.getProviderId(), Map.of(
-                        "name", provider.getName(),
-                        "env", List.of(provider.getApiKeyEnv()),
-                        "npm", "@ai-sdk/openai-compatible",
-                        "api", stripTrailingSlash(provider.getBaseUrl()),
-                        "options", options,
-                        "models", models)));
-    }
-
     /**
      * 返回只引用客户端 loopback relay 环境变量的受管模型配置。
      * 该配置可随连接握手下发，不包含平台代理密钥、上游 Token、UCID 或服务器地址；
@@ -383,15 +261,6 @@ public class ModelCatalogApplicationService {
         payload.put("tool_call", true);
         payload.put("modalities", Map.of("input", List.copyOf(model.inputModalities()), "output", List.of("text")));
         payload.put("limit", Map.of("context", model.contextLimit(), "output", model.outputLimit()));
-        return payload;
-    }
-
-    private Map<String, Object> toOpenCodeModelConfig(ModelCatalogProperties.Model model) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("name", blankToDefault(model.getName(), model.getId()));
-        payload.put("tool_call", true);
-        payload.put("modalities", Map.of("input", model.getInput(), "output", List.of("text")));
-        payload.put("limit", Map.of("context", model.getContextLimit(), "output", model.getOutputLimit()));
         return payload;
     }
 

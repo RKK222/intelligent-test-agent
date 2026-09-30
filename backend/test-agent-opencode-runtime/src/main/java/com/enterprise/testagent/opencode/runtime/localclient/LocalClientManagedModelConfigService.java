@@ -71,10 +71,12 @@ public class LocalClientManagedModelConfigService {
         ObjectNode providers = sanitized.putObject("provider");
         Set<String> acceptedProviderIds = new LinkedHashSet<>();
 
-        JsonNode sourceProviders = source.path("provider");
-        JsonNode sourceEnabled = source.path("enabled_providers");
+        // 公共配置以 V2 为目标；握手载荷仍保留 V1 形态供已安装的客户端消费。
+        boolean v2 = source.path("providers").isObject();
+        JsonNode sourceProviders = source.path(v2 ? "providers" : "provider");
+        JsonNode sourceEnabled = v2 ? v2EnabledProviders(source) : source.path("enabled_providers");
         if (!sourceProviders.isObject() || !sourceEnabled.isArray()) {
-            throw unavailable("企业公共 opencode.jsonc 缺少 provider 或 enabled_providers");
+            throw unavailable("企业公共 opencode.jsonc 缺少可用的供应商配置或策略");
         }
         for (JsonNode providerIdNode : sourceEnabled) {
             String providerId = boundedText(providerIdNode, 128);
@@ -83,7 +85,8 @@ public class LocalClientManagedModelConfigService {
             }
             JsonNode provider = sourceProviders.path(providerId);
             String routeProviderId = boundedText(
-                    provider.path("options").path("headers").path(PROVIDER_HEADER), 128);
+                    v2 ? provider.path("headers").path(PROVIDER_HEADER)
+                            : provider.path("options").path("headers").path(PROVIDER_HEADER), 128);
             if (!provider.isObject()
                     || routeProviderId == null
                     || !provider.path("models").isObject()
@@ -91,7 +94,7 @@ public class LocalClientManagedModelConfigService {
                 acceptedProviderIds.remove(providerId);
                 continue;
             }
-            ObjectNode sanitizedProvider = sanitizeProvider(provider, routeProviderId);
+            ObjectNode sanitizedProvider = sanitizeProvider(provider, routeProviderId, v2);
             if (sanitizedProvider.path("models").isEmpty()) {
                 acceptedProviderIds.remove(providerId);
                 continue;
@@ -107,7 +110,9 @@ public class LocalClientManagedModelConfigService {
         if (defaultModel == null) {
             defaultModel = firstModelReference(acceptedProviderIds, providers);
         }
-        String smallModel = validModelReference(source.path("small_model"), acceptedProviderIds, providers);
+        String smallModel = validModelReference(
+                v2 ? source.path("agents").path("title").path("model") : source.path("small_model"),
+                acceptedProviderIds, providers);
         sanitized.put("model", defaultModel);
         sanitized.put("small_model", smallModel == null ? defaultModel : smallModel);
         return jsoncMapper.convertValue(sanitized, new TypeReference<>() { });
@@ -148,10 +153,50 @@ public class LocalClientManagedModelConfigService {
         }
     }
 
-    private ObjectNode sanitizeProvider(JsonNode source, String routeProviderId) {
+    private ArrayNode v2EnabledProviders(JsonNode source) {
+        ArrayNode allowed = jsoncMapper.createArrayNode();
+        JsonNode policies = source.path("experimental").path("policies");
+        if (!policies.isArray()) {
+            return allowed;
+        }
+        boolean denyAll = false;
+        for (JsonNode policy : policies) {
+            if ("provider.use".equals(policy.path("action").asText())
+                    && "*".equals(policy.path("resource").asText())
+                    && "deny".equals(policy.path("effect").asText())) {
+                denyAll = true;
+            }
+        }
+        if (!denyAll) {
+            return allowed;
+        }
+        // V2 同一文档按书写顺序生效，最后一条匹配策略决定结果；只投影明确列出的供应商。
+        var providerIds = source.path("providers").fieldNames();
+        while (providerIds.hasNext()) {
+            String providerId = providerIds.next();
+            String effect = "deny";
+            for (JsonNode policy : policies) {
+                String resource = boundedText(policy.path("resource"), 128);
+                if ("provider.use".equals(policy.path("action").asText())
+                        && ("*".equals(resource) || providerId.equals(resource))) {
+                    effect = policy.path("effect").asText();
+                }
+            }
+            if ("allow".equals(effect)) {
+                allowed.add(providerId);
+            }
+        }
+        return allowed;
+    }
+
+    private ObjectNode sanitizeProvider(JsonNode source, String routeProviderId, boolean v2) {
         ObjectNode provider = jsoncMapper.createObjectNode();
         copyText(source, provider, "name");
-        copyText(source, provider, "npm");
+        String packageName = boundedText(source.path(v2 ? "package" : "npm"), 512);
+        if (packageName != null) {
+            provider.put("npm", v2 && packageName.startsWith("aisdk:")
+                    ? packageName.substring("aisdk:".length()) : packageName);
+        }
         provider.put("api", PROXY_BASE_URL);
         ArrayNode environment = provider.putArray("env");
         environment.add("TEST_AGENT_INTERNAL_PROXY_API_KEY");
@@ -159,45 +204,57 @@ public class LocalClientManagedModelConfigService {
         ObjectNode options = provider.putObject("options");
         options.put("baseURL", PROXY_BASE_URL);
         options.put("apiKey", PROXY_API_KEY);
-        JsonNode includeUsage = source.path("options").path("includeUsage");
+        JsonNode sourceSettings = source.path(v2 ? "settings" : "options");
+        JsonNode includeUsage = sourceSettings.path("includeUsage");
         if (includeUsage.isBoolean()) {
             options.put("includeUsage", includeUsage.booleanValue());
         }
-        JsonNode timeout = source.path("options").path("timeout");
+        JsonNode timeout = sourceSettings.path("timeout");
         if (timeout.isBoolean()) {
             options.put("timeout", timeout.booleanValue());
         } else if (timeout.canConvertToLong() && timeout.longValue() > 0) {
             options.put("timeout", timeout.longValue());
         }
-        copyPositiveInteger(source.path("options"), options, "headerTimeout");
-        copyPositiveInteger(source.path("options"), options, "chunkTimeout");
+        copyPositiveInteger(sourceSettings, options, "headerTimeout");
+        copyPositiveInteger(sourceSettings, options, "chunkTimeout");
         options.putObject("headers").put(PROVIDER_HEADER, routeProviderId);
         ObjectNode models = provider.putObject("models");
         source.path("models").properties().forEach(entry -> {
             String modelId = boundedText(entry.getKey(), 256);
             if (modelId != null && entry.getValue().isObject()) {
-                models.set(modelId, sanitizeModel(modelId, entry.getValue()));
+                models.set(modelId, sanitizeModel(modelId, entry.getValue(), v2));
             }
         });
         return provider;
     }
 
-    private ObjectNode sanitizeModel(String modelId, JsonNode source) {
+    private ObjectNode sanitizeModel(String modelId, JsonNode source, boolean v2) {
         ObjectNode model = jsoncMapper.createObjectNode();
-        String configuredId = boundedText(source.path("id"), 256);
+        String configuredId = boundedText(source.path(v2 ? "modelID" : "id"), 256);
         String configuredName = boundedText(source.path("name"), 512);
         model.put("id", configuredId == null ? modelId : configuredId);
         model.put("name", configuredName == null ? modelId : configuredName);
         copyText(source, model, "release_date");
-        for (String field : List.of("attachment", "reasoning", "temperature", "tool_call")) {
-            JsonNode value = source.path(field);
-            if (value.isBoolean()) {
-                model.put(field, value.booleanValue());
+        if (v2) {
+            JsonNode capabilities = source.path("capabilities");
+            model.put("tool_call", capabilities.path("tools").asBoolean(false));
+            String reasoningField = boundedText(source.path("compatibility").path("reasoningField"), 128);
+            model.put("reasoning", reasoningField != null);
+            model.put("temperature", true);
+            if (reasoningField != null) {
+                model.putObject("interleaved").put("field", reasoningField);
             }
-        }
-        String interleavedField = boundedText(source.path("interleaved").path("field"), 128);
-        if (interleavedField != null) {
-            model.putObject("interleaved").put("field", interleavedField);
+        } else {
+            for (String field : List.of("attachment", "reasoning", "temperature", "tool_call")) {
+                JsonNode value = source.path(field);
+                if (value.isBoolean()) {
+                    model.put(field, value.booleanValue());
+                }
+            }
+            String interleavedField = boundedText(source.path("interleaved").path("field"), 128);
+            if (interleavedField != null) {
+                model.putObject("interleaved").put("field", interleavedField);
+            }
         }
         ObjectNode limit = jsoncMapper.createObjectNode();
         copyPositiveInteger(source.path("limit"), limit, "context");
@@ -206,8 +263,8 @@ public class LocalClientManagedModelConfigService {
             model.set("limit", limit);
         }
         ObjectNode modalities = jsoncMapper.createObjectNode();
-        copyTextArray(source.path("modalities"), modalities, "input");
-        copyTextArray(source.path("modalities"), modalities, "output");
+        copyTextArray(v2 ? source.path("capabilities") : source.path("modalities"), modalities, "input");
+        copyTextArray(v2 ? source.path("capabilities") : source.path("modalities"), modalities, "output");
         if (!modalities.isEmpty()) {
             model.set("modalities", modalities);
         }

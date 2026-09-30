@@ -2,20 +2,8 @@ package com.enterprise.testagent.opencode.runtime.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.enterprise.testagent.agent.runtime.AgentRuntime;
-import com.enterprise.testagent.agent.runtime.AgentRuntimeCommand;
-import com.enterprise.testagent.agent.runtime.AgentRuntimeResult;
 import com.enterprise.testagent.domain.model.AiModelConfig;
 import com.enterprise.testagent.domain.model.AiModelConfigRepository;
-import com.enterprise.testagent.domain.node.ExecutionNode;
-import com.enterprise.testagent.domain.node.ExecutionNodeId;
-import com.enterprise.testagent.domain.node.ExecutionNodeStatus;
-import com.enterprise.testagent.domain.runtime.RuntimeKind;
-import com.enterprise.testagent.domain.user.User;
-import com.enterprise.testagent.domain.user.UserId;
-import com.enterprise.testagent.domain.user.UserRepository;
-import com.enterprise.testagent.common.pagination.PageRequest;
-import com.enterprise.testagent.common.pagination.PageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +13,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
-import reactor.core.publisher.Mono;
 
 class ModelCatalogApplicationServiceTest {
 
@@ -81,85 +68,6 @@ class ModelCatalogApplicationServiceTest {
     }
 
     @Test
-    void syncProviderConfigPatchesOpencodeWithCurrentProvider() {
-        ModelCatalogProperties properties = new ModelCatalogProperties();
-        properties.setSource("internal");
-        FakeModelRepository repository = new FakeModelRepository();
-        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper);
-        service.seedInternalModelsAfterStartup();
-        RecordingRuntime runtime = new RecordingRuntime();
-
-        service.syncProviderConfig(runtime, node(), "trace_model_test");
-
-        assertThat(runtime.command).isNotNull();
-        assertThat(runtime.command.method()).isEqualTo("PATCH");
-        assertThat(runtime.command.path()).isEqualTo("/api/config");
-        assertThat(runtime.command.body()).asString()
-                .contains("enterprise-openai")
-                .contains("DeepSeek-V4-Flash-W8A8")
-                .contains("Auth-Token")
-                .contains("provider=")
-                .doesNotContain("providers=");
-    }
-
-    @Test
-    void internalSourcePatchesOpencodeWithCurrentUserUcid() {
-        ModelCatalogProperties properties = new ModelCatalogProperties();
-        properties.setSource("internal");
-        FakeModelRepository repository = new FakeModelRepository();
-        FakeUserRepository users = new FakeUserRepository();
-        users.save(User.createNew("usr_1234567890abcdef", "ucid_001", "test-user", "password-hash", "org", "rd", "dept"));
-        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper, users);
-        service.seedInternalModelsAfterStartup();
-        RecordingRuntime runtime = new RecordingRuntime();
-
-        service.syncProviderConfig(runtime, node(), "trace_model_ucid_test", new UserId("usr_1234567890abcdef"));
-
-        assertThat(runtime.command).isNotNull();
-        assertThat(runtime.command.body()).asString()
-                .contains("environment=test")
-                .contains("ucid=ucid_001")
-                .contains("Auth-Token");
-    }
-
-    @Test
-    void internalSourceUsesConfiguredUcidHeaderName() {
-        ModelCatalogProperties properties = new ModelCatalogProperties();
-        properties.setSource("internal");
-        properties.getInternal().setUcidHeaderName("UCID");
-        FakeModelRepository repository = new FakeModelRepository();
-        FakeUserRepository users = new FakeUserRepository();
-        users.save(User.createNew("usr_1234567890abcdef", "ucid_002", "test-user", "password-hash", "org", "rd", "dept"));
-        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper, users);
-        service.seedInternalModelsAfterStartup();
-        RecordingRuntime runtime = new RecordingRuntime();
-
-        service.syncProviderConfig(runtime, node(), "trace_model_ucid_header_test", new UserId("usr_1234567890abcdef"));
-
-        assertThat(runtime.command).isNotNull();
-        assertThat(runtime.command.body()).asString()
-                .contains("UCID=ucid_002")
-                .doesNotContain("ucid=ucid_002");
-    }
-
-    @Test
-    void syncProviderConfigUsesConfiguredApiKeyBeforeEnvironmentReference() {
-        ModelCatalogProperties properties = new ModelCatalogProperties();
-        properties.setSource("external");
-        properties.getExternal().setApiKey("configured-model-key");
-        FakeModelRepository repository = new FakeModelRepository();
-        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper);
-        RecordingRuntime runtime = new RecordingRuntime();
-
-        service.syncProviderConfig(runtime, node(), "trace_model_key_test");
-
-        assertThat(runtime.command).isNotNull();
-        assertThat(runtime.command.body()).asString()
-                .contains("apiKey=configured-model-key")
-                .doesNotContain("{env:EXTERNAL_API_KEY}");
-    }
-
-    @Test
     void localClientProviderConfigUsesOnlyLoopbackRelayEnvironmentReferences() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
         properties.setSource("internal");
@@ -168,12 +76,8 @@ class ModelCatalogApplicationServiceTest {
         ModelCatalogApplicationService service = new ModelCatalogApplicationService(
                 properties, repository, objectMapper);
         service.seedInternalModelsAfterStartup();
-        RecordingRuntime runtime = new RecordingRuntime();
 
-        service.syncProviderConfig(runtime, localNode(), "trace_local_model_test");
-
-        assertThat(runtime.command).isNotNull();
-        assertThat(runtime.command.body()).asString()
+        assertThat(service.localClientProviderConfig()).asString()
                 .contains("{env:TEST_AGENT_INTERNAL_PROXY_BASE_URL}")
                 .contains("{env:TEST_AGENT_INTERNAL_PROXY_API_KEY}")
                 .contains("X-Enterprise-Model-Provider=enterprise-openai")
@@ -236,51 +140,6 @@ class ModelCatalogApplicationServiceTest {
                 .contains("qwen3.5-plus", "kimi-k2.5", "qwen3-coder-plus");
     }
 
-    private ExecutionNode node() {
-        Instant now = Instant.now();
-        return new ExecutionNode(
-                new ExecutionNodeId("node_model_test"),
-                "http://127.0.0.1:4096",
-                ExecutionNodeStatus.READY,
-                0,
-                1,
-                now);
-    }
-
-    private ExecutionNode localNode() {
-        Instant now = Instant.now();
-        return new ExecutionNode(
-                new ExecutionNodeId("node_local_model_test"),
-                "http://local-client.invalid",
-                ExecutionNodeStatus.READY,
-                0,
-                1,
-                100,
-                now,
-                Set.of("chat"),
-                now,
-                now,
-                "trace_local_node",
-                RuntimeKind.LOCAL_CLIENT,
-                "lci_1234567890abcdef",
-                7L);
-    }
-
-    private static class RecordingRuntime implements AgentRuntime {
-        private AgentRuntimeCommand command;
-
-        @Override
-        public String agentId() {
-            return "opencode";
-        }
-
-        @Override
-        public Mono<AgentRuntimeResult> runtime(AgentRuntimeCommand command) {
-            this.command = command;
-            return Mono.just(new AgentRuntimeResult(new ObjectMapper().createObjectNode().put("ok", true)));
-        }
-    }
-
     private static class FakeModelRepository implements AiModelConfigRepository {
         private final Map<String, AiModelConfig> models = new LinkedHashMap<>();
 
@@ -315,46 +174,4 @@ class ModelCatalogApplicationServiceTest {
         }
     }
 
-    private static class FakeUserRepository implements UserRepository {
-        private final Map<UserId, User> users = new LinkedHashMap<>();
-
-        @Override
-        public void save(User user) {
-            users.put(user.userId(), user);
-        }
-
-        @Override
-        public Optional<User> findByUserId(UserId userId) {
-            return Optional.ofNullable(users.get(userId));
-        }
-
-        @Override
-        public Optional<User> findByUnifiedAuthId(String unifiedAuthId) {
-            return users.values().stream()
-                    .filter(user -> user.unifiedAuthId().equals(unifiedAuthId))
-                    .findFirst();
-        }
-
-        @Override
-        public Optional<User> findByUsername(String username) {
-            return users.values().stream()
-                    .filter(user -> user.username().equals(username))
-                    .findFirst();
-        }
-
-        @Override
-        public PageResponse<User> findPage(String keyword, PageRequest pageRequest) {
-            return new PageResponse<>(List.copyOf(users.values()), pageRequest.page(), pageRequest.size(), users.size());
-        }
-
-        @Override
-        public boolean existsByUsername(String username) {
-            return findByUsername(username).isPresent();
-        }
-
-        @Override
-        public boolean existsByUnifiedAuthId(String unifiedAuthId) {
-            return findByUnifiedAuthId(unifiedAuthId).isPresent();
-        }
-    }
 }

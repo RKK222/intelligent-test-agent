@@ -634,7 +634,7 @@ if bash "${ROOT_DIR}/deploy/internal/verify-opencode-model-priority.sh" \
   fail "OpenCode models validator should reject a catalog that sorts DeepSeek before Qwen"
 fi
 drifted_public_config="${tmp_dir}/drifted-opencode.jsonc"
-jq '.provider["enterprise-deepseek"].models["DeepSeek-V4-Flash-W8A8"].limit.context = 65536' \
+jq '.providers["enterprise-deepseek"].models["DeepSeek-V4-Flash-W8A8"].limit.context = 65536' \
   "${ROOT_DIR}/deploy/internal/opencode.jsonc.example" >"${drifted_public_config}"
 if bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
   "${ROOT_DIR}/deploy/internal/opencode-models.json" \

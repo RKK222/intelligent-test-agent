@@ -917,6 +917,24 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void updateConfigUsesOnlyWritableV2ShellRoute() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of()))));
+
+        fixture.service.updateConfig("wrk_1234567890abcdef", Map.of("shell", "/bin/zsh"),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("PATCH");
+        assertThat(command.path()).isEqualTo("/api/experimental/config");
+        assertThat(command.body()).isEqualTo(Map.of("shell", "/bin/zsh"));
+        assertThatThrownBy(() -> fixture.service.updateConfig(
+                "wrk_1234567890abcdef", Map.of("providers", Map.of()), "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class);
+    }
+
+    @Test
     void authorizeProviderOAuthUsesProviderOAuthPathAndBody() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenAnswer(invocation -> {
