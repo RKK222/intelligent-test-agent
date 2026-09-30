@@ -4143,6 +4143,7 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 1. `REDIS_SUMMARY` 优先使用 Redis 物化 snapshot 中最新 `diff.proposed` 的 `diff/files`；命中时不查询 PostgreSQL `run_events` 或 Run 锚点。legacy 继续读取该 Run 最新 `diff.proposed` 事件。
 2. 若 snapshot/legacy 事件中没有 Diff，则通过当前 `AgentRuntime.diff` 查询；新模式只在远端 message/part 缺失时读取 `runs` 非原文定位字段，legacy 继续使用 Session agent binding。
+   OpenCode V2 原生 `/api/session/{sessionID}/diff` 的消息定位查询参数为 `messageID`；平台仅传原生远端消息 ID，且无变更时返回空 `files[]`，不会因旧 `to` 参数导致 502。
 3. 新模式 Redis manifest 已过期但 PostgreSQL 锚点仍存在时返回 `410 RUN_DETAILS_EXPIRED`，禁止回退 legacy 事件表；legacy 没有可用映射时仍返回空文件列表。
 
 `POST /api/internal/agent/{agentId}/runs/{runId}/diff/accept` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept` 不修改文件系统；语义为“保留当前工作区变更并追加平台事件”。响应：

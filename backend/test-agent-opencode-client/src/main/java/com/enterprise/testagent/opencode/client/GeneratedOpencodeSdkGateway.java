@@ -560,7 +560,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String messageId,
             String traceId) {
-        Map<String, String> query = optionalText(messageId) == null ? Map.of() : Map.of("to", messageId);
+        // V2 的 session.diff 仍使用 OpenAPI 中定义的 messageID 查询参数；
+        // 旧适配层的 to 参数会被 2.0.18 以 400 拒绝，并在平台边界表现为 502。
+        Map<String, String> query = optionalText(messageId) == null ? Map.of() : Map.of("messageID", messageId);
         return invokeJson(node, "GET", "/api/session/" + opencodeSessionId + "/diff", Map.of(), null, query, traceId)
                 .map(this::toDiffFiles)
                 .map(OpencodeDiffResult::new);

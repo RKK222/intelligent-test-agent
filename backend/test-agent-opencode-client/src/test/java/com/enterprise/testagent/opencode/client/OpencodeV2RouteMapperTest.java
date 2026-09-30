@@ -13,6 +13,16 @@ class OpencodeV2RouteMapperTest {
         assertThat(OpencodeV2RouteMapper.map("/experimental/tool")).isEqualTo("/api/rpc/testagent.runtime/tools");
         assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/abort"))
                 .isEqualTo("/api/session/ses_demo/interrupt");
+        assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/wait"))
+                .isEqualTo("/api/experimental/session/ses_demo/wait");
+        assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/compact"))
+                .isEqualTo("/api/session/ses_demo/compact");
+        assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/fork"))
+                .isEqualTo("/api/session/ses_demo/fork");
+        assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/revert"))
+                .isEqualTo("/api/session/ses_demo/revert/stage");
+        assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/diff"))
+                .isEqualTo("/api/session/ses_demo/diff");
         assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/message"))
                 .isEqualTo("/api/session/ses_demo/message");
         assertThat(OpencodeV2RouteMapper.map("/session/ses_demo/children"))

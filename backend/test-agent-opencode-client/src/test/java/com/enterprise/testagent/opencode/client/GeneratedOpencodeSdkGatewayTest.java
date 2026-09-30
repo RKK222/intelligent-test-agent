@@ -422,7 +422,7 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/diff");
             assertThat(request.get().query()).doesNotContainKey("directory");
             assertThat(request.get().query()).doesNotContainKey("workspace");
-            assertThat(request.get().query()).containsEntry("to", List.of("msg_remote1234567890abcdef"));
+            assertThat(request.get().query()).containsEntry("messageID", List.of("msg_remote1234567890abcdef"));
             assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
         } finally {
             server.stop(0);
