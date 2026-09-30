@@ -5,6 +5,26 @@
 
 ## Entries
 
+## 2026-09-30 - V1 回滚改为完整平台制品匹配
+
+### Why
+
+- 复核隔离 Jenkins #17 的成功记录发现只证明 1.18.4 Worker、manager health 和发布清单；当时复制的是 V2 后端 JAR。当前 Java 网关及弱健康检查固定走 V2 `/api`，所以该结果不能证明会话、Run 或配置在 V1 回滚后可用。
+
+### What
+
+- `ROLLBACK_ABI=V1` 改为只读引用日常 Jenkins 归档的原始 V1 release，校验 manifest、前后端/源码摘要、旧 OpenCode 1.18.4 依赖、V1 Java 网关及 JAR 类，再复制完整 V1 平台制品到隔离 rollback 目录；V2 release 不能作为 V1 平台来源。
+- 保持独立 `rollback-v1-*` 标签与 1.18.4 Worker 构建；同步隔离 Jenkins 参数说明、发布脚本、离线/本地部署文档，并增加损坏包与 ABI 错配的门禁测试。
+
+### How
+
+- `bash tools/verify-jenkins-release.sh`（含 6 个 V1 来源测试）、`bash tools/verify-opencode-tool-runtime-deploy.sh`、Kylin ARM64 本地客户端打包/更新、Windows 候选包测试、`bash -n`、`python3 -m py_compile` 与 `git diff --check` 通过。JAR 检查按真实 Spring Boot 结构读取内嵌 `test-agent-opencode-client` 模块。
+- 已将当前 V2 分支同步到隔离 Jenkins 的内部 Git 镜像。Jenkins API 对匿名返回 403，对先前给出的 `admin/admin` 返回 401；已请求可用认证，尚未触发新一轮原生 amd64 构建或完整 V1 回滚。
+
+### Result
+
+- 错误的 V2 后端加 V1 Worker 组合会在发布前被拒绝；现有 #17 记录不再算完整 V1 业务回滚证据。真实 V1 平台回滚、恢复 V2、原生 amd64 Worker 与离线包仍需在有 Jenkins 认证的隔离环境验收；本次不改数据库、公开 API/事件或其它 bug 修复工作树。
+
 ## 2026-09-30 - V2 真实浏览器对话与 PTY 回显验收
 
 ### Why

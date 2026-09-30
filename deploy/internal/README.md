@@ -463,12 +463,13 @@ TEST_AGENT_OPENCODE_WORKER_IMAGE=test-agent-opencode-worker:1.18.4 \
 deploy/internal/package-release.sh --opencode-only --output-dir deploy/internal/dist-opencode-1.18.4
 ```
 
-回滚时先加载 1.18.4 image、解压同批次 programs，再通过平台停止并重启用户进程；不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 使用 V1 `plugin` 配置、旧依赖和顶层 `subagent_depth`，而 2.0.18 使用 V2 `plugins`、V2 依赖和 `experimental.subagent_depth`。现存 1.17.8 包仍作为更早的应急兼容包保留，但不再作为当前 V2 回滚基线。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
+回滚时必须同时恢复与 1.18.4 匹配的 V1 Java/前端平台包，再加载 1.18.4 image、解压同批次 programs，并通过平台停止和重启用户进程；不能让 V2 `/api` 网关连接 V1 Worker。不删除 session 目录、manager state 或数据库记录。启动器会依据随包 `VERSION` 使用 V1 `plugin` 配置、旧依赖和顶层 `subagent_depth`，而 2.0.18 使用 V2 `plugins`、V2 依赖和 `experimental.subagent_depth`。现存 1.17.8 包仍作为更早的应急兼容包保留，但不再作为当前 V2 回滚基线。完整差异和验证结论见 `docs/deployment/opencode-v2-migration.md`。
 
-专用 Jenkins 任务 `intelligent-test-agent-opencode-v2` 也提供可重复的 V1 worker 回滚验收：
-选择 `ACTION=ROLLBACK`、`ROLLBACK_ABI=V1`，并把 `ROLLBACK_TAG` 填为已成功发布的源 release。
+专用 Jenkins 任务 `intelligent-test-agent-opencode-v2` 也提供可重复的完整 V1 回滚验收：
+选择 `ACTION=ROLLBACK`、`ROLLBACK_ABI=V1`，并把 `ROLLBACK_TAG` 填为日常 Jenkins
+`/data2/deploy/intelligent-test-agent/releases` 中已归档的 V1 平台 release。
 任务不会覆盖源目录，而是生成 `rollback-v1-<build>-<source-commit-prefix>` immutable release，
-沿用源 release 的 backend/frontend/source，按上面的固定参数构建 1.18.4 worker，并在部署后从
+校验并复制旧包的 backend/frontend/source，按上面的固定参数构建 1.18.4 worker，并在部署后从
 容器内 `/usr/local/lib/opencode/VERSION` 校验实际版本。`ROLLBACK_ABI=V2` 才会直接重新部署
 `ROLLBACK_TAG`，因此不能把 V2 重部署当作 V1 回滚验证。
 
@@ -767,5 +768,6 @@ persistence JAR、XXL integration JAR 完整 SHA。只校验外层 ZIP 或 app J
 当前发布包固定 OpenCode `2.0.18`（release commit
 `cd9a14a6b688d4021bee381dfd39d2cef9c0f862`），Linux worker 使用 npm
 `@opencode/cli-linux-x64-baseline` 平台包，运行时依赖使用
-`@opencode/client` 与 `@opencode/plugin`。V1 历史发布包仅作为独立回滚包，
-不会与 V2 runtime lockfile 混装。
+`@opencode/client` 与 `@opencode/plugin`。V1 历史发布包仅作为完整前后端与
+1.18.4 Worker 匹配的独立回滚来源，不能只把 V2 平台的 Worker 换成 V1；
+两套 runtime lockfile 不混装。

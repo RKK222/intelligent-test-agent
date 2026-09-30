@@ -16,12 +16,13 @@ pipeline {
 
     parameters {
         choice(name: 'ACTION', choices: ['DEPLOY', 'ROLLBACK'], description: '只管理隔离的 OpenCode V2 验收栈。')
-        choice(name: 'ROLLBACK_ABI', choices: ['V1', 'V2'], description: '回滚时选择实际 worker ABI；V1 会从目标 release 生成独立 1.18.4 rollback 包。')
-        string(name: 'ROLLBACK_TAG', defaultValue: '', trim: true, description: '回滚时填写已发布的源 release 标签；V1 会复制其平台制品并替换 worker。')
+        choice(name: 'ROLLBACK_ABI', choices: ['V1', 'V2'], description: 'V1 从已归档的 1.18.4 平台 release 构造完整回滚包；V2 重部署隔离 release。')
+        string(name: 'ROLLBACK_TAG', defaultValue: '', trim: true, description: 'V1 填日常 Jenkins 归档的 V1 release 标签；V2 填隔离验收 release 标签。')
     }
 
     environment {
         RELEASE_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/releases'
+        V1_PLATFORM_RELEASE_ROOT = '/data2/deploy/intelligent-test-agent/releases'
         LOG_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/logs'
         SHARED_ROOT = '/data2/deploy/intelligent-test-agent/v2-acceptance/shared'
         ENV_FILE = '/data2/deploy/intelligent-test-agent/v2-acceptance/shared/runtime.env'
@@ -75,9 +76,8 @@ pipeline {
                         sh '"$RELEASE_SCRIPT" validate-tag "$SOURCE_RELEASE_TAG"'
                         env.OPENCODE_ABI = params.ROLLBACK_ABI
                         if (params.ROLLBACK_ABI == 'V1') {
-                            env.SOURCE_RELEASE_DIR = "${env.RELEASE_ROOT}/${env.SOURCE_RELEASE_TAG}"
                             env.SOURCE_RELEASE_COMMIT = sh(
-                                script: '"$RELEASE_SCRIPT" manifest-commit "$SOURCE_RELEASE_DIR" "$SOURCE_RELEASE_TAG"',
+                                script: '"$RELEASE_SCRIPT" v1-source-commit "$SOURCE_RELEASE_TAG"',
                                 returnStdout: true
                             ).trim()
                             env.RELEASE_TAG = "rollback-v1-${env.BUILD_NUMBER}-${env.SOURCE_RELEASE_COMMIT.take(8)}"

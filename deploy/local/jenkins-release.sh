@@ -5,6 +5,7 @@ script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repository_root=$(cd -- "${script_dir}/../.." && pwd)
 
 RELEASE_ROOT=${RELEASE_ROOT:-/data2/deploy/intelligent-test-agent/releases}
+V1_PLATFORM_RELEASE_ROOT=${V1_PLATFORM_RELEASE_ROOT:-/data2/deploy/intelligent-test-agent/releases}
 LOG_ROOT=${LOG_ROOT:-/data2/deploy/intelligent-test-agent/logs}
 SHARED_ROOT=${SHARED_ROOT:-/data2/deploy/intelligent-test-agent/shared}
 ENV_FILE=${ENV_FILE:-${SHARED_ROOT}/runtime.env}
@@ -59,10 +60,11 @@ Commands:
   validate-host
   validate-manifest RELEASE_DIR TAG
   manifest-commit RELEASE_DIR TAG
+  v1-source-commit SOURCE_TAG
   build
   build-worker
   prepare TAG COMMIT RELEASE_DIR
-  prepare-rollback SOURCE_TAG TARGET_TAG TARGET_RELEASE_DIR
+  prepare-rollback V1_SOURCE_TAG TARGET_TAG TARGET_RELEASE_DIR
   verify-database-upgrade RELEASE_DIR TAG
   deploy RELEASE_DIR TAG
   verify-deployment TAG
@@ -877,19 +879,42 @@ PY
     printf '%s\n' "${commit}"
 }
 
-# 为 V1 回滚生成独立 immutable release：沿用目标 release 的平台制品和源码，
-# 只重新绑定 1.18.4 worker 镜像，避免覆盖原 V2 manifest 或误把一次 V2 重部署当成 V1 回滚。
+# 只从既有 V1 平台发布包读取前后端；V2 Java 网关固定使用 /api，不能与 V1 Worker 混用。
+# 来源目录是只读输入，目标仍写在独立验收目录，不触碰日常 release 运行栈。
+v1_source_commit() {
+    local source_tag=$1 source_dir
+    validate_tag "${source_tag}"
+    [[ "${source_tag}" == release-* ]] || {
+        echo 'V1 rollback source must be an original release tag.' >&2
+        return 1
+    }
+    [[ "${ISOLATED_ACCEPTANCE}" == true ]] || {
+        echo 'V1 platform rollback is limited to the isolated acceptance stack.' >&2
+        return 1
+    }
+    [[ "${V1_PLATFORM_RELEASE_ROOT}" == /data2/deploy/intelligent-test-agent/releases ]] || {
+        echo 'V1 platform source root must be the read-only Jenkins release archive.' >&2
+        return 1
+    }
+    source_dir="${V1_PLATFORM_RELEASE_ROOT}/${source_tag}"
+    python3 "${script_dir}/verify-v1-rollback-source.py" "${source_dir}" "${source_tag}"
+}
+
+# 为 V1 回滚生成独立 immutable release，前后端与 Worker 必须同为 V1 ABI。
 prepare_rollback_release() {
     local source_tag=$1 target_tag=$2 release_dir=$3 source_dir source_commit worker_image
+    [[ "${OPENCODE_ABI}" == V1 ]] || {
+        echo 'V1 rollback release requires OPENCODE_ABI=V1.' >&2
+        return 1
+    }
     validate_release_dir "${release_dir}" "${target_tag}"
     validate_tag "${source_tag}"
-    source_dir="${RELEASE_ROOT}/${source_tag}"
+    source_dir="${V1_PLATFORM_RELEASE_ROOT}/${source_tag}"
     [[ "${source_dir}" != "${release_dir}" ]] || {
         echo 'Rollback target release must be different from the source release.' >&2
         return 1
     }
-    validate_manifest "${source_dir}" "${source_tag}"
-    source_commit=$(manifest_commit "${source_dir}" "${source_tag}")
+    source_commit=$(v1_source_commit "${source_tag}")
     validate_commit "${source_commit}" "${target_tag}"
     [[ ! -e "${release_dir}" ]] || { echo "Immutable rollback release already exists: ${release_dir}" >&2; return 1; }
     [[ -f "${source_dir}/backend.jar" && -f "${source_dir}/nginx.conf" ]] || {
@@ -1365,6 +1390,10 @@ case "${command}" in
     manifest-commit)
         [[ $# -eq 2 ]] || usage
         manifest_commit "$1" "$2"
+        ;;
+    v1-source-commit)
+        [[ $# -eq 1 ]] || usage
+        v1_source_commit "$1"
         ;;
     build)
         [[ $# -eq 0 ]] || usage

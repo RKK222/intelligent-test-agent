@@ -24,10 +24,12 @@
 
 专用任务也使用同一发布脚本和不可变标签，但 `ISOLATED_ACCEPTANCE=true` 会校验所有隔离路径与端口，跳过
 release 的 `stop-legacy`，并禁用独立实例里的 XXL 调度器。一次性数据库克隆只供 V2 验收使用；V2 Flyway
-只能写该副本。两个流水线不得并发操作同一个 V2 任务，缓存可以共享。专用任务的 `ROLLBACK` 使用
-`ROLLBACK_TAG` 指向其自身 `v2-acceptance/releases` 中已存在且验证通过的源标签，并通过 `ROLLBACK_ABI`
-明确选择 `V2` 直接重部署或 `V1` 生成独立 `rollback-v1-*` 制品。V1 路径不会覆盖源 release，也不会使用日常
-release 的目录或覆盖 `3000`；它会重新构建并校验 1.18.4 worker，再由部署门禁核对清单版本与容器内 `VERSION`。
+只能写该副本。两个流水线不得并发操作同一个 V2 任务，缓存可以共享。专用任务的 `ROLLBACK_ABI=V2`
+要求 `ROLLBACK_TAG` 指向自身 `v2-acceptance/releases` 中已验证的标签。`ROLLBACK_ABI=V1` 则要求标签指向
+`/data2/deploy/intelligent-test-agent/releases` 中已归档的真实 V1 平台包；流水线只读核对其清单、摘要、
+旧 Java 网关与 1.18.4 依赖，再把完整 V1 前后端复制到隔离目录并重新构建 V1 worker。
+V2 后端固定使用 `/api`，不能只替换 Worker 冒充 V1 回滚。日常 release 归档和 `3000` 运行栈均不改动；
+归档缺失或不匹配时在停服前终止。回滚后仍须对隔离数据库、会话和配置做 V1 实测。
 验收完成后核对
 `http://192.168.8.100:18182/actuator/health/readiness`、`http://192.168.8.100:3100/`、专用 worker
 健康状态及 Jenkins 构建结果。
