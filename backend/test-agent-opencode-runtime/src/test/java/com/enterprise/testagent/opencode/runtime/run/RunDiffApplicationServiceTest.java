@@ -135,7 +135,10 @@ class RunDiffApplicationServiceTest {
                 RunEventType.RUN_STARTED,
                 "trace_1234567890abcdef",
                 NOW,
-                Map.of("messageID", "msg_remote1234567890abcdef", "partID", "prt_remote1234567890abcdef")));
+                Map.of(
+                        "role", "user",
+                        "messageID", "msg_remote1234567890abcdef",
+                        "partID", "prt_remote1234567890abcdef")));
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         RunDiffApplicationService service = service(events, facade, mappedSession());
 
@@ -174,6 +177,46 @@ class RunDiffApplicationServiceTest {
             assertThat(command.messageId()).isNull();
             assertThat(command.workspace()).isNull();
         });
+    }
+
+    @Test
+    void redisSummaryDiffUsesDispatchUserMessageAsV2FromAnchor() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        RunRuntimeStore runtimeStore = mock(RunRuntimeStore.class);
+        RunSummaryPersistencePort summaryPersistence = mock(RunSummaryPersistencePort.class);
+        when(runtimeStore.findManifest(run().runId())).thenReturn(Optional.of(redisSummaryManifest()));
+        when(runtimeStore.replayAfter(run().runId(), 0L, 1)).thenReturn(new RunRuntimeReplay(
+                redisSummaryManifest(),
+                new RunRuntimeSnapshot(run().runId(), 3L, 3L, 0L, List.of(), NOW),
+                List.of(),
+                false,
+                null));
+        when(summaryPersistence.findDetailsLocator(run().runId())).thenReturn(Optional.of(detailsLocator()));
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunDiffApplicationService service = service(
+                events, facade, mappedSession(), runtimeStore, summaryPersistence);
+
+        service.getDiff(run().runId(), "trace_1234567890abcdef");
+
+        assertThat(facade.getDiffCommands).singleElement().satisfies(command ->
+                assertThat(command.messageId()).isEqualTo("msg_dispatch1234567890abcdef"));
+    }
+
+    @Test
+    void legacyDiffUsesUserMessageEvenWhenAssistantEventIsNewer() {
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        events.append(new RunEventDraft(
+                run().runId(), RunEventType.MESSAGE_UPDATED, "trace_1234567890abcdef", NOW,
+                Map.of("message", Map.of("role", "user", "id", "msg_user1234567890abcdef"))));
+        events.append(new RunEventDraft(
+                run().runId(), RunEventType.MESSAGE_UPDATED, "trace_1234567890abcdef", NOW,
+                Map.of("message", Map.of("role", "assistant", "id", "msg_assistant1234567890abcdef"))));
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+
+        service(events, facade, mappedSession()).getDiff(run().runId(), "trace_1234567890abcdef");
+
+        assertThat(facade.getDiffCommands).singleElement().satisfies(command ->
+                assertThat(command.messageId()).isEqualTo("msg_user1234567890abcdef"));
     }
 
     @Test

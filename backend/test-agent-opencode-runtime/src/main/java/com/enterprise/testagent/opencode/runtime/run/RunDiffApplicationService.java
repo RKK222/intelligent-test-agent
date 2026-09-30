@@ -147,9 +147,9 @@ public class RunDiffApplicationService {
             return new RunDiffResponse(run.runId().value(), List.of());
         }
         Workspace workspace = findWorkspace(run);
-        String messageId = latestTextPayloadValue(events, "messageID")
-                .or(() -> locator.map(RunDetailsLocator::lastRemoteMessageId))
-                .orElse(null);
+        // V2 session.diff 的 from/to 只接受 USER message；终态投影里的 lastRemoteMessageId
+        // 是 assistant message，不能再拿它作为 Diff 锚点，否则 V2 会返回 MessageNotFound/400。
+        String messageId = diffUserMessageId(events, locator).orElse(null);
         AgentDiffResult result = runtime.getDiff(new AgentDiffCommand(
                         target.orElseThrow().node(),
                         target.orElseThrow().remoteSessionId(),
@@ -208,15 +208,14 @@ public class RunDiffApplicationService {
         DiffDetails details = diffDetails(run.runId());
         List<RunEventDraft> events = details.events();
         Optional<RunDetailsLocator> locator = detailsLocator(details, runId);
-        String messageId = latestTextPayloadValue(events, "messageID")
-                .or(() -> locator.map(RunDetailsLocator::lastRemoteMessageId))
+        String messageId = diffUserMessageId(events, locator)
                 .orElseThrow(() -> new PlatformException(
                         details.storageMode() == RunStorageMode.REDIS_SUMMARY
                                 ? ErrorCode.RUN_DETAILS_EXPIRED
                                 : ErrorCode.CONFLICT,
                         details.storageMode() == RunStorageMode.REDIS_SUMMARY
                                 ? "Run Diff 定位详情已过期"
-                                : "缺少 agent messageID，无法拒绝 Diff",
+                                : "缺少 agent USER messageID，无法拒绝 Diff",
                         Map.of("runId", runId.value())));
         String partId = latestTextPayloadValue(events, "partID")
                 .or(() -> locator.map(RunDetailsLocator::lastRemotePartId))
@@ -426,8 +425,54 @@ public class RunDiffApplicationService {
     }
 
     /**
-     * 倒序查找最近的文本 payload 字段，用于定位 opencode messageID/partID。
+     * V2 Diff/revert 的 messageID 必须是 USER 轮次锚点；不能复用 assistant 的 messageID。
      */
+    private Optional<String> diffUserMessageId(
+            List<RunEventDraft> events,
+            Optional<RunDetailsLocator> locator) {
+        return locator.map(RunDetailsLocator::dispatchMessageId)
+                .flatMap(this::textValue)
+                .or(() -> latestUserMessageId(events));
+    }
+
+    /** 从消息事件的稳定 USER 投影中提取远端 message id，兼容顶层和 message/info 嵌套。 */
+    private Optional<String> latestUserMessageId(List<RunEventDraft> events) {
+        List<RunEventDraft> reversed = new ArrayList<>(events);
+        Collections.reverse(reversed);
+        for (RunEventDraft event : reversed) {
+            Optional<String> candidate = userMessageId(event.payload());
+            if (candidate.isPresent()) return candidate;
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> userMessageId(Map<String, Object> payload) {
+        Optional<String> explicit = textValue(payload.get("dispatchMessageId"))
+                .or(() -> textValue(payload.get("userMessageId")));
+        if (explicit.isPresent()) return explicit;
+        for (String key : List.of("message", "info", "data")) {
+            Object nested = payload.get(key);
+            if (nested instanceof Map<?, ?> raw) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> message = (Map<String, Object>) raw;
+                if ("user".equalsIgnoreCase(textValue(message.get("role")).orElse(""))
+                        || "user".equalsIgnoreCase(textValue(message.get("type")).orElse(""))) {
+                    return textValue(message.get("id"))
+                            .or(() -> textValue(message.get("messageID")))
+                            .or(() -> textValue(message.get("messageId")));
+                }
+            }
+        }
+        if ("user".equalsIgnoreCase(textValue(payload.get("role")).orElse(""))
+                || "user".equalsIgnoreCase(textValue(payload.get("type")).orElse(""))) {
+            return textValue(payload.get("id"))
+                    .or(() -> textValue(payload.get("messageID")))
+                    .or(() -> textValue(payload.get("messageId")));
+        }
+        return Optional.empty();
+    }
+
+    /** 倒序查找最近的文本 payload 字段，用于定位 opencode partID 等兼容字段。 */
     private Optional<String> latestTextPayloadValue(List<RunEventDraft> events, String key) {
         List<RunEventDraft> reversed = new ArrayList<>(events);
         Collections.reverse(reversed);

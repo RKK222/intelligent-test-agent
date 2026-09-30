@@ -19289,3 +19289,28 @@
 
 - Java SDK 生成链路现在能从冻结 V2 spec 重新生成，版本语义与实际 `7.24.0` generated source 一致；后续更新 spec 时应同时保留 `GENERATOR_VERSION` 与 `GENERATOR_CLI_VERSION` 的区分。
 - 本次只改生成脚本和 generator README，不涉及平台 API、RunEvent/SSE、数据库/Flyway 或运行时部署节点。
+
+## 2026-09-30 - 按冻结 V2 OpenAPI 纠正 session Diff 用户锚点
+
+### Why
+
+- 复核 `.tmp/opencode-v2-audit/openapi-2.0.18.json` 和重新生成的 `SessionApi` 后确认，V2 `session.diff` 的参数是 `from/to/context`，而 `from/to` 都要求 USER message；此前把 V1/source 快照中的 `messageID` 当成 V2 参数，方向错误。
+- 旧隔离栈 Run Diff 502 的根因还包括 Run fallback/revert 误用 assistant `lastRemoteMessageId`，必须统一使用本轮 USER `dispatchMessageId`。
+
+### What
+
+- `GeneratedOpencodeSdkGateway` 将平台 `messageId` 映射为 V2 `from`；通用 runtime 入口兼容接收旧 `messageID/messageId`，在 client 边界归一化为 `from`。
+- `OpencodeRuntimeApplicationService.sessionDiff` 改为发出 `from` query。
+- `RunDiffApplicationService` 的 Diff/revert 锚点优先读取 Redis/数据库 Run locator 的 `dispatchMessageId`，或明确标注为 USER 的事件消息，不再回退 assistant message ID。
+- 同步 client/runtime 测试、HTTP API、client README 和 V2 部署说明，并补充 Redis Summary Diff 使用 USER 锚点的回归测试。
+
+### How
+
+- 冻结规范核对：`SessionApi.sessionDiff` 生成方法签名为 `sessionID, from, to, context`，请求路径为 `/api/session/{sessionID}/diff`。
+- JDK 21 定向执行 `GeneratedOpencodeSdkGatewayTest`、`DefaultOpencodeClientFacadeTest`、`OpencodeV2RouteMapperTest`、`RunDiffApplicationServiceTest` 和 `OpencodeRuntimeApplicationServiceTest`，均通过。
+- 提交前回顾全部 `.agents/session-log*.md` 并执行 `git diff --check`；未修改 OpenCode 只读源码、环境文件或原 `release` 工作树。
+
+### Result
+
+- Java/client/runtime 适配层当前与冻结 V2 Diff/revert 参数语义一致，旧隔离部署仍需用新提交重新发布后复跑 Run Diff、revert/unrevert 真实验收。
+- 未新增数据库/Flyway、前端 SSE wire 或部署节点；最新远端 Jenkins 发布仍受登录会话限制。

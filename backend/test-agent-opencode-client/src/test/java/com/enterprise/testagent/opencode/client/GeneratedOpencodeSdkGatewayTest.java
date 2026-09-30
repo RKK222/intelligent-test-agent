@@ -383,7 +383,7 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
-    void gatewayReadsSessionDiffWithOptionalMessageId() throws Exception {
+    void gatewayReadsSessionDiffWithOptionalUserMessageId() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {
             request.set(snapshot(exchange));
@@ -422,7 +422,7 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/diff");
             assertThat(request.get().query()).doesNotContainKey("directory");
             assertThat(request.get().query()).doesNotContainKey("workspace");
-            assertThat(request.get().query()).containsEntry("messageID", List.of("msg_remote1234567890abcdef"));
+            assertThat(request.get().query()).containsEntry("from", List.of("msg_remote1234567890abcdef"));
             assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
         } finally {
             server.stop(0);
@@ -496,7 +496,7 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
-    void gatewayPreservesV2MessageIdForRuntimeSessionDiff() throws Exception {
+    void gatewayMapsLegacyRuntimeMessageIdToV2DiffFrom() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {
             request.set(snapshot(exchange));
@@ -511,7 +511,9 @@ class GeneratedOpencodeSdkGatewayTest {
                             "/session/" + REMOTE_SESSION_ID + "/diff",
                             "/tmp/demo",
                             null,
-                            Map.of("messageID", "msg_runtime1234567890abcdef"),
+                            Map.of(
+                                    "messageID", "msg_runtime1234567890abcdef",
+                                    "messageId", "msg_legacy1234567890abcdef"),
                             null,
                             TRACE_ID)
                     .block(Duration.ofSeconds(5));
@@ -519,8 +521,8 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().method()).isEqualTo("GET");
             assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/diff");
             assertThat(request.get().query()).containsEntry(
-                    "messageID", List.of("msg_runtime1234567890abcdef"));
-            assertThat(request.get().query()).doesNotContainKey("to");
+                    "from", List.of("msg_runtime1234567890abcdef"));
+            assertThat(request.get().query()).doesNotContainKeys("messageID", "messageId", "to");
         } finally {
             server.stop(0);
         }

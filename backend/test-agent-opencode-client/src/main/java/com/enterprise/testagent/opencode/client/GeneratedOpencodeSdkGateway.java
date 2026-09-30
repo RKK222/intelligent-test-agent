@@ -560,9 +560,8 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String messageId,
             String traceId) {
-        // V2 的 session.diff 仍使用 OpenAPI 中定义的 messageID 查询参数；
-        // 旧适配层的 to 参数会被 2.0.18 以 400 拒绝，并在平台边界表现为 502。
-        Map<String, String> query = optionalText(messageId) == null ? Map.of() : Map.of("messageID", messageId);
+        // V2 session.diff 只接受 from/to/context；平台 messageId 表示本轮 USER 锚点，映射为 from。
+        Map<String, String> query = optionalText(messageId) == null ? Map.of() : Map.of("from", messageId);
         return invokeJson(node, "GET", "/api/session/" + opencodeSessionId + "/diff", Map.of(), null, query, traceId)
                 .map(this::toDiffFiles)
                 .map(OpencodeDiffResult::new);
@@ -670,6 +669,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         Map<String, Object> pathParams = new HashMap<>();
         String v2Path = OpencodeV2RouteMapper.map(path);
         Map<String, String> runtimeQuery = query == null ? Map.of() : new LinkedHashMap<>(query);
+        if (v2Path.matches("/api/session/[^/]+/diff")) {
+            // 兼容旧平台调用方仍传 messageID/messageId；V2 的 session.diff 语义是
+            // “从该 USER 轮次开始”，因此统一归一化为 OpenAPI 的 from 查询参数。
+            String messageId = runtimeQuery.remove("messageID");
+            String camelCaseMessageId = runtimeQuery.remove("messageId");
+            if (messageId == null) messageId = camelCaseMessageId;
+            if (messageId != null && !messageId.isBlank() && !runtimeQuery.containsKey("from")) {
+                runtimeQuery.put("from", messageId);
+            }
+        }
         boolean toolCatalog = "/experimental/tool".equals(path) || "/experimental/tool/ids".equals(path);
         if ("/file/content".equals(path) && runtimeQuery.containsKey("path")) {
             v2Path = "/api/fs/read/" + runtimeQuery.remove("path");

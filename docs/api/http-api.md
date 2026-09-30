@@ -146,7 +146,7 @@ V2 原生没有 session share 路由，旧 runtime `/session/{id}/share` 入口�
 | `/api/internal/agent/opencode/file` | 文件列表。 |
 | `/api/internal/agent/opencode/file/content` | 文件读取。 |
 | `/api/internal/agent/opencode/vcs/status` | VCS 状态。 |
-| `/api/internal/agent/opencode/session/{sessionId}/diff` | Session Diff。 |
+| `/api/internal/agent/opencode/session/{sessionId}/diff` | Session Diff；可选 `messageId` 表示远端 USER 轮次锚点，内部映射为 OpenCode V2 的 `from`。 |
 | `/api/internal/agent/opencode/session/{sessionId}/abort` | Session abort。 |
 | `/api/internal/agent/opencode/permission?sessionId={sessionId}` | Pending permission；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
 | `/api/internal/agent/opencode/question?sessionId={sessionId}` | Pending question；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
@@ -3910,7 +3910,7 @@ Session 运行态接口：
 |---|---|---|
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/children` | 查询远端 opencode session children。 |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo` | 查询 Todo 列表。V2 从最近的 `todowrite` 工具消息恢复快照。 |
-| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff?messageId=` | 查询 session/message 级 Diff。 |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff?messageId=` | 查询 session/message 级 Diff；`messageId` 是远端 USER 轮次锚点，内部映射到 V2 `from`。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort` | 中止当前 session 执行。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork` | fork session。 |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/side-question` | 旁路问答：从指定消息边界创建临时 fork，必要时只在临时 fork 上调用 summarize/compact，再使用 `plan` agent 的只读权限发送问题，等待工具执行后的自然语言最终回答并删除临时会话；问题和回答不写入主会话历史。body 为 `{ question, messageId?, agent?, model? }`，`question` 最长 4000 字；上下文超过 40 条消息或约 48000 字符时必须提供 `provider/model` 格式的 `model`。响应为 `{ answer, compacted }`。 |
@@ -4142,8 +4142,11 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 读取顺序：
 
 1. `REDIS_SUMMARY` 优先使用 Redis 物化 snapshot 中最新 `diff.proposed` 的 `diff/files`；命中时不查询 PostgreSQL `run_events` 或 Run 锚点。legacy 继续读取该 Run 最新 `diff.proposed` 事件。
-2. 若 snapshot/legacy 事件中没有 Diff，则通过当前 `AgentRuntime.diff` 查询；新模式只在远端 message/part 缺失时读取 `runs` 非原文定位字段，legacy 继续使用 Session agent binding。
-   OpenCode V2 原生 `/api/session/{sessionID}/diff` 的消息定位查询参数为 `messageID`；平台仅传原生远端消息 ID，且无变更时返回空 `files[]`，不会因旧 `to` 参数导致 502。
+2. 若 snapshot/legacy 事件中没有 Diff，则通过当前 `AgentRuntime.diff` 查询；新模式优先使用
+   `runs` 非原文定位字段中的 `dispatchMessageId`，legacy 再从明确标注为 USER 的消息事件中恢复。
+   OpenCode V2 原生 `/api/session/{sessionID}/diff` 的消息定位查询参数为 `from`、`to`、`context`；
+   平台 `messageId` 映射为 `from`，且无变更时返回空 `files[]`。assistant 的
+   `lastRemoteMessageId` 不能作为 V2 Diff/revert 锚点。
 3. 新模式 Redis manifest 已过期但 PostgreSQL 锚点仍存在时返回 `410 RUN_DETAILS_EXPIRED`，禁止回退 legacy 事件表；legacy 没有可用映射时仍返回空文件列表。
 
 `POST /api/internal/agent/{agentId}/runs/{runId}/diff/accept` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept` 不修改文件系统；语义为“保留当前工作区变更并追加平台事件”。响应：
@@ -4159,11 +4162,11 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 后端会追加 `diff.accepted` RunEvent，payload 至少包含 `action`、`status`、`fileCount`。`REDIS_SUMMARY` 只追加 Redis 事件，并在成功后以单条 SQL 增加 `runs.diff_accepted_count`；不写 `run_events`。
 
-`POST /api/internal/agent/{agentId}/runs/{runId}/diff/reject` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject` 语义为“拒绝本次 Run 对应消息产生的变更”。旧 `POST /api/runs/{runId}/diff/reject` 返回 `410 API_GONE`。后端会从 Redis snapshot/legacy RunEvent payload 中查找最近的远端 `messageID`，新模式必要时使用 Run 锚点中的 `last_remote_message_id/last_remote_part_id`，再通过当前 `AgentRuntime.rejectDiff` 执行回滚；`opencode` 实现适配到 opencode `sessionRevert`。成功后追加 `diff.rejected`；新模式再以单条 SQL 增加 `runs.diff_rejected_count`，不写 `run_events`。
+`POST /api/internal/agent/{agentId}/runs/{runId}/diff/reject` 或 `/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject` 语义为“拒绝本次 Run 对应消息产生的变更”。旧 `POST /api/runs/{runId}/diff/reject` 返回 `410 API_GONE`。后端优先从 Run 锚点的 `dispatchMessageId`，或从明确标注为 USER 的 Redis snapshot/legacy RunEvent payload 中读取远端用户 `messageID`，再通过当前 `AgentRuntime.rejectDiff` 执行回滚；不能把 assistant 的 `last_remote_message_id` 当作 V2 `revert/stage` 的 `messageID`。`opencode` 实现适配到 opencode `sessionRevert`。成功后追加 `diff.rejected`；新模式再以单条 SQL 增加 `runs.diff_rejected_count`，不写 `run_events`。
 
 拒绝失败规则：
 
-- legacy 缺少 `messageID` 返回 `CONFLICT`；新模式的 Redis 与 Run 锚点都无法提供定位 ID 时返回 `RUN_DETAILS_EXPIRED`。
+- legacy 缺少 USER `messageID` 返回 `CONFLICT`；新模式的 Redis 与 Run 锚点都无法提供定位 ID 时返回 `RUN_DETAILS_EXPIRED`。
 - Session 未绑定远端 agent session 返回 `CONFLICT`。
 - opencode 超时、不可用或异常仍映射为 `OPENCODE_TIMEOUT`、`OPENCODE_UNAVAILABLE` 或 `OPENCODE_BAD_GATEWAY`。
 

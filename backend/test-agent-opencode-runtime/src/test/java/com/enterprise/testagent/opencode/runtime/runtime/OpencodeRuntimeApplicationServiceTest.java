@@ -409,6 +409,24 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void sessionDiffMapsPlatformMessageIdToV2FromQuery() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("data", List.of())))));
+
+        fixture.service.sessionDiff(
+                "ses_1234567890abcdef",
+                "msg_user1234567890abcdef",
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/diff");
+        assertThat(command.query()).containsEntry("from", "msg_user1234567890abcdef");
+        assertThat(command.query()).doesNotContainKeys("messageID", "messageId", "to");
+    }
+
+    @Test
     void listProvidersUsesV2ProviderPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(

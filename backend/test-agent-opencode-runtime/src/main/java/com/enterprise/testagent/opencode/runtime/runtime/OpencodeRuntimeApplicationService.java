@@ -643,11 +643,11 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 查询远端 session Diff，messageId 为空时不发送 messageID query。
+     * 查询远端 session Diff；平台 messageId 表示 V2 的 USER 轮次锚点，映射为 from。
      */
     public Object sessionDiff(String sessionId, String messageId, String traceId) {
         AgentRuntimeTargetResolver.SessionRuntimeTarget location = sessionLocation(sessionId, traceId);
-        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/diff", query("messageID", messageId), traceId);
+        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/diff", query("from", messageId), traceId);
     }
 
     /**
