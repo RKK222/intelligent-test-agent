@@ -15,6 +15,7 @@ and a future `OpencodeClientFacade` wrapper.
 - Raw snapshot: `pinned-opencode-spec.raw.json`
 - Normalized snapshot: `pinned-opencode-spec.json`
 - Generator version: `7.24.0`
+- npm CLI package version: `2.41.0`
 
 The normalized spec only de-duplicates top-level `tags` by name and injects a
 default `servers[0].url`. It does not modify `paths`, `components`, or
@@ -30,6 +31,12 @@ Override the opencode server URL when needed:
 
 ```bash
 OPENCODE_BASE_URL=http://127.0.0.1:4096 tools/generate-opencode-java-sdk.sh
+```
+
+For a reproducible offline run, use the pinned raw specification:
+
+```bash
+OPENCODE_SPEC_FILE=tools/opencode-sdk-generator/pinned-opencode-spec.raw.json tools/generate-opencode-java-sdk.sh
 ```
 
 ## Verify

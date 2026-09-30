@@ -19267,3 +19267,25 @@
 
 - client 的两条 session Diff 调用路径现在统一使用冻结 V2 的 `messageID`；待 Jenkins 恢复专用登录后，需要用最新提交重新发布隔离栈并复跑真实 Run Diff 200 验收。
 - 不涉及数据库/Flyway、前端 wire、环境文件或新增部署节点；本次仅修正 V2 路由适配和回归测试。
+
+## 2026-09-30 - 修复 Java SDK 生成器版本与 CLI 包版本混用
+
+### Why
+
+- 按迁移要求从冻结 OpenAPI spec 重跑 `tools/generate-opencode-java-sdk.sh` 时，脚本把 Java 生成器 `7.25.0` 当作 npm CLI 包版本，npm 返回 `ETARGET`，导致生成链路无法复现。
+- 仓库已生成的 SDK、`openapitools.json` 和配置注释实际固定在 OpenAPI Generator `7.24.0`，需要让脚本的版本声明和真实生成物一致。
+
+### What
+
+- 将 Java 生成器固定为 `7.24.0`，另行固定承载 CLI 的 npm 包 `@openapitools/openapi-generator-cli@2.41.0`。
+- 生成脚本在 `OPENCODE_SPEC_FILE` 已指向仓库冻结 raw spec 时跳过同 inode 的复制，并在 generator README 中记录两个版本及冻结 spec 复现命令。
+
+### How
+
+- 用 JDK 21、冻结的 `pinned-opencode-spec.raw.json` 重跑完整生成脚本；OpenAPI Generator 下载/构建成功，Gradle `BUILD SUCCESSFUL`，生成 Java 源码同步后 `verify-opencode-generated-sdk-case.py` 通过，且 `git diff` 证明生成物无漂移。
+- 运行 `bash tools/verify-ai-docs.sh` 和 `git diff --check`；未修改 OpenCode 只读源码、环境文件或 release 工作树。
+
+### Result
+
+- Java SDK 生成链路现在能从冻结 V2 spec 重新生成，版本语义与实际 `7.24.0` generated source 一致；后续更新 spec 时应同时保留 `GENERATOR_VERSION` 与 `GENERATOR_CLI_VERSION` 的区分。
+- 本次只改生成脚本和 generator README，不涉及平台 API、RunEvent/SSE、数据库/Flyway 或运行时部署节点。

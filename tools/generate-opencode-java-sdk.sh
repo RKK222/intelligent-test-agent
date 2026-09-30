@@ -5,7 +5,11 @@ OPENCODE_BASE_URL="${OPENCODE_BASE_URL:-http://127.0.0.1:4096}"
 OPENCODE_BASE_URL="${OPENCODE_BASE_URL%/}"
 OPENCODE_SPEC_PATH="${OPENCODE_SPEC_PATH:-/openapi.json}"
 OPENCODE_SPEC_FILE="${OPENCODE_SPEC_FILE:-}"
-GENERATOR_VERSION="7.25.0"
+# OpenAPI Generator 的 Java 生成器版本与 npm CLI 包版本不是同一命名空间。
+# 生成物和 tools/opencode-sdk-generator/openapitools.json 固定在 7.24.0；
+# npm 包 @openapitools/openapi-generator-cli 使用 2.x 版本承载该生成器。
+GENERATOR_VERSION="7.24.0"
+GENERATOR_CLI_VERSION="2.41.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
@@ -82,6 +86,7 @@ and a future \`OpencodeClientFacade\` wrapper.
 - Raw snapshot: \`pinned-opencode-spec.raw.json\`
 - Normalized snapshot: \`pinned-opencode-spec.json\`
 - Generator version: \`${GENERATOR_VERSION}\`
+- npm CLI package version: \`${GENERATOR_CLI_VERSION}\`
 
 The normalized spec only de-duplicates top-level \`tags\` by name and injects a
 default \`servers[0].url\`. It does not modify \`paths\`, \`components\`, or
@@ -97,6 +102,12 @@ Override the opencode server URL when needed:
 
 \`\`\`bash
 OPENCODE_BASE_URL=http://127.0.0.1:4096 tools/generate-opencode-java-sdk.sh
+\`\`\`
+
+For a reproducible offline run, use the pinned raw specification:
+
+\`\`\`bash
+OPENCODE_SPEC_FILE=tools/opencode-sdk-generator/pinned-opencode-spec.raw.json tools/generate-opencode-java-sdk.sh
 \`\`\`
 
 ## Verify
@@ -126,9 +137,9 @@ if command -v openapi-generator-cli >/dev/null 2>&1; then
   OPENAPI_GENERATOR_COMMAND=(openapi-generator-cli)
 else
   require_command npx
-  # OpenAPI Generator 7.25 修复 V2 union schema 的 Java webclient 生成问题；
-  # 使用固定 npx 版本保证本地和离线发布生成结果一致。
-  OPENAPI_GENERATOR_COMMAND=(npx --yes "@openapitools/openapi-generator-cli@${GENERATOR_VERSION}")
+  # 使用固定 CLI 版本，并由 openapitools.json 再固定实际 Java 生成器版本；
+  # 两个版本不能拼成同一个 npm 包版本，否则 npm 上不存在该包。
+  OPENAPI_GENERATOR_COMMAND=(npx --yes "@openapitools/openapi-generator-cli@${GENERATOR_CLI_VERSION}")
 fi
 
 RESOLVED_JAVA_HOME="$(resolve_java_home)"
@@ -148,7 +159,9 @@ mkdir -p "${SDK_DIR}"
 
 # 离线生成消费已冻结的原始契约，不能把 HTML 文档页或不同运行时版本混入 SDK。
 if [[ -n "${OPENCODE_SPEC_FILE}" ]]; then
-  cp "${OPENCODE_SPEC_FILE}" "${RAW_SPEC_FILE}"
+  if [[ ! "${OPENCODE_SPEC_FILE}" -ef "${RAW_SPEC_FILE}" ]]; then
+    cp "${OPENCODE_SPEC_FILE}" "${RAW_SPEC_FILE}"
+  fi
 else
   echo "Downloading opencode OpenAPI spec from ${OPENCODE_BASE_URL}${OPENCODE_SPEC_PATH}"
   curl -fsSL "${OPENCODE_BASE_URL}${OPENCODE_SPEC_PATH}" -o "${RAW_SPEC_FILE}"
