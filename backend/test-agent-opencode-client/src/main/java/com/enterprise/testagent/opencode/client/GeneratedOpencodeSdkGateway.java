@@ -687,9 +687,6 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         + "/connect/oauth/" + attemptId + "/complete";
             }
         }
-        if (v2Path.endsWith("/diff") && runtimeQuery.containsKey("messageID")) {
-            runtimeQuery.putIfAbsent("to", runtimeQuery.remove("messageID"));
-        }
         if ("GET".equals(method) && "/file/content".equals(path)) {
             // V1 返回 FileContent JSON，而 V2 fs.read 直接返回文件字节；在 client 边界恢复
             // 原有平台 DTO，避免二进制响应被通用 JsonNode 解码器误判为坏网关。

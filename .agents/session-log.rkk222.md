@@ -19244,3 +19244,26 @@
 
 - V2 迁移的独立分支已在真实隔离栈完成发布和关键运行链路验收，原 `release` 工作树未混入本任务改动；本次测试断言修正只影响回归测试，不改变运行时行为。
 - 未新增数据库表或 Flyway migration，平台 HTTP/SSE DTO 继续保持兼容；未修改 generated SDK、OpenCode 只读源码或环境文件。浏览器保存密码安全提示阻止了 Chrome UI 登录验收，本机缺少内部 worker 镜像，因此这两项仍以 Jenkins 发布验证和 API/E2E 结果作为证据。
+
+## 2026-09-30 - 修复 runtime session Diff 的 V2 messageID 兼容遗漏
+
+### Why
+
+- 旧隔离发布的 Run Diff 冒烟返回 502；直接对照冻结 V2 OpenAPI 和远端 400 细节后确认，`session/{sessionID}/diff` 只接受 `messageID`，而 runtime 通用入口还会把它改写为 V1 的 `to`。
+- 仅修复 `getDiff` 不能覆盖 `/session/{id}/diff` 经通用 runtime 入口的调用路径，必须删除这段遗留改写并补回归测试。
+
+### What
+
+- 删除 `GeneratedOpencodeSdkGateway.runtime` 中将 Diff 查询 `messageID` 改为 `to` 的逻辑。
+- 新增 client 回归测试，验证旧平台路径经过 V2 映射后仍发送 `/api/session/{id}/diff?messageID=...`，不会出现 `to`。
+
+### How
+
+- 重新对照只读的 `opencode-source/opencode-1.18.4/packages/sdk/openapi.json`：V2 `session.diff` 参数名为 `messageID`，V2 `/vcs/diff` 只接受 `mode/context`，两者都不应由 client 擅自生成 `to`。
+- 通过 JDK 21 执行 client 定向测试和全量测试；全量测试通过，日志中的 503/Git fixture/Netty native warning 均为既有模拟场景或环境提示。
+- 提交前重新回顾全部 `.agents/session-log*.md`，执行 `git diff --check`，并保持原 `release` 工作树和 OpenCode 只读源码不变。
+
+### Result
+
+- client 的两条 session Diff 调用路径现在统一使用冻结 V2 的 `messageID`；待 Jenkins 恢复专用登录后，需要用最新提交重新发布隔离栈并复跑真实 Run Diff 200 验收。
+- 不涉及数据库/Flyway、前端 wire、环境文件或新增部署节点；本次仅修正 V2 路由适配和回归测试。

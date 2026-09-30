@@ -496,6 +496,37 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayPreservesV2MessageIdForRuntimeSessionDiff() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", "[]");
+        });
+
+        try {
+            new GeneratedOpencodeSdkGateway(List.of())
+                    .runtime(
+                            node(server),
+                            "GET",
+                            "/session/" + REMOTE_SESSION_ID + "/diff",
+                            "/tmp/demo",
+                            null,
+                            Map.of("messageID", "msg_runtime1234567890abcdef"),
+                            null,
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(request.get().method()).isEqualTo("GET");
+            assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/diff");
+            assertThat(request.get().query()).containsEntry(
+                    "messageID", List.of("msg_runtime1234567890abcdef"));
+            assertThat(request.get().query()).doesNotContainKey("to");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayRemovesCredentialsFromV2CatalogAndConfigResponses() throws Exception {
         HttpServer server = startServer(exchange -> {
             String path = exchange.getRequestURI().getPath();
