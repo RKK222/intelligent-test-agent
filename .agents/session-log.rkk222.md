@@ -5,6 +5,27 @@
 
 ## Entries
 
+## 2026-10-01 - 复验隔离 V2 本地部署和登录
+
+### Why
+
+- 用户询问能否在本地启动部署，并指定使用 `admin/admin` 登录；需要区分运行态可用与账号认证可用。
+
+### What
+
+- 复验独立工作树的前端 `3100`、后端 `18182` 和受管 OpenCode V2 `4296`，再次运行原生协议 smoke、发布门禁、插件测试及本地客户端包测试。
+- 使用真实浏览器和后端登录接口检查 `admin/admin`，不修改共享测试库账号或环境配置。
+
+### How
+
+- 前端首页和后端 readiness 均返回 200；原生 smoke 再次通过 `2.0.18`、18 个只读入口、4 个自有 Session、assistant 回复、`session.execution.succeeded` 和 `session.compaction.ended`。
+- `verify-ai-docs.sh`、`verify-jenkins-release.sh`、`verify-opencode-tool-runtime-deploy.sh`、`verify-dev-scripts.sh`、V1 回滚来源 6 项测试、Observability 24 项、RTK 3 项以及 Kylin/Windows 本地客户端打包与更新测试通过。
+- `POST /api/auth/login` 对 `admin/admin` 返回 401 `UNAUTHENTICATED`；Playwright 登录页也显示“用户名或密码错误”。本次浏览器快照已清理。
+
+### Result
+
+- 本地 V2 服务正在独立端口运行，协议链路可用；`admin/admin` 不是当前共享测试库中的有效平台凭据，不能将页面已登录列为本次通过。真实登录需要有效账号，Jenkins 当前提交的原生 amd64 构建和完整 V1 回滚仍需有效 Jenkins 认证。未修改 API、事件、数据库、性能、安全逻辑或环境密钥。
+
 ## 2026-10-01 - 固化 OpenCode 2.0.18 原生运行态 smoke
 
 ### Why
