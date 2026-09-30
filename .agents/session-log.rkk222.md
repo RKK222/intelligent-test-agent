@@ -19579,3 +19579,26 @@
 
 - 运行管理脚本不再向禁止的 HTTP 端点发送 manager token，具备用户授权时可验证指定服务器的真实 manager 拓扑；无授权时明确标记为只验证 health。
 - 最新分支的 Jenkins 发布、Linux amd64 Worker 镜像和 V1 真实回滚仍需有效 Jenkins/平台凭据及原生构建环境。此次未改 API、SSE、数据库、Flyway 或进程启动停止实现。
+
+## 2026-10-01 - 单文件获取 OpenCode 资源并验证 V1/V2 离线 Worker 包
+
+### Why
+
+- V2 迁移文档记录的单文件下载没有覆盖 Worker Dockerfile 的 OpenCode 阶段；该阶段仍并发拼接 Range 分片，可能重现 CDN 短分片导致的构建失败。
+
+### What
+
+- V1 GitHub 与 V2 npm 归档统一改为单文件下载，保留固定大小、SHA-256、解包和二进制版本校验；同步内部部署说明和迁移验收结论。
+- 未改变 OpenCode 源码、SDK、业务 API、数据库、SSE、进程管理和独立本地服务配置。
+
+### How
+
+- Docker `linux/amd64` 的 `opencode-download` 目标分别通过 V2 `2.0.18` 与 V1 `1.18.4`：两份归档 SHA-256、`--version`、RTK 归档/二进制/许可证均通过。V1 官方归档 `59265643` 字节、SHA-256 `4d87e414607b77fef940256021e42fbbf37b8c62b06ced76b69e26c5dcbfbabc`。
+- `deploy/internal/package-release.sh --opencode-only --no-zip` 分别生成 V2 和 V1 Linux amd64 镜像 tar 与 programs 包，均可 `docker load`；`verify-opencode-tool-runtime.sh --archive` 对两套包通过，`verify-opencode-tool-runtime-deploy.sh`、`verify-jenkins-release.sh` 通过。
+- V2 tar SHA-256 `f3292a18387470ed7a8f760bae03568467a2d8492e93a3a48e8cc133a857a718`，programs SHA-256 `c2741769041b377c80fdae29d7ba217b7107f6ed782a51ef432a476e279d7f9d`；V1 tar SHA-256 `241fa85c7f1048d017a905ce41afc0cc8170ab023fc3851f54975d5508ca3a58`，programs SHA-256 `3045ef967f95246bc1ce231bf0fc83276d279a727f5c88798221a13733c41dc7`。制品存于本 worktree `.tmp/opencode-v2-audit/worker-package-3` 和 `worker-package-v1`，未纳入 Git。
+- V1 正式打包镜像的 `EXPECTED_OPENCODE_ABI=V1 tools/verify-opencode-node-worker-image.sh` 通过；V2 同脚本在本机 ARM64 的 Docker 容器运行阶段因 Bun `CPU lacks AVX support` 崩溃，尽管 BuildKit 构建阶段 `--version` 已通过。Codex 原生沙箱 E2E 按脚本在 aarch64 宿主机跳过。
+
+### Result
+
+- V1/V2 单文件归档获取和离线包导出得到实测证明，V1 Worker 回滚候选的断网 smoke 通过。
+- V2 容器运行时仍需原生 Linux amd64 smoke；完整 V1 平台前后端/数据库/会话回滚、最新提交的 Jenkins 发布和鉴权后平台 Run/SSE 仍未完成，不能据此宣称全面迁移验收通过。

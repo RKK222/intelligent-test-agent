@@ -204,27 +204,11 @@ ARG RTK_LICENSE_SHA256=4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb5
 # 默认走 raw.githubusercontent.com；网络不稳定或内网构建时可指向本地/内网镜像，内容仍由下面的摘要校验。
 ARG RTK_LICENSE_BASE_URL=https://raw.githubusercontent.com/rtk-ai/rtk
 
+# V1 GitHub 与 V2 npm CDN 都按完整归档下载；部分 CDN 对并发 Range 返回短分片。
 RUN set -eux; \
     asset_url="${OPENCODE_RELEASE_BASE_URL}/${OPENCODE_ASSET_NAME}"; \
-    chunk_size=16777216; \
-    index=0; \
-    start=0; \
-    mkdir -p /tmp/opencode-parts; \
-    while [ "${start}" -lt "${OPENCODE_ASSET_SIZE}" ]; do \
-      end=$((start + chunk_size - 1)); \
-      if [ "${end}" -ge "${OPENCODE_ASSET_SIZE}" ]; then \
-        end=$((OPENCODE_ASSET_SIZE - 1)); \
-      fi; \
-      part="$(printf '/tmp/opencode-parts/part-%03d' "${index}")"; \
-      curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
-        --range "${start}-${end}" \
-        "${asset_url}" \
-        -o "${part}" & \
-      index=$((index + 1)); \
-      start=$((end + 1)); \
-    done; \
-    wait; \
-    cat /tmp/opencode-parts/part-* > /tmp/opencode.tar.gz; \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+      "${asset_url}" -o /tmp/opencode.tar.gz; \
     test "$(stat -c '%s' /tmp/opencode.tar.gz)" = "${OPENCODE_ASSET_SIZE}"; \
     printf '%s  %s\n' "${OPENCODE_ASSET_SHA256}" /tmp/opencode.tar.gz | sha256sum -c -; \
     mkdir -p /out; \

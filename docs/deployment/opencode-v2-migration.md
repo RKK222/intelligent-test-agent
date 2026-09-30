@@ -237,13 +237,17 @@ manager WebSocket 已连接。`admin/admin` 对本地登录仍返回 401；当�
 connection，并保留不发送 manager token 的旧参数兼容。无用户 Token 时，本机只能证明
 backend health 与 manager WebSocket 日志连接，不能把该结果当作已通过运行管理 API 验收。
 
-本次本地 ARM Mac 还尝试了 `deploy/internal/package-release.sh --opencode-only`。
-Docker 构建使用清单中固定的 OpenCode、Codex 资源摘要；下载阶段改为单文件下载
-后再执行长度和 SHA-256 校验，避免 CDN 并发 Range 返回短分片。构建在 amd64
-模拟执行 OpenCode Bun `--version` 时因 QEMU/CPU 不支持 AVX 触发段错误，随后按
-固定字节校验失败关闭。因此本机已验证启动器、运行时依赖和平台 API，但不能把
-该模拟结果当作 Linux amd64 Worker 镜像验收；原生 amd64 构建机仍需完成镜像和
-V1 回滚包 smoke。
+本地 ARM Mac 的 Worker Dockerfile 曾仍用并发 Range 分片获取 OpenCode 归档，
+与先前记录的 CDN 短分片故障及“单文件下载”说明不符；现已对 V2 npm 和 V1 GitHub
+归档统一改为单文件下载，并保留固定长度、SHA-256 与二进制版本校验。
+`opencode-download` 阶段的 V2 `2.0.18` 和 V1 `1.18.4` 构建均通过。
+`package-release.sh --opencode-only --no-zip` 在本机分别生成可 `docker load` 的
+Linux amd64 V2/V1 Worker tar 和各自的 programs 包，两套离线依赖归档检查通过；
+V1 镜像的断网 `/global/health`、自定义 Tool 与基础运行环境 smoke 也通过。
+V2 镜像构建和导出通过，但同一 ARM Mac 上的 V2 容器运行时 smoke 仍因 Bun
+报告 `CPU lacks AVX support` 而崩溃；Codex 原生沙箱 E2E 也按脚本要求跳过。
+因此完整 V2 镜像验收仍须在原生 Linux amd64 节点执行，且上述 V1 Worker smoke
+不能代替完整 V1 平台前后端、数据库和会话回滚实测。
 
 独立的 `codex-download` Docker 阶段已按固定 `0.145.0`、归档 SHA、bwrap 二进制 SHA
 和许可证摘要构建通过。封包读取 `TEST_AGENT_CODEX_VERSION`，不会受 Codex Desktop

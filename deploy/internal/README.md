@@ -447,6 +447,12 @@ API key 的官方 `config.toml` 以接入企业 Responses 代理，随后直接�
 不再提供工具改名、参数过滤或固定 workspace 的协议门面。应用启用和现场能力验收见
 `docs/deployment/codex-whitebox-mcp.md`。
 
+Worker Dockerfile 对 V2 npm 和 V1 GitHub 的官方 OpenCode 归档都采用单文件下载，随后校验
+固定长度和 SHA-256，再提取并检查二进制版本；不拼接并发 Range 分片。Mac ARM64
+打出的 `linux/amd64` 镜像和 programs 包仍须在原生 amd64 节点执行
+`tools/verify-opencode-node-worker-image.sh`，本机跨架构构建通过不等于 OpenCode
+容器运行时 smoke 通过。
+
 1.18.4 回滚包保留原 V1 plugin/sdk ABI 和对应 Tool lockfile，可在外网构建机执行：
 
 ```bash
