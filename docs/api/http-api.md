@@ -3888,16 +3888,19 @@ opencode 公共配置样例（企业单后端部署可直接使用 `deploy/inter
     }
   },
   "mcp": {
-    "code_analysis": {
-      "type": "local",
-      "command": ["/data/testagent/programs/codex/bin/test-agent-codex-mcp"],
-      "environment": {
-        "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
-        "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
-        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
-      },
-      "enabled": true,
-      "timeout": 600000
+    "timeout": { "startup": 30000, "catalog": 30000, "execution": 600000 },
+    "servers": {
+      "code_analysis": {
+        "type": "local",
+        "command": ["/data/testagent/programs/codex/bin/test-agent-codex-mcp"],
+        "environment": {
+          "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
+          "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
+          "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
+        },
+        "disabled": false,
+        "codemode": false
+      }
     }
   }
 }

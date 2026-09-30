@@ -60,7 +60,9 @@ workspace，仍由平台现有应用成员、workspace/session 和源码 Runtime
 ## 公共 JSONC 与 Agent
 
 按“Java 后端 → programs/worker → 公共配置”的顺序升级。当前完整
-`deploy/internal/opencode.jsonc.example` 已包含 `mcp.code_analysis`，新部署直接把完整样例写入
+`deploy/internal/opencode.jsonc.example` 已包含 V2 `mcp.servers.code_analysis`，并显式设置
+`codemode: false`，让 `code_analysis_codex` 和 `code_analysis_codex-reply` 出现在模型原生工具
+目录中；新部署直接把完整样例写入
 公共配置仓库 `opencode/opencode.jsonc`；`deploy/internal/codex-whitebox-public.opencode.jsonc.example`
 仅用于给已有公共配置增量合并 MCP 片段。默认企业模型为：
 

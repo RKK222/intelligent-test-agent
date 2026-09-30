@@ -117,8 +117,12 @@ if [[ -n "${public_config_file}" ]]; then
             and ($model.limit.output == $catalog[0][$provider_id].models[$model_id].limit.output)
         )
     )
+    and (.mcp.servers | type == "object")
+    and (.mcp.servers.code_analysis | type == "object")
+    and (.mcp.servers.code_analysis.disabled == false)
+    and (.mcp.servers.code_analysis.codemode == false)
     and (
-      .mcp.code_analysis.environment as $mcp
+      .mcp.servers.code_analysis.environment as $mcp
       | ($mcp.TEST_AGENT_CODEX_CONTEXT_WINDOW | tonumber) as $context
       | [
           $catalog[0][]

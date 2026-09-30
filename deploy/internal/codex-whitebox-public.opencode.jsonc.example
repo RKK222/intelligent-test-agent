@@ -1,18 +1,25 @@
 {
   // 仅用于给已有公共配置增量合并；新部署直接使用已含本段的 opencode.jsonc.example。
   "mcp": {
-    "code_analysis": {
-      "type": "local",
-      "command": [
-        "/data/testagent/programs/codex/bin/test-agent-codex-mcp"
-      ],
-      "environment": {
-        "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
-        "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
-        "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
-      },
-      "enabled": true,
-      "timeout": 600000
+    "timeout": {
+      "startup": 30000,
+      "catalog": 30000,
+      "execution": 600000
+    },
+    "servers": {
+      "code_analysis": {
+        "type": "local",
+        "command": [
+          "/data/testagent/programs/codex/bin/test-agent-codex-mcp"
+        ],
+        "environment": {
+          "TEST_AGENT_CODEX_PROVIDER_ID": "deepseek-prod",
+          "TEST_AGENT_CODEX_MODEL": "DeepSeek-V4-Flash-W8A8",
+          "TEST_AGENT_CODEX_CONTEXT_WINDOW": "262144"
+        },
+        "disabled": false,
+        "codemode": false
+      }
     }
   }
 }

@@ -19466,3 +19466,26 @@
 ### Result
 
 - 最新远端分支仍为 `codex/opencode-v2-migration` / `8e8d90924`，但该提交尚未部署到 18182/3100；后续需要有效 Jenkins 凭据或用户在浏览器中完成登录后继续远端矩阵验收。
+
+## 2026-10-01 - 验证并固定 V2 MCP 原生工具调用配置
+
+### Why
+
+- 独立 V2 MCP 探针只检查 `connected` 和工具发现，不能证明白盒 Agent 依赖的 `code_analysis_*` 工具真正进入模型请求并被调用。
+- 冻结 2.0.18 默认启用 MCP Code Mode；只有显式 `codemode:false` 时，模型才会直接看到 `<server>_<tool>`。V1 `mcp.code_analysis/enabled/timeout:600000` 形态不能继续作为 V2 公共样例。
+
+### What
+
+- 两份 Codex MCP 公共 JSONC 样例改为 `mcp.servers.code_analysis`、V2 分段 timeout、`disabled:false` 和 `codemode:false`；发布前校验器拒绝 Code Mode 漂移。
+- 独立 MCP smoke 增加隔离的假模型，验证模型工具目录、实际 `tools/call:ping` 和工具返回内容进入下一次模型请求；同步内部部署 README、HTTP API 样例和 V2/Codex MCP 部署说明。
+
+### How
+
+- 对照冻结 V2 OpenAPI 与官方 V2 MCP 文档，使用冻结的 Darwin 2.0.18 CLI 在临时 HOME、工作区和随机端口运行 probe；连续三次通过模型可见性与调用闭环。
+- `bash tools/verify-dev-scripts.sh`、`bash tools/verify-ai-docs.sh`、`node --check tools/test-opencode-v2-mcp-smoke.mjs`、`git diff --check` 通过；本地 3100/18182/4296 栈保持健康。
+- 提交前复核所有 `.agents/session-log*.md` 近期记录；不修改原 `release` 工作树、OpenCode 源码、环境文件或共享 Jenkins 作业。
+
+### Result
+
+- V2 标准样例中的 Codex MCP 会以原生工具名供模型调用；本机 mock MCP 的发现、调用、结果回传得到原生证据。
+- 企业 Codex 0.145.0 二进制和 Linux amd64 Worker 镜像仍需隔离 Jenkins 发布验收；`admin/admin` 对 Jenkins 与平台均返回 401，不能据此宣称远端完成。

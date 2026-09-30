@@ -641,6 +641,14 @@ if bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
   "${drifted_public_config}" >/dev/null 2>&1; then
   fail "OpenCode models validator should reject public config and catalog context drift"
 fi
+codemode_public_config="${tmp_dir}/codemode-opencode.jsonc"
+jq '.mcp.servers.code_analysis.codemode = true' \
+  "${ROOT_DIR}/deploy/internal/opencode.jsonc.example" >"${codemode_public_config}"
+if bash "${ROOT_DIR}/deploy/internal/validate-opencode-models.sh" \
+  "${ROOT_DIR}/deploy/internal/opencode-models.json" \
+  "${codemode_public_config}" >/dev/null 2>&1; then
+  fail "OpenCode models validator should reject Code Mode for the direct Codex MCP agent tools"
+fi
 
 # Docker 18.09 的千端口池必须在删除现有容器前拒绝默认 userland proxy；
 # daemon 明确禁用后才允许继续到 docker rm/run。

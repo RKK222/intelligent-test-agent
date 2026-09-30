@@ -60,7 +60,10 @@ V2 没有 V1 的原生 session share 合约。旧 runtime `/session/{id}/share` 
 模型时沿用会话当前选择，不会把旧模型字段直接转发给严格的 V2 请求体。
 
 平台运行态代理把 V2 的 location envelope 保留在通用目录中供前端解包；
-MCP 状态、资源、工具和 VCS 分支/文件状态则投影回平台稳定 DTO。
+MCP 状态、资源、工具和 VCS 分支/文件状态则投影回平台稳定 DTO。V2 MCP 必须使用
+`mcp.servers.<name>`，不能继续使用 V1 的 `mcp.<name>` 和 `enabled` 字段；需要把 MCP
+工具直接放进模型原生工具目录的服务显式设置 `codemode: false`，否则服务虽显示
+`connected`，模型只会看到 Code Mode 的聚合入口，不会看到 `<server>_<tool>`。
 V2 模型、Provider 和配置来源会回传受控供应商凭据。client 网关对这些目录响应
 递归删除 `apiKey` 等密钥字段、`headers/settings/body/environment` 等可容纳任意凭据的
 容器及插件/MCP 配置，再返回平台 API；`location/data`、模型能力和 provider 策略仍保留。
@@ -140,8 +143,9 @@ HOME、配置目录和随机 loopback 端口启动冻结的 V2 CLI，以自有 s
 验证 `initialize`、`tools/list`、`resources/list`、`resources/templates/list`，并通过
 `/api/mcp` 和 `/api/mcp/resource` 确认连接状态及资源目录。2026-10-01 本机运行返回
 `connected` 和测试资源 `testagent://v2-probe`。此结果证明 V2 MCP 主机与发现协议可用，
-不证明企业 `code_analysis` 二进制、工具调用或 Linux Worker 镜像已通过；这些仍需在
-原生 amd64 隔离部署中验证。
+并在 `codemode:false` 下使用隔离的 OpenAI-compatible 假模型完成一次模型可见性和
+`tools/call` 验收；输出 `toolVisibleToModel:true/toolInvoked:true`。此结果不证明企业
+`code_analysis` 二进制或 Linux Worker 镜像已通过；这些仍需在原生 amd64 隔离部署中验证。
 
 2026-09-30 增加现有自有 Workspace 的真实浏览器验收：使用
 `TEST_AGENT_REAL_E2E_WORKSPACE_ID` 和 `TEST_AGENT_REAL_E2E_WORKSPACE_ROOT` 选择账号

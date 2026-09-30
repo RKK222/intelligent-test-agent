@@ -2,7 +2,8 @@
 
 /**
  * 在独立 HOME、配置目录和临时端口启动冻结的 V2 CLI，使用自有 stdio MCP fixture
- * 验证握手、工具发现及资源目录。fixture 只读临时目录，不接触平台运行实例。
+ * 验证握手、资源目录、模型工具可见性和真实 tools/call。fixture 只读临时目录，
+ * 不接触平台运行实例。
  *
  * 用法：OPENCODE_V2_BIN=/path/to/opencode node tools/test-opencode-v2-mcp-smoke.mjs
  */
@@ -10,8 +11,10 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -28,8 +31,9 @@ async function freePort() {
   return port;
 }
 
-function mockMcpServerSource() {
+function mockMcpServerSource(traceFile) {
   return `import { appendFileSync } from "node:fs";
+const traceFile = ${JSON.stringify(traceFile)};
 let pending = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -41,7 +45,9 @@ process.stdin.on("data", (chunk) => {
     let request;
     try { request = JSON.parse(line); } catch { continue; }
     if (!request.method) continue;
-    appendFileSync(process.env.TEST_AGENT_MCP_TRACE, request.method + "\\n");
+    appendFileSync(traceFile, request.method === "tools/call"
+      ? "tools/call:" + request.params?.name + "\\n"
+      : request.method + "\\n");
     if (request.id === undefined) continue;
     let result;
     switch (request.method) {
@@ -49,7 +55,7 @@ process.stdin.on("data", (chunk) => {
         result = { protocolVersion: request.params?.protocolVersion ?? "2025-03-26", capabilities: { tools: { listChanged: false }, resources: { listChanged: false } }, serverInfo: { name: "testagent-v2-mcp-probe", version: "1.0.0" } };
         break;
       case "tools/list":
-        result = { tools: [{ name: "testagent_ping", description: "Local V2 MCP probe", inputSchema: { type: "object", properties: {}, additionalProperties: false } }] };
+        result = { tools: [{ name: "ping", description: "Local V2 MCP probe", inputSchema: { type: "object", properties: {}, additionalProperties: false } }] };
         break;
       case "tools/call":
         result = { content: [{ type: "text", text: "TESTAGENT_MCP_OK" }] };
@@ -85,29 +91,150 @@ async function getJson(url, password) {
   return response.json();
 }
 
+async function readJsonLinesUntilTool(path, expectedTool, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let entries = [];
+  while (Date.now() < deadline) {
+    const lines = (await readFile(path, "utf8")).trim().split("\n").filter(Boolean);
+    entries = lines.map((line) => JSON.parse(line));
+    if (entries.some((entry) => entry.tools?.includes(expectedTool))) return entries;
+    await delay(250);
+  }
+  return entries;
+}
+
+async function readLinesUntil(path, expectedLine, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lines = [];
+  while (Date.now() < deadline) {
+    lines = (await readFile(path, "utf8")).trim().split("\n").filter(Boolean);
+    if (lines.includes(expectedLine)) return lines;
+    await delay(250);
+  }
+  return lines;
+}
+
+async function startModelProbe(traceFile) {
+  let requestCount = 0;
+  const modelServer = createHttpServer((request, response) => {
+    if (request.method !== "POST") {
+      response.writeHead(404).end();
+      return;
+    }
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        response.writeHead(400).end();
+        return;
+      }
+      const tools = Array.isArray(payload.tools) ? payload.tools : [];
+      const names = tools.map((tool) => tool?.function?.name ?? tool?.name).filter(Boolean);
+      requestCount += 1;
+      const toolMessages = Array.isArray(payload.messages)
+        ? payload.messages.filter((message) => message?.role === "tool")
+        : [];
+      const toolResultHasMarker = JSON.stringify(toolMessages).includes("TESTAGENT_MCP_OK");
+      appendModelTrace(traceFile, {
+        tools: names,
+        toolResultHasMarker,
+        messages: Array.isArray(payload.messages)
+          ? payload.messages.map((message) => ({
+              role: message?.role,
+              tool: message?.tool_call_id,
+              calls: (message?.tool_calls ?? []).map((call) => call?.function?.name).filter(Boolean),
+            }))
+          : [],
+      });
+      // 标题等辅助模型请求没有 MCP 工具，应直接返回文本；只有主请求调用工具。
+      const shouldCallMcp = names.includes("testagent_probe_ping") && toolMessages.length === 0;
+      const delta = shouldCallMcp
+        ? {
+            role: "assistant",
+            tool_calls: [{
+              index: 0,
+              id: `call_testagent_mcp_${requestCount}`,
+              type: "function",
+              function: {
+                name: "testagent_probe_ping",
+                arguments: "{}",
+              },
+            }],
+          }
+        : { role: "assistant", content: toolMessages.length === 0 ? "MCP probe title" : "TEST_AGENT_MCP_TOOL_CALL_OK" };
+      const chunk = {
+        id: "testagent-v2-mcp-model",
+        object: "chat.completion.chunk",
+        model: "mock",
+        choices: [{ index: 0, delta, finish_reason: shouldCallMcp ? "tool_calls" : "stop" }],
+      };
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "close",
+      });
+      response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise((done, fail) => modelServer.once("error", fail).listen(0, "127.0.0.1", done));
+  return { server: modelServer, port: modelServer.address().port };
+}
+
+function appendModelTrace(traceFile, value) {
+  // 模型探针只记录工具名，不记录提示词、凭据或工作区内容。
+  appendFileSync(traceFile, `${JSON.stringify(value)}\n`);
+}
+
 const root = await mkdtemp(join(tmpdir(), "testagent-v2-mcp-"));
 const configDir = join(root, "config");
 const workspace = join(root, "workspace");
 const home = join(root, "home");
 const mcpScript = join(root, "mcp-probe.mjs");
 const traceFile = join(root, "mcp-methods.log");
+const modelTraceFile = join(root, "model-tools.log");
 const port = await freePort();
 const password = randomUUID();
 let server;
+let modelProbe;
 let spawnError;
 try {
   await Promise.all([mkdir(configDir), mkdir(workspace), mkdir(home)]);
-  await writeFile(mcpScript, mockMcpServerSource());
+  await writeFile(mcpScript, mockMcpServerSource(traceFile));
   await writeFile(traceFile, "");
+  await writeFile(modelTraceFile, "");
+  modelProbe = await startModelProbe(modelTraceFile);
   await writeFile(join(configDir, "opencode.jsonc"), JSON.stringify({
-    mcp: {
-      testagent_probe: {
-        type: "local",
-        command: [process.execPath, mcpScript],
-        enabled: true,
-        timeout: 30_000,
+    model: "local/mock",
+    providers: {
+      local: {
+        name: "TestAgent MCP probe",
+        package: "aisdk:@ai-sdk/openai-compatible",
+        settings: { baseURL: `http://127.0.0.1:${modelProbe.port}/v1`, apiKey: "probe" },
+        models: {
+          mock: {
+            name: "TestAgent MCP probe",
+            capabilities: { tools: true, input: ["text"], output: ["text"] },
+            limit: { context: 32768, output: 1024 },
+          },
+        },
       },
     },
+    mcp: {
+      timeout: { startup: 30_000, catalog: 30_000, execution: 30_000 },
+      servers: {
+        testagent_probe: {
+          type: "local",
+          command: [process.execPath, mcpScript],
+          disabled: false,
+          codemode: false,
+        },
+      },
+    },
+    agents: { build: { permissions: [{ action: "*", resource: "*", effect: "allow" }] } },
   }));
   server = spawn(resolve(cli), ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: workspace,
@@ -121,7 +248,6 @@ try {
       OPENCODE_CONFIG_DIR: configDir,
       OPENCODE_DISABLE_AUTOUPDATE: "true",
       OPENCODE_PASSWORD: password,
-      TEST_AGENT_MCP_TRACE: traceFile,
     },
     stdio: "ignore",
   });
@@ -157,7 +283,50 @@ try {
   assert.ok(trace.includes("tools/list"), "MCP tool discovery");
   assert.ok(trace.includes("resources/list"), "MCP resource discovery");
   assert.ok(JSON.stringify(catalog.data).includes("testagent://v2-probe"), "MCP resource catalog");
-  process.stdout.write(JSON.stringify({ version: info.version, status: probe.status.status, methods: [...new Set(trace)], resource: "testagent://v2-probe" }) + "\n");
+  await delay(2_000);
+  const sessionResponse = await fetch(`${base}/api/session`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ title: "MCP tool invocation", agent: "build", location: { directory: workspace } }),
+  });
+  assert.equal(sessionResponse.status, 200, "MCP probe session create");
+  const sessionPayload = await sessionResponse.json();
+  const session = sessionPayload?.data?.id ?? sessionPayload?.id;
+  assert.match(session, /^ses/, "MCP probe session id");
+  const promptResponse = await fetch(`${base}/api/session/${encodeURIComponent(session)}/prompt`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`,
+      "content-type": "application/json",
+    },
+    signal: AbortSignal.timeout(45_000),
+    body: JSON.stringify({ text: "Call the testagent_probe_ping MCP tool and return its marker." }),
+  });
+  assert.equal(promptResponse.status, 200, "MCP tool invocation prompt");
+  const modelTrace = await readJsonLinesUntilTool(modelTraceFile, "testagent_probe_ping");
+  assert.ok(
+    modelTrace.some((entry) => entry.tools.includes("testagent_probe_ping")),
+    `MCP tool is visible to model: ${JSON.stringify(modelTrace)}`,
+  );
+  const invocationTrace = await readLinesUntil(traceFile, "tools/call:ping");
+  assert.ok(
+    invocationTrace.includes("tools/call:ping"),
+    `MCP tools/call invocation: ${JSON.stringify(invocationTrace)} model=${JSON.stringify(modelTrace)}`,
+  );
+  const modelResultTrace = (await readFile(modelTraceFile, "utf8")).trim().split("\n").filter(Boolean)
+    .map((line) => JSON.parse(line));
+  assert.ok(modelResultTrace.some((entry) => entry.toolResultHasMarker), "MCP result reached the model");
+  process.stdout.write(JSON.stringify({
+    version: info.version,
+    status: probe.status.status,
+    methods: [...new Set(invocationTrace)],
+    resource: "testagent://v2-probe",
+    toolVisibleToModel: true,
+    toolInvoked: true,
+  }) + "\n");
 } finally {
   if (server?.pid && server.exitCode === null && server.signalCode === null) {
     server.kill("SIGTERM");
@@ -166,6 +335,9 @@ try {
       server.kill("SIGKILL");
       await Promise.race([new Promise((done) => server.once("exit", done)), delay(3_000)]);
     }
+  }
+  if (modelProbe?.server) {
+    await new Promise((done) => modelProbe.server.close(done));
   }
   await rm(root, { recursive: true, force: true });
 }
