@@ -19597,6 +19597,7 @@
 - `deploy/internal/package-release.sh --opencode-only --no-zip` 分别生成 V2 和 V1 Linux amd64 镜像 tar 与 programs 包，均可 `docker load`；`verify-opencode-tool-runtime.sh --archive` 对两套包通过，`verify-opencode-tool-runtime-deploy.sh`、`verify-jenkins-release.sh` 通过。
 - V2 tar SHA-256 `f3292a18387470ed7a8f760bae03568467a2d8492e93a3a48e8cc133a857a718`，programs SHA-256 `c2741769041b377c80fdae29d7ba217b7107f6ed782a51ef432a476e279d7f9d`；V1 tar SHA-256 `241fa85c7f1048d017a905ce41afc0cc8170ab023fc3851f54975d5508ca3a58`，programs SHA-256 `3045ef967f95246bc1ce231bf0fc83276d279a727f5c88798221a13733c41dc7`。制品存于本 worktree `.tmp/opencode-v2-audit/worker-package-3` 和 `worker-package-v1`，未纳入 Git。
 - V1 正式打包镜像的 `EXPECTED_OPENCODE_ABI=V1 tools/verify-opencode-node-worker-image.sh` 通过；V2 同脚本在本机 ARM64 的 Docker 容器运行阶段因 Bun `CPU lacks AVX support` 崩溃，尽管 BuildKit 构建阶段 `--version` 已通过。Codex 原生沙箱 E2E 按脚本在 aarch64 宿主机跳过。
+- 专用 Jenkins 使用的内网 Git 分支原停在祖先提交 `9288981e4`，已将本次迁移分支快进同步到内网仓库；Jenkins 页面最近成功构建仍为此前的 #26，未触发本次提交的远端部署。
 
 ### Result
 
