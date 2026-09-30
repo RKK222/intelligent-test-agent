@@ -19180,4 +19180,24 @@
 ### Result
 
 - 本地回归证明目录和配置中虚构密钥不再出现在响应，同时保留前端需要的字段。远端隔离 Jenkins 发布后的真实目录脱敏复验待完成；未修改 generated SDK、OpenCode 源码、环境文件或 release 栈，不涉及数据库/Flyway、RunEvent wire 或新增部署节点。
+
+## 2026-09-30 - 修复 V2 prompt 等待交互时的错误超时
+
+### Why
+
+- 真实隔离栈的 question 验收先只轮询 pending 列表，Run 在用户回复前失败；进一步核对发现 V2 `/api/session/{id}/prompt` 会同步等待工具和 Form 完成，但 facade 仍沿用普通 30 秒超时。
+
+### What
+
+- `DefaultOpencodeClientFacade` 将 V2 prompt 与 command 统一切到不可重发的 24 小时硬上限，保留统一异常映射；普通 health、目录和控制请求继续使用原有超时与有限重试。
+- 增加 prompt 长等待、不自动重发 503 的单测，并同步 client README 与 V2 部署说明。
+
+### How
+
+- 本地通过 `mvn -pl test-agent-opencode-client -am -DskipTests=false -Dtest=DefaultOpencodeClientFacadeTest,GeneratedOpencodeSdkGatewayTest -Dsurefire.failIfNoSpecifiedTests=false test -q`（指定测试通过）。
+- 远端在待发布的旧版本上先用 SSE 监听 `question.asked`，再调用现有 question reply API，真实 Run 成功且 reply 返回 200；旧轮询脚本未及时回答导致的失败不再作为当前行为依据。
+
+### Result
+
+- permission/question 等交互不会被普通 30 秒 client timeout 误报为 OpenCode 失败，也不会因为超时自动重发同一 prompt；完整 client 测试与本次改动的独立 Jenkins 发布、脱敏复验仍待完成。
 - 未新增数据库/Flyway、HTTP 路径或事件 wire 类型，未修改 `.env.local`、OpenCode 只读源码和原 `release` 工作区。

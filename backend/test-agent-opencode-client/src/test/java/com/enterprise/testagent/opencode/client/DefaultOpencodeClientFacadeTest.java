@@ -119,7 +119,7 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
-    void facadeStartsRunWithPromptAsyncAndPropagatesTraceId() {
+    void facadeStartsNativeV2PromptAndPropagatesTraceId() {
         FakeGateway gateway = new FakeGateway();
         OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
 
@@ -145,6 +145,42 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(gateway.lastParts).extracting(OpencodePromptPart::type).containsExactly("text");
         assertThat(gateway.lastSystem).isEqualTo("只做只读检查并输出最终答案");
         assertThat(gateway.lastWorkspace).isNull();
+    }
+
+    @Test
+    void facadeKeepsV2PromptOpenBeyondOrdinaryTimeoutWithoutRetrying() {
+        AtomicInteger attempts = new AtomicInteger();
+        FakeGateway gateway = new FakeGateway();
+        gateway.runSupplier = () -> {
+            attempts.incrementAndGet();
+            return Mono.delay(Duration.ofMillis(80)).thenReturn(new OpencodeStartRunResult(true));
+        };
+        OpencodeClientFacade facade = facade(gateway, Duration.ofMillis(20), 1);
+
+        OpencodeStartRunResult result = facade.startRun(new OpencodeStartRunCommand(
+                node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                "wait for form reply", "trace_1234567890abcdef")).block(Duration.ofSeconds(1));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
+    void facadeDoesNotResendV2PromptAfterRetryableRemoteError() {
+        AtomicInteger attempts = new AtomicInteger();
+        FakeGateway gateway = new FakeGateway();
+        gateway.runSupplier = () -> {
+            attempts.incrementAndGet();
+            return Mono.error(remoteError(503));
+        };
+        OpencodeClientFacade facade = facade(gateway, Duration.ofMillis(20), 1);
+
+        assertThatThrownBy(() -> facade.startRun(new OpencodeStartRunCommand(
+                        node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                        "do not repeat", "trace_1234567890abcdef")).block())
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(attempts).hasValue(1);
     }
 
     @Test
@@ -490,6 +526,7 @@ class DefaultOpencodeClientFacadeTest {
         private List<OpencodePromptPart> lastParts = List.of();
         private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
         private Mono<Boolean> sessionExists = Mono.just(true);
+        private java.util.function.Supplier<Mono<OpencodeStartRunResult>> runSupplier;
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -552,6 +589,7 @@ class DefaultOpencodeClientFacadeTest {
             lastParts = parts;
             lastMessageId = messageId;
             lastSystem = system;
+            if (runSupplier != null) return runSupplier.get();
             return Mono.just(new OpencodeStartRunResult(true));
         }
 

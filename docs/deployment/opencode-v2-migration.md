@@ -42,6 +42,10 @@ V2 `serve` 强制 Basic auth。部署时应把同一受控 secret 注入 Java ba
 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 和 worker 的同名环境变量；launcher 会
 将它传给 `OPENCODE_PASSWORD`，gateway 只在变量存在时发送
 `Authorization: Basic opencode:<secret>`，日志不会打印 secret。
+V2 `/api/session/{id}/prompt` 会一直等待模型、工具或 permission/question Form 完成；平台
+Run 已在后台持有该连接，因此 client facade 对 prompt 和 command 使用统一 24 小时硬上限，
+禁止普通 30 秒超时和自动重发。收到 `question.asked` 后由平台现有 question reply API
+回答，原请求继续返回，避免用户尚未回答时被误报为 OpenCode 失败。
 V2 Bun server 收到受控 `SIGTERM` 后会先关闭 watcher，再以退出码 `130` 结束；
 启动器只在已转发该停止信号时将其归一化为成功停止，Worker 镜像的
 `docker stop` 验证仍要求最终容器退出码为 `0`。

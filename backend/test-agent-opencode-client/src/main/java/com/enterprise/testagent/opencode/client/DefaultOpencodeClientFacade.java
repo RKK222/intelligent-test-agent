@@ -27,7 +27,7 @@ import reactor.util.retry.Retry;
 public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultOpencodeClientFacade.class);
-    private static final Duration LONG_RUNNING_COMMAND_TIMEOUT = Duration.ofHours(24);
+    private static final Duration LONG_RUNNING_SESSION_TIMEOUT = Duration.ofHours(24);
 
     private final OpencodeSdkGateway gateway;
     private final OpencodeRunEventMapper eventMapper;
@@ -124,12 +124,13 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     /**
-     * 通过 opencode prompt 启动 Run，generated 请求体只在 gateway 内构造。
+     * V2 prompt 请求直到模型、工具和待答 Form 完成才返回。平台已异步持有该连接，
+     * 不能套用普通 30 秒超时，也不能在连接失败后重发可能已受理的用户消息。
      */
     @Override
     public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
         Objects.requireNonNull(command, "command must not be null");
-        return applyPolicy(
+        return applyLongRunningPolicy(
                 Mono.defer(() -> gateway.startRun(
                         command.node(),
                         command.opencodeSessionId(),
@@ -156,10 +157,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     @Override
     public Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command) {
         Objects.requireNonNull(command, "command must not be null");
-        String nodeId = command.node().executionNodeId().value();
-        LOGGER.debug("Opencode call started, operation=startCommand, nodeId={}, baseUrl={}",
-                nodeId, command.node().baseUrl());
-        return Mono.defer(() -> gateway.startCommand(
+        return applyLongRunningPolicy(Mono.defer(() -> gateway.startCommand(
                         command.node(),
                         command.opencodeSessionId(),
                         command.directory(),
@@ -172,11 +170,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         command.modelProviderId(),
                         command.modelId(),
                         command.variant(),
-                        command.traceId()))
-                .timeout(LONG_RUNNING_COMMAND_TIMEOUT)
-                .doOnSuccess(result -> LOGGER.debug(
-                        "Opencode call completed, operation=startCommand, nodeId={}", nodeId))
-                .onErrorMap(error -> toPlatformException(error, "startCommand", command.node()));
+                        command.traceId())), "startCommand", command.node());
     }
 
     /**
@@ -365,6 +359,17 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         }
         return protectedSource
                 .doOnSuccess(result -> LOGGER.debug("Opencode call completed, operation={}, nodeId={}", operation, nodeId))
+                .onErrorMap(error -> toPlatformException(error, operation, node));
+    }
+
+    /** V2 的同步 prompt/command 由平台后台订阅；仅加硬上限和错误映射，禁止自动重发。 */
+    private <T> Mono<T> applyLongRunningPolicy(Mono<T> source, String operation, ExecutionNode node) {
+        String nodeId = node.executionNodeId().value();
+        LOGGER.debug("Opencode call started, operation={}, nodeId={}, baseUrl={}",
+                operation, nodeId, node.baseUrl());
+        return source.timeout(LONG_RUNNING_SESSION_TIMEOUT)
+                .doOnSuccess(result -> LOGGER.debug(
+                        "Opencode call completed, operation={}, nodeId={}", operation, nodeId))
                 .onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
