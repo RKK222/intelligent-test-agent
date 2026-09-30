@@ -5,6 +5,26 @@
 
 ## Entries
 
+## 2026-10-01 - 补齐 OpenCode V2 原生 MCP 发现探针
+
+### Why
+
+- 受管本机 `code_analysis` 配置指向 Linux 路径，原有 `/api/mcp` HTTP 200 只能证明目录路由，不能证明 V2 与 stdio MCP 服务成功握手和发现工具。
+
+### What
+
+- 新增 `tools/test-opencode-v2-mcp-smoke.mjs`：使用冻结 V2 CLI、隔离 HOME/配置/端口和自有零依赖 MCP fixture，验证连接状态、工具发现、资源发现及 V2 原生资源目录；结束时清理服务和临时文件。
+- 在 `docs/deployment/opencode-v2-migration.md` 记录命令、通过结果和生产 `code_analysis`/Worker 尚待验证的边界。
+
+### How
+
+- `node --check tools/test-opencode-v2-mcp-smoke.mjs` 通过；用本机固定 2.0.18 Darwin CLI 执行，`/api/mcp` 返回 `connected`，fixture 收到 `initialize`、`tools/list`、`resources/list`、`resources/templates/list`，`/api/mcp/resource` 返回 `testagent://v2-probe`。
+- 退出后未留测试 MCP 或 OpenCode 进程；不读取平台密码、用户配置或测试库。
+
+### Result
+
+- V2 MCP 握手和发现路径有可重复原生证据；Linux amd64 Worker 中的固定 Codex MCP 二进制和实际工具调用仍未完成验收。未改公开 API、RunEvent、数据库、环境配置或 OpenCode 上游源码。
+
 ## 2026-10-01 - 复验隔离 V2 本地部署和登录
 
 ### Why

@@ -103,6 +103,8 @@ node --test tools/test-opencode-observability-plugin.mjs
 TEST_AGENT_OPENCODE_SERVER_PASSWORD='<受控本地密码>' \
   OPENCODE_BASE_URL=http://127.0.0.1:4296 \
   node tools/test-opencode-v2-native-smoke.mjs
+OPENCODE_V2_BIN=/path/to/opencode-2.0.18 \
+  node tools/test-opencode-v2-mcp-smoke.mjs
 ```
 
 观测插件单测覆盖 V2 五种 session hook、脱敏、调用 ID、工具失败去重、
@@ -132,6 +134,14 @@ compact 虽返回 200，却可能发出 `session.compaction.failed`；脚本以�
 `session.compaction.ended` 为成功条件。2026-10-01 在本机 `4296` 运行通过，
 SSE 同时捕获 `session.execution.succeeded` 和 `session.compaction.ended`。
 该脚本直接验证原生协议，不能代替平台授权、RunEvent、真实 Worker 镜像或 V1 回滚验收。
+
+独立的 `tools/test-opencode-v2-mcp-smoke.mjs` 不复用 `4296` 或用户配置；它在临时
+HOME、配置目录和随机 loopback 端口启动冻结的 V2 CLI，以自有 stdio MCP fixture
+验证 `initialize`、`tools/list`、`resources/list`、`resources/templates/list`，并通过
+`/api/mcp` 和 `/api/mcp/resource` 确认连接状态及资源目录。2026-10-01 本机运行返回
+`connected` 和测试资源 `testagent://v2-probe`。此结果证明 V2 MCP 主机与发现协议可用，
+不证明企业 `code_analysis` 二进制、工具调用或 Linux Worker 镜像已通过；这些仍需在
+原生 amd64 隔离部署中验证。
 
 2026-09-30 增加现有自有 Workspace 的真实浏览器验收：使用
 `TEST_AGENT_REAL_E2E_WORKSPACE_ID` 和 `TEST_AGENT_REAL_E2E_WORKSPACE_ROOT` 选择账号
