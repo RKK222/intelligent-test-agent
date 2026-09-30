@@ -2,6 +2,11 @@
 
 管理审阅 Tool 使用 TeamReviewToolTokenService 的独立 `team-review-read` audience。OpencodeProcessStartupService 自动注入 TEST_AGENT_TEAM_REVIEW_TOOL_TOKEN 和既有平台 base URL，无需新增必填 dotenv；现有进程需要受管重启才能获得凭据。凭据不能替代登录、workspace-git 或 code-knowledge。
 
+OpenCode V2 的 `serve` 使用 Basic Auth。所有启动入口必须继续调用
+`OpencodeProcessStartupService`，由它把受控 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`
+同时注入 launcher 和 worker 的 `OPENCODE_PASSWORD`；业务层不能自行调用 manager start
+或补写进程状态。V2 健康探针使用 `/api/info`，不是旧的 `/api/health`。
+
 自动化代码库与应用资产库统一由当前工作树 `.opencode/opencode.jsonc` 的 `references` 和精确 `permission.external_directory` 规则交给 OpenCode 原生加载。后端不再为普通对话、命令、重发、批量或定时 Run 拼接自动化路径、system prompt 或用户消息；普通发送、命令、重发、批量提交和夜间任务创建阶段也不预写 JSONC。只有真实 Run（包含定时 Run）即将派发且尚未产生可见副作用时，才调用工作区模块的唯一对账器、按需 reload、固定确实 READY 的精确 generation 并记录生命周期租约；单库不可用通过既有 `run.created` 返回安全局部告警，主 Run 继续执行。
 
 ## 工程定位

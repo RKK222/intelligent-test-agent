@@ -184,6 +184,24 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
+    void facadePreservesNativeV2SessionConflictWithoutRetryingPrompt() {
+        AtomicInteger attempts = new AtomicInteger();
+        FakeGateway gateway = new FakeGateway();
+        gateway.runSupplier = () -> {
+            attempts.incrementAndGet();
+            return Mono.error(remoteError(409));
+        };
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 1);
+
+        assertThatThrownBy(() -> facade.startRun(new OpencodeStartRunCommand(
+                        node(), "ses_remote1234567890abcdef", "/tmp/demo", null,
+                        "conflicting prompt", "trace_1234567890abcdef")).block())
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        assertThat(attempts).hasValue(1);
+    }
+
+    @Test
     void facadeStartsNativeCommandWithoutConvertingItToPromptText() {
         FakeGateway gateway = new FakeGateway();
         OpencodeClientFacade facade = facade(gateway, Duration.ofMillis(10), 0);

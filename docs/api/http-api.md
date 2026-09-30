@@ -36,6 +36,7 @@ OpenCode worker 固定使用 V2 `/api` 路由。平台 runtime API 仍输出稳�
 V2 原生没有 session share 路由，旧 runtime `/session/{id}/share` 入口返回
 `API_GONE`，分享设置统一使用
 `/api/internal/platform/opencode-runtime/sessions/{id}/collaboration-share`。
+V2 原生 session 状态冲突返回 HTTP 409 时，平台保留为统一 `CONFLICT`（HTTP 409）和安全 `details.status`，供调用方按状态冲突处理；其它未归一化的上游错误仍按 `OPENCODE_BAD_GATEWAY` 处理。
 
 ### 用户绑定服务器首跳提示
 

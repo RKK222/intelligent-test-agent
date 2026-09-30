@@ -17,6 +17,8 @@ const pkgSrc = (name: string): string =>
   fileURLToPath(new URL(`../../packages/${name}/src`, import.meta.url));
 // 本地一键启动脚本会按 TEST_AGENT_FRONTEND_URL 注入 HOST，未注入时保持仅本机访问。
 const devServerHost = process.env.HOST ?? "127.0.0.1";
+// 允许隔离工作区通过 PORT 运行在独立端口，避免和默认开发服务互相抢占。
+const devServerPort = Number.parseInt(process.env.PORT ?? "3000", 10);
 
 /**
  * 前端版本只在 Vite 启动构建时生成一次，统一使用北京时间，避免部署机器时区造成版本口径不一致。
@@ -191,7 +193,7 @@ export default defineConfig({
   },
   server: {
     host: devServerHost,
-    port: 3000,
+    port: Number.isFinite(devServerPort) && devServerPort > 0 ? devServerPort : 3000,
     proxy: {
       ...createToolboxDevProxyOptions({
         itToolsTarget:

@@ -108,7 +108,25 @@ root/child Trace、未知事件透传、失败 Step 不伪造耗时，以及
 `file://` 插件目录与本地固定依赖做原生加载探针时，`/api/info` 和
 `POST /api/rpc/testagent.runtime/tools`（请求体 `{"input":{}}`）均返回 200，
 后者返回 62 个已注册工具；此探针只证明插件成功加载和 RPC 可用，真实模型调用、
-上传归档与前端 Trace 仍需在专用 Jenkins 栈做端到端验收。
+上传归档与前端 Trace 仍需在具备 Linux amd64 Worker 的发布环境做镜像级验收。
+
+本地隔离启动已经在独立工作树完成：前端 `http://127.0.0.1:3100`、Java 后端
+`http://127.0.0.1:18182`、OpenCode V2 Worker 使用端口 `4296`，Redis 使用
+独立的本地端口 `16380`；共享测试 PostgreSQL 仍按根目录 `.env.test` 指向固定
+测试库。后端 readiness 和前端首页均返回 200。原生 V2 `/api/info`、`/api/event`、
+文件树/读取/搜索、VCS、PTY、MCP 目录通过 smoke；平台 agent/model/provider/config、
+session、prompt、command、SSE、消息分页、diff、compact、fork、side-question、archive
+通过 API 验收。体验 Workspace 的文件、VCS 和 worktree 平台入口按既有权限策略返回
+403，因此本次没有用它冒充普通 Workspace 的平台代理通过。Run SSE 收到
+`run.succeeded`，重启后重新执行矩阵仍保持重复事件数为 0；`/api/health` 在冻结的
+2.0.18 中不存在，部署健康检查必须使用 `/api/info`。
+
+本地启动会把受控 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 通过公共
+`OpencodeProcessStartupService` 同时注入 Worker 的 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`
+和 `OPENCODE_PASSWORD`，避免 V2 `serve` 默认 Basic Auth 随机密码导致平台 gateway
+收到 401。启动器会检查 MCP、client、plugin、effect、jsonc-parser、playwright 和
+zod 的实际入口文件，缺依赖时重新安装固定 lockfile，而不是复用不完整的前端
+`node_modules`。
 
 Worker 构建还会校验固定 npm runtime lockfile、V2 平台包摘要、V2 插件和
 client 入口。生产发布仍需在隔离 Worker 上执行 `/api/info`、session、prompt、
@@ -143,7 +161,20 @@ V2 后端 Compose 同时固定 `3100` 为浏览器 CORS 来源，并在发布后
 Compose 重建和 readiness/CORS/部署清单校验；远端平台 API 已验证进程状态、agent/model/provider/config、
 文件树/文件读取/搜索、VCS、LSP、MCP、worktree、session 历史、Run SSE 和消息持久化。
 远端取消验收得到 `CANCELLED` 与 `run.cancelled`，模型指定后的 compact 返回成功并可继续读取消息。
-目录凭据脱敏修复仍需在下一次 Jenkins 发布中复验；本机 Docker worker 仍因无内部镜像未执行镜像 smoke。
+目录凭据脱敏修复仍需在下一次 Jenkins 发布中复验；本机 Docker worker 仍因 ARM
+模拟器无法完成镜像 smoke。
+
+本次本地 ARM Mac 还尝试了 `deploy/internal/package-release.sh --opencode-only`。
+Docker 构建使用清单中固定的 OpenCode、Codex 资源摘要；下载阶段改为单文件下载
+后再执行长度和 SHA-256 校验，避免 CDN 并发 Range 返回短分片。构建在 amd64
+模拟执行 OpenCode Bun `--version` 时因 QEMU/CPU 不支持 AVX 触发段错误，随后按
+固定字节校验失败关闭。因此本机已验证启动器、运行时依赖和平台 API，但不能把
+该模拟结果当作 Linux amd64 Worker 镜像验收；原生 amd64 构建机仍需完成镜像和
+V1 回滚包 smoke。
+
+独立的 `codex-download` Docker 阶段已按固定 `0.145.0`、归档 SHA、bwrap 二进制 SHA
+和许可证摘要构建通过。封包读取 `TEST_AGENT_CODEX_VERSION`，不会受 Codex Desktop
+导出的通用 `CODEX_VERSION` 影响。
 
 本地 `tools/dev-phase11-real-e2e.sh`、`tools/dev-runnable-loop-check.sh` 和
 `tools/verify-opencode-user-process-scenarios.sh` 共用

@@ -225,7 +225,7 @@ $env:TEST_AGENT_FRONTEND_URL = "http://192.168.100.115:3000"
 powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile guo -EnvFile .env.local -SkipFrontendBuild
 ```
 
-脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；未显式设置 `TEST_AGENT_BASE_URL` 时，会使用自动探测到的后端内网地址（例如 `http://192.168.100.115:8080`），避免局域网访问前端时浏览器仍请求 `127.0.0.1`。需要指定固定入口时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
+脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；Vite 开发服务器会读取脚本传入的 `PORT`，因此隔离工作区可以使用独立端口；未显式设置 `TEST_AGENT_BASE_URL` 时，会使用自动探测到的后端内网地址（例如 `http://192.168.100.115:8080`），避免局域网访问前端时浏览器仍请求 `127.0.0.1`。需要指定固定入口时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
 macOS arm64 本地启动不复用麒麟客户端分发清单；未设置 `TEST_AGENT_OPENCODE_BIN` 时使用 `$HOME/.opencode/bin/opencode` 或 `PATH` 中的二进制。需要固定调试版本时，应在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）外通过环境变量指定 `TEST_AGENT_OPENCODE_BIN`，例如：
 

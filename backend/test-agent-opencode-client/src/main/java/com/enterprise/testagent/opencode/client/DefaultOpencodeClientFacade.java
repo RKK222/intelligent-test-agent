@@ -452,6 +452,10 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
             if (status == 503) {
                 return platformException(ErrorCode.OPENCODE_UNAVAILABLE, operation, node, status, current);
             }
+            // V2 会用 409 表示 session 状态冲突，保留调用方可恢复的冲突语义。
+            if (status == 409) {
+                return platformException(ErrorCode.CONFLICT, operation, node, status, current);
+            }
             return platformException(ErrorCode.OPENCODE_BAD_GATEWAY, operation, node, status, current);
         }
         if (hasCause(current, ConnectException.class)) {

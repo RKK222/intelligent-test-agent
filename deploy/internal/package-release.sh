@@ -2006,7 +2006,8 @@ RTK_RELEASE_BASE_URL="${RTK_RELEASE_BASE_URL:-https://github.com/rtk-ai/rtk/rele
 RTK_LICENSE_SHA256="${RTK_LICENSE_SHA256:-4044ade9c21d8b084d3d16a03375cf3b7e166b946a327bb37a3fbbdb53287cfd}"
 # RTK 许可证在源码树而非 release 附件，单独一个可覆盖基址；默认走上游 raw，网络不稳时可指向本地/内网镜像。
 RTK_LICENSE_BASE_URL="${RTK_LICENSE_BASE_URL:-https://raw.githubusercontent.com/rtk-ai/rtk}"
-CODEX_VERSION="${CODEX_VERSION:-0.145.0}"
+# Codex Desktop 自身会导出 CODEX_VERSION；交付版本只读项目命名空间，避免误用宿主 CLI 版本。
+CODEX_VERSION="${TEST_AGENT_CODEX_VERSION:-0.145.0}"
 CODEX_ASSET_NAME="${CODEX_ASSET_NAME:-codex-x86_64-unknown-linux-musl.tar.gz}"
 CODEX_ASSET_SIZE="${CODEX_ASSET_SIZE:-113724150}"
 CODEX_ASSET_SHA256="${CODEX_ASSET_SHA256:-bfaf13c9ba34f2ad764e4a916c49cf7177aeba329cf0f719e2227566fc8d662a}"

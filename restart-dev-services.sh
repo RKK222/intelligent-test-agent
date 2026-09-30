@@ -695,9 +695,17 @@ raw_opencode_bin() {
 }
 
 opencode_runtime_dependencies_complete() {
-  local node_modules="$1" dependency
-  for dependency in "@opencode/plugin" "@opencode/client" "effect" "zod"; do
-    [[ -e "${node_modules}/${dependency}" ]] || return 1
+  local node_modules="$1" dependency_file
+  # 开发启动也检查 Worker 实际需要的 Tool 入口，不能复用只有插件包的前端依赖树。
+  for dependency_file in \
+    '@modelcontextprotocol/sdk/dist/esm/server/mcp.js' \
+    '@opencode/plugin/dist/promise/index.js' \
+    '@opencode/client/dist/promise/index.js' \
+    'effect/dist/index.js' \
+    'jsonc-parser/lib/esm/main.js' \
+    'playwright-core/index.js' \
+    'zod/index.js'; do
+    [[ -s "${node_modules}/${dependency_file}" ]] || return 1
   done
 }
 
@@ -755,6 +763,10 @@ prepare_observability_opencode_runtime() {
       ln -s "${dependency_source}" "${runtime_root}/node_modules"
     else
       require_command npm
+      # npm ci 只能清理运行时自身的 node_modules，不能顺着旧 symlink 改写仓库依赖。
+      if [[ -L "${runtime_root}/node_modules" ]]; then
+        rm -f "${runtime_root}/node_modules"
+      fi
       # stdout 由 opencode_bin 的命令替换接收，只允许最终可执行文件路径写入 stdout。
       npm ci --prefix "${runtime_root}" --ignore-scripts --no-audit --no-fund >&2
     fi

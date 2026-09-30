@@ -36,6 +36,7 @@ AAM 登录改造不新增部署节点，但要求所有 Java 在 `/data/testagen
 - `opencode-worker-docker.sh` 固定为 worker 容器设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`；这些值不从 `docker.env` 覆盖。脚本升级后必须重建容器才会生效。
 - Docker 18.09 发布 1000 个 worker 端口前必须在 daemon 中禁用 `userland-proxy`；脚本会在删除旧 worker 前拒绝不安全组合，避免启动中途耗尽 fork 资源。
 - worker 构建会自动检查 Python `3.13.14`、pip/venv/常用标准库与脚本工具、Codex 版本、摘要、官方 MCP 契约和失败关闭；启用分析前，每台 Linux 4.19 / Docker 18.09.7 worker 节点还必须执行 `./check-codex-whitebox-host.sh test-agent-opencode-worker:internal`。脚本按十进制解析 `18.09.7`，并用镜像内的 `/bin/true` 和真实 Codex/bubblewrap 验证 namespace、指定 cwd、源码读取、原生 read-only 拒写、Git 不变与续写；不以 Apple Silicon Mac 的 amd64 仿真结果代替现场内核验收。完整说明见 `docs/deployment/codex-whitebox-mcp.md`。
+- Worker 封包读取 `env.example` 或指定 dotenv 中的 `TEST_AGENT_CODEX_VERSION`，默认固定 `0.145.0`；不读取宿主 Codex Desktop 导出的通用 `CODEX_VERSION`，避免把宿主 CLI 版本误写进企业镜像。
 - 按现场明确批准，ClickHouse 与记忆五类运行入口在当前 Docker 18.09 节点使用 `--privileged` 兼容新镜像系统调用；该高权限例外不修改 daemon、不扩大到现有 PostgreSQL 或其它容器，细节与风险见 ClickHouse、通用记忆部署文档及安全规范。
 - 企业内不使用 Docker Compose；worker 由 `opencode-worker-docker.sh` 管理，当前 XXL MySQL 直接使用外部实例，不在平台服务器部署 MySQL 容器。
 - 当前企业 Linux 目标机不预装宿主机 `psql`、`jq`、`rg`。部署与排障命令不得把这三个命令作为前提：PostgreSQL 只读检查优先使用对应数据库容器内的 `psql`，JSON/文本检查使用随包脚本、`grep`、`sed`、`awk` 或镜像内工具。不得为了部署临时联网安装这些命令。

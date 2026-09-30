@@ -60,6 +60,7 @@ public class OpencodeProcessStartupService {
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String OPENCODE_REFERENCES_DIR_PARAM = "OPENCODE_REFERENCES_DIR";
     private static final String OPENCODE_APP_WORKSPACE_ROOT_PARAM = "OPENCODE_APP_WORKSPACE_ROOT";
+    private static final String OPENCODE_SERVER_PASSWORD_ENV = "TEST_AGENT_OPENCODE_SERVER_PASSWORD";
     private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
     /** 旧 manager 在 start 后会立即补发心跳；最多等待约两秒读取同一 state 的启动时间。 */
@@ -1015,6 +1016,7 @@ public class OpencodeProcessStartupService {
      */
     private Map<String, String> startupEnvironment(OpencodeProcessStartupRequest request) {
         Map<String, String> environment = new java.util.LinkedHashMap<>(request.environment());
+        injectOpencodeServerPassword(environment);
         // RTK 是平台策略能力，调用方传入的同名环境变量不能覆盖数据库中的全局开关。
         environment.put("TEST_AGENT_RTK_ENABLED", Boolean.toString(RtkRuntimePolicy.enabled(commonParameterValues)));
         injectOptionalPathParameter(environment, OPENCODE_REFERENCES_DIR_PARAM);
@@ -1058,6 +1060,34 @@ public class OpencodeProcessStartupService {
             environment.put(OpencodeObservabilityTokenService.SERVER_ID_ENV_NAME, request.linuxServerId().value());
         }
         return Map.copyOf(environment);
+    }
+
+    /**
+     * V2 serve 默认启用 Basic Auth；把同一受控 secret 同时传给 launcher 和 worker，
+     * 让 gateway、manager health 与 OpenCode server 使用同一认证口径。
+     */
+    private void injectOpencodeServerPassword(Map<String, String> environment) {
+        String password = firstNonBlank(
+                System.getProperty("test.agent.opencode.server.password"),
+                System.getenv(OPENCODE_SERVER_PASSWORD_ENV),
+                environment.get(OPENCODE_SERVER_PASSWORD_ENV),
+                environment.get("OPENCODE_PASSWORD"),
+                System.getenv("OPENCODE_PASSWORD"));
+        if (password == null) {
+            return;
+        }
+        environment.put(OPENCODE_SERVER_PASSWORD_ENV, password);
+        environment.put("OPENCODE_PASSWORD", password);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                // 密码必须逐字节匹配 Java gateway，不能像路径参数一样裁剪首尾空格。
+                return value;
+            }
+        }
+        return null;
     }
 
     /** 首次分配也在 manager start 前生成稳定进程 ID，使专用凭据与最终持久化身份完全一致。 */

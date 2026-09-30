@@ -602,6 +602,24 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void startAndVerifyPropagatesV2ServerPasswordToWorkerEnvironment() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        service.startAndVerify(request(
+                null,
+                null,
+                null,
+                Map.of("OPENCODE_PASSWORD", "  v2-secret  ")));
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command ->
+                assertThat(command.environment())
+                        .containsEntry("OPENCODE_PASSWORD", "  v2-secret  ")
+                        .containsEntry("TEST_AGENT_OPENCODE_SERVER_PASSWORD", "  v2-secret  "));
+    }
+
+    @Test
     void startAndVerifyInjectsScopedWorkspaceGitToolCredential() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();

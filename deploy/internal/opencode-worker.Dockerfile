@@ -271,24 +271,12 @@ ARG CODEX_RELEASE_BASE_URL=https://github.com/openai/codex/releases/download
 ARG CODEX_LICENSE_SHA256=d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc
 ARG CODEX_NOTICE_SHA256=9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915
 
+# GitHub CDN 对并发 Range 可能返回短分片；单文件下载后再验证固定长度和摘要。
 RUN set -eux; \
     asset_url="${CODEX_RELEASE_BASE_URL}/rust-v${CODEX_VERSION}/${CODEX_ASSET_NAME}"; \
-    chunk_size=16777216; \
-    index=0; \
-    start=0; \
-    mkdir -p /tmp/codex-parts /tmp/codex-extract /tmp/bwrap-extract /out/codex-resources; \
-    while [ "${start}" -lt "${CODEX_ASSET_SIZE}" ]; do \
-      end=$((start + chunk_size - 1)); \
-      if [ "${end}" -ge "${CODEX_ASSET_SIZE}" ]; then \
-        end=$((CODEX_ASSET_SIZE - 1)); \
-      fi; \
-      part="$(printf '/tmp/codex-parts/part-%03d' "${index}")"; \
-      curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 --range "${start}-${end}" "${asset_url}" -o "${part}" & \
-      index=$((index + 1)); \
-      start=$((end + 1)); \
-    done; \
-    wait; \
-    cat /tmp/codex-parts/part-* > /tmp/codex.tar.gz; \
+    mkdir -p /tmp/codex-extract /tmp/bwrap-extract /out/codex-resources; \
+    curl -fsSL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 \
+      "${asset_url}" -o /tmp/codex.tar.gz; \
     test "$(stat -c '%s' /tmp/codex.tar.gz)" = "${CODEX_ASSET_SIZE}"; \
     printf '%s  %s\n' "${CODEX_ASSET_SHA256}" /tmp/codex.tar.gz | sha256sum -c -; \
     tar -xzf /tmp/codex.tar.gz -C /tmp/codex-extract; \

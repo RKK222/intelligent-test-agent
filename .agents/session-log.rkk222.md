@@ -5,6 +5,32 @@
 
 ## Entries
 
+## 2026-09-30 - 本地独立端口 V2 启动与 Worker 构建核对
+
+### Why
+
+- 用户要求把 OpenCode V2 迁移放在独立目录并确认能否本地启动部署；默认 3000/8080 端口不能与其它 bug 修复栈冲突。
+
+### What
+
+- 在隔离 worktree 使用前端 `3100`、后端 `18182`、OpenCode Worker `4296`、Redis `16380` 启动本地 V2 栈。
+- `OpencodeProcessStartupService` 将受控 V2 Basic Auth secret 同时注入 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 和 `OPENCODE_PASSWORD`；启动器改为检查 MCP、client、plugin、effect、jsonc-parser、playwright、zod 的实际入口文件。
+- 客户端把 V2 原生 session HTTP 409 保留为平台 `CONFLICT`，避免 compact/revert 等有序操作的状态冲突被误报为 502，且冲突的 prompt 不自动重发。
+- Vite 读取启动脚本传入的 `PORT`；Worker 固定 Codex release asset 的大小和 SHA-256；下载改为单文件后再校验，避免 CDN 并发 Range 返回短分片；封包改读 `TEST_AGENT_CODEX_VERSION`，隔离桌面宿主的通用 `CODEX_VERSION`。
+- 同步 client/runtime README、HTTP API、迁移部署文档和前端端口说明。
+
+### How
+
+- 后端 `mvn -f backend/pom.xml -DskipTests package -q`、Java 25 下 runtime/client 模块测试（含 V2 409 映射）、agent-web typecheck、1433 条前端测试、39 条 Node 插件/launcher 测试、运行时依赖 fixture、package component plan 均通过。
+- 本地平台 API 矩阵在重启后再次通过 session/prompt/command/SSE/history/diff/compact/fork/side-question/archive；SSE 终态为 `run.succeeded`，重复 ID 为 0。原生 `/api/info`、`/api/event`、目录、文件、VCS、PTY/MCP smoke 通过；体验 Workspace 的文件、VCS 和 worktree 平台入口按既有策略返回 403，不能作为普通 Workspace 代理验收。
+- ARM Mac 尝试构建 `--opencode-only`，资源长度校验通过后仍在 amd64 QEMU 执行 Bun 版本探针时因 CPU/AVX 不支持触发段错误；独立 `codex-download` Docker 阶段按固定 0.145.0 构建通过，`CODEX_VERSION` 不同宿主值的组件指纹相同。未把这些结果标记为 Linux amd64 Worker 验收通过。
+
+### Result
+
+- 本地独立端口部署可用，前端和后端 readiness 均返回 200；V2 Basic Auth、插件运行时和平台 Run 链路均有实证。
+- Linux amd64 Worker 镜像及 V1 回滚包仍需原生 amd64 构建机完成镜像 smoke；本次未修改 OpenCode 上游源码、数据库或 `.env.local`。原生 409 到平台 `CONFLICT` 的单元测试已通过；重启后的真实平台恢复操作返回 200，未特意制造有损状态来复现原生 409。
+
+
 ## 2026-09-28 - 定位并修复公共共享副本冲突的重试与恢复
 
 ### Why
