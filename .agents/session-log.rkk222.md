@@ -5,6 +5,27 @@
 
 ## Entries
 
+## 2026-10-01 - 固化 OpenCode 2.0.18 原生运行态 smoke
+
+### Why
+
+- 现有文档将原生 session、文件、VCS 等多项能力描述为已验证，但缺少可重复的同一套脚本证据；仅 HTTP 200 不能证明 prompt、compact 等异步操作完成。
+
+### What
+
+- 新增 `tools/test-opencode-v2-native-smoke.mjs`，在临时 Git 目录验证 18 个只读入口、文件正文、session 创建/读取、shell 消息、wait、真实 prompt 后 user/assistant、diff、fork、revert stage/commit、compact、interrupt 和 `/api/event`，最后只清理本次创建的远端 Session。
+- compact 改以已有 assistant 消息为前提，并等待 `session.compaction.ended`；空会话 compact 的 HTTP 200 后可能发出 `session.compaction.failed`，不能算成功。
+- 同步 `docs/deployment/opencode-v2-migration.md` 的执行命令、验证结果和边界。
+
+### How
+
+- 从本地隔离 worker `127.0.0.1:4296` 读取受控 Basic Auth 环境，执行脚本通过：版本 `2.0.18`、18 个只读入口、4 个自有 Session、真实 assistant 和 `session.execution.succeeded` / `session.compaction.ended` 事件。原生 `shell`/`wait` 均为 HTTP 204，shell 输出从消息历史读取。
+- 期间还观察到本机 MCP `code_analysis` 配置指向 Linux `/data/testagent/...` 二进制而报 `NotFound`；当前 smoke 只证明 MCP 目录路由返回 200，不将本机 MCP 服务记为可用。需在 Worker 容器或本机正确安装路径下再验。
+
+### Result
+
+- 原生 V2 成功路径有可重复实测，不变更平台 API、RunEvent、数据库、密钥文件或 OpenCode 源码。平台端到端、Linux amd64 Worker、完整 V1 回滚与真实 MCP 仍是独立验收事项。
+
 ## 2026-09-30 - V1 回滚改为完整平台制品匹配
 
 ### Why

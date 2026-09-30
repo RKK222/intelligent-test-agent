@@ -100,6 +100,9 @@ JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
   PATH=/opt/homebrew/opt/openjdk@21/bin:$PATH \
   mvn -pl test-agent-opencode-client -am -DskipTests compile
 node --test tools/test-opencode-observability-plugin.mjs
+TEST_AGENT_OPENCODE_SERVER_PASSWORD='<受控本地密码>' \
+  OPENCODE_BASE_URL=http://127.0.0.1:4296 \
+  node tools/test-opencode-v2-native-smoke.mjs
 ```
 
 观测插件单测覆盖 V2 五种 session hook、脱敏、调用 ID、工具失败去重、
@@ -120,6 +123,15 @@ session、prompt、command、SSE、消息分页、diff、compact、fork、side-q
 403，因此本次没有用它冒充普通 Workspace 的平台代理通过。Run SSE 收到
 `run.succeeded`，重启后重新执行矩阵仍保持重复事件数为 0；`/api/health` 在冻结的
 2.0.18 中不存在，部署健康检查必须使用 `/api/info`。
+
+独立的 `tools/test-opencode-v2-native-smoke.mjs` 会在系统临时目录建立并删除自有 Git
+工作区和 Session，验证原生 `2.0.18`、`/api/event`、18 个目录/文件/VCS/PTY/Worktree
+只读入口、session 创建/查询、shell 消息、wait、prompt 后 user/assistant 消息、diff、
+fork、revert stage/commit、已有消息上的 compact 终态，以及 interrupt。空会话的
+compact 虽返回 200，却可能发出 `session.compaction.failed`；脚本以真实
+`session.compaction.ended` 为成功条件。2026-10-01 在本机 `4296` 运行通过，
+SSE 同时捕获 `session.execution.succeeded` 和 `session.compaction.ended`。
+该脚本直接验证原生协议，不能代替平台授权、RunEvent、真实 Worker 镜像或 V1 回滚验收。
 
 2026-09-30 增加现有自有 Workspace 的真实浏览器验收：使用
 `TEST_AGENT_REAL_E2E_WORKSPACE_ID` 和 `TEST_AGENT_REAL_E2E_WORKSPACE_ROOT` 选择账号
