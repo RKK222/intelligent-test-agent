@@ -19603,3 +19603,28 @@
 
 - V1/V2 单文件归档获取和离线包导出得到实测证明，V1 Worker 回滚候选的断网 smoke 通过。
 - V2 容器运行时仍需原生 Linux amd64 smoke；完整 V1 平台前后端/数据库/会话回滚、最新提交的 Jenkins 发布和鉴权后平台 Run/SSE 仍未完成，不能据此宣称全面迁移验收通过。
+
+## 2026-10-01 - 完成隔离 Linux amd64 发布、V1 回滚与 V2 恢复
+
+### Why
+
+- 当前迁移分支已经具备 V2 Worker 和平台适配实现，需要在原生 Linux amd64 节点验证真实镜像、数据库升级、V1 回滚以及恢复 V2，不能只依据 ARM Mac 上的构建和原生 smoke。
+
+### What
+
+- 专用 Jenkins 任务 `intelligent-test-agent-opencode-v2` #27 使用当前提交
+  `e8ccb74d291c8e30bf40414d63b2edf2404d4d6` 发布 `release-27-e8ccb74d`，通过构建、V2 Worker、数据库升级、Compose、readiness/CORS 和 Worker runtime version 验证。
+- #28 使用已清理的 `release-15-203f62c9` 做 V1 回滚时在来源校验处 fail-closed；#29 改用实际存在的 V1 归档 `release-71-8af71900`，发布 `rollback-v1-29-8af71900` 并成功验证；#30 恢复 `release-27-e8ccb74d` 并成功验证。
+- 同步更新 `docs/deployment/opencode-v2-migration.md` 的真实内网证据和本地启动说明；未修改 OpenCode 源码、`.env.local`、数据库结构、API/SSE wire 或 generated SDK。
+
+### How
+
+- 使用 Jenkins 浏览器任务和专用 `Jenkinsfile.opencode-v2`，没有通过 SSH/SCP 或测试机工作树手工替换制品；V1 来源校验完整检查 manifest、SHA-256、1.18.4 依赖、V1 Java gateway 和后端 JAR。
+- 发布后从本机只读访问隔离地址：后端 `18182/actuator/health/readiness` 为 `UP`，前端 `3100` 为 200，登录 CORS 预检返回允许来源；Jenkins verify 阶段另外检查 Worker health、manager config update 和 `/usr/local/lib/opencode/VERSION`。
+- 本地独立工作树前端 `3100`、后端 `18182` readiness 和 manager WebSocket 均正常；无会话时 `4296` 不监听符合按需启动模型。`admin/admin` 在本地和隔离 V2 平台均登录失败，没有可用平台 Token。
+
+### Result
+
+- 原生 Linux amd64 V2 镜像和平台发布已通过；真实 V1 回滚和 V2 恢复闭环已通过，隔离栈当前保持 V2，日常 `release` 栈未受影响。
+- V1 回滚首次使用的旧归档缺失被安全门禁拦截，未绕过门禁或修改远端目录；改用现存归档后完成验证。
+- 真实授权后的平台 Session/Run/SSE、permission/question 和消息持久化仍未完成，原因是当前没有有效登录凭据；不能把 `admin/admin` 或无 Token 的浏览器 mock 当作该项通过。

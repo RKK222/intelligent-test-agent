@@ -258,3 +258,29 @@ V2 镜像构建和导出通过，但同一 ARM Mac 上的 V2 容器运行时 smo
 OpenCode V2 `/api/info` 就绪探针；
 启用 Basic auth 时从 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`（或
 `OPENCODE_PASSWORD`）读取凭据，不在命令行或日志中输出密码。
+
+2026-10-01 在专用 Jenkins 任务
+[`intelligent-test-agent-opencode-v2`](http://192.168.8.100:18081/job/intelligent-test-agent-opencode-v2/)
+完成了当前分支的 Linux amd64 隔离发布和回滚闭环：
+
+- #27 `DEPLOY release-27-e8ccb74d` 检出提交
+  `e8ccb74d291c8e30bf40414d63b2edf2404d4d6b`，通过 Java/前端构建、V2 Worker
+  镜像导出、克隆数据库升级、Compose 发布、Worker 健康与运行时版本校验；
+  `http://192.168.8.100:18182/actuator/health/readiness` 返回 `{"status":"UP"}`，
+  `http://192.168.8.100:3100/` 返回 200，登录预检允许 `http://192.168.8.100:3100`。
+- #28 以已被清理的旧归档 `release-15-203f62c9` 请求 V1 回滚时，在
+  `v1-source-commit` 的只读来源校验处 fail-closed；没有停止或修改隔离 V2 栈。
+- #29 改用仍存在且通过 `1.18.4` 平台制品、依赖和 Java V1 gateway 校验的
+  `release-71-8af71900`，生成并发布 `rollback-v1-29-8af71900`；V1 前后端、
+  Worker、隔离数据库启动、健康检查和运行中 `/usr/local/lib/opencode/VERSION`
+  校验全部通过。
+- #30 以 `ROLLBACK_ABI=V2` 恢复 `release-27-e8ccb74d`，再次通过 Compose、
+  readiness、前端 200、CORS 和 Worker V2 版本校验。隔离栈当前保持 V2，
+  日常 `release` 的 3000/18082 栈未被触碰。
+
+本地独立工作树也可启动：前端为 `http://127.0.0.1:3100`，Java 后端为
+`http://127.0.0.1:18182`，manager 已通过 WebSocket 连接；OpenCode 用户进程仍由
+manager 按会话按需拉起，因此没有会话时 `4296` 端口不监听是预期状态。`admin/admin`
+在本地和隔离 V2 平台均返回登录失败，当前没有可用平台 Token，所以本次没有把真实
+平台 Session/Run/SSE 当作已验收；原生 V2 smoke、本地平台 DTO/事件测试和 Jenkins
+镜像级健康检查仍是有效证据。
