@@ -127,6 +127,8 @@ OpenCode `1.18.4` worker，再通过同一公共 manager 生命周期部署。�
 
 隔离栈正式启动前会按 `26380` 端口和 Compose 项目清理可确认属于 V2 的残留 Redis 容器；发现其它容器或宿主进程
 占用时会 fail-closed 并保留占用诊断，不会为了发布停止 release 服务或未知进程。
+Jenkins 主机预检默认对 Docker daemon、Java runtime image 和隔离 Redis 配置使用 180 秒单项上限，
+覆盖测试机冷缓存镜像层解压；超时仍直接终止发布，不跳过检查或切换到未验证的宿主依赖。
 隔离 Redis 配置仍以 `0600` 文件保存在专用 `shared` 目录；Jenkins 启动前先验证该文件可挂载并在容器内复制，
 运行时再由 `redis` 用户读取容器内副本，以兼容测试机的 FUSE 目录权限。
 V2 后端 Compose 同时固定 `3100` 为浏览器 CORS 来源，并在发布后验证登录接口的预检响应；仅检查

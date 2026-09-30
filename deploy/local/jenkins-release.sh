@@ -38,7 +38,9 @@ WORKER_PORT_END=${WORKER_PORT_END:-4105}
 OPENCODE_ABI=${OPENCODE_ABI:-V2}
 MAVEN_IMAGE=${MAVEN_IMAGE:-maven:3.9.9-eclipse-temurin-21}
 # 宿主机检查必须有界结束，避免远端 Docker/数据库/端口探测异常时无声占住 Jenkins。
-HOST_CHECK_TIMEOUT_SECONDS=${HOST_CHECK_TIMEOUT_SECONDS:-60}
+# Docker 首次启动固定 Maven runtime image 可能经历镜像层解压；仍由 timeout fail-closed，
+# 但 60 秒不足以覆盖测试机冷缓存恢复，默认给每项检查 180 秒。
+HOST_CHECK_TIMEOUT_SECONDS=${HOST_CHECK_TIMEOUT_SECONDS:-180}
 # 用户手册构建会读取 Git 提交时间，使用含 git 的固定 Node 完整镜像。
 NODE_IMAGE=${NODE_IMAGE:-node:22.16.0-bookworm}
 # 体验工作区和应用资产运行期需要执行 Git；复用已固定的 Maven JDK 21 镜像，避免使用不含 Git 的纯 JRE 镜像。

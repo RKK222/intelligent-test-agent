@@ -19200,4 +19200,23 @@
 ### Result
 
 - permission/question 等交互不会被普通 30 秒 client timeout 误报为 OpenCode 失败，也不会因为超时自动重发同一 prompt；完整 client 测试与本次改动的独立 Jenkins 发布、脱敏复验仍待完成。
+
+## 2026-09-30 - 放宽隔离 Jenkins Docker 冷缓存预检上限
+
+### Why
+
+- #23 在后端全量编译阶段长时间无进展后停止；随后 #24、#25 均在 `validate-host` 的 `docker run maven:3.9.9-eclipse-temurin-21` 探测处超过 60 秒，发布尚未进入代码构建。Docker daemon 本身已能响应，问题属于测试机镜像冷缓存/存储恢复时间不足以满足原门禁。
+
+### What
+
+- 将 `HOST_CHECK_TIMEOUT_SECONDS` 默认值从 60 秒提升到 180 秒；保留每项 Docker/Redis/数据库检查的 `timeout --foreground` 和超时失败关闭语义，不跳过检查、不回退未知宿主依赖。同步 Jenkins release contract、部署 README 与 V2 迁移说明。
+
+### How
+
+- 执行 `bash -n deploy/local/jenkins-release.sh tools/verify-jenkins-release.sh`、`tools/verify-jenkins-release.sh` 和 `git diff --check`，均通过。
+- #24/#25 的 Jenkins 控制台确认失败点均为 runtime image 探测退出码 124，未创建或替换 V2 服务；隔离栈仍保持 #22 已验证 release。
+
+### Result
+
+- 下一次隔离发布可等待测试机 Docker 冷缓存恢复最多 180 秒，同时仍会对失去响应的主机 fail-closed；代码构建和真实脱敏复验待新提交发布后完成。
 - 未新增数据库/Flyway、HTTP 路径或事件 wire 类型，未修改 `.env.local`、OpenCode 只读源码和原 `release` 工作区。
