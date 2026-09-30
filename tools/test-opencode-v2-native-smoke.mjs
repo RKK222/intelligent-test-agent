@@ -23,6 +23,8 @@ const auth = password
   ? { Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}` }
   : {};
 const requestTimeoutMs = Number(process.env.OPENCODE_NATIVE_SMOKE_TIMEOUT_MS ?? 180_000);
+const commandName = process.env.OPENCODE_NATIVE_SMOKE_COMMAND_NAME;
+const subagentName = process.env.OPENCODE_NATIVE_SMOKE_SUBAGENT_NAME;
 
 function endpoint(pathname, query = {}) {
   const url = new URL(pathname, `${baseUrl}/`);
@@ -54,6 +56,18 @@ async function request(pathname, { method = "GET", query, body, timeoutMs = requ
     throw new Error(`OpenCode V2 ${method} ${pathname} failed: HTTP ${response.status}`);
   }
   return { status: response.status, contentType, data, raw };
+}
+
+async function expectJsonError(pathname, query, expectedStatus) {
+  const response = await fetch(endpoint(pathname, query), {
+    headers: { ...auth, Accept: "application/json" },
+    signal: AbortSignal.timeout(requestTimeoutMs),
+  });
+  if (response.status !== expectedStatus || !(response.headers.get("content-type") ?? "").includes("json")) {
+    throw new Error(`OpenCode V2 ${pathname} expected JSON HTTP ${expectedStatus}, got ${response.status}`);
+  }
+  const body = await response.json();
+  expectObject(body, `HTTP ${expectedStatus} error envelope`);
 }
 
 function payloadData(result) {
@@ -97,7 +111,7 @@ async function initializeWorkspace() {
   }
 }
 
-async function readEvents(signal, eventTypes) {
+async function readEvents(signal, eventTypes, eventRecords) {
   const response = await fetch(endpoint("/api/event"), { headers: auth, signal });
   if (!response.ok || !response.body) throw new Error(`OpenCode V2 event stream failed: HTTP ${response.status}`);
   const reader = response.body.getReader();
@@ -114,7 +128,10 @@ async function readEvents(signal, eventTypes) {
         if (!line.startsWith("data: ")) continue;
         try {
           const event = JSON.parse(line.slice(6));
-          if (typeof event.type === "string") eventTypes.push(event.type);
+          if (typeof event.type === "string") {
+            eventTypes.push(event.type);
+            eventRecords.push(event);
+          }
         } catch {
           // 心跳或未知 SSE frame 不影响 smoke；业务事件仍按 type 记录。
         }
@@ -138,22 +155,36 @@ async function waitForAssistant(session, userMessageId) {
   throw new Error(`OpenCode V2 prompt did not produce an assistant message for ${userMessageId}`);
 }
 
+async function waitForAssistantCount(session, expectedCount) {
+  const deadline = Date.now() + requestTimeoutMs;
+  while (Date.now() < deadline) {
+    const result = await request(`/api/session/${encodeURIComponent(session)}/message`, {
+      query: { order: "asc", limit: 200 },
+    });
+    const messages = expectArray(payloadData(result), "session messages");
+    if (messages.filter((message) => message?.type === "assistant").length >= expectedCount) return messages;
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`OpenCode V2 command did not produce ${expectedCount} assistant messages`);
+}
+
 async function waitForEventType(eventTypes, type) {
   const deadline = Date.now() + requestTimeoutMs;
   while (Date.now() < deadline) {
     if (eventTypes.includes(type)) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`OpenCode V2 event was not observed: ${type}`);
+  throw new Error(`OpenCode V2 event was not observed: ${type}; observed=${[...new Set(eventTypes)].sort().join(",")}`);
 }
 
 async function main() {
   const workspace = await initializeWorkspace();
   const sessions = new Set();
   const eventTypes = [];
+  const eventRecords = [];
   const eventAbort = new AbortController();
   let eventError;
-  const eventTask = readEvents(eventAbort.signal, eventTypes).catch((error) => {
+  const eventTask = readEvents(eventAbort.signal, eventTypes, eventRecords).catch((error) => {
     if (!eventAbort.signal.aborted) eventError = error;
   });
   try {
@@ -202,7 +233,121 @@ async function main() {
     const userMessageId = user.id;
     const completed = await waitForAssistant(session, userMessageId);
     if (completed.messages.filter((message) => message?.type === "assistant").length === 0) throw new Error("No assistant message");
+    const firstPage = await request(`/api/session/${session}/message`, { query: { order: "asc", limit: 1 } });
+    const firstMessage = expectArray(payloadData(firstPage), "first message page");
+    if (firstMessage.length !== 1 || !firstPage.data?.cursor?.next) {
+      throw new Error("OpenCode V2 first message page has no next cursor");
+    }
+    const secondPage = await request(`/api/session/${session}/message`, {
+      query: { limit: 1, cursor: firstPage.data.cursor.next },
+    });
+    const secondMessage = expectArray(payloadData(secondPage), "second message page");
+    if (secondMessage.length !== 1 || secondMessage[0]?.id === firstMessage[0]?.id) {
+      throw new Error("OpenCode V2 message cursor repeated the first message");
+    }
+    await expectJsonError(`/api/session/${session}/message`, {
+      order: "asc", limit: 1, cursor: firstPage.data.cursor.next,
+    }, 400);
+    await expectJsonError("/api/session/ses_missing_v2_smoke", undefined, 404);
+    expectStatus(await request(`/api/session/${session}`), 200, "session.get after recoverable errors");
     expectStatus(await request(`/api/session/${session}/diff`, { query: { from: userMessageId } }), 200, "session.diff");
+
+    if (commandName) {
+      const commands = await request("/api/command", { query: location });
+      const catalog = expectArray(payloadData(commands), "command catalog");
+      if (!catalog.some((item) => item?.name === commandName)) {
+        throw new Error("OpenCode V2 fixture command was not discovered");
+      }
+      expectStatus(await request(`/api/session/${session}/command`, {
+        method: "POST", body: { name: commandName, text: "" },
+      }), 204, "session.command");
+      expectStatus(await request(`/api/experimental/session/${session}/wait`, { method: "POST" }), 204, "command.wait");
+      await waitForAssistantCount(session, 2);
+    }
+
+    // Form 是 V2 question 交互的原生契约；创建、列表、按字段 key 回复均在临时 Session 内完成。
+    const form = await request(`/api/session/${session}/form`, {
+      method: "POST", body: { title: "V2 form smoke", fields: [{ key: "answer", type: "string", required: true }] },
+    });
+    const formId = expectObject(payloadData(form), "form.create").id;
+    if (typeof formId !== "string" || !formId.startsWith("frm_")) throw new Error("V2 form has no id");
+    const pendingForms = await request(`/api/session/${session}/form`);
+    if (!expectArray(payloadData(pendingForms), "pending forms").some((item) => item?.id === formId)) {
+      throw new Error("V2 form was not visible in the session list");
+    }
+    expectStatus(await request(`/api/session/${session}/form/${formId}/reply`, {
+      method: "POST", body: { answer: { answer: "V2_FORM_OK" } },
+    }), 204, "form.reply");
+    const settledForms = await request(`/api/session/${session}/form`);
+    if (expectArray(payloadData(settledForms), "settled forms").some((item) => item?.id === formId)) {
+      throw new Error("V2 replied form remained pending");
+    }
+
+    // Permission 是 V2 的另一条异步交互契约；通过 Session 级 ruleset 触发 ask，
+    // 再读取 pending request 并回复 once，确认请求身份和 reply decision 均可恢复。
+    const permissionSessionResult = await request("/api/session", {
+      method: "POST",
+      body: {
+        title: "V2 permission smoke",
+        location: { directory: workspace },
+        permissions: [{ action: "shell", resource: "*", effect: "ask" }],
+      },
+    });
+    const permissionSession = sessionId(permissionSessionResult, "permission session.create");
+    sessions.add(permissionSession);
+    const permissionAsk = await request(`/api/session/${permissionSession}/permission`, {
+      method: "POST",
+      body: { action: "shell", resources: ["printf V2_PERMISSION_OK"] },
+    });
+    const permission = expectObject(payloadData(permissionAsk), "permission.create");
+    if (permission.effect !== "ask" || typeof permission.id !== "string" || !permission.id.startsWith("per")) {
+      throw new Error(`V2 permission ask did not create a pending request: ${JSON.stringify(permission)}`);
+    }
+    const pendingPermissions = await request(`/api/session/${permissionSession}/permission`);
+    if (!expectArray(payloadData(pendingPermissions)).some((item) => item?.id === permission.id)) {
+      throw new Error("V2 permission request was not visible in the session list");
+    }
+    expectStatus(await request(`/api/session/${permissionSession}/permission/${permission.id}/reply`, {
+      method: "POST", body: { decision: "once" },
+    }), 204, "permission.reply");
+    const settledPermissions = await request(`/api/session/${permissionSession}/permission`);
+    if (expectArray(payloadData(settledPermissions)).some((item) => item?.id === permission.id)) {
+      throw new Error("V2 permission reply remained pending");
+    }
+
+    if (subagentName) {
+      const beforeSubagent = commandName ? 2 : 1;
+      expectStatus(await request(`/api/session/${session}/prompt`, {
+        method: "POST", body: { text: `Please call the V2_SUBAGENT probe subagent ${subagentName} and return its result.` },
+      }), 200, "subagent.prompt");
+      expectStatus(await request(`/api/experimental/session/${session}/wait`, { method: "POST" }), 204, "subagent.wait");
+      await waitForAssistantCount(session, beforeSubagent + 1);
+      const sessionList = await request("/api/session", { query: location });
+      const children = expectArray(payloadData(sessionList), "session list")
+        .filter((item) => item?.parentID === session);
+      if (children.length !== 1) throw new Error(`V2 subagent created ${children.length} child sessions`);
+      const child = children[0].id;
+      if (typeof child !== "string") throw new Error("V2 child session has no id");
+      sessions.add(child);
+      await waitForAssistant(child, "subagent child prompt");
+      const childEventDeadline = Date.now() + requestTimeoutMs;
+      while (!eventRecords.some((event) => event.type === "session.created"
+          && JSON.stringify(event).includes(child)) && Date.now() < childEventDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      if (!eventRecords.some((event) => event.type === "session.created"
+          && JSON.stringify(event).includes(child))) {
+        throw new Error("V2 SSE omitted the child session.created event");
+      }
+      const parentHistory = await request(`/api/session/${session}/message`, { query: { order: "asc", limit: 200 } });
+      const subagentParts = expectArray(payloadData(parentHistory), "subagent messages")
+        .flatMap((message) => Array.isArray(message?.content) ? message.content : [])
+        .filter((part) => part?.name === "subagent" || part?.tool === "subagent");
+      if (!subagentParts.some((part) => part?.state?.status === "completed" || part?.status === "completed")) {
+        throw new Error(`V2 subagent did not complete; states=${JSON.stringify(subagentParts.map((part) => part?.state?.status ?? part?.status))}`);
+      }
+      await waitForEventType(eventTypes, "session.tool.success");
+    }
 
     const fork = await request(`/api/session/${session}/fork`, { method: "POST", body: { before: userMessageId } });
     const forkId = sessionId(fork, "session.fork");
@@ -241,6 +386,12 @@ async function main() {
       readOnlyRoutes: readOnlyRoutes.length + 2,
       sessions: sessions.size,
       promptAssistant: true,
+      command: Boolean(commandName),
+      formReply: true,
+      permissionReply: true,
+      subagent: Boolean(subagentName),
+      pagination: true,
+      errorRecovery: true,
       eventTypes: [...new Set(eventTypes)].sort(),
     }));
   } finally {

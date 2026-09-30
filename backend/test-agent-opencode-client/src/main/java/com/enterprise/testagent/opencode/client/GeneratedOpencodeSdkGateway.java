@@ -1032,8 +1032,13 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         pathParams.put("sessionID", opencodeSessionId);
         MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         queryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
-        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "order", order));
-        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", optionalText(cursor)));
+        String pageCursor = optionalText(cursor);
+        // V2 游标已经编码排序方向，后续页同时传 order 会被原生接口以 400 拒绝。
+        if (pageCursor == null) {
+            queryParams.putAll(apiClient.parameterToMultiValueMap(null, "order", order));
+        } else {
+            queryParams.putAll(apiClient.parameterToMultiValueMap(null, "cursor", pageCursor));
+        }
         HttpHeaders headerParams = new HttpHeaders();
         MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
         MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();

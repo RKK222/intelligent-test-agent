@@ -19512,3 +19512,26 @@
 
 - V2 模型/Provider 从受控公共配置加载；不存在的写接口不再吞掉 Run 前的配置同步失败。既有客户端仍收到不含上游 Token、UCID、服务器地址的 loopback 握手载荷。
 - 平台对前端的 RunEvent 和模型 DTO 未变化；配置 PATCH 的可写范围收窄，未涉及数据库/Flyway。隔离 Jenkins 最新 Linux amd64 与企业 Codex 验收仍需有效账号；`admin/admin` 已被登录页拒绝。
+
+## 2026-10-01 - 补齐 V2 游标协议及原生交互矩阵
+
+### Why
+
+- 冻结 2.0.18 的消息分页明确拒绝同一请求同时携带 `cursor` 和 `order`，Java 网关后续页仍发送两者，原生矩阵得到 HTTP 400，影响历史恢复。
+- 现有原生 smoke 对 command、Permission、Form、子 Agent 和错误恢复只有路由或 fixture 证据，缺少同一冻结 CLI 的完成态验收。
+
+### What
+
+- `GeneratedOpencodeSdkGateway.sessionMessages` 首页面保留 `order`，使用游标的后续页仅发送 `cursor`；回归测试断言第二页没有 `order`。同步 client README 和 V2 部署文档。
+- 隔离 MCP/假模型 smoke 扩展为原生矩阵：命令、Form 回复、Permission `ask → pending → once`、真实子 Agent 与 child SSE、消息双页游标、400/404 JSON 错误后恢复、已有消息 compact 终态。子 Agent 以 `/wait` 完成工具和 child，再检查消息、工具终态与事件。
+
+### How
+
+- 冻结 Darwin CLI `2.0.18` 原生探针通过：18 个只读入口、6 个自有 Session、MCP 模型工具调用、command/Form/Permission/subagent/pagination/errorRecovery 均为 true；SSE 捕获 `permission.asked/replied`、child `session.created`、`session.tool.success`、`session.compaction.ended`。
+- `mvn -pl test-agent-opencode-runtime -am test -q`、39 项 Observability/RTK/启动器 Node 测试、离线依赖与 Git ignore 门禁、文档校验通过。JDK 25 完整后端包从本 worktree 重建并按现有 V2 隔离配置重启：前端 `3100` 为 200，后端 `18182` readiness 为 `UP`，登录预检 CORS 允许 `3100`。隔离配置保留 `.env.test` 指定的共享测试 PostgreSQL；主 `release` 工作树和 `.env.local` 均未改动。
+- 提交前复核全部 `.agents/session-log*.md` 近期条目及本次暂存范围，没有覆盖其它提交者的成果或留下合并标记。
+
+### Result
+
+- Java 历史分页遵守 V2 不混传游标和排序的协议；本地隔离 V2 服务已运行新后端包，原生交互矩阵得到更完整的可重复证据。平台外部 DTO、RunEvent wire、数据库、Flyway 和 generated SDK 均未修改。
+- 本机 ARM Docker 缺少目标 Worker 镜像；先前 `package-release.sh --opencode-only` 在 amd64 QEMU 执行 Bun `--version` 时因模拟 CPU 不支持 AVX 崩溃。原生 Linux amd64 镜像 smoke、当前提交的隔离 Jenkins 和完整 V1 回滚仍需目标环境验收；`admin/admin` 对平台/Jenkins 返回 401，不能据此宣称登录或远端发布成功。

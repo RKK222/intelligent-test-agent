@@ -925,6 +925,7 @@ class GeneratedOpencodeSdkGatewayTest {
                     assertThat(message.message()).containsEntry("id", "msg_cursor1234567890abcdef"));
             assertThat(request.get().query()).containsEntry("limit", List.of("50"));
             assertThat(request.get().query()).containsEntry("cursor", List.of("cursor_previous_page"));
+            assertThat(request.get().query()).doesNotContainKey("order");
         } finally {
             server.stop(0);
         }

@@ -34,7 +34,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `OpencodeDiffCommand` / `OpencodeDiffResult`：封装 opencode `sessionDiff`，平台 `messageId` 表示 USER 轮次锚点，client 请求 V2 `/api/session/{id}/diff?from={messageId}`，不泄露 `SnapshotFileDiff`。
 - `OpencodeRejectDiffCommand` / `OpencodeRejectDiffResult`：封装 opencode `sessionRevert`，用于 Run 级拒绝 Diff。
 - `OpencodeRuntimeCommand` / `OpencodeRuntimeResult`：运行态通用 facade 命令，用于受控访问 opencode Web App 需要的 agent/model/provider/command/reference、session、permission、question、fs/vcs/lsp/mcp status/resources/tools 等 HTTP API；返回 Jackson `JsonNode`，不泄露 generated DTO。
-- `OpencodeSessionMessagesCommand` / `OpencodeSessionMessagesResult`：通过 generated `ApiClient` 分页读取 opencode 标准 `/api/session/{sessionID}/message` 消息 envelope，供断线、完成态快照和历史刷新恢复完整 user/assistant 消息；generated `Message` union 无法稳定反序列化 user 时在本适配器内保留原始 JSON，不向业务模块暴露 generated DTO。
+- `OpencodeSessionMessagesCommand` / `OpencodeSessionMessagesResult`：通过 generated `ApiClient` 分页读取 opencode 标准 `/api/session/{sessionID}/message` 消息 envelope，供断线、完成态快照和历史刷新恢复完整 user/assistant 消息；首个 V2 页面发送 `limit/order`，后续页面只发送 opaque `cursor`，因为原生接口禁止 `cursor` 与 `order` 同时出现；generated `Message` union 无法稳定反序列化 user 时在本适配器内保留原始 JSON，不向业务模块暴露 generated DTO。
 
 ## 测试覆盖
 

@@ -91,7 +91,8 @@ Provider/模型由公共配置发布和 `/api/location/reload` 生效；回滚 V
 LSP 状态接口，平台只报告 `unknown` 或显式关闭时的 `disabled`。
 
 真实 E2E 的原生消息读取使用 `/api/session/{id}/message` 的
-`{data,cursor}` 分页。V2 `session_message.data` 内联 assistant 的
+`{data,cursor}` 分页；第一页可传 `order`，跟随 `cursor.next/previous` 时不能再次传 `order`，
+游标自身已经编码了顺序和方向。V2 `session_message.data` 内联 assistant 的
 `text/reasoning/tool` content，旧版 `message/part` 十二类 fixture 仅用于
 `TEST_AGENT_PART_PHASE=fallback-v1` 回滚验收；V2 的
 `TEST_AGENT_PART_PHASE=fallback` 使用独立 `session_v2/session_message` fixture，
@@ -138,7 +139,11 @@ session、prompt、command、SSE、消息分页、diff、compact、fork、side-q
 独立的 `tools/test-opencode-v2-native-smoke.mjs` 会在系统临时目录建立并删除自有 Git
 工作区和 Session，验证原生 `2.0.18`、`/api/event`、18 个目录/文件/VCS/PTY/Worktree
 只读入口、session 创建/查询、shell 消息、wait、prompt 后 user/assistant 消息、diff、
-fork、revert stage/commit、已有消息上的 compact 终态，以及 interrupt。空会话的
+fork、revert stage/commit、已有消息上的 compact 终态，以及 interrupt。隔离假模型矩阵
+还验证命令执行、Form 创建/回复、Permission 的 `ask → pending → once`、子 Agent
+创建及子会话消息和 SSE 事件、两页消息游标、JSON 400/404 后恢复查询。子 Agent
+prompt 接受请求时工具仍可能为 `running`，必须在 `/wait` 后核对子会话和工具终态。
+第二页只能发送 `cursor` 和 `limit`，不能重发 `order`；错误组合会得到 400。空会话的
 compact 虽返回 200，却可能发出 `session.compaction.failed`；脚本以真实
 `session.compaction.ended` 为成功条件。2026-10-01 在本机 `4296` 运行通过，
 SSE 同时捕获 `session.execution.succeeded` 和 `session.compaction.ended`。
