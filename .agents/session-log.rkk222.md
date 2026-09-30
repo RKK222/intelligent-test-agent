@@ -19314,3 +19314,22 @@
 
 - Java/client/runtime 适配层当前与冻结 V2 Diff/revert 参数语义一致，旧隔离部署仍需用新提交重新发布后复跑 Run Diff、revert/unrevert 真实验收。
 - 未新增数据库/Flyway、前端 SSE wire 或部署节点；最新远端 Jenkins 发布仍受登录会话限制。
+
+## 2026-09-30 - 隔离 Jenkins 登录凭据验证
+
+### Why
+
+- 目标从 blocked 状态恢复后，继续尝试把 `8e8d90924` 发布到独立验收栈；Jenkins 任务页仍要求登录。
+
+### What
+
+- 用户明确提供 `admin/admin` 并授权登录隔离 Jenkins；通过浏览器登录页提交后，服务器跳转 `/loginError`，明确拒绝该凭据。
+- 未尝试猜测其它账号、读取保存密码或绕过 Jenkins 鉴权；分支 worktree 保持 clean，未改变发布制品或 `release` 栈。
+
+### How
+
+- 使用隔离 Jenkins 任务 `intelligent-test-agent-opencode-v2` 的登录页提交账号；随后复核本地分支、远端 ref、`git diff --check` 和当前提交。
+
+### Result
+
+- 最新远端分支仍为 `codex/opencode-v2-migration` / `8e8d90924`，但该提交尚未部署到 18182/3100；后续需要有效 Jenkins 凭据或用户在浏览器中完成登录后继续远端矩阵验收。
