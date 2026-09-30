@@ -19160,4 +19160,24 @@
 ### Result
 
 - 迟到 V2 终态不会再覆盖已确认的用户取消，compact 会尊重平台选择的模型；下一步需通过专用 Jenkins 隔离发布，在远端重复取消+SSE 和 compact 场景确认行为。
+
+## 2026-09-30 - V2 目录凭据脱敏与隔离栈继续验收
+
+### Why
+
+- Jenkins #21 和 #22 的真实隔离部署已经确认取消终态与指定模型 compact 可用；后续 API 冒烟发现 V2 原生模型、Provider 和配置来源会回传 `settings.apiKey`、鉴权头等受控凭据，而平台目录仍把原始 JSON 返回给前端。
+
+### What
+
+- 在 OpenCode client 的运行态响应边界仅对模型、Provider、配置及相关目录递归删除密钥字段和可容纳任意凭据的 `settings/headers/body/environment/options/plugins/mcp` 等配置容器，保留 `location/data`、模型能力及 provider 策略；不改变文件正文、消息或 RunEvent 投影。
+- 补本地 HTTP 回归，使用虚构凭据覆盖模型、Provider、配置和多层嵌套；同步 client README、HTTP API、部署迁移说明与安全规范。
+
+### How
+
+- 对照冻结 V2 OpenAPI，确认 `Model.Info`、`Provider.Info`、`Config.ProviderEncoded` 明确允许 `settings/headers/body`，且配置还包含 MCP 环境与插件选项；前端当前只读取模型能力、Provider 身份和 `experimental.policies`。
+- 执行 `mvn -pl test-agent-opencode-client -am -DskipTests=false -Dtest=GeneratedOpencodeSdkGatewayTest -Dsurefire.failIfNoSpecifiedTests=false test -q` 与 `git diff --check`，均通过。提交前已回顾全部 `.agents/session-log*.md` 近期记录。
+
+### Result
+
+- 本地回归证明目录和配置中虚构密钥不再出现在响应，同时保留前端需要的字段。远端隔离 Jenkins 发布后的真实目录脱敏复验待完成；未修改 generated SDK、OpenCode 源码、环境文件或 release 栈，不涉及数据库/Flyway、RunEvent wire 或新增部署节点。
 - 未新增数据库/Flyway、HTTP 路径或事件 wire 类型，未修改 `.env.local`、OpenCode 只读源码和原 `release` 工作区。

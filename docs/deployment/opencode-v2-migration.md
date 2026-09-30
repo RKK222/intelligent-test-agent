@@ -57,6 +57,9 @@ V2 没有 V1 的原生 session share 合约。旧 runtime `/session/{id}/share` 
 
 平台运行态代理把 V2 的 location envelope 保留在通用目录中供前端解包；
 MCP 状态、资源、工具和 VCS 分支/文件状态则投影回平台稳定 DTO。
+V2 模型、Provider 和配置来源会回传受控供应商凭据。client 网关对这些目录响应
+递归删除 `apiKey` 等密钥字段、`headers/settings/body/environment` 等可容纳任意凭据的
+容器及插件/MCP 配置，再返回平台 API；`location/data`、模型能力和 provider 策略仍保留。
 V2 `/api/fs/read/*` 直接返回带 MIME 的文件字节，不再返回 V1 `FileContent` JSON；
 client 适配器在边界按严格 UTF-8 与 NUL 检测恢复 `{type:"text",content}` 或
 `{type:"binary",content,encoding:"base64",mimeType}`，平台 runtime 的文件读取响应保持兼容。
@@ -125,11 +128,11 @@ OpenCode `1.18.4` worker，再通过同一公共 manager 生命周期部署。�
 V2 后端 Compose 同时固定 `3100` 为浏览器 CORS 来源，并在发布后验证登录接口的预检响应；仅检查
 `/actuator/health/readiness` 不足以证明前端可登录。
 
-隔离 Jenkins #20（提交 `333c6ba58`）已完成 V2 worker 镜像、后端/前端构建、数据库升级、
+隔离 Jenkins #22（提交 `d336bf9b6`）已完成 V2 worker 镜像、后端/前端构建、数据库升级、
 Compose 重建和 readiness/CORS/部署清单校验；远端平台 API 已验证进程状态、agent/model/provider/config、
 文件树/文件读取/搜索、VCS、LSP、MCP、worktree、session 历史、Run SSE 和消息持久化。
-取消验收随后发现迟到 `run.failed` 覆盖 `CANCELLED`，本次终态仲裁修复需在下一次 Jenkins
-发布中复验；本机 Docker worker 仍因无内部镜像未执行镜像 smoke。
+远端取消验收得到 `CANCELLED` 与 `run.cancelled`，模型指定后的 compact 返回成功并可继续读取消息。
+目录凭据脱敏修复仍需在下一次 Jenkins 发布中复验；本机 Docker worker 仍因无内部镜像未执行镜像 smoke。
 
 本地 `tools/dev-phase11-real-e2e.sh`、`tools/dev-runnable-loop-check.sh` 和
 `tools/verify-opencode-user-process-scenarios.sh` 共用

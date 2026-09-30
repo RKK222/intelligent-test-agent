@@ -25,6 +25,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 
 - `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、createSession、sessionExists、startRun、startCommand、cancelSession、streamRunEvents、getDiff、rejectDiff 能力；`sessionExists` 调用远端 v2 session get，404 映射为 `false` 供上层重建历史绑定，其它错误仍按统一 opencode 错误码抛出；原生 command 由平台 Run 后台持有，不使用普通 30 秒超时或自动重试。
 - `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器；`prompt` 发送前后输出 `opencode_prompt_request_prepared` / `opencode_prompt_request_accepted` 脱敏摘要。V2 消息从 `/api/session/{sessionID}/message` 的 `{data,cursor}` 读取，`OpencodeV2ContentAdapter` 将 assistant `content[]` 和 user text/file 投影为平台 Part，并以 `part_{messageId}_{ordinal}` 为无原生 ID 的内容建立稳定身份；自定义 generated `ApiClient` WebClient 设置单页缓冲上限。V2 `/api/fs/read/*` 返回原始字节，网关在 client 边界按严格 UTF-8/NUL 规则恢复 V1 `FileContent` 的 text/base64 projection；MCP 状态/资源、插件 RPC 工具目录、VCS 分支/文件状态和 LSP 未知状态均在此边界归一化；远端 session 404 作为可恢复缺失处理，generated SDK 不手改。
+- V2 `/api/model`、`/api/provider` 和 `/api/config` 的原生响应可能包含供应商密钥、鉴权头和插件/MCP 环境。`GeneratedOpencodeSdkGateway` 在目录/配置响应离开 client 模块前递归删除敏感字段和任意凭据容器，保留 `location/data`、模型能力和 `experimental.policies`；运行态文件正文与消息不经过该目录过滤器。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session 并只返回远端 session id；标题可选，缺失或空白时请求体为 `{}`，保留 OpenCode 默认标题以触发内置 title agent，显式标题仍透传为 `title` 字段。
 - `OpencodeSessionExistsCommand`：校验远端 opencode session 是否仍存在，只返回布尔值，不暴露 v2 session DTO。
 - `OpencodeStartRunCommand`、`OpencodeStartCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：平台 Run 启动命令、原生 slash command、稳定 prompt part 模型和结果，分别映射到 opencode `prompt` 与 `/api/session/{sessionID}/command`；普通 prompt 的可选 `tools` 映射只在调用方显式提供时进入请求体。OpenCode `FilePartInput.source` 是可选字段，路径型 `file://`/URL 附件不发送 source，只有内联文本能同时提供 `text/type/path` 时才发送完整 `FileSource`；平台 `contextType/deliveryMode/行号` 不混入远端 source，也不向 app/domain 暴露 generated DTO。
@@ -39,7 +40,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `OpencodeMessageIdGeneratorTest` 覆盖格式、同毫秒单调递增、时钟回退、并发唯一性，以及随机 UUID 小于上一轮 assistant 而原生时序 ID 大于它的真实故障样本。
 - `DefaultOpencodeClientFacadeTest` 覆盖 traceId 透传、health/create/sessionExists/start/cancel/event/diff/reject/messages facade 编排，以及超时、远端 404/503 和有限重试映射。
 - `OpencodeRunEventMapperTest` 覆盖旧版 `session.next.*` 事件、opencode 2.0.18 `session.status`/`session.idle` 终态、message/permission/question/todo/vcs/lsp/mcp/reference/file 等运行态事件、公共 ID alias、派生终态来源字段和未知事件透传。
-- `GeneratedOpencodeSdkGatewayTest` 使用本地 HTTP server 覆盖 create/start/cancel/event/messages/diff/revert/runtime 的真实请求路径、query、请求体和 `X-Trace-Id` header，确保 generated SDK DTO 不外泄。
+- `GeneratedOpencodeSdkGatewayTest` 使用本地 HTTP server 覆盖 create/start/cancel/event/messages/diff/revert/runtime 的真实请求路径、query、请求体和 `X-Trace-Id` header，并验证 V2 模型、供应商和配置响应不会把嵌套密钥/鉴权头暴露给平台。
 - `GeneratedOpencodeSdkGatewayTest` 同时锁定生产构造必须显式注入 `OpencodeWebClientTransport`；禁止恢复无参构造，否则本地工作区会绕过反向隧道直连服务器 OpenCode。
 - `OpencodeRuntimeFacadeTest` 覆盖 runtime facade 的 GET/POST 调用透传和 JSON projection 返回。
 

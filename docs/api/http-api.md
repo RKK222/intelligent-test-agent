@@ -3524,6 +3524,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 Model/Provider 目录兼容说明：
 
 - `/api/internal/platform/opencode-runtime/models` 和 `/api/internal/platform/opencode-runtime/providers` 始终代理当前用户 opencode server 的 `/api/model`、`/api/provider`，不再受 `ai_model_configs`、内部供应商表或 `test-agent.model-catalog.source` 影响。
+- V2 原生模型、Provider 和配置来源可能包含 `settings.apiKey`、鉴权请求头、插件/MCP 环境等运行凭据；平台在 client 边界删除这些敏感字段及任意凭据容器后才返回目录或配置。`location/data`、模型能力、Provider 身份和 `experimental.policies` 保持可用，前端不得依赖原生 `settings/headers/body` 读取凭据。
 - 前端会把 opencode 原生 provider map 和 model map 归一化成已有 `ModelInfo` / `ProviderInfo`，并保留 `capabilities.attachment` 与 `capabilities.input.{text,audio,image,video,pdf}` 用于聊天附件投递分流，但不新增数据库模型字段；浏览器历史偏好仍按当前 opencode 返回目录做前端侧清理。
 
 内部模型 Token 与供应商配置 API（全部仅限 `SUPER_ADMIN`）：

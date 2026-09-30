@@ -5,6 +5,8 @@ import com.enterprise.testagent.domain.node.ExecutionNode;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -15,8 +17,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -43,6 +47,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     private static final int OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE = 16 * 1024 * 1024;
     private static final Pattern PROVIDER_OAUTH_CALLBACK =
             Pattern.compile("^/provider/([^/]+)/oauth/callback$");
+    private static final Set<String> PRIVATE_CATALOG_FIELDS = Set.of(
+            "apikey", "token", "authtoken", "accesstoken", "refreshtoken", "localtoken",
+            "password", "passphrase", "secret", "clientsecret", "privatekey", "credential",
+            "credentials", "authorization", "cookie", "setcookie", "proxyauthorization",
+            "headers", "settings", "body", "environment", "env", "options", "auth", "oauth",
+            "plugins", "mcp");
+    private static final Set<String> CATALOG_RESPONSE_PATHS = Set.of(
+            "/api/model", "/model", "/api/provider", "/provider", "/api/config",
+            "/config", "/global/config", "/api/agent", "/agent", "/api/command",
+            "/command", "/api/reference", "/reference", "/api/integration", "/provider/auth");
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final List<OpencodeWebClientTransport> transports;
@@ -708,7 +722,8 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         returnType)
                 .bodyToMono(returnType)
                 .defaultIfEmpty(objectMapper.createObjectNode().put("accepted", true))
-                .map(result -> toolCatalog ? projectRuntimeToolCatalog(path, result) : projectRuntimeResponse(path, result))
+                .map(result -> toolCatalog ? projectRuntimeToolCatalog(path, result)
+                        : protectRuntimeCatalog(path, projectRuntimeResponse(path, result)))
                 .map(OpencodeRuntimeResult::new);
     }
 
@@ -832,6 +847,39 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             });
             return projected;
         }
+        return result;
+    }
+
+    /**
+     * V2 模型、供应商和配置源会原样携带运行凭据。目录只用于客户端选择与展示，
+     * 因此在唯一 OpenCode 响应边界删除凭据字段及可容纳任意密钥的配置容器。
+     * 保留 location/data envelope、模型能力和 provider 策略，避免前端协议变化。
+     */
+    private JsonNode protectRuntimeCatalog(String path, JsonNode result) {
+        if (path == null || !CATALOG_RESPONSE_PATHS.contains(path)
+                && !path.startsWith("/provider/") && !path.startsWith("/auth/")) {
+            return result;
+        }
+        return stripPrivateCatalogFields(result);
+    }
+
+    private JsonNode stripPrivateCatalogFields(JsonNode value) {
+        if (value.isArray()) {
+            ArrayNode result = objectMapper.createArrayNode();
+            value.forEach(item -> result.add(stripPrivateCatalogFields(item)));
+            return result;
+        }
+        if (!value.isObject()) return value;
+        ObjectNode result = objectMapper.createObjectNode();
+        value.fields().forEachRemaining(field -> {
+            String normalized = field.getKey().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+            if (!PRIVATE_CATALOG_FIELDS.contains(normalized)
+                    && !normalized.endsWith("apikey") && !normalized.endsWith("token")
+                    && !normalized.endsWith("secret") && !normalized.endsWith("password")
+                    && !normalized.endsWith("credential")) {
+                result.set(field.getKey(), stripPrivateCatalogFields(field.getValue()));
+            }
+        });
         return result;
     }
 

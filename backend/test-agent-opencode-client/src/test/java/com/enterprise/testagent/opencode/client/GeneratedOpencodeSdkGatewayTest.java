@@ -496,6 +496,48 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayRemovesCredentialsFromV2CatalogAndConfigResponses() throws Exception {
+        HttpServer server = startServer(exchange -> {
+            String path = exchange.getRequestURI().getPath();
+            String body = switch (path) {
+                case "/api/model" -> """
+                        {"location":{"directory":"/tmp/demo"},"data":[{"id":"safe-model","providerID":"safe-provider","name":"Visible","enabled":true,"capabilities":{"attachment":true},"settings":{"apiKey":"model-secret","timeout":10},"headers":{"Auth-Token":"model-header-secret"},"variants":[{"id":"fast","settings":{"token":"variant-secret"}}]}]}
+                        """;
+                case "/api/provider" -> """
+                        {"location":{"directory":"/tmp/demo"},"data":[{"id":"safe-provider","name":"Visible","activation":"enabled","settings":{"apiKey":"provider-secret"},"headers":{"Authorization":"provider-header-secret"},"body":{"custom":"provider-body-secret"}}]}
+                        """;
+                case "/api/config" -> """
+                        [{"type":"document","info":{"experimental":{"policies":[{"action":"provider.use","resource":"safe-provider","effect":"allow"}]},"providers":{"safe-provider":{"settings":{"apiKey":"config-secret"},"headers":{"Auth-Token":"config-header-secret"}}},"mcp":{"servers":{"docs":{"environment":{"KEY":"mcp-secret"}}}},"plugins":[{"options":{"token":"plugin-secret"}}],"client_secret":"oauth-secret"}}]
+                        """;
+                default -> "{}";
+            };
+            respond(exchange, 200, "application/json", body);
+        });
+        try {
+            GeneratedOpencodeSdkGateway gateway = new GeneratedOpencodeSdkGateway(List.of());
+            JsonNode models = gateway.runtime(node(server), "GET", "/api/model", "/tmp/demo", null,
+                    Map.of(), null, TRACE_ID).block(Duration.ofSeconds(5)).body();
+            assertThat(models.path("data").get(0).path("id").asText()).isEqualTo("safe-model");
+            assertThat(models.path("data").get(0).path("capabilities").path("attachment").asBoolean()).isTrue();
+            assertThat(models.toString()).doesNotContain("model-secret", "model-header-secret", "variant-secret");
+
+            JsonNode providers = gateway.runtime(node(server), "GET", "/api/provider", "/tmp/demo", null,
+                    Map.of(), null, TRACE_ID).block(Duration.ofSeconds(5)).body();
+            assertThat(providers.path("data").get(0).path("id").asText()).isEqualTo("safe-provider");
+            assertThat(providers.toString()).doesNotContain("provider-secret", "provider-header-secret", "provider-body-secret");
+
+            JsonNode config = gateway.runtime(node(server), "GET", "/config", "/tmp/demo", null,
+                    Map.of(), null, TRACE_ID).block(Duration.ofSeconds(5)).body();
+            assertThat(config.get(0).path("info").path("experimental").path("policies").get(0)
+                    .path("resource").asText()).isEqualTo("safe-provider");
+            assertThat(config.toString()).doesNotContain("config-secret", "config-header-secret", "mcp-secret",
+                    "plugin-secret", "oauth-secret");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayProjectsV2FileReadTextAsLegacyFileContent() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {
