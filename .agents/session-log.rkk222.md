@@ -19557,3 +19557,25 @@
 
 - 旧 RunEvent 权限类型字段继续可读，本机独立 V2 栈运行更新后的后端包。
 - `admin/admin` 的本地平台登录仍为 401；当前提交的真实平台 Run/SSE、Linux amd64 Worker 镜像、隔离 Jenkins 和完整 V1 回滚仍未验收，不能宣称全面迁移已经发布完成。
+
+## 2026-10-01 - 修复运行管理验收脚本的旧 manager HTTP 入口
+
+### Why
+
+- 本地 `18182` 后端 health 为 UP，但运行管理只读 smoke 仍把 manager control token 发到已作废的 `manager-backends` HTTP 路由，实际收到 410；因此原脚本不能证明 V2 manager 连接状态。
+
+### What
+
+- 验收脚本改用 `SUPER_ADMIN` 用户 token 查询现有 `management/overview`，按显式 `linuxServerId` 关联 `CONNECTED` manager、连接和 `READY` Java 后端；`--require-manager` 缺服务器身份或用户 token 时失败关闭。旧 `--manager-token` 参数仅兼容接收，不再发送到 HTTP。
+- 新增只读 HTTP fixture 回归并接入开发脚本门禁；同步后端、manager、部署和安全文档，修正 V2 Basic Auth、V2/V1 离线包名与 Worker `/api/info`/`/path` 说明。
+
+### How
+
+- 运行脚本原始版本在本地复现 `/manager-backends` 返回 410；修复后 4 项 fixture 验证有效连接、错误服务器/断连/Java 不健康、缺服务器身份及旧 manager token 均按契约处理，不会再访问该旧路由。
+- `tools/verify-dev-scripts.sh`、`tools/verify-ai-docs.sh`、`bash -n`、`git diff --check` 通过；本地无 SUPER_ADMIN token，因此实际后端只执行只读 health 检查。远端 V2 `3100/18182` 可达，但 Jenkins job API 返回 403，不能据此判断最新提交的发布状态。
+- 提交前回顾全部 `.agents/session-log*.md` 近期记录；只修改本次 V2 验收脚本、测试和相关稳定文档，不触碰共享测试库、其它修复或 OpenCode 源码。
+
+### Result
+
+- 运行管理脚本不再向禁止的 HTTP 端点发送 manager token，具备用户授权时可验证指定服务器的真实 manager 拓扑；无授权时明确标记为只验证 health。
+- 最新分支的 Jenkins 发布、Linux amd64 Worker 镜像和 V1 真实回滚仍需有效 Jenkins/平台凭据及原生构建环境。此次未改 API、SSE、数据库、Flyway 或进程启动停止实现。

@@ -143,7 +143,7 @@ manager 当前接受的命令为 `start`、`health`、`stop`、`restart`、`stop
 
 - manager 不访问后端数据库；在线心跳只经 Java 写入 Redis，数据库只保留持久拓扑和用户进程业务数据。
 - manager 日志不得输出 token、Authorization、Cookie、统一认证号、用户完整输入或完整 prompt。用户进程日志文件名虽然经过路径安全编码，仍属于含身份信息的数据；不得把完整文件名复制到普通生命周期日志、错误响应或未脱敏的外部工单。
-- opencode server 默认监听 `0.0.0.0:{port}`，不设置 `OPENCODE_SERVER_PASSWORD`；生产必须依赖容器网络、主机防火墙或网关限制访问面。
+- opencode server 默认监听 `0.0.0.0:{port}`；V2 `serve` 必须从 worker 与 Java 一致的 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 注入 Basic Auth，启动器映射为 `OPENCODE_PASSWORD`。生产还必须用容器网络、主机防火墙或网关限制端口池访问面。
 
 ## 部署验收
 
@@ -152,10 +152,11 @@ manager 当前接受的命令为 `start`、`health`、`stop`、`restart`、`stop
 ```bash
 tools/verify-opencode-process-deployment.sh \
   --backend-url http://<backend-or-lb>:8080 \
-  --manager-token <manager-control-token> \
-  --auth-token <super-admin-user-jwt>
+  --auth-token <super-admin-user-jwt> \
+  --linux-server-id <target-server-id> \
+  --require-manager
 ```
 
-该脚本只检查后端 health、manager 诊断端点和超级管理员运行管理 overview，不会向 manager 下发 `start`、`stop`、`restart` 或 `health` 命令。完整多服务器验收清单见 `docs/deployment/backend.md`。
+该脚本只检查后端 health 和超级管理员运行管理 overview，从中确认指定服务器的 manager 与 backend connection 均为 `CONNECTED`；不使用已废弃的 manager HTTP 诊断端点，也不会向 manager 下发 `start`、`stop`、`restart` 或 `health` 命令。完整多服务器验收清单见 `docs/deployment/backend.md`。
 
-企业 worker 镜像还必须执行 `tools/verify-opencode-node-worker-image.sh <image>`。该 smoke 会在断网容器内实际启动 OpenCode，读取 PID 1 环境核验 HOME/XDG/TMP/config 映射，调用 `/path` 核验 OpenCode 的 home/state/config 解析，并确认 data、cache、state、tmp 下的 `opencode` 子目录都是普通目录。
+企业 worker 镜像还必须执行 `tools/verify-opencode-node-worker-image.sh <image>`。该 smoke 会在断网容器内实际启动 OpenCode，读取 PID 1 环境核验 HOME/XDG/TMP/config 映射；V2 调用 `/api/info` 核验运行路径，V1 回滚调用 `/path`，并确认 data、cache、state、tmp 下的 `opencode` 子目录都是普通目录。

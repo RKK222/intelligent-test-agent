@@ -231,6 +231,12 @@ Jenkins 发布脚本静态门禁，以及麒麟 ARM64、Windows 本地客户端�
 manager WebSocket 已连接。`admin/admin` 对本地登录仍返回 401；当前没有可用的
 登录 Token，因此不能把这些 mock 浏览器用例当作本次提交的真实平台 Run/SSE 验收。
 
+运行管理只读 smoke 脚本原先仍用 manager token 请求已作废的
+`manager-backends` HTTP 入口，本地后端实际返回 410。现在脚本通过超级管理员
+`management/overview` 检查指定 `linuxServerId` 的 `CONNECTED` manager 和 backend
+connection，并保留不发送 manager token 的旧参数兼容。无用户 Token 时，本机只能证明
+backend health 与 manager WebSocket 日志连接，不能把该结果当作已通过运行管理 API 验收。
+
 本次本地 ARM Mac 还尝试了 `deploy/internal/package-release.sh --opencode-only`。
 Docker 构建使用清单中固定的 OpenCode、Codex 资源摘要；下载阶段改为单文件下载
 后再执行长度和 SHA-256 校验，避免 CDN 并发 Range 返回短分片。构建在 amd64

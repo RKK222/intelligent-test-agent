@@ -198,8 +198,9 @@ curl http://127.0.0.1:8080/actuator/health
 ```bash
 tools/verify-opencode-process-deployment.sh \
   --backend-url http://<backend-or-lb>:8080 \
-  --manager-token <manager-control-token> \
-  --auth-token <super-admin-user-jwt>
+  --auth-token <super-admin-user-jwt> \
+  --linux-server-id <target-server-id> \
+  --require-manager
 ```
 
 ### 启动前端

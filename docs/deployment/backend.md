@@ -137,7 +137,7 @@ OPENCODE_CONFIG_DIR=<repo>/.testagent/agent-opencode/.session/users/DEV_88888888
 
 `OPENCODE_REFERENCES_DIR` 与 `OPENCODE_APP_WORKSPACE_ROOT` 不属于 manager 自身启动环境或 `configUpdate` 字段。Java 的公共 `OpencodeProcessStartupService` 在每次新启动用户 opencode server 时，按目标 Java 当前平台解析同名通用参数，归一化并移除尾部分隔符后通过 `start.environment` 传给 manager；新应用资产引用和自动化引用都从前者展开，后者仅供存量旧 JSONC 的逻辑路径滚动兼容。调用方已显式提供同名值时保留其路径语义并执行同样归一化。此约束避免 JSONC 的 `{env:...}/子路径` 产生双斜线，导致引用可定位但 `permission.external_directory` 精确规则无法命中真实规范路径。为兼容滚动升级，参数缺失或空白不阻断用户进程启动，只是不注入对应变量。已运行进程不会因参数或副本同步完成而自动重启；变量只对后续新启动或通过平台公共停止/启动程序执行的受管重启生效。
 
-opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端和前端展示的 `baseUrl/serviceAddress` 使用 `.serverhost` / `TEST_AGENT_SERVER_ADVERTISED_HOST` 拼接端口，不再使用 `linuxServerId` 拼地址。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
+OpenCode V2 `serve` 使用 Basic Auth：Java 后端与 worker 必须注入同一个受控 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`，公共启动程序把它传入用户进程，launcher 再映射为 `OPENCODE_PASSWORD`；V1 回滚包按自身 ABI 验证。后端和前端展示的 `baseUrl/serviceAddress` 使用 `.serverhost` / `TEST_AGENT_SERVER_ADVERTISED_HOST` 拼接端口，不再使用 `linuxServerId` 拼地址。生产部署仍必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
 
 后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。macOS/Linux 本地开发可把路径写为 `$HOME/.testagent/...` 或 `$TEST_AGENT_ROOT/...`，加载后的 `resolvedValue` 会变为实际用户目录或环境变量值。只有 `editable=true` 的运行参数（包括 `OPENCODE_MANAGER_MAX_PROCESSES`、`NIGHT_EXECUTION_SLOT_CAPACITY` 和公共 Git 地址）允许通过前端修改；路径类参数应通过部署配置、数据库迁移或公共配置初始化流程调整。真实创建用户进程时，入口 Java 先按 Redis 在线快照选择集群中进程总数最少且仍可初始化的服务器，必要时转发到该服务器的目标 Java；目标 Java 再按本机健康容器和空闲端口选择目标容器，在用户 session 下建立固定软链接，并优先指向同服本人有效公共个人目录、否则指向共享公共目录，再向该容器对应 manager 下发显式 `start.configPath`；manager 在所在服务器检查该链接解析后的目录必须存在且非空。缺失、为空、非目录或不可读时返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和实际检查目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；不会启动 opencode server。
 
@@ -559,7 +559,7 @@ opencode worker 扩容流程：
 4. 检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行以 `containerName` 展示可读名称，并保留哈希 `containerId` 用于路由。
 5. 当前 `opencode-worker-docker.sh` 固定设置 `--pids-limit=8192`、`nofile=262144:262144` 和 `nproc=8192:8192`，不从 `docker.env` 覆盖。脚本升级后必须重建容器，并用 `docker inspect` 与容器 `/proc/1/limits` 确认 PID 上限 `8192`、最大打开文件数 `262144`、最大用户进程数 `8192`。
 
-企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源，固定包含 OpenCode `1.18.4` 对应的 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 及 lockfile 传递依赖。用户进程启动器会在官方程序执行依赖一致性检查前，为 XDG 全局配置、用户 HOME `.opencode`、公共配置目录和共同祖先 `node_modules` 补充固定数量的非覆盖式链接，不再递归扫描工作区。工作区树由每台 worker 唯一的后台维护循环维护；entrypoint 先启动 manager，首轮等待 60 秒，之后每轮临时启动一次单次扫描，结束后 Node 立即退出，不再常驻递归文件监听器。已有及新建 `.opencode` 在下一轮扫描自动收敛，默认等待 60 秒加本轮实际扫描耗时；扫描不跟随软链接，也跳过 `.git`、`node_modules` 和常见构建目录。官方 1.18.4 没有依赖安装禁用环境变量，企业离线保障来自预置的完整本地 metadata/node_modules，而不是伪开关。目标已有 package/lockfile 时保留现场版本，管理员必须自行保证其离线依赖闭包完整。禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
+企业离线 worker 的 `/data/testagent/programs/opencode/node_modules` 是自定义 Tool 依赖的统一只读来源：V2 `2.0.18` 固定 `@opencode/plugin`、`@opencode/client`、`effect`、`zod` 及 lockfile 传递依赖；独立 V1 `1.18.4` 回滚包保留 `@opencode-ai/plugin`、`@opencode-ai/sdk` 锁定。用户进程启动器会在官方程序执行依赖一致性检查前，为 XDG 全局配置、用户 HOME `.opencode`、公共配置目录和共同祖先 `node_modules` 补充固定数量的非覆盖式链接，不再递归扫描工作区。工作区树由每台 worker 唯一的后台维护循环维护；entrypoint 先启动 manager，首轮等待 60 秒，之后每轮临时启动一次单次扫描，结束后 Node 立即退出，不再常驻递归文件监听器。已有及新建 `.opencode` 在下一轮扫描自动收敛，默认等待 60 秒加本轮实际扫描耗时；扫描不跟随软链接，也跳过 `.git`、`node_modules` 和常见构建目录。离线保障来自预置的完整本地 metadata/node_modules，不依赖未验证的安装禁用开关。目标已有 package/lockfile 时保留现场版本，管理员必须自行保证其离线依赖闭包完整。禁止在内网启动阶段执行 npm 下载。Tool 新增其它第三方包时必须在外网构建侧更新 runtime package/lockfile、重打 programs 和 worker 镜像，再重启 worker。
 
 这些配置目录的运行文件忽略规则由 `deploy/internal/opencode-runtime.gitignore` 统一维护。标准后台升级会在公共仓库已经初始化时补齐 `node_modules`、`package.json`、`package-lock.json`、`bun.lock` 和 `.gitignore`，不覆盖已有规则、不删除文件，也不取消已跟踪文件；新增后台尚未初始化公共仓库时跳过，随后由随 programs 交付的 `opencode-official-launcher.mjs` 在第一次创建运行依赖链接前补齐。扩容验收必须在新后台执行 `git check-ignore -v opencode/package.json opencode/package-lock.json opencode/node_modules` 和 `git status --short --untracked-files=all`；运行文件应被忽略，agent、skill、command、plugin、tool 及辅助源码等用户维护配置仍保持 Git 可见。忽略规则不负责隐藏已经跟踪的运行文件；这类文件若出现在 Git status，平台 Diff 必须展示并由管理员提交或回退。
 
@@ -605,11 +605,12 @@ opencode worker 扩容流程：
 ```bash
 tools/verify-opencode-process-deployment.sh \
   --backend-url http://<backend-or-lb>:8080 \
-  --manager-token <manager-control-token> \
-  --auth-token <super-admin-user-jwt>
+  --auth-token <super-admin-user-jwt> \
+  --linux-server-id <target-server-id> \
+  --require-manager
 ```
 
-该脚本只检查 `/actuator/health`、manager 兼容诊断端点和超级管理员 overview，不会启动、停止、重启或健康检测用户进程。未提供 token 时对应高权限接口会被跳过；生产验收建议传入两个 token，并在 shell history 策略中避免保存真实值。
+该脚本只检查 `/actuator/health` 和超级管理员 overview，并从后者核对指定服务器的 `CONNECTED` manager 及其 backend connection；旧 `manager-backends` HTTP 端点已返回 410，不再用 manager control token 访问。它不会启动、停止、重启或健康检测用户进程。未提供超级管理员 token 时只检查 health；要求 manager 状态时必须传入 `--auth-token`。生产验收应从安全变量注入用户 token，避免保存在 shell history 中。
 
 worker 镜像发布前执行 `tools/verify-opencode-node-worker-image.sh <image>`；企业打包还会通过 `tools/verify-codex-whitebox-worker-image.sh <image>` 在 `--network none` 容器内检查 Python `3.13.14`、`python`/`python3` 一致性、pip、venv、常用标准库及 `curl/jq/zip/unzip`。前一脚本按 `EXPECTED_OPENCODE_ABI=V2` 或 `V1` 真实启动对应 OpenCode，分别核验 `/api/info` 或 `/global/health`、插件依赖、PID 1 继承的 HOME/XDG/TMP/config 环境和运行目录；V1 回滚 worker 仍必须通过同一检查。Python 只来自 worker 镜像，不继承宿主机；镜像不含业务第三方包或编译工具链。pandas、Excel、Word 与 JSON 第三方库通过 `package-python-libs.sh` 生成独立哈希锁制品，`deploy-python-libs.sh` 在目标机断网校验后挂载，升级库不重建 worker；运行时 `PIP_NO_INDEX=1`，不得访问公网安装。
 

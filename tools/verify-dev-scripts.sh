@@ -182,6 +182,7 @@ if ! grep -Fq "parameter_english" "${ROOT_DIR}/tools/cleanup-old-path-data.sql";
 fi
 run_check "opencode process deployment smoke script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh"
 run_check "opencode process deployment smoke script help" bash "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh" --help
+run_check "opencode process deployment smoke contract" python3 "${ROOT_DIR}/tools/test-opencode-process-deployment.py"
 run_check "opencode user process scenario script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-user-process-scenarios.sh"
 
 # 用 xtrace 验证误用 sh 执行时确实重进 Bash，而不是继续留在 sh/POSIX 模式。
