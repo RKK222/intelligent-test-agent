@@ -45,6 +45,7 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
     private final TerminalProcessFactory processFactory;
     private final TerminalMessageCodec codec;
     private final Set<String> allowedOrigins;
+    private final boolean allowAnyOrigin;
     private final TerminalActiveSessionRegistry activeSessions;
     private final int maxInputBytes;
     private final int inputMessagesPerWindow;
@@ -74,9 +75,15 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         this.terminalService = terminalService;
         this.processFactory = processFactory;
         this.codec = codec;
-        this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
+        Set<String> configuredOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isBlank())
+                .toList());
+        // 本地 test profile 可以显式使用单独的 * 放开浏览器来源；生产仍应配置精确 Origin。
+        // PTY 连接仍需一次性 ticket，* 只控制 WebSocket 握手来源校验。
+        this.allowAnyOrigin = configuredOrigins.size() == 1 && configuredOrigins.contains("*");
+        this.allowedOrigins = allowAnyOrigin ? Set.of() : Set.copyOf(configuredOrigins.stream()
+                .filter(origin -> !"*".equals(origin))
                 .toList());
         this.activeSessions = activeSessions;
         this.maxInputBytes = Math.max(1, maxInputBytes);
@@ -98,7 +105,7 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         try {
             URI uri = session.getHandshakeInfo().getUri();
             String origin = session.getHandshakeInfo().getHeaders().getOrigin();
-            if (!allowedOrigins.contains(origin)) {
+            if (!originAllowed(origin)) {
                 return sendErrorAndClose(session, "PTY_ORIGIN_DENIED", "origin denied");
             }
             ticket = isServerTerminal(uri.getPath())
@@ -178,6 +185,19 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                     activeLease.close();
                     closeTerminal(activeTerminal, terminalClosed).subscribe();
                 });
+    }
+
+    /** 通配配置只接受可规范化的浏览器来源，避免空值或畸形 Origin 越过 PTY 来源校验。 */
+    private boolean originAllowed(String origin) {
+        if (!allowAnyOrigin) {
+            return allowedOrigins.contains(origin);
+        }
+        try {
+            AppSourceWebSocketOrigin.canonicalize(origin);
+            return true;
+        } catch (PlatformException exception) {
+            return false;
+        }
     }
 
     /** Workspace PTY 独立于键盘输入每秒复核一次，撤权后即使只有持续输出也会关闭。 */

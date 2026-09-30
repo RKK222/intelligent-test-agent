@@ -351,7 +351,7 @@ TCDS 案例维护是固定目标的服务端集成，不属于可配置外部 AP
 1. 先通过 HTTP API 创建一次性 ticket，再使用 ticket 建立 WebSocket；不得直接以长期 Bearer token 暴露在 WebSocket URL 中。
 2. workspace ticket 必须绑定 session、workspace、execution node；服务器 ticket 必须绑定 linuxServerId 和发起用户。两类 ticket 均绑定 traceId、过期时间且只能使用一次。
 3. cwd 必须归一化在 workspace root 内，shell 必须走后端白名单；在白名单配置完成前，前端不得覆盖 shell。
-4. WebSocket upgrade 必须校验 Origin、ticket、session/workspace 归属和限流。
+4. WebSocket upgrade 必须校验 Origin、ticket、session/workspace 归属和限流。仅当全局 CORS 来源配置恰好是单个 `*` 时，本地测试可接受任意格式合法的浏览器 Origin；空值和畸形 Origin 必须拒绝，生产仍配置精确白名单。
 5. input/output 审计日志默认只记录长度、事件类型、截断、退出码和必要状态，不记录完整终端内容。
 6. input、resize、output buffer、idle timeout 和 hard timeout 必须有明确上限。
 7. 断开连接、session abort、后端关闭或超时时必须清理 PTY 进程。

@@ -5,6 +5,31 @@
 
 ## Entries
 
+## 2026-09-30 - V2 真实浏览器对话与 PTY 回显验收
+
+### Why
+
+- 本地隔离 V2 栈虽通过平台 API smoke，但尚缺真实浏览器 RunEvent 与 PTY 同链路证据。
+
+### What
+
+- 在 agent-web real E2E 增加使用账号已有且同服务器的 Workspace 的 V2 用例，验证 Session/Run、SSE 终态与去重、原生 user/assistant 消息、平台历史/会话树和浏览器 PTY 回显，最后仅清理自有 Session。
+- `TerminalWebSocketHandler` 对配置为单个 `*` 的本地测试 CORS 来源接受格式合法的浏览器 Origin；显式白名单继续精确匹配，短期一次性 PTY ticket 不变。补合法和畸形来源回归测试，并同步 API、安全、部署、后端模块和前端测试说明。
+- 发现 manager 重启窗口旧 WebSocket 断线回调可移除同 containerId 的新控制连接；连接表改为按 sender 身份条件清理，API 入口只对自身控制连接执行断线标记。
+
+### How
+
+- 隔离工作树重启 `3100/18182/4296` 本地栈；真实 Playwright V2 对话与 PTY 用例 1/1 通过，Java PTY handler 定向测试、agent-web typecheck 和 24 条 V2 测试 helper 用例通过。
+- manager 连接表与 WebSocket 入口定向测试通过，覆盖“旧 socket 晚于新 socket 关闭仍能接收命令”。
+- 修复后受管重启的用户进程恢复 `READY`，真实 Playwright 链路再次 1/1 通过；中间一次原生模型超过 Run 超时产生 `run.failed`，未修改代码后重跑成功，保留上游延迟风险。
+- 临时 E2E 账号为探查旧托管 Workspace fixture 而加的 `SUPER_ADMIN` 已通过平台角色 API 撤回，重新登录只剩 `USER`；没有保留弱口令高权限账号。
+- 旧的托管 Workspace 创建用例在当前临时测试账号下停于仓库分支查询 503，后端显示没有可用 SSH key；撤回了对旧 fixture 的试探性修改，不把它计为 V2 验收通过。
+
+### Result
+
+- 本地部署可从浏览器完成 V2 对话和 PTY 回显，平台 SSE wire 格式未变。没有数据库结构或新 API 路径；PTY Origin 安全规则对 test profile 的单个 `*` 生效，正式环境仍应使用精确来源。
+- 原生 Linux amd64 Worker 镜像、V1 回滚 smoke、需 SSH key 的托管 Workspace fixture 仍需后续验收。
+
 ## 2026-09-30 - 本地独立端口 V2 启动与 Worker 构建核对
 
 ### Why

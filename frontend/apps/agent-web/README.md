@@ -303,6 +303,7 @@ corepack pnpm --filter @test-agent/agent-web build
 Vite 配置按 `Asia/Shanghai` 生成 `VyyyyMMdd.HHmmss` 并注入 `VITE_TEST_AGENT_BUILD_VERSION` 只读编译常量，设置弹窗左侧导航底部固定展示该值；Vitest 使用固定版本，业务代码不得从运行时环境覆盖构建版本。
 
 真实三服务验收由仓库根目录 `tools/dev-phase11-real-e2e.sh --start-services` 触发；2026-07-13 最近一次运行中 Session+PTY 与宠物旁路 fork 2/2 通过，其余 13 项按套件条件跳过。不能用该 README 的单包验证命令替代真实三服务 E2E 收口。
+OpenCode V2 本地隔离验收另可用已有且当前账号确有权限的 Workspace：设置 `TEST_AGENT_RUN_REAL_E2E=1`、`TEST_AGENT_REAL_E2E_WORKSPACE_ID`、`TEST_AGENT_REAL_E2E_WORKSPACE_ROOT`、平台 `TEST_AGENT_API_TOKEN`、后端和前端 URL，以及受控 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`，运行 `corepack pnpm exec playwright test --config=playwright.real.config.ts apps/agent-web/tests/workbench.real-spec.ts -g 'runs a real V2 conversation'`。该用例覆盖真实 Session/Run、RunEvent SSE、V2 原生与平台消息、浏览器 PTY 回显，并清理自身创建的 Session。需创建托管 Workspace 的旧用例另要求可访问的测试仓库和账号 SSH key。
 
 - 工作区文件树中的文件和目录通过右键菜单行内改名；Ctrl/Cmd+单击多选后可统一删除、复制、剪切、粘贴或拖动。仅可写纯 `WORKSPACE` 文件/目录可作为拖动源，源行显示抓取/半透明反馈；只读、纯 `REFERENCE` 和 `MIXED` 条目不可拖。合法目录和根空白区显示蓝色落点；当前父目录、自身、被拖目录的后代、文件行、纯引用目录和只读目录不接受移动，带 `workspacePath` 的 `MIXED` 目录可作为工作区侧落点接收工作区条目。移动成功仍统一通过目标后端文件 WebSocket RPC，先迁移已打开子文件 Tab、活动/Diff/请求路径，再按新 `workspacePath` 补齐目标祖先并逐层认领组合树新稳定 ID；无快照的加载中 Tab 在刷新新代次建立后补读，最后刷新 Git diff。既有撤销栈以反向移动沿用同一收敛链路。
 - 应用 worktree / feature 权限固定测试数据位于 `frontend/tests/fixtures/application-workspace-restrictions.ts`，组件回归覆盖文件树只读、Agent 配置分权、超管角色权限和 `spec/**` 对所有角色仅本地提交。

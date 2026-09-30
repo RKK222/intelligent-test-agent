@@ -89,6 +89,75 @@ class TerminalWebSocketHandlerTest {
     }
 
     @Test
+    void acceptsBrowserOriginWhenWildcardIsConfigured() {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://127.0.0.1:3100",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(Flux.empty());
+        when(terminal.close()).thenReturn(Mono.empty());
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "http://127.0.0.1:3100",
+                List.of("{\"type\":\"close\",\"reason\":\"test\"}"));
+
+        handler(terminalService, processFactory, registry, defaultOptions(), new TerminalAuditLogger(), "*")
+                .handle(session)
+                .block(Duration.ofSeconds(1));
+
+        verify(terminalService).consumeTicket(
+                new SessionId("ses_1234567890abcdef"),
+                "pty_1234567890abcdef",
+                "http://127.0.0.1:3100",
+                "trace_1234567890abcdef");
+        verify(processFactory).start(ticket);
+        verify(terminal).close();
+        assertThat(session.closed()).isFalse();
+    }
+
+    @Test
+    void rejectsMalformedOriginUnderWildcardBeforeConsumingTicket() throws Exception {
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "http://127.0.0.1:3100/other",
+                List.of());
+
+        handler(terminalService, processFactory, new TerminalActiveSessionRegistry(),
+                defaultOptions(), new TerminalAuditLogger(), "*").handle(session).block();
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("code").asText()).isEqualTo("PTY_ORIGIN_DENIED");
+        verify(terminalService, never()).consumeTicket(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+    }
+
+    @Test
+    void mixedWildcardAndExplicitOriginDoesNotPermitOtherBrowserOrigins() throws Exception {
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        FakeWebSocketSession session = FakeWebSocketSession.withOrigin(
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "http://127.0.0.1:3100",
+                List.of());
+
+        handler(terminalService, processFactory, new TerminalActiveSessionRegistry(),
+                defaultOptions(), new TerminalAuditLogger(), "*,http://localhost:3000").handle(session).block();
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("code").asText()).isEqualTo("PTY_ORIGIN_DENIED");
+        verify(terminalService, never()).consumeTicket(Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any());
+    }
+
+    @Test
     void releasesActiveReservationWhenProcessStartFails() throws Exception {
         TerminalTicket ticket = ticket("ses_1234567890abcdef");
         TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
@@ -383,11 +452,22 @@ class TerminalWebSocketHandlerTest {
             TerminalActiveSessionRegistry registry,
             HandlerOptions options,
             TerminalAuditLogger auditLogger) {
+        return handler(terminalService, processFactory, registry, options, auditLogger,
+                "http://localhost:3000,http://127.0.0.1:3000");
+    }
+
+    private TerminalWebSocketHandler handler(
+            TerminalApplicationService terminalService,
+            TerminalProcessFactory processFactory,
+            TerminalActiveSessionRegistry registry,
+            HandlerOptions options,
+            TerminalAuditLogger auditLogger,
+            String allowedOrigins) {
         return new TerminalWebSocketHandler(
                 terminalService,
                 processFactory,
                 new TerminalMessageCodec(objectMapper),
-                "http://localhost:3000,http://127.0.0.1:3000",
+                allowedOrigins,
                 options.maxInputBytes(),
                 64,
                 10,
@@ -464,6 +544,10 @@ class TerminalWebSocketHandlerTest {
 
         static FakeWebSocketSession allowed(String path, List<String> incoming) {
             return new FakeWebSocketSession(path, "http://localhost:3000", incoming);
+        }
+
+        static FakeWebSocketSession withOrigin(String path, String origin, List<String> incoming) {
+            return new FakeWebSocketSession(path, origin, incoming);
         }
 
         static FakeWebSocketSession allowedUntilClose(String path) {

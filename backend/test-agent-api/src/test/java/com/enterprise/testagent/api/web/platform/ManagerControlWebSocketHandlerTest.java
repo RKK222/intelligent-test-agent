@@ -360,6 +360,63 @@ class ManagerControlWebSocketHandlerTest {
         }
     }
 
+    @Test
+    void closingOldSocketDoesNotDisconnectReconnectedManager() throws Exception {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerConnectionRegistry connections = new ManagerConnectionRegistry();
+        OpencodeManagerConfigSyncService configSyncService = Mockito.mock(OpencodeManagerConfigSyncService.class);
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef", "ctr_01", "10.8.0.12", "opencode-a",
+                4096, 4100, 4, 1, Map.of("health", true), "trace_register");
+        when(controlService.register(register)).thenReturn(ManagerControlMessage.registered(
+                "bjp_1234567890abcdef", "trace_register"));
+        when(configSyncService.configUpdateMessage("trace_config")).thenReturn(Optional.of(
+                ManagerControlMessage.configUpdate(
+                        4, "/data/.testagent/agent-opencode/.session/",
+                        "/data/.testagent/agent-opencode/.config/opencode/", "trace_config")));
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef", "ctr_01", "10.8.0.12", "opencode-a",
+                4096, 4100, 4, 1, Map.of("health", true),
+                List.of("bjp_1234567890abcdef"), "trace_heartbeat");
+        List<String> startup = List.of(
+                codec.encode(register),
+                codec.encode(ManagerControlMessage.configRequest("trace_config")),
+                codec.encode(heartbeat));
+        ManagerControlWebSocketHandler handler = handler(
+                controlService, new ManagerPendingCommandRegistry(), configSyncService, connections);
+        FakeWebSocketSession oldSession = FakeWebSocketSession.openWithToken("secret-token", startup);
+        FakeWebSocketSession replacementSession = FakeWebSocketSession.openWithToken("secret-token", startup);
+        var oldConnection = handler.handle(oldSession).subscribe();
+        Disposable replacementConnection = null;
+        var containerId = new com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId("ctr_01");
+        try {
+            awaitCondition(() -> connections.isConnected(containerId));
+            replacementConnection = handler.handle(replacementSession).subscribe();
+            ManagerControlMessage beforeClose = ManagerControlMessage.command(
+                    "mcmd_replacement_before", "health", 4096, 10_000, "trace_replacement");
+            awaitCondition(() -> {
+                connections.send(containerId, beforeClose);
+                return replacementSession.sentText().stream()
+                        .map(codec::decode)
+                        .anyMatch(message -> "mcmd_replacement_before".equals(message.commandId()));
+            });
+
+            oldConnection.dispose();
+            assertThat(connections.isConnected(containerId)).isTrue();
+            ManagerControlMessage afterClose = ManagerControlMessage.command(
+                    "mcmd_replacement_after", "health", 4096, 10_000, "trace_replacement");
+            connections.send(containerId, afterClose);
+            awaitCondition(() -> replacementSession.sentText().stream()
+                    .map(codec::decode)
+                    .anyMatch(message -> "mcmd_replacement_after".equals(message.commandId())));
+            verify(controlService, never()).disconnect(
+                    new ContainerManagerId("mgr_1234567890abcdef"), "trace_1234567890abcdef");
+        } finally {
+            oldConnection.dispose();
+            if (replacementConnection != null) replacementConnection.dispose();
+        }
+    }
+
     private static void awaitCondition(BooleanSupplier condition) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) {

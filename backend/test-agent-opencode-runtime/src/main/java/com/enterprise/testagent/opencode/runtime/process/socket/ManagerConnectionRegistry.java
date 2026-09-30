@@ -40,6 +40,14 @@ public class ManagerConnectionRegistry {
         connections.remove(containerId);
     }
 
+    /** 旧 socket 的断线回调只能移除自己的 sender，不能删掉同一容器刚重连的控制连接。 */
+    public boolean disconnect(OpencodeContainerId containerId, ManagerCommandSender sender) {
+        ManagerConnection current = connections.get(containerId);
+        return current != null
+                && current.sender() == sender
+                && connections.remove(containerId, current);
+    }
+
     /**
      * 向指定容器发送命令；无连接时转换为 opencode 不可用。
      */

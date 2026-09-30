@@ -121,6 +121,23 @@ session、prompt、command、SSE、消息分页、diff、compact、fork、side-q
 `run.succeeded`，重启后重新执行矩阵仍保持重复事件数为 0；`/api/health` 在冻结的
 2.0.18 中不存在，部署健康检查必须使用 `/api/info`。
 
+2026-09-30 增加现有自有 Workspace 的真实浏览器验收：使用
+`TEST_AGENT_REAL_E2E_WORKSPACE_ID` 和 `TEST_AGENT_REAL_E2E_WORKSPACE_ROOT` 选择账号
+确有权限且与进程服务器归属一致的工作区，设置受控 OpenCode Basic Auth secret，执行
+`workbench.real-spec.ts` 中 `runs a real V2 conversation and PTY` 用例。该用例验证平台
+Session/Run、RunEvent SSE 终态与 durable 去重、V2 原生 user/assistant 消息、平台
+USER 历史、session-tree assistant 和浏览器 PTY 回显，并只删除自己创建的远端 Session。
+本地 `3100/18182/4296` 栈通过 1/1；发现并修正 PTY 在 test profile 配置单个
+`TEST_AGENT_CORS_ALLOWED_ORIGINS=*` 时错误拒绝合法浏览器 Origin 的问题，Origin
+仍需格式合法且 PTY ticket 仍一次性消费。原有需现场可访问测试仓库及 SSH key 的
+托管 Workspace 创建 fixture 在当前测试账号下未通过，不能据此宣称该路径完成验收。
+反复重启时还观察到旧 manager WebSocket 的断线清理可能删除同 containerId 的新控制连接，
+使 `/processes/me` 在后端仍健康时返回 `UNAVAILABLE`；现按当前 socket sender 身份
+条件清理，并通过“旧 socket 后关闭，新 socket 仍能接收命令”的回归测试锁定。
+修复后本地受管重启的进程状态恢复为 `READY`，真实浏览器 Session/Run/SSE/PTY
+再次通过。中途有一次上游模型超过本地 Run 超时，平台产生 `run.failed`，随后不改代码
+重跑通过；该结果说明模型上游延迟仍会影响真实 E2E，不能由前端或 PTY 冒充成功。
+
 本地启动会把受控 `TEST_AGENT_OPENCODE_SERVER_PASSWORD` 通过公共
 `OpencodeProcessStartupService` 同时注入 Worker 的 `TEST_AGENT_OPENCODE_SERVER_PASSWORD`
 和 `OPENCODE_PASSWORD`，避免 V2 `serve` 默认 Basic Auth 随机密码导致平台 gateway

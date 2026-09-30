@@ -22,9 +22,135 @@ import {
 
 const runRealE2e = process.env.TEST_AGENT_RUN_REAL_E2E === "1";
 const backendBaseUrl = stripTrailingSlash(process.env.TEST_AGENT_BASE_URL ?? "http://127.0.0.1:8080");
+const existingWorkspaceId = process.env.TEST_AGENT_REAL_E2E_WORKSPACE_ID;
+const existingWorkspaceRoot = process.env.TEST_AGENT_REAL_E2E_WORKSPACE_ROOT;
 
 test.describe("phase 11 real service integration", () => {
   test.skip(!runRealE2e, "Set TEST_AGENT_RUN_REAL_E2E=1 to run the real frontend/backend/opencode integration suite.");
+
+  test("runs a real V2 conversation and PTY in an existing owned workspace", async ({ page }) => {
+    test.skip(!existingWorkspaceId || !existingWorkspaceRoot,
+      "Set TEST_AGENT_REAL_E2E_WORKSPACE_ID and TEST_AGENT_REAL_E2E_WORKSPACE_ROOT for the existing-workspace E2E.");
+    test.skip(!process.env.TEST_AGENT_OPENCODE_SERVER_PASSWORD && !process.env.OPENCODE_PASSWORD,
+      "Set the managed OpenCode V2 Basic Auth secret before the native session and cleanup checks.");
+    const workspaceId = existingWorkspaceId!;
+    const workspaceRoot = existingWorkspaceRoot!;
+    const marker = `v2_real_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    let sessionId: string | undefined;
+    let remoteSessionId: string | undefined;
+    let opencodeBaseUrl: string | undefined;
+    let primaryFailure: unknown;
+    try {
+      await expect.poll(
+        async () => (await apiGet<{ status?: string }>("/api/internal/agent/opencode/processes/me")).status,
+        { timeout: 30_000, intervals: [500, 1_000, 2_000], message: "V2 manager should restore the user process after restart" }
+      ).toBe("READY");
+      const processInfo = await apiGet<{ status?: string; baseUrl?: string; linuxServerId?: string }>(
+        "/api/internal/agent/opencode/processes/me"
+      );
+      const workspace = await apiGet<{ linuxServerId?: string; capabilities?: { chat?: boolean; terminal?: boolean } }>(
+        `/api/internal/platform/workspace-management/workspaces/${encodeURIComponent(workspaceId)}`
+      );
+      expect(processInfo.status).toBe("READY");
+      expect(workspace.linuxServerId).toBe(processInfo.linuxServerId);
+      expect(workspace.capabilities).toMatchObject({ chat: true, terminal: true });
+      opencodeBaseUrl = processInfo.baseUrl;
+      expect(opencodeBaseUrl).toBeTruthy();
+
+      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
+        workspaceId,
+        title: marker
+      });
+      sessionId = session.sessionId;
+      const prompt = `Reply with ${marker}. Do not modify files.`;
+      const run = await apiPost<{ runId: string }>("/api/internal/agent/opencode/runs", {
+        sessionId,
+        prompt,
+        parts: [{ type: "text", text: prompt }]
+      });
+      const events = await captureRunEventsUntilTerminal(run.runId).finished;
+      remoteSessionId = await resolveRemoteSessionId(sessionId, (observedId) => {
+        remoteSessionId ??= observedId;
+      });
+      const uniqueEvents = new Map<string, CapturedRunEvent>();
+      for (const event of events) {
+        const previous = uniqueEvents.get(event.eventId);
+        if (previous) {
+          // legacy SSE 的 live/replay 可重复投递同一 durable ID；内容必须保持一致。
+          expect({ seq: event.seq, type: event.type }).toEqual({ seq: previous.seq, type: previous.type });
+        } else {
+          uniqueEvents.set(event.eventId, event);
+        }
+      }
+      const delivered = [...uniqueEvents.values()];
+      expect(delivered.map((event) => event.type)).toContain("run.succeeded");
+      expect(delivered.filter((event) => event.type === "run.succeeded")).toHaveLength(1);
+      const durable = delivered.filter((event) => event.seq > 0);
+      expect(new Set(durable.map((event) => event.seq)).size).toBe(durable.length);
+
+      const nativeSession = await getNativeV2Session(opencodeBaseUrl!, remoteSessionId);
+      expect(nativeV2SessionDirectory(nativeSession)).toBe(workspaceRoot);
+      const nativeMessages = await listNativeV2Messages(opencodeBaseUrl!, remoteSessionId);
+      expect(nativeMessages.some((message) => message.type === "user")).toBe(true);
+      expect(nativeMessages.some((message) => message.type === "assistant")).toBe(true);
+      const history = await apiGet<{ items?: Array<{ role?: string; runId?: string }> }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/messages?page=1&size=100&refresh=true`
+      );
+      expect(history.items?.some((message) =>
+        message.role?.toLowerCase() === "user" && message.runId === run.runId
+      )).toBe(true);
+      const tree = await apiGet<{
+        messagesBySessionId?: Record<string, Array<{ message?: { role?: string } }>>;
+      }>(`/api/internal/agent/opencode/sessions/${encodeURIComponent(sessionId)}/session-tree/messages`);
+      const treeMessages = Object.values(tree.messagesBySessionId ?? {}).flat();
+      expect(treeMessages.some((entry) => entry.message?.role?.toLowerCase() === "assistant")).toBe(true);
+
+      const ticket = await apiPost<{ webSocketUrl: string }>(
+        `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`,
+        { workspaceId, cols: 120, rows: 32 }
+      );
+      await page.goto("/985211");
+      await page.waitForLoadState("networkidle");
+      const terminal = await connectTerminalAndEcho(page, ticket.webSocketUrl, marker);
+      expect(terminal.error).toBeUndefined();
+      expect(terminal.output).toContain(marker);
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      const ownedSessionId = sessionId;
+      const ownedRemoteSessionId = remoteSessionId;
+      const ownedOpencodeBaseUrl = opencodeBaseUrl;
+      try {
+        await runCleanupStages([
+          async () => {
+            if (!ownedSessionId) return;
+            const activeRun = await apiGet<{ runId: string } | null>(
+              `/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}/active-run`
+            );
+            if (activeRun?.runId) {
+              await apiPost(`/api/internal/agent/opencode/runs/${encodeURIComponent(activeRun.runId)}/cancel`, {});
+            }
+          },
+          async () => {
+            if (!ownedOpencodeBaseUrl) return;
+            const nativeId = ownedRemoteSessionId ?? (ownedSessionId
+              ? await resolveRemoteSessionId(ownedSessionId, (observedId) => { remoteSessionId ??= observedId; }).catch(() => undefined)
+              : undefined);
+            if (nativeId) await deleteNativeSession(ownedOpencodeBaseUrl, nativeId, workspaceRoot);
+          },
+          async () => {
+            if (ownedSessionId) await apiDelete(`/api/internal/platform/opencode-runtime/sessions/${encodeURIComponent(ownedSessionId)}`);
+          }
+        ]);
+      } catch (cleanupError) {
+        if (primaryFailure !== undefined) {
+          throw new AggregateError([primaryFailure, cleanupError], "Real V2 E2E failed and cleanup also failed");
+        }
+        throw cleanupError;
+      }
+    }
+  });
 
   test("creates a real opencode-backed session and opens a PTY terminal websocket", async ({ page }) => {
     const workspace = await createManagedWorkspaceFixture();
@@ -464,7 +590,7 @@ type ManagedWorkspaceFixture = {
   workspaceRootPath: string;
 };
 
-type CapturedRunEvent = { seq: number; type: string; payload: Record<string, unknown> };
+type CapturedRunEvent = { eventId: string; seq: number; type: string; payload: Record<string, unknown> };
 type PlatformRealMessage = { role?: string; runId?: string; remoteMessageId?: string };
 /** 真实 E2E 只通过平台 RunEvent SSE 收集旁路可见事件，不接触生产浏览器外的 OpenCode 事件流。 */
 function captureRunEventsUntilTerminal(runId: string): { finished: Promise<CapturedRunEvent[]> } {

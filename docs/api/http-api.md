@@ -4095,6 +4095,7 @@ ticket 响应 data：
 ```
 
 `webSocketUrl` 固定返回签发 ticket 的当前 Java 绝对地址。多后台时 ticket 请求可先经入口 Java 转发到用户进程所属 Java，响应仍指向实际签发节点，后续 upgrade 不再由 Nginx 二次负载；浏览器必须能访问该 Java 的 `listenUrl`，后端 Origin 白名单仍校验前端 origin。
+PTY Origin 校验与平台其它 WebSocket 一致：仅当 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 恰好为单个 `*` 时允许任意格式合法的浏览器 Origin；空值、畸形 Origin 和混合 `*`/显式来源不会获得通配权限。生产应使用精确 Origin 白名单，任何配置下均需消费一次性 PTY ticket。
 
 服务器终端 ticket 请求体固定为：
 

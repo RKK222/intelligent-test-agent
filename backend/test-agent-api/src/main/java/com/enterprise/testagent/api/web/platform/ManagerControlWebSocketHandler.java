@@ -7,6 +7,7 @@ import com.enterprise.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.enterprise.testagent.observability.TraceConstants;
 import com.enterprise.testagent.observability.TraceIdSupport;
 import com.enterprise.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.enterprise.testagent.opencode.runtime.process.socket.ManagerCommandSender;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerConnectionRegistry;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlApplicationService;
 import com.enterprise.testagent.opencode.runtime.process.socket.ManagerControlMessage;
@@ -78,6 +79,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
         AtomicReference<OpencodeContainerId> containerRef = new AtomicReference<>();
         AtomicBoolean fullRuntimeConfigSent = new AtomicBoolean(false);
         AtomicBoolean controlConnectionRegistered = new AtomicBoolean(false);
+        AtomicReference<ManagerCommandSender> senderRef = new AtomicReference<>();
 
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
@@ -88,6 +90,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
                         containerRef,
                         fullRuntimeConfigSent,
                         controlConnectionRegistered,
+                        senderRef,
                         message))
                 .doOnError(exception -> LOGGER.warn(
                         "manager WebSocket 入站处理失败 managerId={} containerId={} traceId={}",
@@ -98,10 +101,11 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
                 .doFinally(ignored -> {
                     OpencodeContainerId containerId = containerRef.get();
                     ContainerManagerId managerId = managerRef.get();
-                    if (containerId != null) {
-                        connections.disconnect(containerId);
-                    }
-                    if (managerId != null) {
+                    ManagerCommandSender sender = senderRef.get();
+                    boolean removed = containerId != null && sender != null
+                            && connections.disconnect(containerId, sender);
+                    if (managerId != null && (removed || (sender == null
+                            && (containerId == null || !connections.isConnected(containerId))))) {
                         controlService.disconnect(managerId, traceId);
                     }
                     completeOutbound(outbound);
@@ -119,6 +123,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             AtomicReference<OpencodeContainerId> containerRef,
             AtomicBoolean fullRuntimeConfigSent,
             AtomicBoolean controlConnectionRegistered,
+            AtomicReference<ManagerCommandSender> senderRef,
             ManagerControlMessage message) {
         if (!ManagerControlProtocol.VERSION.equals(message.protocolVersion())) {
             emitOutbound(outbound, ManagerControlMessage.error("VALIDATION_ERROR", "manager 协议版本无效", message.traceId()));
@@ -144,6 +149,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
                         managerRef,
                         containerRef,
                         controlConnectionRegistered,
+                        senderRef,
                         message.traceId());
                 controlService.managerHeartbeatAndRecoverRunningProcesses(message);
             } else {
@@ -185,6 +191,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             AtomicReference<ContainerManagerId> managerRef,
             AtomicReference<OpencodeContainerId> containerRef,
             AtomicBoolean controlConnectionRegistered,
+            AtomicReference<ManagerCommandSender> senderRef,
             String traceId) {
         if (controlConnectionRegistered.get()) {
             return;
@@ -194,11 +201,13 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
         if (managerId == null || containerId == null) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "manager 尚未注册，不能处理运行心跳");
         }
+        ManagerCommandSender sender = outboundMessage -> emitOutbound(outbound, outboundMessage);
         connections.register(
                 managerId,
                 containerId,
                 backendLifecycle.backendProcessId(),
-                outboundMessage -> emitOutbound(outbound, outboundMessage));
+                sender);
+        senderRef.set(sender);
         controlConnectionRegistered.set(true);
         LOGGER.info(
                 "manager 完整配置已应用，控制连接可用 managerId={} containerId={} traceId={}",

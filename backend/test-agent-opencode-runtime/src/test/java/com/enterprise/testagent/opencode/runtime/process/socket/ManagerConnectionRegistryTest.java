@@ -66,4 +66,28 @@ class ManagerConnectionRegistryTest {
         assertThat(secondSent).isEmpty();
         assertThat(registry.connectedContainerIds()).containsExactlyInAnyOrder(containerA, containerB);
     }
+
+    @Test
+    void staleDisconnectCannotRemoveReplacementConnection() {
+        ManagerConnectionRegistry registry = new ManagerConnectionRegistry();
+        OpencodeContainerId containerId = new OpencodeContainerId("ctr_01");
+        List<ManagerControlMessage> oldMessages = new ArrayList<>();
+        List<ManagerControlMessage> newMessages = new ArrayList<>();
+        ManagerCommandSender oldSender = oldMessages::add;
+        ManagerCommandSender newSender = newMessages::add;
+        ContainerManagerId managerId = new ContainerManagerId("mgr_1234567890abcdef");
+        BackendProcessId backendProcessId = new BackendProcessId("bjp_1234567890abcdef");
+        registry.register(managerId, containerId, backendProcessId, oldSender);
+        registry.register(managerId, containerId, backendProcessId, newSender);
+
+        assertThat(registry.disconnect(containerId, oldSender)).isFalse();
+        assertThat(registry.isConnected(containerId)).isTrue();
+        ManagerControlMessage command = ManagerControlMessage.command(
+                "mcmd_1234567890abcdef", "health", 4096, 5000, "trace_1234567890abcdef");
+        registry.send(containerId, command);
+        assertThat(oldMessages).isEmpty();
+        assertThat(newMessages).containsExactly(command);
+        assertThat(registry.disconnect(containerId, newSender)).isTrue();
+        assertThat(registry.isConnected(containerId)).isFalse();
+    }
 }
